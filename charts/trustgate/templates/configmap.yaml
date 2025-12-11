@@ -11,10 +11,22 @@ data:
       proxy_port: 8081
       actions_port: 8084
       metrics_port: 9090
-      base_domain: {{ .Values.global.env.SERVER_BASE_DOMAIN }}
+      {{- /* Use the same logic as env-configmap for consistency */}}
+      {{- $baseDomain := "" }}
+      {{- $openshiftDomain := .Values.global.openshiftDomain | default $.Values.global.openshiftDomain }}
+      {{- if .Values.global.env.SERVER_BASE_DOMAIN }}
+        {{- $baseDomain = .Values.global.env.SERVER_BASE_DOMAIN }}
+      {{- else if .Values.config.baseDomain }}
+        {{- $baseDomain = .Values.config.baseDomain }}
+      {{- else if and (or .Values.global.openshift $.Values.global.openshift) $openshiftDomain }}
+        {{- $baseDomain = $openshiftDomain }}
+      {{- else }}
+        {{- $baseDomain = "neuraltrust.ai" }}
+      {{- end }}
+      base_domain: {{ $baseDomain | quote }}
 
     metrics:
-      enabled: false
+      enabled: true
       enable_latency: true
       enable_upstream: true
       enable_connections: true

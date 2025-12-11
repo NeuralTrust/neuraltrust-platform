@@ -336,26 +336,36 @@ dataPlane:
       storage: 10Gi
       trustTestConfig:
         evaluator:
-          provider: "google"
-          model: "gemini-2.0-flash"
-          temperature: 0.2
+          provider: "openai"
+          model: "gpt-5-mini"
+          temperature: 0.0
+          extra_args:
+            reasoning_effort: "low"
           retry_config:
             attempts: 3
         question_generator:
-          provider: "google"
-          model: "gemini-2.0-flash"
-          temperature: 0.5
+          provider: "openai"
+          model: "gpt-5-mini"
+          extra_args:
+            reasoning_effort: "low"
+          temperature: 0.0
           retry_config:
             attempts: 3
-        embeddings:
-          provider: "openai"
-          model: "text-embedding-3-small"
+        translation:
+          provider: "google"
+          model: "gemini-2.0-flash"
+          temperature: 0.0
+          retry_config:
+            attempts: 3
         topic_summarizer:
           provider: "google"
           model: "gemini-2.0-flash"
           temperature: 0.2
           retry_config:
             attempts: 3
+        embeddings:
+          provider: "openai"
+          model: "text-embedding-3-small"
       replicas: 3
       resources:
         requests:
@@ -433,7 +443,10 @@ controlPlane:
         imagePullSecrets:
           - name: gcr-secret
       config:
-        dataPlaneApiUrl: ""
+        # URLs will be auto-generated from OpenShift Routes if global.openshift=true and global.openshiftDomain is set
+        # Otherwise, set these manually or they will default to internal service URLs
+        controlPlaneApiUrl: ""  # Auto: https://control-plane-api.{global.openshiftDomain} or http://control-plane-api-service.{namespace}.svc.cluster.local
+        dataPlaneApiUrl: ""  # Auto: https://data-plane-api.{global.openshiftDomain} or http://data-plane-api-service.{namespace}.svc.cluster.local
       resources:
         requests:
           memory: 256Mi
@@ -478,7 +491,10 @@ controlPlane:
       secrets:
         controlPlaneJWTSecret: ""
       config:
-        dataPlaneApiUrl: ""
+        # URLs will be auto-generated from OpenShift Routes if global.openshift=true and global.openshiftDomain is set
+        # Otherwise, set these manually or they will default to internal service URLs
+        controlPlaneApiUrl: ""  # Auto: https://control-plane-api.{global.openshiftDomain} or http://control-plane-api-service.{namespace}.svc.cluster.local
+        dataPlaneApiUrl: ""  # Auto: https://data-plane-api.{global.openshiftDomain} or http://data-plane-api-service.{namespace}.svc.cluster.local
       resources:
         requests:
           memory: 512Mi
@@ -722,17 +738,36 @@ neuraltrust:
         storage: 10Gi
         trustTestConfig:
           evaluator:
+            provider: "openai"
+            model: "gpt-5-mini"
+            temperature: 0.0
+            extra_args:
+              reasoning_effort: "low"
+            retry_config:
+              attempts: 3
+          question_generator:
+            provider: "openai"
+            model: "gpt-5-mini"
+            extra_args:
+              reasoning_effort: "low"
+            temperature: 0.0
+            retry_config:
+              attempts: 3
+          translation:
+            provider: "google"
+            model: "gemini-2.0-flash"
+            temperature: 0.0
+            retry_config:
+              attempts: 3
+          topic_summarizer:
             provider: "google"
             model: "gemini-2.0-flash"
             temperature: 0.2
             retry_config:
               attempts: 3
-          question_generator:
-            provider: "google"
-            model: "gemini-2.0-flash"
-            temperature: 0.5
-            retry_config:
-              attempts: 3
+          embeddings:
+            provider: "openai"
+            model: "text-embedding-3-small"
           embeddings:
             provider: "openai"
             model: "text-embedding-3-small"

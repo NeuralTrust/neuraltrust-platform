@@ -36,6 +36,7 @@ helm dependency update
 helm upgrade --install neuraltrust-platform . \
   --namespace neuraltrust \
   --set global.openshift=true \
+  --set global.openshiftDomain="apps.neuraltrust-dev.c4u5.p2.openshiftapps.com" \
   -f values.yaml
 ```
 
@@ -57,12 +58,16 @@ All secrets must be created in the target namespace before deployment. The follo
 
 | Secret Name | Key | Required | Description |
 |------------|-----|----------|-------------|
-| `<release-name>-secrets` or `control-plane-secrets` | `CONTROL_PLANE_JWT_SECRET` | **Yes** | JWT secret for Control Plane API authentication |
-| `<release-name>-secrets` or `control-plane-secrets` | `resend-alert-sender` | No | Email address for alert notifications |
-| `<release-name>-secrets` or `control-plane-secrets` | `resend-invite-sender` | No | Email address for invitation emails |
-| `<release-name>-secrets` or `control-plane-secrets` | `TRUSTGATE_JWT_SECRET` | No | JWT secret for TrustGate integration |
-| `<release-name>-secrets` or `control-plane-secrets` | `FIREWALL_JWT_SECRET` | No | JWT secret for firewall service |
-| `<release-name>-secrets` or `control-plane-secrets` | `MODEL_SCANNER_SECRET` | No | Secret for model scanner service |
+| `control-plane-secrets` | `CONTROL_PLANE_JWT_SECRET` | **Yes** | JWT secret for Control Plane API authentication |
+| `control-plane-secrets` | `OPENAI_API_KEY` | No | OpenAI API key for AI model integrations |
+| `control-plane-secrets` | `resend-api-key` | No | Resend API key for email services |
+| `control-plane-secrets` | `resend-alert-sender` | No | Email address for alert notifications |
+| `control-plane-secrets` | `resend-invite-sender` | No | Email address for invitation emails |
+| `control-plane-secrets` | `TRUSTGATE_JWT_SECRET` | No | JWT secret for TrustGate integration |
+| `control-plane-secrets` | `FIREWALL_JWT_SECRET` | No | JWT secret for firewall service |
+| `control-plane-secrets` | `MODEL_SCANNER_SECRET` | No | Secret for model scanner service |
+
+**Note:** As an alternative, you can use separate secrets `openai-secrets` (key: `OPENAI_API_KEY`) and `resend-secrets` (key: `RESEND_API_KEY`) instead of storing these in `control-plane-secrets`. The chart will automatically detect and use these if they exist.
 | `postgresql-secrets` | `POSTGRES_HOST` | **Yes** | PostgreSQL database hostname |
 | `postgresql-secrets` | `POSTGRES_PORT` | **Yes** | PostgreSQL database port (default: 5432) |
 | `postgresql-secrets` | `POSTGRES_USER` | **Yes** | PostgreSQL database username |
@@ -75,14 +80,22 @@ All secrets must be created in the target namespace before deployment. The follo
 
 | Secret Name | Key | Required | Description |
 |------------|-----|----------|-------------|
-| `clickhouse` | `admin-password` | **Yes** (if deploying ClickHouse) | ClickHouse admin password |
+| `clickhouse` | `admin-password` | **Yes** (if deploying ClickHouse) | ClickHouse admin password for infrastructure ClickHouse instance |
+
+**Note:** The data plane also uses a `clickhouse-secrets` secret, but this is **auto-generated** by the Helm chart and does not need to be created manually. It contains connection details (CLICKHOUSE_USER, CLICKHOUSE_DATABASE, CLICKHOUSE_HOST, CLICKHOUSE_PORT) and is created automatically from values.yaml configuration.
 
 ### TrustGate Secrets
 
 | Secret Name | Key | Required | Description |
 |------------|-----|----------|-------------|
 | `trustgate-secrets` | `SERVER_SECRET_KEY` | No | TrustGate server secret key |
-| `trustgate-redis` | `redis-password` | No | Redis password for TrustGate Redis instance |
+| `trustgate-secrets` | `redis-password` | No | Redis password for TrustGate Redis instance (stored in `trustgate-secrets`, not a separate secret) |
+| `trustgate-secrets` | `DATABASE_HOST` | No | Database hostname for TrustGate (if using external database) |
+| `trustgate-secrets` | `DATABASE_PORT` | No | Database port for TrustGate (if using external database) |
+| `trustgate-secrets` | `DATABASE_USER` | No | Database username for TrustGate (if using external database) |
+| `trustgate-secrets` | `DATABASE_PASSWORD` | No | Database password for TrustGate (if using external database) |
+| `trustgate-secrets` | `DATABASE_NAME` | No | Database name for TrustGate (if using external database) |
+| `trustgate-secrets` | `DATABASE_URL` | No | Database connection URL for TrustGate (if using external database) |
 | `hf-api-key` | `HUGGINGFACE_TOKEN` | No | Hugging Face API key for firewall service. **Note:** Can reuse the same token value from `huggingface-secrets` |
 
 ### Docker Registry Secret
@@ -130,8 +143,8 @@ oc create secret generic data-plane-jwt-secret \
 # Generate JWT secret
 CONTROL_PLANE_JWT=$(openssl rand -hex 32)
 
-# Create control plane secrets (replace 'neuraltrust-platform' with your release name)
-oc create secret generic neuraltrust-platform-secrets \
+# Create control plane secrets
+oc create secret generic control-plane-secrets \
   --from-literal=CONTROL_PLANE_JWT_SECRET="$CONTROL_PLANE_JWT" \
   --from-literal=resend-alert-sender="alerts@example.com" \
   --from-literal=resend-invite-sender="invites@example.com" \
@@ -199,13 +212,9 @@ oc create secret generic huggingface-secrets \
 #### TrustGate Secrets (Optional)
 
 ```bash
-# TrustGate Server Secret Key
+# TrustGate Secrets (including Redis password)
 oc create secret generic trustgate-secrets \
   --from-literal=SERVER_SECRET_KEY="$(openssl rand -hex 32)" \
-  -n neuraltrust
-
-# Redis Password
-oc create secret generic trustgate-redis \
   --from-literal=redis-password="$(openssl rand -base64 32)" \
   -n neuraltrust
 
@@ -255,6 +264,7 @@ Set the `global.openshift` flag to `true` in your values file or via Helm comman
 helm upgrade --install neuraltrust-platform . \
   --namespace neuraltrust \
   --set global.openshift=true \
+  --set global.openshiftDomain="apps.neuraltrust-dev.c4u5.p2.openshiftapps.com" \
   -f values.yaml
 ```
 
@@ -263,6 +273,7 @@ Or in your `values.yaml`:
 ```yaml
 global:
   openshift: true
+  openshiftDomain: "apps.neuraltrust-dev.c4u5.p2.openshiftapps.com"  # Your OpenShift wildcard DNS domain
 ```
 
 ### OpenShift Route Configuration
@@ -315,10 +326,12 @@ oc create namespace neuraltrust
 Create all secrets as described in the [Creating Secrets](#creating-secrets) section. At minimum, you need:
 
 - `data-plane-jwt-secret`
-- `<release-name>-secrets` (with `CONTROL_PLANE_JWT_SECRET`)
+- `control-plane-secrets` (with `CONTROL_PLANE_JWT_SECRET`)
 - `postgresql-secrets`
-- `clickhouse` (if deploying ClickHouse)
+- `clickhouse` (if deploying ClickHouse) - with key `admin-password`
 - `gcr-secret` (if using private images)
+
+**Note:** The `clickhouse-secrets` secret used by the data plane is auto-generated by the Helm chart and does not need to be created manually.
 
 ### Step 3: Update Helm Dependencies
 
@@ -333,6 +346,7 @@ Create or modify your values file for OpenShift:
 ```yaml
 global:
   openshift: true
+  openshiftDomain: "apps.neuraltrust-dev.c4u5.p2.openshiftapps.com"  # Your OpenShift wildcard DNS domain
   storageClass: "gp2"  # Your OpenShift storage class
 
 infrastructure:
@@ -369,6 +383,7 @@ trustgate:
 helm upgrade --install neuraltrust-platform . \
   --namespace neuraltrust \
   --set global.openshift=true \
+  --set global.openshiftDomain="apps.neuraltrust-dev.c4u5.p2.openshiftapps.com" \
   -f values.yaml
 ```
 
@@ -552,7 +567,7 @@ oc create secret generic data-plane-jwt-secret \
   -n "$NAMESPACE" --dry-run=client -o yaml | oc apply -f -
 
 # Control Plane Secrets
-oc create secret generic "${RELEASE_NAME}-secrets" \
+oc create secret generic control-plane-secrets \
   --from-literal=CONTROL_PLANE_JWT_SECRET="$CONTROL_PLANE_JWT" \
   -n "$NAMESPACE" --dry-run=client -o yaml | oc apply -f -
 
@@ -572,8 +587,9 @@ oc create secret generic clickhouse \
   --from-literal=admin-password="$CLICKHOUSE_PASSWORD" \
   -n "$NAMESPACE" --dry-run=client -o yaml | oc apply -f -
 
-# TrustGate Redis Secret
-oc create secret generic trustgate-redis \
+# TrustGate Secrets (including Redis password)
+oc create secret generic trustgate-secrets \
+  --from-literal=SERVER_SECRET_KEY="$(openssl rand -hex 32)" \
   --from-literal=redis-password="$REDIS_PASSWORD" \
   -n "$NAMESPACE" --dry-run=client -o yaml | oc apply -f -
 
@@ -598,7 +614,7 @@ echo "Secrets created successfully!"
 echo ""
 echo "Next steps:"
 echo "1. Update Helm dependencies: helm dependency update"
-echo "2. Deploy with: helm upgrade --install $RELEASE_NAME . --namespace $NAMESPACE --set global.openshift=true -f values.yaml"
+echo "2. Deploy with: helm upgrade --install $RELEASE_NAME . --namespace $NAMESPACE --set global.openshift=true --set global.openshiftDomain=\"apps.neuraltrust-dev.c4u5.p2.openshiftapps.com\" -f values.yaml"
 ```
 
 Save this as `create-secrets-openshift.sh`, make it executable, and run:

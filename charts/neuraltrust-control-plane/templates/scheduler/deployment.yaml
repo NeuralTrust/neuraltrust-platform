@@ -146,23 +146,44 @@ spec:
             secretKeyRef:
               name: {{ $pgSecretName }}
               key: POSTGRES_PASSWORD
-        - name: DATA_PLANE_API_URL
-          {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.scheduler .Values.controlPlane.components.scheduler.config .Values.controlPlane.components.scheduler.config.dataPlaneApiUrl }}
-          value: "{{ .Values.controlPlane.components.scheduler.config.dataPlaneApiUrl }}"
-          {{- else }}
-          value: "http://data-plane-api-service.{{ .Release.Namespace }}.svc.cluster.local"
+        {{- /* Auto-generate URLs from OpenShift Routes if OpenShift is enabled and URLs are not explicitly set */}}
+        {{- $openshiftDomain := .Values.global.openshiftDomain | default $.Values.global.openshiftDomain }}
+        {{- $dataPlaneApiUrl := "" }}
+        {{- $controlPlaneApiUrl := "" }}
+        {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.scheduler .Values.controlPlane.components.scheduler.config }}
+          {{- if .Values.controlPlane.components.scheduler.config.dataPlaneApiUrl }}
+            {{- $dataPlaneApiUrl = .Values.controlPlane.components.scheduler.config.dataPlaneApiUrl }}
           {{- end }}
+          {{- if .Values.controlPlane.components.scheduler.config.controlPlaneApiUrl }}
+            {{- $controlPlaneApiUrl = .Values.controlPlane.components.scheduler.config.controlPlaneApiUrl }}
+          {{- end }}
+        {{- end }}
+        {{- /* Auto-generate from OpenShift Routes if not explicitly set */}}
+        {{- if and (or .Values.global.openshift $.Values.global.openshift) $openshiftDomain }}
+          {{- if not $dataPlaneApiUrl }}
+            {{- $dataPlaneApiUrl = printf "https://data-plane-api.%s" $openshiftDomain }}
+          {{- end }}
+          {{- if not $controlPlaneApiUrl }}
+            {{- $controlPlaneApiUrl = printf "https://control-plane-api.%s" $openshiftDomain }}
+          {{- end }}
+        {{- else }}
+          {{- /* Default to internal service URLs if not set */}}
+          {{- if not $dataPlaneApiUrl }}
+            {{- $dataPlaneApiUrl = printf "http://data-plane-api-service.%s.svc.cluster.local" .Release.Namespace }}
+          {{- end }}
+          {{- if not $controlPlaneApiUrl }}
+            {{- $controlPlaneApiUrl = printf "http://control-plane-api-service.%s.svc.cluster.local" .Release.Namespace }}
+          {{- end }}
+        {{- end }}
+        - name: DATA_PLANE_API_URL
+          value: {{ $dataPlaneApiUrl | quote }}
         - name: DATA_PLANE_JWT_SECRET
           valueFrom:
             secretKeyRef:
               name: data-plane-jwt-secret
               key: DATA_PLANE_JWT_SECRET
         - name: CONTROL_PLANE_API_URL
-          {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.scheduler .Values.controlPlane.components.scheduler.config .Values.controlPlane.components.scheduler.config.controlPlaneApiUrl }}
-          value: "{{ .Values.controlPlane.components.scheduler.config.controlPlaneApiUrl }}"
-          {{- else }}
-          value: "http://control-plane-api-service.{{ .Release.Namespace }}.svc.cluster.local"
-          {{- end }}
+          value: {{ $controlPlaneApiUrl | quote }}
         - name: CONTROL_PLANE_JWT_SECRET
           valueFrom:
             secretKeyRef:

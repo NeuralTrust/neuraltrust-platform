@@ -7,7 +7,19 @@ metadata:
   labels:
     {{- include "trustgate.labels" . | nindent 4 }}
 data:
-  SERVER_BASE_DOMAIN: {{ .Values.config.baseDomain | default (.Values.global.baseDomain | default "neuraltrust.ai") }}
+  {{- /* SERVER_BASE_DOMAIN: Use global.env.SERVER_BASE_DOMAIN, config.baseDomain, OpenShift domain, or default */}}
+  {{- $baseDomain := "" }}
+  {{- $openshiftDomain := .Values.global.openshiftDomain | default $.Values.global.openshiftDomain }}
+  {{- if .Values.global.env.SERVER_BASE_DOMAIN }}
+    {{- $baseDomain = .Values.global.env.SERVER_BASE_DOMAIN }}
+  {{- else if .Values.config.baseDomain }}
+    {{- $baseDomain = .Values.config.baseDomain }}
+  {{- else if and (or .Values.global.openshift $.Values.global.openshift) $openshiftDomain }}
+    {{- $baseDomain = $openshiftDomain }}
+  {{- else }}
+    {{- $baseDomain = "neuraltrust.ai" }}
+  {{- end }}
+  SERVER_BASE_DOMAIN: {{ $baseDomain | quote }}
   SERVER_ADMIN_PORT: "8080"
   SERVER_METRICS_PORT: "9090"
   SERVER_PROXY_PORT: "8081"
