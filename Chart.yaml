@@ -1,0 +1,43 @@
+apiVersion: v2
+name: neuraltrust-platform
+description: Unified Helm chart for NeuralTrust platform including Data Plane, Control Plane, TrustGate, and infrastructure components
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+icon: https://kubernetes.io/images/favicon.png
+
+dependencies:
+  # Infrastructure components (conditional deployment)
+  - name: clickhouse
+    version: 8.0.10
+    repository: file://./charts/clickhouse
+    condition: infrastructure.clickhouse.deploy
+    tags:
+      - infrastructure
+  - name: kafka
+    version: 31.0.0
+    repository: file://./charts/kafka
+    condition: infrastructure.kafka.deploy
+    tags:
+      - infrastructure
+  # NeuralTrust components
+  - name: neuraltrust-data-plane
+    version: 0.1.0
+    condition: neuraltrust.dataPlane.enabled
+    repository: file://./charts/neuraltrust-data-plane
+    tags:
+      - neuraltrust
+  - name: neuraltrust-control-plane
+    version: 0.1.0
+    condition: neuraltrust.controlPlane.enabled
+    repository: file://./charts/neuraltrust-control-plane
+    tags:
+      - neuraltrust
+  # TrustGate components
+  - name: trustgate
+    version: 0.1.0
+    condition: trustgate.enabled
+    repository: file://./charts/trustgate
+    tags:
+      - trustgate
+

@@ -1,0 +1,82 @@
+{{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.postgresql .Values.controlPlane.components.postgresql.installInCluster }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: control-plane-postgresql-ready-check
+  labels:
+    app: control-plane-postgresql
+    component: readiness-check
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-20"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    "helm.sh/hook-timeout": "300"
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        app: control-plane-postgresql
+        component: readiness-check
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: postgresql-ready-check
+        image: postgres:17.2-alpine
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          POSTGRES_HOST="control-plane-postgresql.{{ .Release.Namespace }}.svc.cluster.local"
+          POSTGRES_PORT="5432"
+          MAX_ATTEMPTS=120
+          ATTEMPT=0
+          
+          echo "Waiting for PostgreSQL to be ready at $POSTGRES_HOST:$POSTGRES_PORT..."
+          echo "This hook ensures PostgreSQL is ready before control-plane deployments start."
+          
+          # Wait for PostgreSQL service to be accessible and ready
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            # First check if the service endpoint is accessible
+            if nc -z -w 2 "$POSTGRES_HOST" "$POSTGRES_PORT" 2>/dev/null; then
+              echo "PostgreSQL service is accessible, verifying database is ready..."
+              
+              # Try to connect to PostgreSQL using pg_isready
+              # pg_isready checks if PostgreSQL is accepting connections
+              if pg_isready -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -t 2 >/dev/null 2>&1; then
+                echo "✓ PostgreSQL is ready and accepting connections!"
+                exit 0
+              else
+                echo "PostgreSQL port is open but not ready yet, waiting..."
+              fi
+            else
+              echo "PostgreSQL service not accessible yet, waiting..."
+            fi
+            
+            ATTEMPT=$((ATTEMPT + 1))
+            if [ $((ATTEMPT % 10)) -eq 0 ]; then
+              echo "Attempt $ATTEMPT/$MAX_ATTEMPTS: PostgreSQL not ready yet, waiting..."
+            fi
+            sleep 2
+          done
+          
+          echo "ERROR: PostgreSQL did not become ready at $POSTGRES_HOST:$POSTGRES_PORT within $((MAX_ATTEMPTS * 2)) seconds."
+          echo "Check PostgreSQL pod logs and status for more information."
+          exit 1
+        env:
+        - name: POSTGRES_HOST
+          value: "control-plane-postgresql.{{ .Release.Namespace }}.svc.cluster.local"
+        - name: POSTGRES_PORT
+          value: "5432"
+      {{- if and .Values.controlPlane (hasKey .Values.controlPlane "imagePullSecrets") .Values.controlPlane.imagePullSecrets }}
+      imagePullSecrets:
+        {{- if kindIs "string" .Values.controlPlane.imagePullSecrets }}
+        - name: {{ .Values.controlPlane.imagePullSecrets }}
+        {{- else if kindIs "slice" .Values.controlPlane.imagePullSecrets }}
+        {{- toYaml .Values.controlPlane.imagePullSecrets | nindent 8 }}
+        {{- end }}
+      {{- end }}
+{{- end }}
+

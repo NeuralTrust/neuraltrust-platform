@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: trustgate-redis
+  labels:
+    {{- include "trustgate.labels" . | nindent 4 }}
+    component: redis
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.redis.master.service.port }}
+      targetPort: redis
+      protocol: TCP
+      name: redis
+  selector:
+    {{- include "trustgate.selectorLabels" . | nindent 4 }}
+    component: redis
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trustgate-redis-headless
+  labels:
+    {{- include "trustgate.labels" . | nindent 4 }}
+    component: redis
+spec:
+  clusterIP: None
+  ports:
+    - port: {{ .Values.redis.master.service.port }}
+      targetPort: redis
+      protocol: TCP
+      name: redis
+  selector:
+    {{- include "trustgate.selectorLabels" . | nindent 4 }}
+    component: redis 

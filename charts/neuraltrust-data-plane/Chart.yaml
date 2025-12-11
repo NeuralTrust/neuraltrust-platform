@@ -1,0 +1,6 @@
+apiVersion: v2
+name: neuraltrust-data-plane
+description: Data Plane components for NeuralTrust
+type: application
+version: 0.1.0
+# Dependencies are managed at the parent chart level

@@ -1,0 +1,103 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "data-plane-worker"
+  labels:
+    app: worker
+    plane: data
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worker 
+  template:
+    metadata:
+      labels:
+        app: worker
+        plane: data
+    spec:
+      {{- if not (and .Values.dataPlane (hasKey .Values.dataPlane "imagePullSecrets") (eq .Values.dataPlane.imagePullSecrets "none")) }}
+      imagePullSecrets:
+        - name: gcr-secret
+      {{- end }}
+      containers:
+      - name: worker
+        {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.worker .Values.dataPlane.components.worker.image }}
+        image: "{{ .Values.dataPlane.components.worker.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/workers" }}:{{ .Values.dataPlane.components.worker.image.tag | default "v1.4.0-with-models" }}"
+        imagePullPolicy: "{{ .Values.dataPlane.components.worker.image.pullPolicy | default "Always" }}"
+        {{- else }}
+        image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/workers:v1.4.0-with-models"
+        imagePullPolicy: "Always"
+        {{- end }}
+        env:
+        - name: ENV
+          value: "prod"
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka:9092"
+        - name: NEURALTRUST_CLASSIFIER_MODEL
+          valueFrom:
+            configMapKeyRef:
+              name: "data-plane-secrets"
+              key: NEURALTRUST_CLASSIFIER_MODEL
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ if and .Values.dataPlane .Values.dataPlane.secrets .Values.dataPlane.secrets.openaiApiKeySecretName }}{{ .Values.dataPlane.secrets.openaiApiKeySecretName }}{{ else }}openai-secrets{{ end }}
+              key: OPENAI_API_KEY
+        - name: GOOGLE_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ if and .Values.dataPlane .Values.dataPlane.secrets .Values.dataPlane.secrets.googleApiKeySecretName }}{{ .Values.dataPlane.secrets.googleApiKeySecretName }}{{ else }}google-secrets{{ end }}
+              key: GOOGLE_API_KEY
+        - name: CLICKHOUSE_HOST
+          valueFrom:
+            secretKeyRef:
+              name: clickhouse-secrets
+              key: CLICKHOUSE_HOST
+        - name: CLICKHOUSE_PORT
+          value: "8123"
+        - name: CLICKHOUSE_USER
+          valueFrom:
+            secretKeyRef:
+              name: clickhouse-secrets
+              key: CLICKHOUSE_USER
+        - name: CLICKHOUSE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: clickhouse
+              key: admin-password
+        - name: CLICKHOUSE_DATABASE
+          valueFrom:
+            secretKeyRef:
+              name: clickhouse-secrets
+              key: CLICKHOUSE_DATABASE
+        command: ["python", "-u", "src/listen.py"]
+        resources:
+          {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.worker .Values.dataPlane.components.worker.resources }}
+          {{- toYaml .Values.dataPlane.components.worker.resources | nindent 10 }}
+          {{- else }}
+          requests:
+            memory: 4Gi
+            cpu: 1000m
+          limits:
+            memory: 8Gi
+            cpu: 2000m
+          {{- end }}
+        startupProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - ps aux | grep "python -u src/listen.py" | grep -v grep
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          failureThreshold: 30  # Allow up to 5 minutes (30 * 10s) for startup
+        livenessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - ps aux | grep "python -u src/listen.py" | grep -v grep
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3

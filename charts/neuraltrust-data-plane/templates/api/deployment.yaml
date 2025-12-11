@@ -1,0 +1,285 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "data-plane-api"
+  labels:
+    app: api
+    plane: data
+spec:
+  replicas: {{ if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api }}{{ .Values.dataPlane.components.api.replicas | default 3 }}{{ else }}3{{ end }}
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+        plane: data
+    spec:
+      {{- if not (and .Values.dataPlane (hasKey .Values.dataPlane "imagePullSecrets") (eq .Values.dataPlane.imagePullSecrets "none")) }}
+      imagePullSecrets:
+        - name: gcr-secret
+      {{- end }}
+      initContainers:
+        - name: clickhouse-migrations
+          {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.clickhouse .Values.dataPlane.components.clickhouse.image }}
+          image: "{{ .Values.dataPlane.components.clickhouse.image.repository | default "clickhouse/clickhouse-server" }}:{{ .Values.dataPlane.components.clickhouse.image.tag | default "25.3.2" }}"
+          imagePullPolicy: {{ .Values.dataPlane.components.clickhouse.image.pullPolicy | default "IfNotPresent" }}
+          {{- else }}
+          image: "clickhouse/clickhouse-server:25.3.2"
+          imagePullPolicy: IfNotPresent
+          {{- end }}
+          command:
+          - /bin/sh
+          - -c
+          - |
+            set -e
+            echo "Running ClickHouse initialization scripts..."
+            # Use port 9000 for native protocol (migrations require native protocol, not HTTP)
+            CLICKHOUSE_NATIVE_PORT="9000"
+            echo "Using port ${CLICKHOUSE_NATIVE_PORT} for migrations (native protocol)"
+            
+            # Wait for ClickHouse to be ready
+            echo "Waiting for ClickHouse to be ready..."
+            MAX_ATTEMPTS=60
+            ATTEMPT=0
+            while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+              if clickhouse-client --host="${CLICKHOUSE_HOST}" --port="${CLICKHOUSE_NATIVE_PORT}" --user=default --password="${CLICKHOUSE_PASSWORD}" --query "SELECT 1" &> /dev/null; then
+                echo "✓ ClickHouse is ready"
+                break
+              fi
+              ATTEMPT=$((ATTEMPT + 1))
+              if [ $((ATTEMPT % 5)) -eq 0 ]; then
+                echo "Waiting for ClickHouse... ($ATTEMPT/$MAX_ATTEMPTS)"
+              fi
+              sleep 2
+            done
+            
+            if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
+              echo "ERROR: ClickHouse did not become ready in time"
+              exit 1
+            fi
+            
+            # Ensure user exists (idempotent)
+            echo "Ensuring user ${CLICKHOUSE_USER} exists..."
+            clickhouse-client \
+              --host="${CLICKHOUSE_HOST}" \
+              --port="${CLICKHOUSE_NATIVE_PORT}" \
+              --user=default \
+              --password="${CLICKHOUSE_PASSWORD}" \
+              --query="CREATE USER IF NOT EXISTS ${CLICKHOUSE_USER} IDENTIFIED WITH sha256_password BY '${CLICKHOUSE_PASSWORD}'" 2>/dev/null || \
+              echo "User may already exist, continuing..."
+            
+            # Grant permissions
+            echo "Granting permissions to user ${CLICKHOUSE_USER}..."
+            clickhouse-client \
+              --host="${CLICKHOUSE_HOST}" \
+              --port="${CLICKHOUSE_NATIVE_PORT}" \
+              --user=default \
+              --password="${CLICKHOUSE_PASSWORD}" \
+              --query="GRANT ALL ON *.* TO ${CLICKHOUSE_USER}" 2>/dev/null || \
+              echo "Permissions may already be granted, continuing..."
+            
+            # Calculate MD5 hash of the migration file
+            MIGRATION_HASH=$(md5sum /init-db/init-db.sql | cut -d' ' -f1)
+            echo "Migration file MD5: $MIGRATION_HASH"
+            
+            # Check if this migration has already been applied
+            EXISTING_HASH=$(clickhouse-client \
+              --host="${CLICKHOUSE_HOST}" \
+              --port="${CLICKHOUSE_NATIVE_PORT}" \
+              --user="${CLICKHOUSE_USER}" \
+              --password="${CLICKHOUSE_PASSWORD}" \
+              --query="SELECT migrationHash FROM ${CLICKHOUSE_DATABASE}.schema_migrations WHERE migrationHash = '${MIGRATION_HASH}' LIMIT 1" 2>/dev/null | tr -d '\n' || echo "")
+            
+            if [ -n "$EXISTING_HASH" ] && [ "$EXISTING_HASH" = "$MIGRATION_HASH" ]; then
+              echo "Migration $MIGRATION_HASH has already been applied. Skipping."
+              exit 0
+            fi
+            
+            echo "Applying migration $MIGRATION_HASH..."
+            
+            # Execute the migration
+            clickhouse-client \
+              --host="${CLICKHOUSE_HOST}" \
+              --port="${CLICKHOUSE_NATIVE_PORT}" \
+              --user="${CLICKHOUSE_USER}" \
+              --password="${CLICKHOUSE_PASSWORD}" \
+              --multiquery \
+              < /init-db/init-db.sql
+            
+            if [ $? -ne 0 ]; then
+              echo "Error: Migration failed!"
+              exit 1
+            fi
+            
+            # Record the migration
+            clickhouse-client \
+              --host="${CLICKHOUSE_HOST}" \
+              --port="${CLICKHOUSE_NATIVE_PORT}" \
+              --user="${CLICKHOUSE_USER}" \
+              --password="${CLICKHOUSE_PASSWORD}" \
+              --query="INSERT INTO ${CLICKHOUSE_DATABASE}.schema_migrations (migrationHash, appliedAt) VALUES ('${MIGRATION_HASH}', now64(6))" \
+              2>/dev/null || echo "Warning: Failed to record migration (non-fatal)"
+            
+            echo "Migration $MIGRATION_HASH applied successfully."
+          env:
+          - name: CLICKHOUSE_HOST
+            valueFrom:
+              secretKeyRef:
+                name: clickhouse-secrets
+                key: CLICKHOUSE_HOST
+          - name: CLICKHOUSE_USER
+            valueFrom:
+              secretKeyRef:
+                name: clickhouse-secrets
+                key: CLICKHOUSE_USER
+          - name: CLICKHOUSE_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: clickhouse
+                key: admin-password
+          - name: CLICKHOUSE_DATABASE
+            valueFrom:
+              secretKeyRef:
+                name: clickhouse-secrets
+                key: CLICKHOUSE_DATABASE
+          volumeMounts:
+          - name: init-db
+            mountPath: /init-db
+            readOnly: true
+      containers:
+      - name: api
+        {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.image }}
+        image: "{{ .Values.dataPlane.components.api.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api" }}:{{ .Values.dataPlane.components.api.image.tag | default "v1.6.2" }}"
+        imagePullPolicy: {{ .Values.dataPlane.components.api.image.pullPolicy | default "Always" }}
+        {{- else }}
+        image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api:v1.6.2"
+        imagePullPolicy: Always
+        {{- end }}
+        ports:
+        - containerPort: 8000
+        env:
+          - name: PORT
+            value: "8000"
+          - name: DATA_PLANE_JWT_SECRET
+            valueFrom:
+              secretKeyRef:
+                name: {{ if and .Values.dataPlane .Values.dataPlane.secrets .Values.dataPlane.secrets.dataPlaneJWTSecretName }}{{ .Values.dataPlane.secrets.dataPlaneJWTSecretName }}{{ else }}data-plane-jwt-secret{{ end }}
+                key: DATA_PLANE_JWT_SECRET
+          - name: OPENAI_API_KEY
+            valueFrom:
+              secretKeyRef:
+                name: {{ if and .Values.dataPlane .Values.dataPlane.secrets .Values.dataPlane.secrets.openaiApiKeySecretName }}{{ .Values.dataPlane.secrets.openaiApiKeySecretName }}{{ else }}openai-secrets{{ end }}
+                key: OPENAI_API_KEY
+          - name: GOOGLE_API_KEY
+            valueFrom:
+              secretKeyRef:
+                name: {{ if and .Values.dataPlane .Values.dataPlane.secrets .Values.dataPlane.secrets.googleApiKeySecretName }}{{ .Values.dataPlane.secrets.googleApiKeySecretName }}{{ else }}google-secrets{{ end }}
+                key: GOOGLE_API_KEY
+          - name: RESEND_API_KEY
+            valueFrom:
+              secretKeyRef:
+                name: {{ if and .Values.dataPlane .Values.dataPlane.secrets .Values.dataPlane.secrets.resendApiKeySecretName }}{{ .Values.dataPlane.secrets.resendApiKeySecretName }}{{ else }}resend-secrets{{ end }}
+                key: RESEND_API_KEY
+          - name: KAFKA_BOOTSTRAP_SERVERS
+            value: "kafka:9092"
+          - name: HF_HOME
+            value: "/root/.cache/huggingface"
+          - name: HUGGINGFACE_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: {{ if and .Values.dataPlane .Values.dataPlane.secrets .Values.dataPlane.secrets.huggingFaceTokenSecretName }}{{ .Values.dataPlane.secrets.huggingFaceTokenSecretName }}{{ else }}huggingface-secrets{{ end }}
+                key: HUGGINGFACE_TOKEN
+          - name: PYTHONPATH
+            value: "/app"
+          - name: CLICKHOUSE_HOST
+            valueFrom:
+              secretKeyRef:
+                name: clickhouse-secrets
+                key: CLICKHOUSE_HOST
+          - name: CLICKHOUSE_PORT
+            valueFrom:
+              secretKeyRef:
+                name: clickhouse-secrets
+                key: CLICKHOUSE_PORT
+          - name: CLICKHOUSE_DATABASE
+            valueFrom:
+              secretKeyRef:
+                name: clickhouse-secrets
+                key: CLICKHOUSE_DATABASE
+          - name: CLICKHOUSE_USER
+            valueFrom:
+              secretKeyRef:
+                name: clickhouse-secrets
+                key: CLICKHOUSE_USER
+          - name: CLICKHOUSE_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: clickhouse
+                key: admin-password
+        volumeMounts:
+          {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.trustTestConfig }}
+          - name: trusttest-config-volume
+            mountPath: /app/.trusttest_config.json # Assuming app runs from /app
+            subPath: .trusttest_config.json
+          {{- end }}
+        resources:
+          {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.resources }}
+          {{- toYaml .Values.dataPlane.components.api.resources | nindent 10 }}
+          {{- else }}
+          requests:
+            cpu: 1
+            memory: 2Gi
+          limits:
+            cpu: 2
+            memory: 3Gi
+          {{- end }}
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+            httpHeaders:
+            - name: Accept
+              value: application/json
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+            httpHeaders:
+            - name: Accept
+              value: application/json
+          initialDelaySeconds: 60
+          periodSeconds: 15
+          timeoutSeconds: 60
+          successThreshold: 1
+          failureThreshold: 3
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8000
+            httpHeaders:
+            - name: Accept
+              value: application/json
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 30
+      volumes:
+      - name: init-db
+        configMap:
+          name: {{ if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.clickhouse .Values.dataPlane.components.clickhouse.configmap }}{{ .Values.dataPlane.components.clickhouse.configmap.name | default "clickhouse-init-job" }}{{ else }}clickhouse-init-job{{ end }}
+          items:
+            - key: init-db.sql
+              path: init-db.sql
+      {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.trustTestConfig }}
+      - name: trusttest-config-volume
+        configMap:
+          name: data-plane-trusttest-config
+      {{- end }}

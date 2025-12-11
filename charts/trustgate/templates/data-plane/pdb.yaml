@@ -1,0 +1,15 @@
+{{- if .Values.dataPlane.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Values.dataPlane.name }}
+  labels:
+    {{- include "trustgate.labels" . | nindent 4 }}
+    component: data-plane
+spec:
+  minAvailable: {{ .Values.dataPlane.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "trustgate.selectorLabels" . | nindent 6 }}
+      component: data-plane
+{{- end }} 

@@ -1,0 +1,157 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trustgate-data-plane
+  labels:
+    {{- include "trustgate.dataPlane.labels" . | nindent 4 }}
+    component: data-plane
+spec:
+  replicas: {{ .Values.dataPlane.replicas }}
+  selector:
+    matchLabels:
+      {{- include "trustgate.dataPlane.labels" . | nindent 6 }}
+      component: data-plane
+  template:
+    metadata:
+      labels:
+        {{- include "trustgate.dataPlane.labels" . | nindent 8 }}
+        component: data-plane
+    spec:
+      imagePullSecrets:
+        {{- if .Values.global.image.imagePullSecrets }}
+        {{- toYaml .Values.global.image.imagePullSecrets | nindent 8 }}
+        {{- else }}
+        - name: gcr-secret
+        {{- end }}
+      volumes:
+      - name: logs-volume
+        emptyDir: {}
+      containers:
+      - name: data-plane
+        image: "{{ .Values.global.image.image }}:{{ .Values.global.image.tag }}"
+        args: ["proxy"]
+        envFrom:
+        - configMapRef:
+            name: trustgate-env-vars
+        env:
+        # Sensitive values from secrets
+        - name: SERVER_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: trustgate-secrets
+              key: SERVER_SECRET_KEY
+              optional: true
+        - name: DATABASE_HOST
+          valueFrom:
+            secretKeyRef:
+              name: trustgate-secrets
+              key: DATABASE_HOST
+        - name: DATABASE_PORT
+          valueFrom:
+            secretKeyRef:
+              name: trustgate-secrets
+              key: DATABASE_PORT
+        - name: DATABASE_USER
+          valueFrom:
+            secretKeyRef:
+              name: trustgate-secrets
+              key: DATABASE_USER
+        - name: DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: trustgate-secrets
+              key: DATABASE_PASSWORD
+        - name: DATABASE_NAME
+          valueFrom:
+            secretKeyRef:
+              name: trustgate-secrets
+              key: DATABASE_NAME
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: trustgate-secrets
+              key: DATABASE_URL
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: trustgate-secrets
+              key: redis-password
+        imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.dataPlane.ports.http }}
+          name: http
+        volumeMounts:
+        - name: logs-volume
+          mountPath: /app/logs
+        resources:
+          {{- toYaml .Values.dataPlane.resources | nindent 10 }}
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 15
+          periodSeconds: 20
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.dataPlane.podSecurityContext | nindent 8 }}
+      {{- with .Values.dataPlane.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.dataPlane.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.dataPlane.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }} 
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trustgate-data-plane
+  labels:
+    {{- include "trustgate.dataPlane.labels" . | nindent 4 }}
+    component: data-plane
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: {{ .Values.dataPlane.ports.http }}
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "trustgate.dataPlane.labels" . | nindent 4 }}
+    component: data-plane
+{{- if or .Values.global.openshift $.Values.global.openshift }}
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: trustgate-gateway-route
+  labels:
+    {{- include "trustgate.dataPlane.labels" . | nindent 4 }}
+    component: data-plane
+spec:
+  host: {{ if or .Values.global.openshiftDomain $.Values.global.openshiftDomain }}{{ printf "trustgate-gateway.%s" (.Values.global.openshiftDomain | default $.Values.global.openshiftDomain) | quote }}{{ else }}"gateway.neuraltrust.ai"{{ end }}
+  to:
+    kind: Service
+    name: trustgate-data-plane
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+{{- end }} 

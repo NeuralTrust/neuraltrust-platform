@@ -1,0 +1,145 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: control-plane-app-service
+spec:
+  {{- $serviceType := "ClusterIP" }}
+  {{- if .Values.controlPlane }}
+    {{- if .Values.controlPlane.components }}
+      {{- if .Values.controlPlane.components.app }}
+        {{- if .Values.controlPlane.components.app.service }}
+          {{- if .Values.controlPlane.components.app.service.type }}
+            {{- $serviceType = .Values.controlPlane.components.app.service.type }}
+          {{- end }}
+        {{- end }}
+      {{- end }}
+    {{- end }}
+  {{- end }}
+  type: {{ $serviceType }}
+  selector:
+    app: control-plane-app
+  ports:
+    - port: 80
+      {{- $targetPort := 3000 }}
+      {{- if .Values.controlPlane }}
+        {{- if .Values.controlPlane.components }}
+          {{- if .Values.controlPlane.components.app }}
+            {{- if .Values.controlPlane.components.app.config }}
+              {{- if .Values.controlPlane.components.app.config.port }}
+                {{- $targetPort = .Values.controlPlane.components.app.config.port }}
+              {{- end }}
+            {{- end }}
+          {{- end }}
+        {{- end }}
+      {{- end }}
+      targetPort: {{ $targetPort }}
+      name: http
+{{- if and (not .Values.global.openshift) .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.ingress .Values.controlPlane.components.app.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: "control-plane-app-ingress"
+  {{- if .Values.controlPlane.components.app.ingress.annotations }}
+  annotations:
+    {{- toYaml .Values.controlPlane.components.app.ingress.annotations | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.controlPlane.components.app.ingress.className }}
+  ingressClassName: {{ .Values.controlPlane.components.app.ingress.className }}
+  {{- end }}
+  {{- if .Values.controlPlane.components.app.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.controlPlane.components.app.host | quote }}
+        {{- if .Values.controlPlane.components.app.secondaryHost }}
+        - {{ .Values.controlPlane.components.app.secondaryHost | quote }}
+        {{- end }}
+      {{- if .Values.controlPlane.components.app.ingress.tls.secretName }}
+      secretName: {{ .Values.controlPlane.components.app.ingress.tls.secretName }}
+      {{- else }}
+      secretName: "control-plane-app-tls"
+      {{- end }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.controlPlane.components.app.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: "control-plane-app-service"
+                port:
+                  name: http
+    {{- if .Values.controlPlane.components.app.secondaryHost }}
+    - host: {{ .Values.controlPlane.components.app.secondaryHost | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: "control-plane-app-service"
+                port:
+                  name: http
+    {{- end }}
+{{- end }}
+{{- if .Values.global.openshift }}
+  {{- $host := "" }}
+  {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.host }}
+    {{- $host = .Values.controlPlane.components.app.host }}
+  {{- else if .Values.global.openshiftDomain }}
+    {{- $host = printf "control-plane-app.%s" .Values.global.openshiftDomain }}
+  {{- else }}
+    {{- $host = "app.neuraltrust.ai" }}
+  {{- end }}
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: "control-plane-app-route"
+spec:
+  host: {{ $host | quote }}
+  to:
+    kind: Service
+    name: "control-plane-app-service"
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+    {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.secondaryHost }}
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: "control-plane-app-redirect-route"
+  annotations:
+    haproxy.router.openshift.io/route-redirect: https://{{ $host }}
+spec:
+  host: {{ .Values.controlPlane.components.app.secondaryHost | quote }}
+  to:
+    kind: Service
+    name: "control-plane-app-service"
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: {{ if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.ingress .Values.controlPlane.components.app.ingress.tls .Values.controlPlane.components.app.ingress.tls.termination }}{{ .Values.controlPlane.components.app.ingress.tls.termination }}{{ else }}edge{{ end }}
+    {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.ingress .Values.controlPlane.components.app.ingress.tls .Values.controlPlane.components.app.ingress.tls.certificate }}
+    certificate: {{ .Values.controlPlane.components.app.ingress.tls.certificate | quote }}
+    {{- end }}
+    {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.ingress .Values.controlPlane.components.app.ingress.tls .Values.controlPlane.components.app.ingress.tls.key }}
+    key: {{ .Values.controlPlane.components.app.ingress.tls.key | quote }}
+    {{- end }}
+    {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.ingress .Values.controlPlane.components.app.ingress.tls .Values.controlPlane.components.app.ingress.tls.caCertificate }}
+    caCertificate: {{ .Values.controlPlane.components.app.ingress.tls.caCertificate | quote }}
+    {{- end }}
+    {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.ingress .Values.controlPlane.components.app.ingress.tls .Values.controlPlane.components.app.ingress.tls.destinationCACertificate }}
+    destinationCACertificate: {{ .Values.controlPlane.components.app.ingress.tls.destinationCACertificate | quote }}
+    {{- end }}
+    insecureEdgeTerminationPolicy: {{ if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.ingress .Values.controlPlane.components.app.ingress.tls .Values.controlPlane.components.app.ingress.tls.insecureEdgeTerminationPolicy }}{{ .Values.controlPlane.components.app.ingress.tls.insecureEdgeTerminationPolicy }}{{ else }}Redirect{{ end }}
+    {{- end }}
+{{- end }}

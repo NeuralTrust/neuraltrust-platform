@@ -1,0 +1,73 @@
+Thank you for installing {{ .Chart.Name }}.
+
+Your TrustGate deployment is now being set up. This may take a few minutes.
+
+{{- if .Values.ingress.enabled }}
+You can access the TrustGate services at:
+  - Control Plane: https://{{ .Values.ingress.controlPlane.host }}
+  - Data Plane: https://{{ .Values.ingress.dataPlane.host }}
+{{- else }}
+To get the IP addresses for your TrustGate services:
+
+1. For the Control Plane:
+   kubectl get svc {{ .Release.Name }}-control-plane -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+
+2. For the Data Plane:
+   kubectl get svc {{ .Release.Name }}-data-plane -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+
+If you're using NodePort instead of LoadBalancer, get the NodePort and any node IP:
+   Control Plane port: kubectl get svc {{ .Release.Name }}-control-plane -n {{ .Release.Namespace }} -o jsonpath='{.spec.ports[0].nodePort}'
+   Data Plane port: kubectl get svc {{ .Release.Name }}-data-plane -n {{ .Release.Namespace }} -o jsonpath='{.spec.ports[0].nodePort}'
+   Node IP: kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="ExternalIP")].address}'
+{{- end }}
+
+For more information on using TrustGate, please visit:
+https://docs.neuraltrust.ai
+
+To view the status of your deployment:
+  kubectl get pods -n {{ .Release.Namespace }}
+
+Access URLs:
+{{- if .Values.ingress.enabled }}
+1. Access the Control Plane API at:
+   https://{{ .Values.ingress.controlPlane.host }}
+
+2. Access the Data Plane API at:
+   https://{{ .Values.ingress.dataPlane.host }}
+
+{{- else }}
+1. Get the Control Plane URL by running these commands:
+  export POD_NAME=$(kubectl get pods --namespace {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "trustgate.name" . }},app.kubernetes.io/instance={{ .Release.Name }},component=control-plane" -o jsonpath="{.items[0].metadata.name}")
+  export CONTAINER_PORT=$(kubectl get pod --namespace {{ .Release.Namespace }} $POD_NAME -o jsonpath="{.spec.containers[0].ports[0].containerPort}")
+  echo "Visit http://127.0.0.1:8080 to use your application"
+  kubectl --namespace {{ .Release.Namespace }} port-forward $POD_NAME 8080:$CONTAINER_PORT
+
+2. Get the Data Plane URL by running these commands:
+  export POD_NAME=$(kubectl get pods --namespace {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "trustgate.name" . }},app.kubernetes.io/instance={{ .Release.Name }},component=data-plane" -o jsonpath="{.items[0].metadata.name}")
+  export CONTAINER_PORT=$(kubectl get pod --namespace {{ .Release.Namespace }} $POD_NAME -o jsonpath="{.spec.containers[0].ports[0].containerPort}")
+  echo "Visit http://127.0.0.1:8081 to use your application"
+  kubectl --namespace {{ .Release.Namespace }} port-forward $POD_NAME 8081:$CONTAINER_PORT
+{{- end }}
+
+{{- if .Values.redis.enabled }}
+3. Redis can be accessed on the following DNS name from within your cluster:
+    {{ include "trustgate.fullname" . }}-redis-headless.{{ .Release.Namespace }}.svc.cluster.local:6379
+{{- end }}
+
+Initial setup:
+1. Ensure your DNS records are configured for the above hostnames
+2. Configure your first API Gateway:
+   curl -X POST https://{{ .Values.ingress.controlPlane.host }}/api/v1/gateways \
+     -H "Content-Type: application/json" \
+     -d '{"name": "my-gateway", "subdomain": "api.example.com"}'
+
+Monitor the deployment:
+- Check pod status and logs for monitoring
+
+Get the application logs:
+  kubectl logs -n {{ .Release.Namespace }} -l "app.kubernetes.io/instance={{ .Release.Name }}" -f
+
+Need help? Visit:
+- Documentation: https://docs.neuraltrust.ai
+- Community: https://join.slack.com/t/neuraltrustcommunity/shared_invite/zt-2xl47cag6-_HFNpltIULnA3wh4R6AqBg
+- Issues: https://github.com/NeuralTrust/TrustGate/issues

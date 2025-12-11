@@ -1,0 +1,53 @@
+{{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.clickhouse .Values.dataPlane.components.clickhouse.backup .Values.dataPlane.components.clickhouse.backup.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: clickhouse-backup
+spec:
+  schedule: "0 * * * *"  # Run every hour at minute 0
+  concurrencyPolicy: "Forbid"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: backup
+              image: {{ if and .Values.dataPlane.components.clickhouse.backup.image .Values.dataPlane.components.clickhouse.backup.image.repository }}{{ .Values.dataPlane.components.clickhouse.backup.image.repository }}{{ else }}curlimages/curl{{ end }}:{{ if and .Values.dataPlane.components.clickhouse.backup.image .Values.dataPlane.components.clickhouse.backup.image.tag }}{{ .Values.dataPlane.components.clickhouse.backup.image.tag }}{{ else }}8.13.0{{ end }}
+              imagePullPolicy: IfNotPresent
+              command:
+                - /bin/sh
+                - -ec
+                - |
+                  BACKUP_DATE=$(date +%Y-%m-%d-%H-%M-%S)
+                  echo "Starting backup..."
+                  {{- if and .Values.dataPlane.components.clickhouse.backup.type (eq .Values.dataPlane.components.clickhouse.backup.type "s3") }}
+                  curl -X POST "http://clickhouse:8123" \
+                    -H "X-ClickHouse-User: {{ if and .Values.dataPlane.components.clickhouse.auth .Values.dataPlane.components.clickhouse.auth.username }}{{ .Values.dataPlane.components.clickhouse.auth.username }}{{ else }}neuraltrust{{ end }}" \
+                    -H "X-ClickHouse-Key: $CLICKHOUSE_PASSWORD" \
+                    -d "BACKUP DATABASE neuraltrust TO S3('https://{{ if .Values.dataPlane.components.clickhouse.backup.s3.bucket }}{{ .Values.dataPlane.components.clickhouse.backup.s3.bucket }}{{ else }}backup-bucket{{ end }}.s3.{{ if .Values.dataPlane.components.clickhouse.backup.s3.region }}{{ .Values.dataPlane.components.clickhouse.backup.s3.region }}{{ else }}us-east-1{{ end }}.amazonaws.com/$BACKUP_DATE/shard-0', '{{ if .Values.dataPlane.components.clickhouse.backup.s3.accessKey }}{{ .Values.dataPlane.components.clickhouse.backup.s3.accessKey }}{{ else }}access-key{{ end }}', '{{ if .Values.dataPlane.components.clickhouse.backup.s3.secretKey }}{{ .Values.dataPlane.components.clickhouse.backup.s3.secretKey }}{{ else }}secret-key{{ end }}'{{- if and .Values.dataPlane.components.clickhouse.backup.s3 .Values.dataPlane.components.clickhouse.backup.s3.endpoint }}, '{{ .Values.dataPlane.components.clickhouse.backup.s3.endpoint }}'{{- end }}) ASYNC"
+                  {{- else }}
+                  curl -X POST "http://clickhouse:8123" \
+                    -H "X-ClickHouse-User: {{ if and .Values.dataPlane.components.clickhouse.auth .Values.dataPlane.components.clickhouse.auth.username }}{{ .Values.dataPlane.components.clickhouse.auth.username }}{{ else }}neuraltrust{{ end }}" \
+                    -H "X-ClickHouse-Key: $CLICKHOUSE_PASSWORD" \
+                    -d "BACKUP DATABASE neuraltrust TO S3('https://storage.googleapis.com/{{ if .Values.dataPlane.components.clickhouse.backup.gcs.bucket }}{{ .Values.dataPlane.components.clickhouse.backup.gcs.bucket }}{{ else }}backup-bucket{{ end }}/$BACKUP_DATE/shard-0', '{{ if .Values.dataPlane.components.clickhouse.backup.gcs.accessKey }}{{ .Values.dataPlane.components.clickhouse.backup.gcs.accessKey }}{{ else }}access-key{{ end }}', '{{ if .Values.dataPlane.components.clickhouse.backup.gcs.secretKey }}{{ .Values.dataPlane.components.clickhouse.backup.gcs.secretKey }}{{ else }}secret-key{{ end }}') ASYNC"
+                  {{- end }}
+                  echo "Backup initiated for $BACKUP_DATE"
+              env:
+                - name: CLICKHOUSE_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: clickhouse
+                      key: admin-password
+              resources:
+                {{- if and .Values.dataPlane.components.clickhouse.backup.resources }}
+                {{- toYaml .Values.dataPlane.components.clickhouse.backup.resources | nindent 16 }}
+                {{- else }}
+                requests:
+                  memory: 128Mi
+                  cpu: 100m
+                limits:
+                  memory: 256Mi
+                  cpu: 200m
+                {{- end }}
+          restartPolicy: OnFailure
+{{- end }}

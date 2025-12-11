@@ -1,0 +1,15 @@
+{{- if .Values.controlPlane.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Values.controlPlane.name }}
+  labels:
+    {{- include "trustgate.labels" . | nindent 4 }}
+    component: control-plane
+spec:
+  minAvailable: {{ .Values.controlPlane.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "trustgate.selectorLabels" . | nindent 6 }}
+      component: control-plane
+{{- end }} 

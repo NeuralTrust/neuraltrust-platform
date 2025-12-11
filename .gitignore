@@ -1,0 +1,45 @@
+# Helm chart packages
+*.tgz
+*.tar.gz
+
+# Helm dependencies (if using local charts)
+charts/*.tgz
+
+# Temporary Helm files
+.helm/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS-specific files
+Thumbs.db
+.DS_Store
+
+# Sensitive files (uncomment if you want to ignore these)
+# *.key
+# *.pem
+# *-secret.yaml
+# secrets.yaml
+# gcr-keys.json
+
+# Helm test output
+test-results/
+rendered-charts/
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Log files
+*.log
+
+# Environment-specific values files (optional - uncomment if needed)
+# values-*.yaml
+# !values-*.yaml.example
+gcr-keys.json

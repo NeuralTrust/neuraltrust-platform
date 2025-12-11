@@ -1,0 +1,195 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-connect
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: {{ if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect }}{{ .Values.dataPlane.components.kafka.connect.replicas | default 1 }}{{ else }}1{{ end }}
+  selector:
+    matchLabels:
+      app: kafka-connect
+  template:
+    metadata:
+      labels:
+        app: kafka-connect
+    spec:
+      {{- if not (and .Values.dataPlane (hasKey .Values.dataPlane "imagePullSecrets") (eq .Values.dataPlane.imagePullSecrets "none")) }}
+      imagePullSecrets:
+        - name: gcr-secret
+      {{- end }}
+      containers:
+        - name: kafka-connect
+          {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect .Values.dataPlane.components.kafka.connect.image }}
+          image: "{{ .Values.dataPlane.components.kafka.connect.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect" }}:{{ .Values.dataPlane.components.kafka.connect.image.tag | default "v0.0.1" }}"
+          imagePullPolicy: {{ .Values.dataPlane.components.kafka.connect.image.pullPolicy | default "Always" }}
+          {{- else }}
+          image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect:v0.0.1"
+          imagePullPolicy: Always
+          {{- end }}
+          ports:
+            - containerPort: 8083
+          readinessProbe:
+            httpGet:
+              path: /connectors
+              port: 8083
+            # Give the pod up to 5 minutes to become ready
+            initialDelaySeconds: 180 # Increased from 30
+            periodSeconds: 15 # Increased from 10
+            timeoutSeconds: 10 # Increased from 5
+            failureThreshold: 10 # Increased from 6
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8083
+            # Start checking for liveness only after it should be ready
+            initialDelaySeconds: 300 # Increased from 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5 # Increased from 3
+          env:
+            - name: CONNECT_ERRORS_TOLERANCE
+              value: "all"
+            - name: CONNECT_ERRORS_RETRY_TIMEOUT
+              value: "60"
+            - name: CONNECT_BOOTSTRAP_SERVERS
+              value: "kafka-broker-0.kafka-broker-headless.{{ .Release.Namespace }}.svc.cluster.local:9094"
+            - name: CONNECT_GROUP_ID
+              value: "connect-cluster"
+            - name: CONNECT_CONFIG_STORAGE_TOPIC
+              value: "connect-configs"
+            - name: CONNECT_OFFSET_STORAGE_TOPIC
+              value: "connect-offsets"
+            - name: CONNECT_STATUS_STORAGE_TOPIC
+              value: "connect-status"
+            - name: CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR
+              value: "{{ if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect }}{{ .Values.dataPlane.components.kafka.connect.replicas | default 1 }}{{ else }}1{{ end }}"
+            - name: CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR
+              value: "{{ if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect }}{{ .Values.dataPlane.components.kafka.connect.replicas | default 1 }}{{ else }}1{{ end }}"
+            - name: CONNECT_STATUS_STORAGE_REPLICATION_FACTOR
+              value: "{{ if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect }}{{ .Values.dataPlane.components.kafka.connect.replicas | default 1 }}{{ else }}1{{ end }}"
+            - name: CONNECT_KEY_CONVERTER
+              value: "org.apache.kafka.connect.storage.StringConverter"
+            - name: CONNECT_VALUE_CONVERTER
+              value: "org.apache.kafka.connect.json.JsonConverter"
+            - name: CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE
+              value: "false"
+            - name: CONNECT_PLUGIN_PATH
+              value: "/usr/share/java,/usr/share/confluent-hub-components"
+            - name: CONNECT_REST_ADVERTISED_HOST_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: CONNECT_LOG4J_ROOT_LOGLEVEL
+              value: "ERROR"
+            - name: CONNECT_LOG4J_LOGGERS
+              value: "org.apache.zookeeper=INFO,org.I0Itec.zkclient=INFO,org.reflections=ERROR"
+            - name: CONNECT_CONSUMER_OFFSETS_TOPIC_REPLICATION_FACTOR
+              value: "{{ if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect }}{{ .Values.dataPlane.components.kafka.connect.replicas | default 1 }}{{ else }}1{{ end }}"
+            - name: CONNECT_CONSUMER_OFFSETS_TOPIC_NUM_PARTITIONS
+              value: "{{ if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect }}{{ .Values.dataPlane.components.kafka.connect.replicas | default 1 }}{{ else }}1{{ end }}"
+            - name: CONNECT_INTERNAL_REPLICATION_FACTOR
+              value: "{{ if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect }}{{ .Values.dataPlane.components.kafka.connect.replicas | default 1 }}{{ else }}1{{ end }}"
+            - name: KAFKA_NUM_PARTITIONS
+              value: "3"
+            - name: CONNECT_PRODUCER_DEFAULT_PARTITIONS
+              value: "3"
+            - name: CONNECT_CONSUMER_DEFAULT_PARTITIONS
+              value: "3"
+          {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect .Values.dataPlane.components.kafka.connect.image }}
+          {{- else }}
+          imagePullPolicy: Always
+          {{- end }}
+          resources:
+            {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect .Values.dataPlane.components.kafka.connect.resources }}
+            {{- toYaml .Values.dataPlane.components.kafka.connect.resources | nindent 12 }}
+            {{- else }}
+            limits:
+              cpu: "1"
+              memory: 4Gi
+            requests:
+              cpu: 500m
+              memory: 2Gi
+            {{- end }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: create-connectors
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    "helm.sh/hook-timeout": "600"
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app: create-connectors
+        job-name: create-connectors
+    spec:
+      containers:
+      - name: create-connectors
+        image: {{ if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.connectorsJob }}{{ (.Values.dataPlane.components.connectorsJob.image | default "curlimages/curl:8.13.0") | quote }}{{ else }}"curlimages/curl:8.13.0"{{ end }}
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            echo "=== Kafka Connectors Job ==="
+            echo "This job will check if connectors exist and create missing ones."
+            echo "If connectors already exist, they will be skipped."
+            echo ""
+            ls -la /scripts
+            /scripts/create-clickhouse-sink.sh {{ .Release.Namespace }}
+        env:
+        - name: CLICKHOUSE_HOST
+          valueFrom:
+            secretKeyRef:
+              name: clickhouse-secrets
+              key: CLICKHOUSE_HOST
+              optional: true
+        - name: CLICKHOUSE_PORT
+          valueFrom:
+            secretKeyRef:
+              name: clickhouse-secrets
+              key: CLICKHOUSE_PORT
+              optional: true
+        - name: CLICKHOUSE_DATABASE
+          valueFrom:
+            secretKeyRef:
+              name: clickhouse-secrets
+              key: CLICKHOUSE_DATABASE
+              optional: true
+        - name: CLICKHOUSE_USER
+          valueFrom:
+            secretKeyRef:
+              name: clickhouse-secrets
+              key: CLICKHOUSE_USER
+              optional: true
+        - name: CLICKHOUSE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: clickhouse
+              key: admin-password
+              optional: true
+        volumeMounts:
+        - name: connector-scripts
+          mountPath: /scripts
+        resources:
+          {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.connectorsJob .Values.dataPlane.components.connectorsJob.resources }}
+          {{- toYaml .Values.dataPlane.components.connectorsJob.resources | nindent 10 }}
+          {{- else }}
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+          {{- end }}
+      volumes:
+      - name: connector-scripts
+        configMap:
+          name: connector-scripts
+          defaultMode: 0755
+      restartPolicy: OnFailure

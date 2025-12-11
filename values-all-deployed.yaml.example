@@ -1,0 +1,70 @@
+# Example: Deploy everything (ClickHouse, Kafka, PostgreSQL, NeuralTrust, TrustGate)
+# This is the default configuration - deploy all infrastructure and services
+
+infrastructure:
+  clickhouse:
+    deploy: true  # Deploy ClickHouse
+    chart:
+      auth:
+        username: "neuraltrust"
+        password: "your-clickhouse-password"
+      persistence:
+        size: 10Gi
+
+  kafka:
+    deploy: true  # Deploy Kafka
+    chart:
+      persistence:
+        size: 10Gi
+
+  postgresql:
+    deploy: true  # Deploy PostgreSQL
+    chart:
+      persistence:
+        size: 10Gi
+
+neuraltrust:
+  dataPlane:
+    enabled: true
+    components:
+      clickhouse:
+        enabled: true  # ClickHouse will be deployed
+        host: "clickhouse"  # Will be auto-configured
+        port: "8123"
+        user: "neuraltrust"
+        database: "neuraltrust"
+      kafka:
+        enabled: true  # Kafka will be deployed
+      api:
+        enabled: true
+        host: "data-plane-api.example.com"
+      worker:
+        enabled: true
+
+  controlPlane:
+    enabled: true
+    components:
+      postgresql:
+        installInCluster: true  # PostgreSQL will be deployed
+        secrets:
+          password: "your-postgres-password"
+          database: "neuraltrust"
+      api:
+        enabled: true
+        host: "control-plane-api.example.com"
+      app:
+        enabled: true
+        host: "control-plane-app.example.com"
+      scheduler:
+        enabled: true
+
+trustgate:
+  enabled: true
+  global:
+    env:
+      DATABASE_HOST: ""  # Will be auto-configured when postgresql.deploy=true
+      DATABASE_PORT: "5432"
+      DATABASE_USER: "postgres"
+      DATABASE_PASSWORD: "your-postgres-password"
+      DATABASE_NAME: "trustgate"
+

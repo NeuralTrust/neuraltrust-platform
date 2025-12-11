@@ -1,0 +1,103 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: "control-plane-scheduler-service"
+  labels:
+    app: control-plane-scheduler
+spec:
+  {{- $serviceType := "ClusterIP" }}
+  {{- if .Values.controlPlane }}
+    {{- if .Values.controlPlane.components }}
+      {{- if .Values.controlPlane.components.scheduler }}
+        {{- if .Values.controlPlane.components.scheduler.service }}
+          {{- if .Values.controlPlane.components.scheduler.service.type }}
+            {{- $serviceType = .Values.controlPlane.components.scheduler.service.type }}
+          {{- end }}
+        {{- end }}
+      {{- end }}
+    {{- end }}
+  {{- end }}
+  type: {{ $serviceType }}
+  ports:
+    - port: 80
+      targetPort: 3000
+      name: http
+  selector:
+    app: control-plane-scheduler
+{{- if and (not .Values.global.openshift) .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.scheduler .Values.controlPlane.components.scheduler.ingress .Values.controlPlane.components.scheduler.ingress.enabled }}
+  {{- with .Values.controlPlane.components.scheduler }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: "control-plane-scheduler-ingress"
+  {{- if .ingress.annotations }}
+  annotations:
+    {{- toYaml .ingress.annotations | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .ingress.className }}
+  ingressClassName: {{ .ingress.className }}
+  {{- end }}
+  {{- if .ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .host | default "scheduler.neuraltrust.ai" | quote }}
+      {{- if .ingress.tls.secretName }}
+      secretName: {{ .ingress.tls.secretName }}
+      {{- else }}
+      secretName: "control-plane-scheduler-tls"
+      {{- end }}
+  {{- end }}
+  rules:
+    - host: {{ .host | default "scheduler.neuraltrust.ai" | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: "control-plane-scheduler-service"
+                port:
+                  name: http
+  {{- end }}
+{{- end }}
+{{- if .Values.global.openshift }}
+  {{- with .Values.controlPlane }}
+    {{- with .components }}
+      {{- with .scheduler }}
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: "control-plane-scheduler-route"
+spec:
+  host: {{ .host | default "scheduler.neuraltrust.ai" | quote }}
+  tls:
+    termination: {{ if .ingress.tls.termination }}{{ .ingress.tls.termination }}{{ else }}edge{{ end }}
+    {{- if .ingress.tls.certificate }}
+    certificate: {{ .ingress.tls.certificate | quote }}
+    {{- end }}
+    {{- if .ingress.tls.key }}
+    key: {{ .ingress.tls.key | quote }}
+    {{- end }}
+    {{- if .ingress.tls.caCertificate }}
+    caCertificate: {{ .ingress.tls.caCertificate | quote }}
+    {{- end }}
+    {{- if .ingress.tls.destinationCACertificate }}
+    destinationCACertificate: {{ .ingress.tls.destinationCACertificate | quote }}
+    {{- end }}
+    {{- if .ingress.tls.insecureEdgeTerminationPolicy }}
+    insecureEdgeTerminationPolicy: {{ .ingress.tls.insecureEdgeTerminationPolicy }}
+    {{- end }}
+  to:
+    kind: Service
+    name: "control-plane-scheduler-service"
+    weight: 100
+  port:
+    targetPort: http
+  path: "/"
+      {{- end }}
+    {{- end }}
+  {{- end }}
+{{- end }}

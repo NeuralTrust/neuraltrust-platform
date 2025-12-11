@@ -1,0 +1,101 @@
+{{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.postgresql .Values.controlPlane.components.postgresql.installInCluster }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: control-plane-postgresql
+  labels:
+    app: control-plane-postgresql
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: control-plane-postgresql
+  template:
+    metadata:
+      labels:
+        app: control-plane-postgresql
+    spec:
+      {{- if not .Values.global.openshift }}
+      securityContext:
+        fsGroup: 999
+        runAsUser: 999
+        runAsGroup: 999
+        runAsNonRoot: true
+      {{- end }}
+      imagePullSecrets:
+        {{- toYaml .Values.controlPlane.components.postgresql.imagePullSecrets | nindent 10 }}
+      containers:
+      - name: postgresql
+        image: "{{ .Values.controlPlane.components.postgresql.image.repository }}:{{ .Values.controlPlane.components.postgresql.image.tag }}"
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+          runAsNonRoot: true
+          {{- if not .Values.global.openshift }}
+          runAsUser: 999
+          runAsGroup: 999
+          {{- end }}
+          seccompProfile:
+            type: RuntimeDefault
+        imagePullPolicy: {{ .Values.controlPlane.components.postgresql.image.pullPolicy }}
+        ports:
+        - containerPort: 5432
+          name: postgresql
+        env:
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: postgresql-secrets
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgresql-secrets
+              key: POSTGRES_PASSWORD
+        - name: POSTGRES_DB
+          valueFrom:
+            secretKeyRef:
+              name: postgresql-secrets
+              key: POSTGRES_DB
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        - name: POSTGRES_HOST_AUTH_METHOD
+          value: "md5"
+        volumeMounts:
+        - name: postgresql-data
+          mountPath: /var/lib/postgresql/data
+        resources:
+            {{- toYaml .Values.controlPlane.components.postgresql.resources | nindent 12 }}
+        livenessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - "PGPASSWORD=$POSTGRES_PASSWORD pg_isready -h localhost -p 5432 -U $POSTGRES_USER"
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 10
+          successThreshold: 1
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - "PGPASSWORD=$POSTGRES_PASSWORD pg_isready -h localhost -p 5432 -U $POSTGRES_USER"
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 10
+          successThreshold: 1
+          failureThreshold: 3
+      volumes:
+      - name: postgresql-data
+        {{- if .Values.controlPlane.components.postgresql.persistence.enabled }}
+        persistentVolumeClaim:
+          claimName: control-plane-postgresql-pvc
+        {{- else }}
+        emptyDir: {}
+        {{- end }}
+{{- end }} 

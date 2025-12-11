@@ -1,0 +1,189 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: control-plane-scheduler
+  labels:
+    app: control-plane-scheduler
+    plane: control
+spec:
+  {{- $replicas := 1 }}
+  {{- with .Values.controlPlane }}
+    {{- with .components }}
+      {{- with .scheduler }}
+        {{- if .replicas }}
+          {{- $replicas = .replicas }}
+        {{- end }}
+      {{- end }}
+    {{- end }}
+  {{- end }}
+  replicas: {{ $replicas }}
+  selector:
+    matchLabels:
+      app: control-plane-scheduler
+  template:
+    metadata:
+      labels:
+        app: control-plane-scheduler
+        plane: control
+    spec:
+      {{- if not (and .Values.controlPlane (hasKey .Values.controlPlane "imagePullSecrets") (eq .Values.controlPlane.imagePullSecrets "none")) }}
+      imagePullSecrets:
+        - name: gcr-secret
+      {{- end }}
+      {{- $pgSecretName := "postgresql-secrets" }}
+      {{- with .Values.controlPlane }}
+        {{- with .components }}
+          {{- with .postgresql }}
+            {{- with .secrets }}
+              {{- if .name }}
+                {{- $pgSecretName = .name }}
+              {{- end }}
+            {{- end }}
+          {{- end }}
+        {{- end }}
+      {{- end }}
+      initContainers:
+      - name: wait-for-postgresql
+        image: postgres:17.2-alpine
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          echo "Waiting for PostgreSQL to be ready..."
+          echo "POSTGRES_HOST: $POSTGRES_HOST"
+          echo "POSTGRES_PORT: $POSTGRES_PORT"
+          
+          # Wait for PostgreSQL to be accessible and ready
+          MAX_ATTEMPTS=120
+          ATTEMPT=0
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            if nc -z -w 2 "$POSTGRES_HOST" "$POSTGRES_PORT" 2>/dev/null; then
+              # Check if PostgreSQL is ready to accept connections
+              if pg_isready -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -t 2 >/dev/null 2>&1; then
+                echo "✓ PostgreSQL is ready and accepting connections!"
+                exit 0
+              fi
+            fi
+            ATTEMPT=$((ATTEMPT + 1))
+            if [ $((ATTEMPT % 10)) -eq 0 ]; then
+              echo "Attempt $ATTEMPT/$MAX_ATTEMPTS: Waiting for PostgreSQL..."
+            fi
+            sleep 2
+          done
+          
+          echo "ERROR: PostgreSQL did not become ready within $((MAX_ATTEMPTS * 2)) seconds."
+          exit 1
+        env:
+        - name: POSTGRES_HOST
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: POSTGRES_HOST
+        - name: POSTGRES_PORT
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: POSTGRES_PORT
+      containers:
+      - name: control-plane-scheduler
+        {{- $imageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/scheduler" }}
+        {{- $imageTag := "latest" }}
+        {{- $pullPolicy := "Always" }}
+        {{- with .Values.controlPlane }}
+          {{- with .components }}
+            {{- with .scheduler }}
+              {{- with .image }}
+                {{- if .repository }}{{- $imageRepo = .repository }}{{- end }}
+                {{- if .tag }}{{- $imageTag = .tag }}{{- end }}
+                {{- if .pullPolicy }}{{- $pullPolicy = .pullPolicy }}{{- end }}
+              {{- end }}
+            {{- end }}
+          {{- end }}
+        {{- end }}
+        image: "{{ $imageRepo }}:{{ $imageTag }}"
+        imagePullPolicy: "{{ $pullPolicy }}"
+        resources:
+          {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.scheduler .Values.controlPlane.components.scheduler.resources }}
+          {{- toYaml .Values.controlPlane.components.scheduler.resources | nindent 10 }}
+          {{- else }}
+          requests:
+            memory: 256Mi
+            cpu: 100m
+          limits:
+            memory: 512Mi
+            cpu: 200m
+          {{- end }}
+        ports:
+        - containerPort: 3000
+        env:
+        - name: PORT
+          value: "3000"
+        - name: POSTGRES_SSL_MODE
+          value: "disable"
+        - name: POSTGRES_HOST
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: POSTGRES_HOST
+        - name: POSTGRES_PORT
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: POSTGRES_PORT
+        - name: POSTGRES_DATABASE
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: POSTGRES_DB
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: POSTGRES_PASSWORD
+        - name: DATA_PLANE_API_URL
+          {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.scheduler .Values.controlPlane.components.scheduler.config .Values.controlPlane.components.scheduler.config.dataPlaneApiUrl }}
+          value: "{{ .Values.controlPlane.components.scheduler.config.dataPlaneApiUrl }}"
+          {{- else }}
+          value: "http://data-plane-api-service.{{ .Release.Namespace }}.svc.cluster.local"
+          {{- end }}
+        - name: DATA_PLANE_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: data-plane-jwt-secret
+              key: DATA_PLANE_JWT_SECRET
+        - name: CONTROL_PLANE_API_URL
+          {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.scheduler .Values.controlPlane.components.scheduler.config .Values.controlPlane.components.scheduler.config.controlPlaneApiUrl }}
+          value: "{{ .Values.controlPlane.components.scheduler.config.controlPlaneApiUrl }}"
+          {{- else }}
+          value: "http://control-plane-api-service.{{ .Release.Namespace }}.svc.cluster.local"
+          {{- end }}
+        - name: CONTROL_PLANE_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: control-plane-secrets
+              key: CONTROL_PLANE_JWT_SECRET
+        - name: RESEND_API_KEY
+          valueFrom:
+            secretKeyRef:
+              {{- $resendSecret := (lookup "v1" "Secret" .Release.Namespace "resend-secrets") }}
+              {{- if and .Values.controlPlane .Values.controlPlane.secrets .Values.controlPlane.secrets.resendApiKey (kindIs "map" .Values.controlPlane.secrets.resendApiKey) }}
+              name: {{ .Values.controlPlane.secrets.resendApiKey.secretName }}
+              key: {{ .Values.controlPlane.secrets.resendApiKey.secretKey }}
+              {{- else if $resendSecret }}
+              name: resend-secrets
+              key: RESEND_API_KEY
+              {{- else }}
+              name: control-plane-secrets
+              key: resend-api-key
+              {{- end }}
+        - name: RESEND_SENDER
+          valueFrom:
+            secretKeyRef:
+              name: control-plane-secrets
+              key: resend-alert-sender

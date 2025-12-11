@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: connector-scripts
+  namespace: {{ .Release.Namespace }}
+data:
+  create-clickhouse-sink.sh: |
+    {{- (.Files.Get "files/connectors/create-clickhouse-sink.sh") | nindent 4 }}

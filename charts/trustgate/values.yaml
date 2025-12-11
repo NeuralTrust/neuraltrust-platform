@@ -1,0 +1,267 @@
+# Additional global settings
+global:
+  version: "ee"  # can be "ce" or "ee"
+  imageRegistry: "docker.io"
+  imagePullSecrets:
+    - name: gcr-secret
+  # -- Storage class to use for persistent volumes
+  # If not set, will use the cluster's default StorageClass
+  storageClass: ""
+  deploymentType: shared  # shared or dedicated
+  huggingface:
+    apiKeySecret: "hf-api-key"
+  image:
+    pullPolicy: Always
+    image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee"
+    repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee"
+    tag: "latest"
+  env:
+    SERVER_SECRET_KEY: ${SERVER_SECRET_KEY}
+    SERVER_BASE_DOMAIN: ${SERVER_BASE_DOMAIN:-neuraltrust.ai}
+    SERVER_ADMIN_PORT: ${SERVER_ADMIN_PORT:-8080}
+    SERVER_METRICS_PORT: ${SERVER_METRICS_PORT:-9090}
+    SERVER_PROXY_PORT: ${SERVER_PROXY_PORT:-8081}
+    SERVER_ACTIONS_PORT: ${SERVER_ACTIONS_PORT:-8084}
+    DATABASE_HOST: ${DATABASE_HOST}
+    DATABASE_PORT: ${DATABASE_PORT}
+    DATABASE_USER: ${DATABASE_USER}
+    DATABASE_PASSWORD: ${DATABASE_PASSWORD}
+    DATABASE_NAME: ${DATABASE_NAME}
+    REDIS_HOST: ${REDIS_HOST}
+    REDIS_PORT: ${REDIS_PORT}
+    REDIS_PASSWORD: ${REDIS_PASSWORD}
+    REDIS_DB: ${REDIS_DB}
+    CONTROL_PLANE_HOST: ${CONTROL_PLANE_HOST}
+    DATA_PLANE_HOST: ${DATA_PLANE_HOST}
+    ACTIONS_HOST: ${ACTIONS_HOST}
+
+# Service Account configuration
+serviceAccount:
+  create: true
+  name: ""
+  annotations: { }
+
+# Common configurations
+config:
+  logLevel: "info"
+  baseDomain: "neuraltrust.ai"
+  providers: { }
+
+# Control Plane settings
+controlPlane:
+  name: trustgate-control-plane
+  replicas: 1
+  ports:
+    http: 8080
+  podSecurityContext:
+    fsGroup: 1001
+  resources:
+    requests:
+      cpu: 100m
+      memory: 1Gi
+    limits:
+      cpu: 200m
+      memory: 2Gi
+
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+  autoscaling:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 80
+    targetMemoryUtilizationPercentage: 80
+
+  nodeSelector: { }
+  tolerations: [ ]
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                    - trustgate-control-plane
+            topologyKey: kubernetes.io/hostname
+
+  service:
+    type: ClusterIP
+    port: 8080
+
+# Data Plane settings
+dataPlane:
+  name: trustgate-data-plane
+  replicas: 1
+  resources:
+    requests:
+      cpu: 1000m
+      memory: 2Gi
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+  # Add ports configuration
+  ports:
+    http: 8081
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 2
+
+  autoscaling:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 75
+    targetMemoryUtilizationPercentage: 75
+
+  nodeSelector: { }
+  tolerations: [ ]
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+              - key: app
+                operator: In
+                values:
+                  - trustgate-data-plane
+          topologyKey: kubernetes.io/hostname
+
+  service:
+    type: ClusterIP
+    port: 8081
+
+# Actions settings
+actions:
+  name: trustgate-actions
+  replicas: 1
+  ports:
+    http: 8084
+  podSecurityContext:
+    fsGroup: 1001
+  resources:
+    requests:
+      cpu: 100m
+      memory: 1Gi
+    limits:
+      cpu: 200m
+      memory: 2Gi
+
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+  autoscaling:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 80
+    targetMemoryUtilizationPercentage: 80
+
+  nodeSelector: { }
+  tolerations: [ ]
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                    - trustgate-actions
+            topologyKey: kubernetes.io/hostname
+
+  service:
+    type: ClusterIP
+    port: 8084
+
+# Redis configuration
+redis:
+  enabled: true
+  image:
+    repository: redislabs/redisearch
+    tag: 2.6.9
+    pullPolicy: IfNotPresent
+  # External Redis configuration if redis.enabled is false
+  external:
+    host: ""
+    port: 6379
+    password: ""
+  auth:
+    password: "<password>"
+  master:
+    service:
+      port: 6379
+    persistence:
+      enabled: true
+      size: 10Gi
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+  replica:
+    replicaCount: 1
+    service:
+      port: 6379
+
+
+# Default values for TrustGate
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/cors-expose-headers: "*"
+    nginx.ingress.kubernetes.io/cors-allow-headers: "X-API-KEY,X-API-Key,x-api-key,DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,token,Token,Authorization"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "PUT, GET, POST, OPTIONS, DELETE"
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "128k"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/x-content-type-options: "nosniff"
+    nginx.ingress.kubernetes.io/x-frame-options: "DENY"
+    nginx.ingress.kubernetes.io/x-xss-protection: "1; mode=block"
+  controlPlane:
+    host: ${CONTROL_PLANE_HOST}
+  dataPlane:
+    host: ${DATA_PLANE_HOST}
+  actions:
+    host: ${ACTIONS_HOST}
+
+# Optional: Add cert-manager configuration
+certManager:
+  enabled: true
+  issuerName: "letsencrypt-prod"
+  issuerKind: "ClusterIssuer"  # Can be "Issuer" or "ClusterIssuer"
+  email: "admin@neuraltrust.ai"
+  
+  # Custom certificate support for both planes
+  customCertificates:
+    enabled: false  # Set to true when using custom certs
+    controlPlane:
+      cert: |
+        -----BEGIN CERTIFICATE-----
+        -----END CERTIFICATE-----
+      key: |
+        -----BEGIN PRIVATE KEY-----
+        -----END PRIVATE KEY-----
+    dataPlane:
+      cert: |
+        -----BEGIN CERTIFICATE-----
+        -----END CERTIFICATE-----
+      key: |
+        -----BEGIN PRIVATE KEY-----
+        -----END PRIVATE KEY-----

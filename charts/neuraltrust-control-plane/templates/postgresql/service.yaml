@@ -1,0 +1,19 @@
+{{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.postgresql .Values.controlPlane.components.postgresql.installInCluster }}
+  {{- with .Values.controlPlane.components.postgresql }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: control-plane-postgresql
+  labels:
+    app: control-plane-postgresql
+spec:
+  type: {{ if .service.type }}{{ .service.type }}{{ else }}ClusterIP{{ end }}
+  ports:
+  - port: {{ if .service.port }}{{ .service.port }}{{ else }}5432{{ end }}
+    targetPort: postgresql
+    protocol: TCP
+    name: postgresql
+  selector:
+    app: control-plane-postgresql
+  {{- end }}
+{{- end }} 

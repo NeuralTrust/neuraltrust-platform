@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trustgate-config
+  labels:
+    {{- include "trustgate.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    server:
+      admin_port: 8080
+      proxy_port: 8081
+      actions_port: 8084
+      metrics_port: 9090
+      base_domain: {{ .Values.global.env.SERVER_BASE_DOMAIN }}
+
+    metrics:
+      enabled: false
+      enable_latency: true
+      enable_upstream: true
+      enable_connections: true
+      enable_per_route: true
+
+    database:
+      host: {{ .Values.global.env.DATABASE_HOST }}
+      port: {{ .Values.global.env.DATABASE_PORT }}
+      user: {{ .Values.global.env.DATABASE_USER }}
+      password: {{ .Values.global.env.DATABASE_PASSWORD }}
+      dbname: {{ .Values.global.env.DATABASE_NAME }}
+      ssl_mode: {{ .Values.global.env.DATABASE_SSL_MODE }}
+
+    redis:
+      host: {{ .Values.global.env.REDIS_HOST }}
+      port: {{ .Values.global.env.REDIS_PORT }}
+      db: {{ .Values.global.env.REDIS_DB }}
+      username: {{ .Values.global.env.REDIS_USERNAME }}
+      password: {{ .Values.global.env.REDIS_PASSWORD }}

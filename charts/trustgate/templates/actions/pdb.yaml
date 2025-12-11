@@ -1,0 +1,15 @@
+{{- if .Values.actions.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Values.actions.name }}
+  labels:
+    {{- include "trustgate.labels" . | nindent 4 }}
+    component: actions
+spec:
+  minAvailable: {{ .Values.actions.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "trustgate.selectorLabels" . | nindent 6 }}
+      component: actions
+{{- end }} 

@@ -1,0 +1,141 @@
+{{- /*
+DEPRECATED: This init job is deprecated in favor of init containers in the API and Worker deployments.
+The init containers run migrations automatically before the pods start, providing better reliability and integration.
+To enable this job (not recommended), set dataPlane.components.clickhouse.useInitJob to true.
+*/}}
+{{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.clickhouse .Values.dataPlane.components.clickhouse.enabled (.Values.dataPlane.components.clickhouse.useInitJob | default false) }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: data-plane-clickhouse-init
+  labels:
+    app.kubernetes.io/name: data-plane
+    app.kubernetes.io/instance: data-plane
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+    "helm.sh/hook-timeout": "600"
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: data-plane
+        app.kubernetes.io/instance: data-plane
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: clickhouse-init
+          {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.clickhouse .Values.dataPlane.components.clickhouse.image }}
+          image: "{{ .Values.dataPlane.components.clickhouse.image.repository | default "clickhouse/clickhouse-server" }}:{{ .Values.dataPlane.components.clickhouse.image.tag | default "25.3.2" }}"
+          imagePullPolicy: {{ .Values.dataPlane.components.clickhouse.image.pullPolicy | default "Always" }}
+          {{- else }}
+          image: "clickhouse/clickhouse-server:25.3.2"
+          imagePullPolicy: Always
+          {{- end }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              echo "=== ClickHouse Initialization Job ==="
+              echo "CLICKHOUSE_HOST: $CLICKHOUSE_HOST"
+              echo "CLICKHOUSE_USER: $CLICKHOUSE_USER"
+              echo "CLICKHOUSE_DATABASE: $CLICKHOUSE_DATABASE"
+              echo ""
+              
+              # Wait for ClickHouse to be ready
+              echo "Waiting for ClickHouse to be ready..."
+              MAX_ATTEMPTS=60
+              ATTEMPT=0
+              while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+                if clickhouse-client --host $CLICKHOUSE_HOST --user default --password $CLICKHOUSE_PASSWORD --query "SELECT 1" &> /dev/null; then
+                  echo "✓ ClickHouse is ready"
+                  break
+                fi
+                ATTEMPT=$((ATTEMPT + 1))
+                if [ $((ATTEMPT % 5)) -eq 0 ]; then
+                  echo "Waiting for ClickHouse... ($ATTEMPT/$MAX_ATTEMPTS)"
+                fi
+                sleep 2
+              done
+              
+              if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
+                echo "ERROR: ClickHouse did not become ready in time"
+                exit 1
+              fi
+              
+              echo ""
+              echo "Creating user and database..."
+              
+              # Ensure user exists (idempotent)
+              echo "Creating user $CLICKHOUSE_USER..."
+              clickhouse-client --host $CLICKHOUSE_HOST --user default --password $CLICKHOUSE_PASSWORD --query "CREATE USER IF NOT EXISTS $CLICKHOUSE_USER IDENTIFIED WITH sha256_password BY '$CLICKHOUSE_PASSWORD'" || echo "User may already exist, continuing..."
+              
+              # Grant permissions to the user
+              echo "Granting permissions to user $CLICKHOUSE_USER..."
+              clickhouse-client --host $CLICKHOUSE_HOST --user default --password $CLICKHOUSE_PASSWORD --query "GRANT ALL ON *.* TO $CLICKHOUSE_USER" || echo "Permissions may already be granted, continuing..."
+              
+              # Run initialization script
+              echo ""
+              echo "Running initialization script..."
+              clickhouse-client --host $CLICKHOUSE_HOST --user $CLICKHOUSE_USER --password $CLICKHOUSE_PASSWORD -n < /init-db/init-db.sql
+              
+              # Verify database was created
+              echo ""
+              echo "Verifying database creation..."
+              DB_EXISTS=$(clickhouse-client --host $CLICKHOUSE_HOST --user $CLICKHOUSE_USER --password $CLICKHOUSE_PASSWORD --query "SELECT count() FROM system.databases WHERE name = '$CLICKHOUSE_DATABASE'" 2>/dev/null || echo "0")
+              if [ "$DB_EXISTS" = "1" ]; then
+                echo "✓ Database $CLICKHOUSE_DATABASE created successfully"
+              else
+                echo "ERROR: Database $CLICKHOUSE_DATABASE was not created"
+                exit 1
+              fi
+              
+              echo ""
+              echo "✓ Initialization completed successfully"
+          env:
+            - name: CLICKHOUSE_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-secrets
+                  key: CLICKHOUSE_HOST
+            - name: CLICKHOUSE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-secrets
+                  key: CLICKHOUSE_USER
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse
+                  key: admin-password
+            - name: CLICKHOUSE_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-secrets
+                  key: CLICKHOUSE_DATABASE
+          resources:
+            {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.clickhouse .Values.dataPlane.components.clickhouse.resources }}
+            {{- toYaml .Values.dataPlane.components.clickhouse.resources | nindent 12 }}
+            {{- else }}
+            requests:
+              memory: 512Mi
+              cpu: 250m
+            limits:
+              memory: 1Gi
+              cpu: 500m
+            {{- end }}
+          volumeMounts:
+            - name: init-db
+              mountPath: /init-db
+      volumes:
+        - name: init-db
+          configMap:
+            name: {{ if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.clickhouse .Values.dataPlane.components.clickhouse.configmap }}{{ .Values.dataPlane.components.clickhouse.configmap.name | default "clickhouse-init-job" }}{{ else }}clickhouse-init-job{{ end }}
+            items:
+              - key: init-db.sql
+                path: init-db.sql
+{{- end }}

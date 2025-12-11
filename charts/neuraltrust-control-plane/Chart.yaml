@@ -1,0 +1,5 @@
+apiVersion: v2
+name: neuraltrust-control-plane
+description: Control Plane components for NeuralTrust
+type: application
+version: 0.1.0 

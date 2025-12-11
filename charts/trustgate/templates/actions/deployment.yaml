@@ -1,0 +1,138 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trustgate-actions
+  labels:
+    {{- include "trustgate.actions.labels" . | nindent 4 }}
+    component: actions
+spec:
+  replicas: {{ .Values.actions.replicas | default 1 }}
+  selector:
+    matchLabels:
+      {{- include "trustgate.actions.labels" . | nindent 6 }}
+      component: actions
+  template:
+    metadata:
+      labels:
+        {{- include "trustgate.actions.labels" . | nindent 8 }}
+        component: actions
+    spec:
+      imagePullSecrets:
+        {{- if .Values.global.image.imagePullSecrets }}
+        {{- toYaml .Values.global.image.imagePullSecrets | nindent 8 }}
+        {{- else }}
+        - name: gcr-secret
+        {{- end }}
+      volumes:
+      - name: logs-volume
+        emptyDir: {}
+      containers:
+      - name: actions
+        image: "{{ .Values.global.image.image }}:{{ .Values.global.image.tag }}"
+        args: ["actions"]
+        envFrom:
+        - configMapRef:
+            name: trustgate-env-vars
+        env:
+        # Sensitive values from secrets
+        - name: SERVER_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: trustgate-secrets
+              key: SERVER_SECRET_KEY
+              optional: true
+        - name: DATABASE_HOST
+          valueFrom:
+            secretKeyRef:
+              name: trustgate-secrets
+              key: DATABASE_HOST
+        - name: DATABASE_PORT
+          valueFrom:
+            secretKeyRef:
+              name: trustgate-secrets
+              key: DATABASE_PORT
+        - name: DATABASE_USER
+          valueFrom:
+            secretKeyRef:
+              name: trustgate-secrets
+              key: DATABASE_USER
+        - name: DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: trustgate-secrets
+              key: DATABASE_PASSWORD
+        - name: DATABASE_NAME
+          valueFrom:
+            secretKeyRef:
+              name: trustgate-secrets
+              key: DATABASE_NAME
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: trustgate-secrets
+              key: DATABASE_URL
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: trustgate-secrets
+              key: redis-password
+        imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.actions.ports.http }}
+          name: http
+        volumeMounts:
+        - name: logs-volume
+          mountPath: /app/logs
+        resources:
+          {{- toYaml .Values.actions.resources | nindent 10 }}
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 15
+          periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trustgate-actions
+  labels:
+    {{- include "trustgate.actions.labels" . | nindent 4 }}
+    component: actions
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: {{ .Values.actions.ports.http }}
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "trustgate.actions.labels" . | nindent 4 }}
+    component: actions
+{{- if or .Values.global.openshift $.Values.global.openshift }}
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: trustgate-actions-route
+  labels:
+    {{- include "trustgate.actions.labels" . | nindent 4 }}
+    component: actions
+spec:
+  host: {{ if or .Values.global.openshiftDomain $.Values.global.openshiftDomain }}{{ printf "trustgate-actions.%s" (.Values.global.openshiftDomain | default $.Values.global.openshiftDomain) | quote }}{{ else }}"trustgate-actions.neuraltrust.ai"{{ end }}
+  to:
+    kind: Service
+    name: trustgate-actions
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+{{- end }}

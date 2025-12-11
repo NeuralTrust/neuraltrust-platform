@@ -1,0 +1,40 @@
+NeuralTrust Platform has been deployed!
+
+{{- if .Values.infrastructure.clickhouse.deploy }}
+ClickHouse has been deployed in this release.
+{{- else }}
+Using external ClickHouse at {{ .Values.infrastructure.clickhouse.external.host }}:{{ .Values.infrastructure.clickhouse.external.port }}
+{{- end }}
+
+{{- if .Values.infrastructure.kafka.deploy }}
+Kafka has been deployed in this release.
+{{- else }}
+Using external Kafka at {{ .Values.infrastructure.kafka.external.bootstrapServers }}
+{{- end }}
+
+{{- if .Values.infrastructure.postgresql.deploy }}
+PostgreSQL has been deployed in this release.
+{{- else }}
+Using external PostgreSQL at {{ .Values.infrastructure.postgresql.external.host }}:{{ .Values.infrastructure.postgresql.external.port }}
+{{- end }}
+
+{{- if .Values.neuraltrust.dataPlane.enabled }}
+NeuralTrust Data Plane is enabled.
+{{- end }}
+
+{{- if .Values.neuraltrust.controlPlane.enabled }}
+NeuralTrust Control Plane is enabled.
+{{- end }}
+
+{{- if .Values.trustgate.enabled }}
+TrustGate is enabled.
+{{- end }}
+
+To get the status of your deployment, run:
+  kubectl get pods -n {{ .Release.Namespace }}
+
+To view logs:
+  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=neuraltrust-platform
+
+For more information, see the README.md file.
+

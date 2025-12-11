@@ -1,0 +1,378 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: control-plane-app
+  labels:
+    app: control-plane-app
+spec:
+  {{- $replicas := 1 }}
+  {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.replicaCount }}
+    {{- $replicas = .Values.controlPlane.components.app.replicaCount }}
+  {{- end }}
+  replicas: {{ $replicas }}
+  selector:
+    matchLabels:
+      app: control-plane-app
+  template:
+    metadata:
+      labels:
+        app: control-plane-app
+    spec:
+      {{- if not (and .Values.controlPlane (hasKey .Values.controlPlane "imagePullSecrets") (eq .Values.controlPlane.imagePullSecrets "none")) }}
+      imagePullSecrets:
+        - name: gcr-secret
+      {{- end }}
+      {{- $pgSecretName := "postgresql-secrets" }}
+      {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.postgresql .Values.controlPlane.components.postgresql.secrets .Values.controlPlane.components.postgresql.secrets.name }}
+        {{- $pgSecretName = .Values.controlPlane.components.postgresql.secrets.name }}
+      {{- end }}
+      initContainers:
+      - name: init-db
+        {{- $initImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
+        {{- $initImageTag := "latest" }}
+        {{- $initPullPolicy := "Always" }}
+        {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.image }}
+          {{- if .Values.controlPlane.components.app.image.repository }}{{- $initImageRepo = .Values.controlPlane.components.app.image.repository }}{{- end }}
+          {{- if .Values.controlPlane.components.app.image.tag }}{{- $initImageTag = .Values.controlPlane.components.app.image.tag }}{{- end }}
+          {{- if .Values.controlPlane.components.app.image.pullPolicy }}{{- $initPullPolicy = .Values.controlPlane.components.app.image.pullPolicy }}{{- end }}
+        {{- end }}
+        image: "{{ $initImageRepo }}:{{ $initImageTag }}"
+        imagePullPolicy: "{{ $initPullPolicy }}"
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          export PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING=true
+          export PRISMA_GENERATE_SKIP_AUTOINSTALL=true
+          export PRISMA_SKIP_POSTINSTALL_GENERATE=true
+
+          # Wait for PostgreSQL to be ready
+          echo "Waiting for PostgreSQL..."
+          echo "POSTGRES_HOST: $POSTGRES_HOST"
+          echo "POSTGRES_PORT: $POSTGRES_PORT"
+          echo "POSTGRES_DATABASE: $POSTGRES_DATABASE"
+          echo "POSTGRES_USER: $POSTGRES_USER"
+
+          # Check if PostgreSQL is ready
+          until nc -z -w 2 $POSTGRES_HOST $POSTGRES_PORT; do
+            echo "Waiting for PostgreSQL to be ready..."
+            sleep 2
+          done
+
+          echo "PostgreSQL is ready, running database migrations..."
+
+          # Set Prisma environment variables to avoid network access
+          export PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING=true
+          export PRISMA_GENERATE_SKIP_AUTOINSTALL=true
+          export PRISMA_SKIP_POSTINSTALL_GENERATE=true
+
+          echo "Running Prisma migrations..."
+          if ! npx prisma migrate deploy; then
+            echo "ERROR: Prisma migrations failed!"
+            exit 1
+          fi
+
+          echo "Running Prisma db push..."
+          if ! npx prisma db push; then
+            echo "ERROR: Prisma db push failed!"
+            exit 1
+          fi
+
+          echo "Running Prisma seed..."
+          if ! npx prisma db seed; then
+            echo "ERROR: Prisma seed failed!"
+            exit 1
+          fi
+
+          echo "Database migrations completed successfully"
+        env:
+        - name: POSTGRES_HOST
+          valueFrom:
+            secretKeyRef:
+              key: POSTGRES_HOST
+              name: {{ $pgSecretName }}
+        - name: POSTGRES_PORT
+          valueFrom:
+            secretKeyRef:
+              key: POSTGRES_PORT
+              name: {{ $pgSecretName }}
+        - name: POSTGRES_DATABASE
+          valueFrom:
+            secretKeyRef:
+              key: POSTGRES_DB
+              name: {{ $pgSecretName }}
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              key: POSTGRES_USER
+              name: {{ $pgSecretName }}
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: POSTGRES_PASSWORD
+              name: {{ $pgSecretName }}
+        - name: POSTGRES_PRISMA_URL
+          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DATABASE)?connection_limit=15"
+        - name: DATABASE_URL
+          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DATABASE)?connection_limit=15"
+      containers:
+      - name: app
+        {{- $appImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
+        {{- $appImageTag := "latest" }}
+        {{- $appPullPolicy := "Always" }}
+        {{- $appPort := 3000 }}
+        {{- $nodeEnv := "production" }}
+        {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.image }}
+          {{- if .Values.controlPlane.components.app.image.repository }}{{- $appImageRepo = .Values.controlPlane.components.app.image.repository }}{{- end }}
+          {{- if .Values.controlPlane.components.app.image.tag }}{{- $appImageTag = .Values.controlPlane.components.app.image.tag }}{{- end }}
+          {{- if .Values.controlPlane.components.app.image.pullPolicy }}{{- $appPullPolicy = .Values.controlPlane.components.app.image.pullPolicy }}{{- end }}
+        {{- end }}
+        {{- $openaiModel := "gpt-4o-mini" }}
+        {{- $controlPlaneApiUrl := "" }}
+        {{- $dataPlaneApiUrl := "" }}
+        {{- $schedulerUrl := "" }}
+        {{- $trustgateControlPlaneUrl := "" }}
+        {{- $trustgateDataPlaneUrl := "" }}
+        {{- $trustgateActionsUrl := "" }}
+        {{- $nextAuthUrl := "" }}
+        {{- $firewallApiUrl := "" }}
+        {{- $modelScannerApiUrl := "" }}
+        {{- $kafkaHost := "kafka" }}
+        {{- $kafkaPort := "9092" }}
+        {{- $openshiftDomain := .Values.global.openshiftDomain | default $.Values.global.openshiftDomain }}
+        {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.config }}
+          {{- if .Values.controlPlane.components.app.config.port }}{{- $appPort = .Values.controlPlane.components.app.config.port }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.nodeEnv }}{{- $nodeEnv = .Values.controlPlane.components.app.config.nodeEnv }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.openaiModel }}{{- $openaiModel = .Values.controlPlane.components.app.config.openaiModel }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.controlPlaneApiUrl }}{{- $controlPlaneApiUrl = .Values.controlPlane.components.app.config.controlPlaneApiUrl }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.dataPlaneApiUrl }}{{- $dataPlaneApiUrl = .Values.controlPlane.components.app.config.dataPlaneApiUrl }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.schedulerUrl }}{{- $schedulerUrl = .Values.controlPlane.components.app.config.schedulerUrl }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.trustgateControlPlaneUrl }}{{- $trustgateControlPlaneUrl = .Values.controlPlane.components.app.config.trustgateControlPlaneUrl }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.trustgateDataPlaneUrl }}{{- $trustgateDataPlaneUrl = .Values.controlPlane.components.app.config.trustgateDataPlaneUrl }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.trustgateActionsUrl }}{{- $trustgateActionsUrl = .Values.controlPlane.components.app.config.trustgateActionsUrl }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.nextAuthUrl }}{{- $nextAuthUrl = .Values.controlPlane.components.app.config.nextAuthUrl }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.firewallApiUrl }}{{- $firewallApiUrl = .Values.controlPlane.components.app.config.firewallApiUrl }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.modelScannerApiUrl }}{{- $modelScannerApiUrl = .Values.controlPlane.components.app.config.modelScannerApiUrl }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.kafkaHost }}{{- $kafkaHost = .Values.controlPlane.components.app.config.kafkaHost }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.kafkaPort }}{{- $kafkaPort = .Values.controlPlane.components.app.config.kafkaPort }}{{- end }}
+        {{- end }}
+        {{- /* Auto-generate URLs from OpenShift Routes if OpenShift is enabled and URLs are not explicitly set */}}
+        {{- if and (or .Values.global.openshift $.Values.global.openshift) $openshiftDomain }}
+          {{- if not $controlPlaneApiUrl }}
+            {{- $controlPlaneApiUrl = printf "https://control-plane-api.%s" $openshiftDomain }}
+          {{- end }}
+          {{- if not $dataPlaneApiUrl }}
+            {{- $dataPlaneApiUrl = printf "https://data-plane-api.%s" $openshiftDomain }}
+          {{- end }}
+          {{- if not $schedulerUrl }}
+            {{- $schedulerUrl = printf "https://control-plane-scheduler.%s" $openshiftDomain }}
+          {{- end }}
+          {{- if not $trustgateControlPlaneUrl }}
+            {{- $trustgateControlPlaneUrl = printf "https://trustgate-admin.%s" $openshiftDomain }}
+          {{- end }}
+          {{- if not $trustgateDataPlaneUrl }}
+            {{- $trustgateDataPlaneUrl = printf "https://trustgate-gateway.%s" $openshiftDomain }}
+          {{- end }}
+          {{- if not $trustgateActionsUrl }}
+            {{- $trustgateActionsUrl = printf "https://trustgate-actions.%s" $openshiftDomain }}
+          {{- end }}
+        {{- else }}
+          {{- /* Default values for non-OpenShift deployments */}}
+          {{- if not $trustgateControlPlaneUrl }}
+            {{- $trustgateControlPlaneUrl = "https://admin.neuraltrust.ai" }}
+          {{- end }}
+          {{- if not $trustgateDataPlaneUrl }}
+            {{- $trustgateDataPlaneUrl = "https://gateway.neuraltrust.ai" }}
+          {{- end }}
+          {{- if not $trustgateActionsUrl }}
+            {{- $trustgateActionsUrl = "https://actions.neuraltrust.ai" }}
+          {{- end }}
+        {{- end }}
+        image: "{{ $appImageRepo }}:{{ $appImageTag }}"
+        imagePullPolicy: "{{ $appPullPolicy }}"
+        ports:
+        - containerPort: {{ $appPort }}
+        env:
+        - name: NODE_ENV
+          value: "{{ $nodeEnv }}"
+        - name: PORT
+          value: "{{ $appPort }}"
+        - name: HOSTNAME
+          value: "0.0.0.0"
+        - name: NT_API_URL
+          value: "http://neuraltrust-api-service.neuraltrust.svc.cluster.local"
+        - name: POSTGRES_HOST
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: POSTGRES_HOST
+        - name: POSTGRES_PORT
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: POSTGRES_PORT
+        - name: POSTGRES_DATABASE
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: POSTGRES_DB
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: POSTGRES_PASSWORD
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: DATABASE_URL
+        - name: POSTGRES_PRISMA_URL
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: POSTGRES_PRISMA_URL
+        - name: RESEND_API_KEY
+          valueFrom:
+            secretKeyRef:
+              {{- $resendSecret := (lookup "v1" "Secret" .Release.Namespace "resend-secrets") }}
+              {{- if and .Values.controlPlane .Values.controlPlane.secrets .Values.controlPlane.secrets.resendApiKey (kindIs "map" .Values.controlPlane.secrets.resendApiKey) }}
+              name: {{ .Values.controlPlane.secrets.resendApiKey.secretName }}
+              key: {{ .Values.controlPlane.secrets.resendApiKey.secretKey }}
+              {{- else if $resendSecret }}
+              name: resend-secrets
+              key: RESEND_API_KEY
+              {{- else }}
+              name: control-plane-secrets
+              key: resend-api-key
+              {{- end }}
+        - name: RESEND_SENDER
+          valueFrom:
+            secretKeyRef:
+              name: control-plane-secrets
+              key: resend-alert-sender
+        - name: APP_URL
+          {{- $appHost := "control-plane-app.neuraltrust.ai" }}
+          {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.host }}
+            {{- $appHost = .Values.controlPlane.components.app.host }}
+          {{- else if and (or .Values.global.openshift $.Values.global.openshift) $openshiftDomain }}
+            {{- $appHost = printf "control-plane-app.%s" $openshiftDomain }}
+          {{- end }}
+          value: "https://{{ $appHost }}"
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              {{- $openaiSecret := (lookup "v1" "Secret" .Release.Namespace "openai-secrets") }}
+              {{- if and .Values.controlPlane .Values.controlPlane.secrets .Values.controlPlane.secrets.openaiApiKey (kindIs "map" .Values.controlPlane.secrets.openaiApiKey) }}
+              name: {{ .Values.controlPlane.secrets.openaiApiKey.secretName }}
+              key: {{ .Values.controlPlane.secrets.openaiApiKey.secretKey }}
+              {{- else if $openaiSecret }}
+              name: openai-secrets
+              key: OPENAI_API_KEY
+              {{- else }}
+              name: control-plane-secrets
+              key: OPENAI_API_KEY
+              {{- end }}
+        - name: OPENAI_MODEL
+          value: "{{ $openaiModel }}"
+        - name: CONTROL_PLANE_API_URL
+          {{- if $controlPlaneApiUrl }}
+          value: "{{ $controlPlaneApiUrl }}"
+          {{- else }}
+          value: "http://control-plane-api-service.{{ .Release.Namespace }}.svc.cluster.local"
+          {{- end }}
+        - name: CONTROL_PLANE_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: control-plane-secrets
+              key: CONTROL_PLANE_JWT_SECRET
+        - name: DATA_PLANE_API_URL
+          {{- if $dataPlaneApiUrl }}
+          value: "{{ $dataPlaneApiUrl }}"
+          {{- else }}
+          value: "http://data-plane-api-service.{{ .Release.Namespace }}.svc.cluster.local"
+          {{- end }}
+        - name: DATA_PLANE_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: data-plane-jwt-secret
+              key: DATA_PLANE_JWT_SECRET
+        - name: CONTROL_PLANE_SCHEDULER_URL
+          {{- if $schedulerUrl }}
+          value: "{{ $schedulerUrl }}"
+          {{- else }}
+          value: "http://control-plane-scheduler-service.{{ .Release.Namespace }}.svc.cluster.local"
+          {{- end }}
+        - name: TRUSTGATE_CONTROL_PLANE_URL
+          value: "{{ $trustgateControlPlaneUrl }}"
+        - name: TRUSTGATE_DATA_PLANE_URL
+          value: "{{ $trustgateDataPlaneUrl }}"
+        - name: TRUSTGATE_ACTIONS_URL
+          {{- if $trustgateActionsUrl }}
+          value: "{{ $trustgateActionsUrl }}"
+          {{- else }}
+          value: ""
+          {{- end }}
+        - name: NEXTAUTH_URL
+          {{- if $nextAuthUrl }}
+          value: "{{ $nextAuthUrl }}"
+          {{- else }}
+          {{- $appHost := "control-plane-app.neuraltrust.ai" }}
+          {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.host }}
+            {{- $appHost = .Values.controlPlane.components.app.host }}
+          {{- else if and (or .Values.global.openshift $.Values.global.openshift) $openshiftDomain }}
+            {{- $appHost = printf "control-plane-app.%s" $openshiftDomain }}
+          {{- end }}
+          value: "https://{{ $appHost }}"
+          {{- end }}
+        - name: TRUSTGATE_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: control-plane-secrets
+              key: TRUSTGATE_JWT_SECRET
+        - name: FIREWALL_API_URL
+          {{- if $firewallApiUrl }}
+          value: "{{ $firewallApiUrl }}"
+          {{- else }}
+          # Use data plane API URL as default for firewall
+          {{- if $dataPlaneApiUrl }}
+          value: "{{ $dataPlaneApiUrl }}"
+          {{- else }}
+          value: "http://data-plane-api-service.{{ .Release.Namespace }}.svc.cluster.local"
+          {{- end }}
+          {{- end }}
+        - name: FIREWALL_JWT_SECRET
+          {{- if and .Values.controlPlane .Values.controlPlane.secrets .Values.controlPlane.secrets.firewallJwtSecret (or (kindIs "map" .Values.controlPlane.secrets.firewallJwtSecret) (and (kindIs "string" .Values.controlPlane.secrets.firewallJwtSecret) (ne .Values.controlPlane.secrets.firewallJwtSecret ""))) }}
+          # Use firewall JWT secret from control-plane secrets if present
+          valueFrom:
+            secretKeyRef:
+              name: control-plane-secrets
+              key: FIREWALL_JWT_SECRET
+          {{- else }}
+          # Use data plane JWT secret as fallback if firewall JWT secret is not present
+          valueFrom:
+            secretKeyRef:
+              name: data-plane-jwt-secret
+              key: DATA_PLANE_JWT_SECRET
+          {{- end }}
+        - name: MODEL_SCANNER_API_URL
+          value: "{{ $modelScannerApiUrl }}"
+        - name: MODEL_SCANNER_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: control-plane-secrets
+              key: MODEL_SCANNER_SECRET
+              optional: true
+        - name: KAFKA_HOST
+          value: "{{ $kafkaHost }}"
+        - name: KAFKA_PORT
+          value: "{{ $kafkaPort }}"
+        resources:
+          {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.resources }}
+          {{- toYaml .Values.controlPlane.components.app.resources | nindent 10 }}
+          {{- end }}

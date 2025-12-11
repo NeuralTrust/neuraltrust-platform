@@ -1,0 +1,24 @@
+{{- $existingConfigMap := (lookup "v1" "ConfigMap" .Release.Namespace "trustgate-env-vars") }}
+{{- if not $existingConfigMap }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trustgate-env-vars
+  labels:
+    {{- include "trustgate.labels" . | nindent 4 }}
+data:
+  SERVER_BASE_DOMAIN: {{ .Values.config.baseDomain | default (.Values.global.baseDomain | default "neuraltrust.ai") }}
+  SERVER_ADMIN_PORT: "8080"
+  SERVER_METRICS_PORT: "9090"
+  SERVER_PROXY_PORT: "8081"
+  SERVER_ACTIONS_PORT: "8084"
+  OPENTELEMETRY_ENABLED: "false"
+  OPENTELEMETRY_INSECURE: "true"
+  REDIS_HOST: trustgate-redis
+  REDIS_PORT: "6379"
+  REDIS_DB: "0"
+  CONTROL_PLANE_HOST: trustgate-control-plane
+  DATA_PLANE_HOST: trustgate-data-plane
+  ACTIONS_HOST: trustgate-actions
+{{- end }}
+

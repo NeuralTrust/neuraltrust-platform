@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trustgate-redis
+  labels:
+    {{- include "trustgate.labels" . | nindent 4 }}
+    component: redis
+data:
+  redis.conf: |
+    # Basic configuration
+    port 6379
+    bind 0.0.0.0
+    protected-mode yes
+    
+    # Authentication (force password)
+    requirepass "{{ .Values.redis.auth.password }}"
+    masterauth "{{ .Values.redis.auth.password }}"
+    
+    # Performance tuning
+    maxmemory 1gb
+    maxmemory-policy allkeys-lru
+    
+    # Persistence
+    appendonly yes
+    appendfilename "appendonly.aof"
+    appendfsync everysec
+    dir /data
+    
+    # Security
+    rename-command FLUSHDB ""
+    rename-command FLUSHALL ""
+    rename-command DEBUG ""
+    
+    # Logging
+    loglevel notice
+    
+    # Replication
+    {{- if gt (.Values.redis.replica.replicaCount | int) 0 }}
+    replica-read-only yes
+    {{- end }} 

@@ -1,0 +1,75 @@
+# Example: Deploy NeuralTrust with external ClickHouse, Kafka, and PostgreSQL
+# This example shows how to configure the chart to use pre-installed infrastructure services
+
+infrastructure:
+  clickhouse:
+    deploy: false
+    external:
+      host: "clickhouse.clickhouse.svc.cluster.local"
+      port: "8123"
+      user: "neuraltrust"
+      password: "your-clickhouse-password"
+      database: "neuraltrust"
+
+  kafka:
+    deploy: false
+    external:
+      bootstrapServers: "kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
+
+  postgresql:
+    deploy: false
+    external:
+      host: "postgresql.postgresql.svc.cluster.local"
+      port: "5432"
+      user: "postgres"
+      password: "your-postgres-password"
+      database: "neuraltrust"
+
+neuraltrust:
+  dataPlane:
+    enabled: true
+    components:
+      clickhouse:
+        enabled: false  # External ClickHouse
+        host: "clickhouse.clickhouse.svc.cluster.local"
+        port: "8123"
+        user: "neuraltrust"
+        database: "neuraltrust"
+      kafka:
+        enabled: false  # External Kafka
+      api:
+        enabled: true
+        host: "data-plane-api.example.com"
+      worker:
+        enabled: true
+
+  controlPlane:
+    enabled: true
+    components:
+      postgresql:
+        installInCluster: false  # External PostgreSQL
+        secrets:
+          host: "postgresql.postgresql.svc.cluster.local"
+          port: "5432"
+          user: "postgres"
+          password: "your-postgres-password"
+          database: "neuraltrust"
+      api:
+        enabled: true
+        host: "control-plane-api.example.com"
+      app:
+        enabled: true
+        host: "control-plane-app.example.com"
+      scheduler:
+        enabled: true
+
+trustgate:
+  enabled: true
+  global:
+    env:
+      DATABASE_HOST: "postgresql.postgresql.svc.cluster.local"
+      DATABASE_PORT: "5432"
+      DATABASE_USER: "postgres"
+      DATABASE_PASSWORD: "your-postgres-password"
+      DATABASE_NAME: "trustgate"
+
