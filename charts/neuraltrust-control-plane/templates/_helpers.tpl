@@ -1,4 +1,29 @@
 {{/*
+Helper to construct image path with optional registry prefix
+Usage: {{ include "control-plane.image" (dict "repository" .Values.controlPlane.components.api.image.repository "tag" .Values.controlPlane.components.api.image.tag "global" .Values.global) }}
+*/}}
+{{- define "control-plane.image" -}}
+{{- $registry := "" }}
+{{- $repository := .repository }}
+{{- $tag := .tag }}
+{{- if and .global .global.imageRegistry .global.imageRegistry }}
+  {{- $registry = .global.imageRegistry }}
+{{- end }}
+{{- if $registry }}
+  {{- /* Check if repository already starts with registry (e.g., "central.unicaja.es/...") */}}
+  {{- if hasPrefix $registry $repository }}
+    {{- /* Repository already has registry, use as-is */}}
+    {{- printf "%s:%s" $repository $tag }}
+  {{- else }}
+    {{- /* Prepend registry */}}
+    {{- printf "%s/%s:%s" $registry $repository $tag }}
+  {{- end }}
+{{- else }}
+  {{- printf "%s:%s" $repository $tag }}
+{{- end }}
+{{- end }}
+
+{{/*
 Helper to get secret value - supports both direct values and secret references
 Usage: {{ include "control-plane.getSecretValue" (dict "value" .Values.controlPlane.secrets.openaiApiKey "secretName" "my-secret" "secretKey" "OPENAI_API_KEY" "context" $) }}
 */}}

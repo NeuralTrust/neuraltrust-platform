@@ -64,10 +64,10 @@ spec:
 {{- end }}
 {{- if .Values.global.openshift }}
   {{- $host := "" }}
-  {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.api .Values.controlPlane.components.api.host }}
-    {{- $host = .Values.controlPlane.components.api.host }}
-  {{- else if .Values.global.openshiftDomain }}
+  {{- if .Values.global.openshiftDomain }}
     {{- $host = printf "control-plane-api.%s" .Values.global.openshiftDomain }}
+  {{- else if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.api .Values.controlPlane.components.api.host }}
+    {{- $host = .Values.controlPlane.components.api.host }}
   {{- else }}
     {{- $host = "api.neuraltrust.ai" }}
   {{- end }}

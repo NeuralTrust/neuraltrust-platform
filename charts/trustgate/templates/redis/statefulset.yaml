@@ -18,6 +18,16 @@ spec:
         {{- include "trustgate.selectorLabels" . | nindent 8 }}
         component: redis
     spec:
+      {{- if .Values.redis.image.imagePullSecrets }}
+      imagePullSecrets:
+        {{- range .Values.redis.image.imagePullSecrets }}
+        {{- if kindIs "string" . }}
+        - name: {{ . }}
+        {{- else }}
+        - name: {{ .name | default . }}
+        {{- end }}
+        {{- end }}
+      {{- end }}
       containers:
       - name: redis
         image: "{{ .Values.redis.image.repository }}:{{ .Values.redis.image.tag }}"

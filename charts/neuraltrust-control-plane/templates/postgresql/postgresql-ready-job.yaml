@@ -23,7 +23,13 @@ spec:
       restartPolicy: OnFailure
       containers:
       - name: postgresql-ready-check
-        image: postgres:17.2-alpine
+        {{- $pgImageRepo := "postgres" }}
+        {{- $pgImageTag := "17.2-alpine" }}
+        {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.postgresql .Values.controlPlane.components.postgresql.image }}
+          {{- if .Values.controlPlane.components.postgresql.image.repository }}{{- $pgImageRepo = .Values.controlPlane.components.postgresql.image.repository }}{{- end }}
+          {{- if .Values.controlPlane.components.postgresql.image.tag }}{{- $pgImageTag = .Values.controlPlane.components.postgresql.image.tag }}{{- end }}
+        {{- end }}
+        image: {{ include "control-plane.image" (dict "repository" $pgImageRepo "tag" $pgImageTag "global" .Values.global) | quote }}
         command:
         - /bin/sh
         - -c

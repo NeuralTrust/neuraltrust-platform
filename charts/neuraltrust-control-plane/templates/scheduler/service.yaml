@@ -66,13 +66,21 @@ spec:
   {{- with .Values.controlPlane }}
     {{- with .components }}
       {{- with .scheduler }}
+  {{- $host := "" }}
+  {{- if $.Values.global.openshiftDomain }}
+    {{- $host = printf "control-plane-scheduler.%s" $.Values.global.openshiftDomain }}
+  {{- else if .host }}
+    {{- $host = .host }}
+  {{- else }}
+    {{- $host = "scheduler.neuraltrust.ai" }}
+  {{- end }}
 ---
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
   name: "control-plane-scheduler-route"
 spec:
-  host: {{ .host | default "scheduler.neuraltrust.ai" | quote }}
+  host: {{ $host | quote }}
   tls:
     termination: {{ if .ingress.tls.termination }}{{ .ingress.tls.termination }}{{ else }}edge{{ end }}
     {{- if .ingress.tls.certificate }}

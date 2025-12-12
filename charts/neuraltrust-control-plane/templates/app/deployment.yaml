@@ -46,7 +46,7 @@ spec:
           {{- if .Values.controlPlane.components.app.image.tag }}{{- $initImageTag = .Values.controlPlane.components.app.image.tag }}{{- end }}
           {{- if .Values.controlPlane.components.app.image.pullPolicy }}{{- $initPullPolicy = .Values.controlPlane.components.app.image.pullPolicy }}{{- end }}
         {{- end }}
-        image: "{{ $initImageRepo }}:{{ $initImageTag }}"
+        image: {{ include "control-plane.image" (dict "repository" $initImageRepo "tag" $initImageTag "global" .Values.global) | quote }}
         imagePullPolicy: "{{ $initPullPolicy }}"
         command:
         - /bin/sh
@@ -203,7 +203,7 @@ spec:
             {{- $trustgateActionsUrl = "https://actions.neuraltrust.ai" }}
           {{- end }}
         {{- end }}
-        image: "{{ $appImageRepo }}:{{ $appImageTag }}"
+        image: {{ include "control-plane.image" (dict "repository" $appImageRepo "tag" $appImageTag "global" .Values.global) | quote }}
         imagePullPolicy: "{{ $appPullPolicy }}"
         ports:
         - containerPort: {{ $appPort }}

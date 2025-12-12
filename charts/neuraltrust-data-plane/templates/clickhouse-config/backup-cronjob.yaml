@@ -12,7 +12,15 @@ spec:
         spec:
           containers:
             - name: backup
-              image: {{ if and .Values.dataPlane.components.clickhouse.backup.image .Values.dataPlane.components.clickhouse.backup.image.repository }}{{ .Values.dataPlane.components.clickhouse.backup.image.repository }}{{ else }}curlimages/curl{{ end }}:{{ if and .Values.dataPlane.components.clickhouse.backup.image .Values.dataPlane.components.clickhouse.backup.image.tag }}{{ .Values.dataPlane.components.clickhouse.backup.image.tag }}{{ else }}8.13.0{{ end }}
+              {{- $backupRepo := "curlimages/curl" }}
+              {{- $backupTag := "8.13.0" }}
+              {{- if and .Values.dataPlane.components.clickhouse.backup.image .Values.dataPlane.components.clickhouse.backup.image.repository }}
+                {{- $backupRepo = .Values.dataPlane.components.clickhouse.backup.image.repository }}
+              {{- end }}
+              {{- if and .Values.dataPlane.components.clickhouse.backup.image .Values.dataPlane.components.clickhouse.backup.image.tag }}
+                {{- $backupTag = .Values.dataPlane.components.clickhouse.backup.image.tag }}
+              {{- end }}
+              image: {{ include "data-plane.image" (dict "repository" $backupRepo "tag" $backupTag "global" .Values.global) | quote }}
               imagePullPolicy: IfNotPresent
               command:
                 - /bin/sh

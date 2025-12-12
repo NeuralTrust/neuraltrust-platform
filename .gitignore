@@ -1,3 +1,5 @@
+accounts
+
 # Helm chart packages
 *.tgz
 *.tar.gz

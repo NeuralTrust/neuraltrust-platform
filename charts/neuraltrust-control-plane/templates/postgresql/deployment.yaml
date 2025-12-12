@@ -22,11 +22,13 @@ spec:
         runAsGroup: 999
         runAsNonRoot: true
       {{- end }}
+      {{- if .Values.controlPlane.components.postgresql.image.imagePullSecrets }}
       imagePullSecrets:
-        {{- toYaml .Values.controlPlane.components.postgresql.imagePullSecrets | nindent 10 }}
+        {{- toYaml .Values.controlPlane.components.postgresql.image.imagePullSecrets | nindent 10 }}
+      {{- end }}
       containers:
       - name: postgresql
-        image: "{{ .Values.controlPlane.components.postgresql.image.repository }}:{{ .Values.controlPlane.components.postgresql.image.tag }}"
+        image: {{ include "control-plane.image" (dict "repository" .Values.controlPlane.components.postgresql.image.repository "tag" .Values.controlPlane.components.postgresql.image.tag "global" .Values.global) | quote }}
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:

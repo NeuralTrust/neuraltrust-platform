@@ -27,7 +27,15 @@ spec:
       restartPolicy: OnFailure
       containers:
       - name: health-check
-        image: curlimages/curl:8.13.0
+        {{- $healthCheckImage := "curlimages/curl:8.13.0" }}
+        {{- if and $.Values.dataPlane $.Values.dataPlane.components $.Values.dataPlane.components.connectorsJob $.Values.dataPlane.components.connectorsJob.image }}
+          {{- $healthCheckImage = toString $.Values.dataPlane.components.connectorsJob.image }}
+        {{- end }}
+        {{- /* Parse image and use helper function to add registry if needed */}}
+        {{- $parts := splitList ":" $healthCheckImage }}
+        {{- $healthCheckRepo := index $parts 0 }}
+        {{- $healthCheckTag := index $parts 1 | default "latest" }}
+        image: {{ include "data-plane.image" (dict "repository" $healthCheckRepo "tag" $healthCheckTag "global" $.Values.global) | quote }}
         command:
         - /bin/sh
         - -c

@@ -30,10 +30,12 @@ spec:
       containers:
         - name: kafka-connect
           {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect .Values.dataPlane.components.kafka.connect.image }}
-          image: "{{ .Values.dataPlane.components.kafka.connect.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect" }}:{{ .Values.dataPlane.components.kafka.connect.image.tag | default "v0.0.1" }}"
+          {{- $kafkaConnectRepo := .Values.dataPlane.components.kafka.connect.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect" }}
+          {{- $kafkaConnectTag := .Values.dataPlane.components.kafka.connect.image.tag | default "v0.0.1" }}
+          image: {{ include "data-plane.image" (dict "repository" $kafkaConnectRepo "tag" $kafkaConnectTag "global" .Values.global) | quote }}
           imagePullPolicy: {{ .Values.dataPlane.components.kafka.connect.image.pullPolicy | default "Always" }}
           {{- else }}
-          image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect:v0.0.1"
+          image: {{ include "data-plane.image" (dict "repository" "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect" "tag" "v0.0.1" "global" .Values.global) | quote }}
           imagePullPolicy: Always
           {{- end }}
           ports:
@@ -142,7 +144,23 @@ spec:
     spec:
       containers:
       - name: create-connectors
-        image: {{ if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.connectorsJob }}{{ (.Values.dataPlane.components.connectorsJob.image | default "curlimages/curl:8.13.0") | quote }}{{ else }}"curlimages/curl:8.13.0"{{ end }}
+        {{- $connectorsImage := "curlimages/curl:8.13.0" }}
+        {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.connectorsJob .Values.dataPlane.components.connectorsJob.image }}
+          {{- $connectorsImage = toString .Values.dataPlane.components.connectorsJob.image }}
+        {{- end }}
+        {{- /* If image already contains registry, use as-is, otherwise use helper */}}
+        {{- $finalImage := "" }}
+        {{- if contains "/" $connectorsImage }}
+          {{- /* Image already has full path, use directly */}}
+          {{- $finalImage = $connectorsImage }}
+        {{- else }}
+          {{- /* Parse and use helper function */}}
+          {{- $parts := splitList ":" $connectorsImage }}
+          {{- $connectorsRepo := index $parts 0 }}
+          {{- $connectorsTag := index $parts 1 | default "latest" }}
+          {{- $finalImage = include "data-plane.image" (dict "repository" $connectorsRepo "tag" $connectorsTag "global" .Values.global) }}
+        {{- end }}
+        image: {{ $finalImage | quote }}
         command: ["/bin/sh", "-c"]
         args:
           - |

@@ -24,7 +24,10 @@ spec:
       restartPolicy: OnFailure
       containers:
       - name: health-check
-        image: curlimages/curl:8.13.0
+        {{- /* Parse image and use helper function to add registry if needed */}}
+        {{- $healthCheckRepo := "curlimages/curl" }}
+        {{- $healthCheckTag := "8.13.0" }}
+        image: {{ include "control-plane.image" (dict "repository" $healthCheckRepo "tag" $healthCheckTag "global" .Values.global) | quote }}
         command:
         - /bin/sh
         - -c

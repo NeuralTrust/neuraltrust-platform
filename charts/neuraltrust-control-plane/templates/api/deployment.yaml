@@ -54,7 +54,13 @@ spec:
       {{- end }}
       initContainers:
       - name: wait-for-postgresql
-        image: postgres:17.2-alpine
+        {{- $pgWaitImageRepo := "postgres" }}
+        {{- $pgWaitImageTag := "17.2-alpine" }}
+        {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.postgresql .Values.controlPlane.components.postgresql.image }}
+          {{- if .Values.controlPlane.components.postgresql.image.repository }}{{- $pgWaitImageRepo = .Values.controlPlane.components.postgresql.image.repository }}{{- end }}
+          {{- if .Values.controlPlane.components.postgresql.image.tag }}{{- $pgWaitImageTag = .Values.controlPlane.components.postgresql.image.tag }}{{- end }}
+        {{- end }}
+        image: {{ include "control-plane.image" (dict "repository" $pgWaitImageRepo "tag" $pgWaitImageTag "global" .Values.global) | quote }}
         command:
         - /bin/sh
         - -c
@@ -105,7 +111,7 @@ spec:
           {{- if .Values.controlPlane.components.api.image.tag }}{{- $apiImageTag = .Values.controlPlane.components.api.image.tag }}{{- end }}
           {{- if .Values.controlPlane.components.api.image.pullPolicy }}{{- $apiPullPolicy = .Values.controlPlane.components.api.image.pullPolicy }}{{- end }}
         {{- end }}
-        image: "{{ $apiImageRepo }}:{{ $apiImageTag }}"
+        image: {{ include "control-plane.image" (dict "repository" $apiImageRepo "tag" $apiImageTag "global" .Values.global) | quote }}
         imagePullPolicy: {{ $apiPullPolicy }}
         resources:
           {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.api .Values.controlPlane.components.api.resources }}

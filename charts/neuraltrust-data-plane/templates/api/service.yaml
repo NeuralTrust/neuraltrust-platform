@@ -50,10 +50,10 @@ spec:
 {{- end }}
 {{- if .Values.global.openshift }}
   {{- $host := "" }}
-  {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.host }}
-    {{- $host = .Values.dataPlane.components.api.host }}
-  {{- else if .Values.global.openshiftDomain }}
+  {{- if .Values.global.openshiftDomain }}
     {{- $host = printf "data-plane-api.%s" .Values.global.openshiftDomain }}
+  {{- else if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.host }}
+    {{- $host = .Values.dataPlane.components.api.host }}
   {{- else }}
     {{- $host = "data-plane-api.neuraltrust.ai" }}
   {{- end }}

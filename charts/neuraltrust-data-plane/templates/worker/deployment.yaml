@@ -33,10 +33,12 @@ spec:
       containers:
       - name: worker
         {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.worker .Values.dataPlane.components.worker.image }}
-        image: "{{ .Values.dataPlane.components.worker.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/workers" }}:{{ .Values.dataPlane.components.worker.image.tag | default "v1.4.0-with-models" }}"
+        {{- $workerRepo := .Values.dataPlane.components.worker.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/workers" }}
+        {{- $workerTag := .Values.dataPlane.components.worker.image.tag | default "v1.4.0-with-models" }}
+        image: {{ include "data-plane.image" (dict "repository" $workerRepo "tag" $workerTag "global" .Values.global) | quote }}
         imagePullPolicy: "{{ .Values.dataPlane.components.worker.image.pullPolicy | default "Always" }}"
         {{- else }}
-        image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/workers:v1.4.0-with-models"
+        image: {{ include "data-plane.image" (dict "repository" "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/workers" "tag" "v1.4.0-with-models" "global" .Values.global) | quote }}
         imagePullPolicy: "Always"
         {{- end }}
         env:
