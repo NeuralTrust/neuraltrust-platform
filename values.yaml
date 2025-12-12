@@ -1481,13 +1481,13 @@ neuraltrust-control-plane:
               memory: 1Gi
               cpu: 500m
       postgresql:
-        installInCluster: false
+        installInCluster: false  # Set to true via --set to enable in-cluster PostgreSQL deployment
         secrets:
           name: "postgresql-secrets"
-          user: "postgres"
-          password: ""
+          user: "neuraltrust"
+          password: ""  # Set via --set neuraltrust-control-plane.controlPlane.components.postgresql.secrets.password="your-password"
           database: "neuraltrust"
-          host: ""
+          host: ""  # Set via --set neuraltrust-control-plane.controlPlane.components.postgresql.secrets.host="control-plane-postgresql" when installInCluster=true
           port: "5432"
         image:
           repository: "postgres"

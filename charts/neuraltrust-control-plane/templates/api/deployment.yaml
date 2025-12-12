@@ -189,6 +189,12 @@ spec:
             secretKeyRef:
               name: {{ $pgSecretName }}
               key: POSTGRES_PASSWORD
+        {{- $postgresSslMode := "require" }}
+        {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.postgresql .Values.controlPlane.components.postgresql.installInCluster }}
+          {{- $postgresSslMode = "disable" }}
+        {{- end }}
+        - name: POSTGRES_SSL
+          value: {{ $postgresSslMode | quote }}
         - name: CONTROL_PLANE_JWT_SECRET
           valueFrom:
             secretKeyRef:
