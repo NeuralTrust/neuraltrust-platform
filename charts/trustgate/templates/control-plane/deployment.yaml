@@ -17,12 +17,26 @@ spec:
         {{- include "trustgate.controlPlane.labels" . | nindent 8 }}
         component: control-plane
     spec:
+      {{- $imagePullSecret := "" }}
+      {{- if .Values.imagePullSecrets }}
+        {{- $imagePullSecret = .Values.imagePullSecrets }}
+      {{- else if .Values.global.image.imagePullSecrets }}
+        {{- if kindIs "slice" .Values.global.image.imagePullSecrets }}
+          {{- $imagePullSecret = "array" }}
+        {{- else if kindIs "string" .Values.global.image.imagePullSecrets }}
+          {{- $imagePullSecret = .Values.global.image.imagePullSecrets }}
+        {{- end }}
+      {{- else if .Values.global.imagePullSecrets }}
+        {{- $imagePullSecret = .Values.global.imagePullSecrets }}
+      {{- end }}
+      {{- if $imagePullSecret }}
       imagePullSecrets:
-        {{- if .Values.global.image.imagePullSecrets }}
+        {{- if eq $imagePullSecret "array" }}
         {{- toYaml .Values.global.image.imagePullSecrets | nindent 8 }}
         {{- else }}
-        - name: gcr-secret
+        - name: {{ $imagePullSecret }}
         {{- end }}
+      {{- end }}
       volumes:
       - name: logs-volume
         emptyDir: {}

@@ -16,9 +16,19 @@ spec:
         app: worker
         plane: data
     spec:
-      {{- if not (and .Values.dataPlane (hasKey .Values.dataPlane "imagePullSecrets") (eq .Values.dataPlane.imagePullSecrets "none")) }}
+      {{- $imagePullSecret := "gcr-secret" }}
+      {{- if .Values.imagePullSecrets }}
+        {{- $imagePullSecret = .Values.imagePullSecrets }}
+      {{- else if .Values.dataPlane }}
+        {{- if hasKey .Values.dataPlane "imagePullSecrets" }}
+          {{- if and .Values.dataPlane.imagePullSecrets (ne .Values.dataPlane.imagePullSecrets "none") (ne .Values.dataPlane.imagePullSecrets "") }}
+            {{- $imagePullSecret = .Values.dataPlane.imagePullSecrets }}
+          {{- end }}
+        {{- end }}
+      {{- end }}
+      {{- if and $imagePullSecret (ne $imagePullSecret "none") (ne $imagePullSecret "") }}
       imagePullSecrets:
-        - name: gcr-secret
+        - name: {{ $imagePullSecret }}
       {{- end }}
       containers:
       - name: worker

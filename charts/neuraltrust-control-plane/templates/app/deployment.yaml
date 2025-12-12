@@ -18,9 +18,19 @@ spec:
       labels:
         app: control-plane-app
     spec:
-      {{- if not (and .Values.controlPlane (hasKey .Values.controlPlane "imagePullSecrets") (eq .Values.controlPlane.imagePullSecrets "none")) }}
+      {{- $imagePullSecret := "gcr-secret" }}
+      {{- if .Values.imagePullSecrets }}
+        {{- $imagePullSecret = .Values.imagePullSecrets }}
+      {{- else if .Values.controlPlane }}
+        {{- if hasKey .Values.controlPlane "imagePullSecrets" }}
+          {{- if and .Values.controlPlane.imagePullSecrets (ne .Values.controlPlane.imagePullSecrets "none") (ne .Values.controlPlane.imagePullSecrets "") }}
+            {{- $imagePullSecret = .Values.controlPlane.imagePullSecrets }}
+          {{- end }}
+        {{- end }}
+      {{- end }}
+      {{- if and $imagePullSecret (ne $imagePullSecret "none") (ne $imagePullSecret "") }}
       imagePullSecrets:
-        - name: gcr-secret
+        - name: {{ $imagePullSecret }}
       {{- end }}
       {{- $pgSecretName := "postgresql-secrets" }}
       {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.postgresql .Values.controlPlane.components.postgresql.secrets .Values.controlPlane.components.postgresql.secrets.name }}

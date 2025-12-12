@@ -216,7 +216,7 @@ infrastructure:
 dataPlane:
   enabled: true
   preserveExistingSecrets: false
-  imagePullSecrets: "gcr-secret"  # Docker registry secret name for pulling images
+  imagePullSecrets: ""  # Docker registry secret name for pulling images (set via --set dataPlane.imagePullSecrets="secret-name")
   secrets:
     openaiApiKeySecretName: "openai-secrets"
     openaiApiKey: ""
@@ -397,7 +397,7 @@ dataPlane:
 controlPlane:
   enabled: true
   preserveExistingSecrets: false
-  imagePullSecrets: "gcr-secret"  # Docker registry secret name for pulling images
+  imagePullSecrets: ""  # Docker registry secret name for pulling images (set via --set dataPlane.imagePullSecrets="secret-name")
   secrets:
     controlPlaneJWTSecret: ""
     openaiApiKey: ""
@@ -605,7 +605,7 @@ neuraltrust:
   dataPlane:
     enabled: true
     preserveExistingSecrets: false
-    imagePullSecrets: "gcr-secret"  # Docker registry secret name for pulling images
+    imagePullSecrets: ""  # Docker registry secret name for pulling images (set via --set dataPlane.imagePullSecrets="secret-name")
     secrets:
       openaiApiKeySecretName: "openai-secrets"
       # You can provide either a direct value (string) or a secret reference (object)
@@ -808,7 +808,7 @@ neuraltrust:
   controlPlane:
     enabled: true
     preserveExistingSecrets: false
-    imagePullSecrets: "gcr-secret"  # Docker registry secret name for pulling images
+    imagePullSecrets: ""  # Docker registry secret name for pulling images (set via --set dataPlane.imagePullSecrets="secret-name")
     secrets:
       # You can provide either a direct value (string) or a secret reference (object)
       controlPlaneJWTSecret: ""  # Define this value or use secret reference
@@ -1007,11 +1007,11 @@ neuraltrust:
 # TrustGate Configuration
 trustgate:
   enabled: true
-  # Additional global settings
+  imagePullSecrets: ""  # Docker registry secret name for pulling images (set via --set trustgate.imagePullSecrets="secret-name")
   global:
     version: "ce"  # can be "ce" or "ee"
     imageRegistry: "docker.io"
-    imagePullSecrets: []
+    imagePullSecrets: []  # If empty, will use global.imagePullSecrets from parent chart
     storageClass: ""
     deploymentType: shared  # shared or dedicated
     huggingface:
@@ -1021,6 +1021,8 @@ trustgate:
       image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee"
       repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee"
       tag: "latest"
+      # imagePullSecrets will use trustgate.global.imagePullSecrets if set, otherwise falls back to parent global.imagePullSecrets
+      imagePullSecrets: []  # If empty, will use global.imagePullSecrets converted to array format
     env:
       SERVER_SECRET_KEY: ""  # Define this value
       SERVER_BASE_DOMAIN: "neuraltrust.ai"

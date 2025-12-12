@@ -38,6 +38,17 @@ helm upgrade --install neuraltrust-platform . \
   --set global.openshift=true \
   --set global.openshiftDomain="apps.neuraltrust-dev.c4u5.p2.openshiftapps.com" \
   -f values.yaml
+
+# Optional: If using a custom image pull secret (instead of default 'gcr-secret'):
+# Set imagePullSecrets for each component separately using subchart name prefix
+helm upgrade --install neuraltrust-platform . \
+  --namespace neuraltrust \
+  --set global.openshift=true \
+  --set global.openshiftDomain="apps.neuraltrust-dev.c4u5.p2.openshiftapps.com" \
+  --set neuraltrust-data-plane.imagePullSecrets="my-custom-secret" \
+  --set neuraltrust-control-plane.imagePullSecrets="my-custom-secret" \
+  --set trustgate.imagePullSecrets="my-custom-secret" \
+  -f values.yaml
 ```
 
 ## Required Secrets
@@ -275,6 +286,53 @@ global:
   openshift: true
   openshiftDomain: "apps.neuraltrust-dev.c4u5.p2.openshiftapps.com"  # Your OpenShift wildcard DNS domain
 ```
+
+### Custom Image Pull Secret
+
+To use a custom image pull secret instead of the default `gcr-secret`, set the imagePullSecrets for each component separately using the subchart name prefix:
+
+```bash
+helm upgrade --install neuraltrust-platform . \
+  --namespace neuraltrust \
+  --set global.openshift=true \
+  --set global.openshiftDomain="apps.neuraltrust-dev.c4u5.p2.openshiftapps.com" \
+  --set neuraltrust-data-plane.imagePullSecrets="my-custom-secret" \
+  --set neuraltrust-control-plane.imagePullSecrets="my-custom-secret" \
+  --set trustgate.imagePullSecrets="my-custom-secret" \
+  -f values.yaml
+```
+
+Or configure in `values.yaml`:
+
+```yaml
+global:
+  openshift: true
+  openshiftDomain: "apps.neuraltrust-dev.c4u5.p2.openshiftapps.com"
+
+# Note: When using --set, use the subchart name prefix:
+# --set neuraltrust-data-plane.imagePullSecrets="my-custom-secret"
+# --set neuraltrust-control-plane.imagePullSecrets="my-custom-secret"
+# --set trustgate.imagePullSecrets="my-custom-secret"
+
+# Or in values.yaml, set at root level for subchart compatibility:
+neuraltrust-data-plane:
+  imagePullSecrets: "my-custom-secret"
+
+neuraltrust-control-plane:
+  imagePullSecrets: "my-custom-secret"
+
+trustgate:
+  imagePullSecrets: "my-custom-secret"
+
+# Note: Kafka and ClickHouse use public images and don't need imagePullSecrets
+# They are already set to empty arrays in values.yaml
+```
+
+**Note:** 
+- Replace `my-custom-secret` with your actual secret name
+- Ensure the secret exists in the namespace before deployment
+- Set `imagePullSecrets` for each component (dataPlane, controlPlane, trustgate) separately
+- Kafka and ClickHouse use public images and don't need imagePullSecrets (already configured as empty arrays)
 
 ### OpenShift Route Configuration
 
