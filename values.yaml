@@ -12,6 +12,7 @@
 global:
   openshift: false # set to true if you are using openshift
   openshiftDomain: "apps.neuraltrust-dev.c4u5.p2.openshiftapps.com" # OpenShift wildcard DNS domain (e.g., *.apps.neuraltrust-dev.c4u5.p2.openshiftapps.com)
+  imageRegistry: "" # Global image registry prefix (e.g., "central.unicaja.es" or "europe-west1-docker.pkg.dev/project/repo"). If set, will be prepended to image repositories.
   security:
     allowInsecureImages: true # Allow Bitnami charts to use their container images
   storageClass: "" # Global storage class for persistent volumes
@@ -27,9 +28,12 @@ clickhouse:
     enabled: false
   image:
     registry: docker.io
-    repository: bitnamilegacy/clickhouse
+    repository: bitnamilegacy/clickhouse  # Set via --set clickhouse.image.repository="your-repo/clickhouse"
     tag: 25.3.2-debian-12-r3
     pullPolicy: IfNotPresent
+    pullSecrets: []  # Set via --set clickhouse.image.pullSecrets[0]="user-registry"
+  global:
+    imagePullSecrets: []  # Set via --set clickhouse.global.imagePullSecrets[0]="user-registry"
   auth:
     username: "neuraltrust"
     password: "" # Define this value
@@ -111,6 +115,10 @@ kafka:
     auth:
       client:
         enabled: false
+    image:
+      registry: docker.io
+      repository: bitnamilegacy/zookeeper
+      tag: 3.9.3-debian-12-r0
     resources:
       requests:
         cpu: 500m
@@ -122,9 +130,12 @@ kafka:
     replicaCount: 0
   image:
     registry: docker.io
-    repository: bitnamilegacy/kafka
+    repository: bitnamilegacy/kafka  # Set via --set kafka.image.repository="your-repo/kafka"
     tag: 3.9.0-debian-12-r1
     pullPolicy: IfNotPresent
+    pullSecrets: []  # Set via --set kafka.image.pullSecrets[0]="user-registry"
+  global:
+    imagePullSecrets: []  # Set via --set kafka.global.imagePullSecrets[0]="user-registry"
   persistence:
     enabled: true
     size: 10Gi
@@ -191,6 +202,8 @@ infrastructure:
         repository: "postgres"
         tag: "17.2-alpine"
         pullPolicy: "IfNotPresent"
+        imagePullSecrets:
+          - name: ""
       persistence:
         enabled: true
         size: 10Gi
@@ -235,6 +248,12 @@ dataPlane:
       port: "8123"
       user: "neuraltrust"
       database: "neuraltrust"
+      image:
+        repository: "clickhouse/clickhouse-server"  # Set via --set dataPlane.components.clickhouse.image.repository="your-repo/clickhouse-server"
+        tag: "25.3.2"  # Set via --set dataPlane.components.clickhouse.image.tag="your-tag"
+        pullPolicy: "IfNotPresent"  # Set via --set dataPlane.components.clickhouse.image.pullPolicy="Always"
+        imagePullSecrets:
+          - name: ""
       backup:
         enabled: false
         type: "s3"
@@ -253,12 +272,6 @@ dataPlane:
           secretKey: ""
       auth:
         username: "neuraltrust"
-      image:
-        repository: "clickhouse/clickhouse-server"
-        tag: "25.3.2"
-        pullPolicy: "Always"
-        imagePullSecrets:
-          - name: ""
       secrets:
         name: "clickhouse-secrets"
       configmap:
@@ -569,36 +582,36 @@ controlPlane:
           limits:
             memory: 1Gi
             cpu: 500m
-    postgresql:
-      installInCluster: false
-      secrets:
-        name: "postgresql-secrets"
-        user: "postgres"
-        password: ""
-        database: "neuraltrust"
-        host: ""
-        port: "5432"
-      image:
-        repository: "postgres"
-        tag: "17.2-alpine"
-        pullPolicy: "IfNotPresent"
-        imagePullSecrets:
-          - name: ""
-      persistence:
-        enabled: true
-        size: 10Gi
-        storageClass: ""
-        preserveOnDelete: true
-      resources:
-        requests:
-          memory: 512Mi
-          cpu: 250m
-        limits:
-          memory: 1Gi
-          cpu: 500m
-      service:
-        type: ClusterIP
-        port: 5432
+      postgresql:
+        installInCluster: false
+        secrets:
+          name: "postgresql-secrets"
+          user: "neuraltrust"
+          password: ""
+          database: "neuraltrust"
+          host: ""
+          port: "5432"
+        image:
+          repository: "postgres"
+          tag: "17.2-alpine"
+          pullPolicy: "IfNotPresent"
+          imagePullSecrets:
+            - name: ""
+        persistence:
+          enabled: true
+          size: 10Gi
+          storageClass: ""
+          preserveOnDelete: true
+        resources:
+          requests:
+            memory: 512Mi
+            cpu: 250m
+          limits:
+            memory: 1Gi
+            cpu: 500m
+        service:
+          type: ClusterIP
+          port: 5432
 
 neuraltrust:
   # Data Plane Configuration
@@ -677,9 +690,9 @@ neuraltrust:
         connect:
           replicas: 1
           image:
-            repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect
-            tag: v0.0.1
-            pullPolicy: Always
+            repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect  # Set via --set dataPlane.components.kafka.connect.image.repository="your-repo/kafka-connect"
+            tag: v0.0.1  # Set via --set dataPlane.components.kafka.connect.image.tag="your-tag"
+            pullPolicy: Always  # Set via --set dataPlane.components.kafka.connect.image.pullPolicy="IfNotPresent"
             imagePullSecrets:
               - name: ""
           resources:
@@ -729,7 +742,7 @@ neuraltrust:
         classifierModel: "gpt"
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.6.2
+          tag: v1.7.8
           pullPolicy: Always
           imagePullSecrets:
             - name: gcr-secret
@@ -768,15 +781,6 @@ neuraltrust:
           embeddings:
             provider: "openai"
             model: "text-embedding-3-small"
-          embeddings:
-            provider: "openai"
-            model: "text-embedding-3-small"
-          topic_summarizer:
-            provider: "google"
-            model: "gemini-2.0-flash"
-            temperature: 0.2
-            retry_config:
-              attempts: 3
         replicas: 3
         resources:
           requests:
@@ -1020,7 +1024,7 @@ trustgate:
       pullPolicy: Always
       image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee"
       repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee"
-      tag: "latest"
+      tag: "v1.9.27"
       # imagePullSecrets will use trustgate.global.imagePullSecrets if set, otherwise falls back to parent global.imagePullSecrets
       imagePullSecrets: []  # If empty, will use global.imagePullSecrets converted to array format
     env:
@@ -1185,9 +1189,10 @@ trustgate:
   redis:
     enabled: true
     image:
-      repository: redislabs/redisearch
+      repository: redislabs/redisearch  # Set via --set trustgate.redis.image.repository="your-repo/redisearch"
       tag: 2.6.9
       pullPolicy: IfNotPresent
+      imagePullSecrets: []  # Set via --set trustgate.redis.image.imagePullSecrets[0]="user-registry"
     # External Redis configuration if redis.enabled is false
     external:
       host: ""
@@ -1484,7 +1489,7 @@ neuraltrust-control-plane:
         installInCluster: false  # Set to true via --set to enable in-cluster PostgreSQL deployment
         secrets:
           name: "postgresql-secrets"
-          user: "neuraltrust"
+          user: "postgres"
           password: ""  # Set via --set neuraltrust-control-plane.controlPlane.components.postgresql.secrets.password="your-password"
           database: "neuraltrust"
           host: ""  # Set via --set neuraltrust-control-plane.controlPlane.components.postgresql.secrets.host="control-plane-postgresql" when installInCluster=true
@@ -1517,4 +1522,170 @@ neuraltrust-control-plane:
         key: |
           -----BEGIN PRIVATE KEY-----
           -----END PRIVATE KEY-----
+
+# Map dataPlane values to neuraltrust-data-plane subchart
+neuraltrust-data-plane:
+  dataPlane:
+    enabled: true
+    preserveExistingSecrets: false
+    imagePullSecrets: ""
+    secrets:
+      openaiApiKeySecretName: "openai-secrets"
+      openaiApiKey: ""
+      googleApiKeySecretName: "google-secrets"
+      googleApiKey: ""
+      resendApiKeySecretName: "resend-secrets"
+      resendApiKey: ""
+      dataPlaneJWTSecretName: "data-plane-jwt-secret"
+      dataPlaneJWTSecret: ""
+      huggingFaceTokenSecretName: "huggingface-secrets"
+      huggingFaceToken: ""
+    components:
+      clickhouse:
+        enabled: true
+        host: "clickhouse"
+        port: "8123"
+        user: "neuraltrust"
+        database: "neuraltrust"
+        image:
+          repository: "clickhouse/clickhouse-server"
+          tag: "25.3.2"
+          pullPolicy: "IfNotPresent"
+          imagePullSecrets:
+            - name: ""
+        auth:
+          username: "neuraltrust"
+        secrets:
+          name: "clickhouse-secrets"
+        configmap:
+          name: "clickhouse-init-job"
+        resources:
+          requests:
+            memory: 512Mi
+            cpu: 250m
+          limits:
+            memory: 1Gi
+            cpu: 500m
+      kafka:
+        enabled: true
+        connect:
+          replicas: 1
+          image:
+            repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect
+            tag: v0.0.1
+            pullPolicy: Always
+            imagePullSecrets:
+              - name: ""
+          resources:
+            limits:
+              cpu: "1"
+              memory: 4Gi
+            requests:
+              cpu: 500m
+              memory: 2Gi
+        broker:
+          replicas: 1
+          imagePullSecrets:
+            - name: ""
+          resources:
+            requests:
+              memory: 1Gi
+              cpu: 500m
+            limits:
+              memory: 2Gi
+              cpu: 1
+      api:
+        enabled: true
+        host: "data-plane-api.neuraltrust.ai"
+        service:
+          type: LoadBalancer
+        ingress:
+          enabled: true
+          className: "nginx"
+          annotations:
+            nginx.ingress.kubernetes.io/ssl-redirect: "true"
+            nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+            nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+            nginx.ingress.kubernetes.io/x-frame-options: "DENY"
+            nginx.ingress.kubernetes.io/x-content-type-options: "nosniff"
+            nginx.ingress.kubernetes.io/x-xss-protection: "1; mode=block"
+            nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+            nginx.ingress.kubernetes.io/proxy-connect-timeout: "600"
+            nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+            nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+            nginx.ingress.kubernetes.io/enable-cors: "true"
+            nginx.ingress.kubernetes.io/cors-allow-origin: "https://*"
+            nginx.ingress.kubernetes.io/cors-allow-methods: "PUT, GET, POST, OPTIONS, DELETE, PATCH"
+            nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,token,Token,Content-Length,Accept,Origin,Token,token"
+          tls:
+            enabled: true
+            secretName: ""
+        classifierModel: "gpt"
+        image:
+          repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
+          tag: v1.7.8
+          pullPolicy: Always
+          imagePullSecrets:
+            - name: gcr-secret
+        accessMode: ReadWriteOnce
+        huggingfaceToken: ""
+        storage: 10Gi
+        trustTestConfig:
+          evaluator:
+            provider: "openai"
+            model: "gpt-5-mini"
+            temperature: 0.0
+            extra_args:
+              reasoning_effort: "low"
+            retry_config:
+              attempts: 3
+          question_generator:
+            provider: "openai"
+            model: "gpt-5-mini"
+            extra_args:
+              reasoning_effort: "low"
+            temperature: 0.0
+            retry_config:
+              attempts: 3
+          translation:
+            provider: "google"
+            model: "gemini-2.0-flash"
+            temperature: 0.0
+            retry_config:
+              attempts: 3
+          topic_summarizer:
+            provider: "google"
+            model: "gemini-2.0-flash"
+            temperature: 0.2
+            retry_config:
+              attempts: 3
+          embeddings:
+            provider: "openai"
+            model: "text-embedding-3-small"
+        replicas: 3
+        resources:
+          requests:
+            cpu: 1
+            memory: 2Gi
+          limits:
+            cpu: 2
+            memory: 3Gi
+      worker:
+        enabled: true
+        replicas: 1
+        image:
+          repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/workers
+          tag: v1.4.0-with-models
+          pullPolicy: Always
+          imagePullSecrets:
+            - name: gcr-secret
+        resources:
+          requests:
+            memory: 4Gi
+            cpu: 1000m
+          limits:
+            memory: 8Gi
+            cpu: 2000m
+      connectorsJob:
+        image: curlimages/curl:8.13.0
 
