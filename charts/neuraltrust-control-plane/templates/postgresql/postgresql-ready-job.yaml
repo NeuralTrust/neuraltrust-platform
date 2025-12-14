@@ -10,10 +10,10 @@ metadata:
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-weight": "-20"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
-    "helm.sh/hook-timeout": "300"
+    "helm.sh/hook-timeout": "600"
 spec:
-  backoffLimit: 3
-  activeDeadlineSeconds: 300
+  backoffLimit: 5
+  activeDeadlineSeconds: 600
   template:
     metadata:
       labels:
@@ -37,7 +37,7 @@ spec:
           set -e
           POSTGRES_HOST="control-plane-postgresql.{{ .Release.Namespace }}.svc.cluster.local"
           POSTGRES_PORT="5432"
-          MAX_ATTEMPTS=120
+          MAX_ATTEMPTS=240
           ATTEMPT=0
           
           echo "Waiting for PostgreSQL to be ready at $POSTGRES_HOST:$POSTGRES_PORT..."
