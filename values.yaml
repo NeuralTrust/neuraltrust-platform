@@ -7,7 +7,7 @@
 global:
   openshift: true # set to true if you are using openshift
   openshiftDomain: "apps.neuraltrust-dev.c4u5.p2.openshiftapps.com" # OpenShift wildcard DNS domain (e.g., *.apps.neuraltrust-dev.c4u5.p2.openshiftapps.com)
-  imageRegistry: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/accounts-repo" # Global image registry prefix (e.g., "europe-west1-docker.pkg.dev/project/repo"). If set, will be prepended to image repositories.
+  imageRegistry: "" # Global image registry prefix (e.g., "europe-west1-docker.pkg.dev/project/repo"). If set, will be prepended to image repositories.
   security:
     allowInsecureImages: true # Allow Bitnami charts to use their container images
   storageClass: "" # Global storage class for persistent volumes
@@ -21,7 +21,7 @@ clickhouse:
   zookeeper:
     enabled: false
   image:
-    registry: europe-west1-docker.pkg.dev/neuraltrust-app-prod/accounts-repo
+    registry: docker.io
     repository: bitnamilegacy/clickhouse  # Set via --set clickhouse.image.repository="your-repo/clickhouse"
     tag: 25.3.2-debian-12-r3
     pullPolicy: Always
@@ -109,7 +109,7 @@ kafka:
       client:
         enabled: false
     image:
-      registry: europe-west1-docker.pkg.dev/neuraltrust-app-prod/accounts-repo
+      registry: docker.io
       repository: bitnamilegacy/zookeeper
       tag: 3.9.3-debian-12-r0
     resources:
@@ -122,7 +122,7 @@ kafka:
   controller:
     replicaCount: 0
   image:
-    registry: europe-west1-docker.pkg.dev/neuraltrust-app-prod/accounts-repo
+    registry: docker.io
     repository: bitnamilegacy/kafka
     tag: 3.9.0-debian-12-r1
     pullPolicy: Always
@@ -175,14 +175,14 @@ trustgate:
   enabled: true
   global:
     version: "ee"  # can be "ce" or "ee"
-    imageRegistry: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/accounts-repo"
+    imageRegistry: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker"
     storageClass: ""
     deploymentType: shared  # shared or dedicated
     huggingface:
       apiKeySecret: "hf-api-key"
     image:
       pullPolicy: Always
-      image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/accounts-repo/trustgate-ee"
+      image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee"
       tag: "v1.9.27"
       # imagePullSecrets: if not set, will fall back to parent chart's global.imagePullSecrets
       imagePullSecrets: ["user-registry"]  # Set to array of secret names, e.g., ["secret-name"] or leave empty to use parent global.imagePullSecrets
@@ -353,7 +353,7 @@ trustgate:
   redis:
     enabled: true
     image:
-      repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/accounts-repo/redislabs/redisearch
+      repository: redislabs/redisearch
       tag: 2.6.9
       pullPolicy: Always
       imagePullSecrets: ["user-registry"]
@@ -446,8 +446,8 @@ neuraltrust-control-plane:
           enabled: false
         replicaCount: 1
         image:
-          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/accounts-repo/scheduler"
-          tag: "v1.4.0"
+          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/scheduler"
+          tag: "v1.7.2"
           pullPolicy: "Always"
         config:
           # URLs will be auto-generated from OpenShift Routes if global.openshift=true and global.openshiftDomain is set
@@ -470,7 +470,7 @@ neuraltrust-control-plane:
           enabled: false
         replicaCount: 2
         image:
-          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/accounts-repo/control-plane-api"
+          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api"
           tag: "v1.7.3"
           pullPolicy: "Always"
         secrets:
@@ -497,7 +497,7 @@ neuraltrust-control-plane:
           enabled: false
         replicaCount: 1
         image:
-          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/accounts-repo/app"
+          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
           tag: "v1.7.4"
           pullPolicy: "Always"
         config:
@@ -542,7 +542,7 @@ neuraltrust-control-plane:
           host: "control-plane-postgresql"  # PostgreSQL host (set to "control-plane-postgresql" when installInCluster=true, or external host when using external PostgreSQL)
           port: "5432"  # PostgreSQL port
         image:
-          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/accounts-repo/postgres"
+          repository: "postgres"
           tag: "17.2-alpine"
           pullPolicy: "Always"
           imagePullSecrets:
@@ -562,13 +562,6 @@ neuraltrust-control-plane:
         service:
           type: ClusterIP
           port: 5432
-      dataPlane:
-        cert: |
-          -----BEGIN CERTIFICATE-----
-          -----END CERTIFICATE-----
-        key: |
-          -----BEGIN PRIVATE KEY-----
-          -----END PRIVATE KEY-----
 
 # NeuralTrust Data Plane subchart values
 # Helm requires values to be passed to subcharts using the subchart name as a prefix
@@ -596,7 +589,7 @@ neuraltrust-data-plane:
         user: "neuraltrust"
         database: "neuraltrust"
         image:
-          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/accounts-repo/clickhouse/clickhouse-server"
+          repository: "clickhouse/clickhouse-server"
           tag: "25.3.2"
           pullPolicy: "Always"
         auth:
@@ -617,7 +610,7 @@ neuraltrust-data-plane:
         connect:
           replicas: 1
           image:
-            repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/accounts-repo/kafka-connect
+            repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect
             tag: v0.0.1
             pullPolicy: Always
           resources:
@@ -636,7 +629,7 @@ neuraltrust-data-plane:
           enabled: false
         classifierModel: "gpt"
         image:
-          repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/accounts-repo/data-plane-api
+          repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
           tag: v1.7.8
           pullPolicy: Always
         accessMode: ReadWriteOnce
@@ -686,7 +679,7 @@ neuraltrust-data-plane:
         enabled: true
         replicas: 1
         image:
-          repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/accounts-repo/workers
+          repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/workers
           tag: v1.4.0-with-models
           pullPolicy: Always
         resources:

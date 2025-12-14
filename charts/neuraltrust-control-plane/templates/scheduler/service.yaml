@@ -82,20 +82,20 @@ metadata:
 spec:
   host: {{ $host | quote }}
   tls:
-    termination: {{ if .ingress.tls.termination }}{{ .ingress.tls.termination }}{{ else }}edge{{ end }}
-    {{- if .ingress.tls.certificate }}
+    termination: {{ if and .ingress.tls .ingress.tls.termination }}{{ .ingress.tls.termination }}{{ else }}edge{{ end }}
+    {{- if and .ingress.tls .ingress.tls.certificate }}
     certificate: {{ .ingress.tls.certificate | quote }}
     {{- end }}
-    {{- if .ingress.tls.key }}
+    {{- if and .ingress.tls .ingress.tls.key }}
     key: {{ .ingress.tls.key | quote }}
     {{- end }}
-    {{- if .ingress.tls.caCertificate }}
+    {{- if and .ingress.tls .ingress.tls.caCertificate }}
     caCertificate: {{ .ingress.tls.caCertificate | quote }}
     {{- end }}
-    {{- if .ingress.tls.destinationCACertificate }}
+    {{- if and .ingress.tls .ingress.tls.destinationCACertificate }}
     destinationCACertificate: {{ .ingress.tls.destinationCACertificate | quote }}
     {{- end }}
-    {{- if .ingress.tls.insecureEdgeTerminationPolicy }}
+    {{- if and .ingress.tls .ingress.tls.insecureEdgeTerminationPolicy }}
     insecureEdgeTerminationPolicy: {{ .ingress.tls.insecureEdgeTerminationPolicy }}
     {{- end }}
   to:

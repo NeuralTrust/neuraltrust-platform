@@ -35,11 +35,13 @@ Using external PostgreSQL at {{ $postgresqlHost }}:{{ $postgresqlPort }}
 PostgreSQL configuration not specified.
 {{- end }}
 
-{{- if .Values.neuraltrust.dataPlane.enabled }}
+{{- $dpValues := index .Values "neuraltrust-data-plane" }}
+{{- if and $dpValues $dpValues.dataPlane $dpValues.dataPlane.enabled }}
 NeuralTrust Data Plane is enabled.
 {{- end }}
 
-{{- if .Values.neuraltrust.controlPlane.enabled }}
+{{- $cpValues := index .Values "neuraltrust-control-plane" }}
+{{- if and $cpValues $cpValues.controlPlane $cpValues.controlPlane.enabled }}
 NeuralTrust Control Plane is enabled.
 {{- end }}
 
