@@ -1,0 +1,202 @@
+{{- /*
+Job to initialize TrustGate PostgreSQL database and user.
+This job connects using postgresql-secrets (admin credentials) and creates
+the database and user specified in trustgate-secrets if they don't exist.
+*/}}
+{{- $pgSecretName := "postgresql-secrets" }}
+{{- $tgSecretName := "trustgate-secrets" }}
+{{- /* Check if both secrets exist or will be created */}}
+{{- $pgSecret := (lookup "v1" "Secret" .Release.Namespace $pgSecretName) }}
+{{- $tgSecret := (lookup "v1" "Secret" .Release.Namespace $tgSecretName) }}
+{{- /* Get database values from trustgate.global.env */}}
+{{- $tgDbHost := "" }}
+{{- $tgDbPort := "5432" }}
+{{- $tgDbUser := "postgres" }}
+{{- $tgDbPassword := "" }}
+{{- $tgDbName := "trustgate" }}
+{{- $tgDbSslMode := "require" }}
+{{- if and .Values.global.env .Values.global.env.DATABASE_HOST (ne .Values.global.env.DATABASE_HOST "") }}
+  {{- $tgDbHost = .Values.global.env.DATABASE_HOST }}
+{{- end }}
+{{- if and .Values.global.env .Values.global.env.DATABASE_PORT (ne .Values.global.env.DATABASE_PORT "") }}
+  {{- $tgDbPort = .Values.global.env.DATABASE_PORT | toString }}
+{{- end }}
+{{- if and .Values.global.env .Values.global.env.DATABASE_USER (ne .Values.global.env.DATABASE_USER "") }}
+  {{- $tgDbUser = .Values.global.env.DATABASE_USER }}
+{{- end }}
+{{- if and .Values.global.env .Values.global.env.DATABASE_PASSWORD (ne .Values.global.env.DATABASE_PASSWORD "") }}
+  {{- $tgDbPassword = .Values.global.env.DATABASE_PASSWORD }}
+{{- end }}
+{{- if and .Values.global.env .Values.global.env.DATABASE_NAME (ne .Values.global.env.DATABASE_NAME "") }}
+  {{- $tgDbName = .Values.global.env.DATABASE_NAME }}
+{{- end }}
+{{- if and .Values.global.env .Values.global.env.DATABASE_SSL_MODE (ne .Values.global.env.DATABASE_SSL_MODE "") }}
+  {{- $tgDbSslMode = .Values.global.env.DATABASE_SSL_MODE }}
+{{- end }}
+{{- /* Only create job if we have the required values */}}
+{{- if and $tgDbHost $tgDbPassword $tgDbName $tgDbUser }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "trustgate.fullname" . }}-postgresql-init
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "trustgate.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgresql-init
+  annotations:
+    {{- /* If using in-cluster PostgreSQL (control-plane-postgresql), run after it's ready */}}
+    {{- if eq $tgDbHost "control-plane-postgresql" }}
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-15"
+    {{- else }}
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    {{- end }}
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    "helm.sh/hook-timeout": "300"
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        {{- include "trustgate.labels" . | nindent 8 }}
+        app.kubernetes.io/component: postgresql-init
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: postgresql-init
+        {{- $postgresImageRepo := "postgres" }}
+        {{- $postgresImageTag := "17.2-alpine" }}
+        {{- $postgresImage := printf "%s:%s" $postgresImageRepo $postgresImageTag }}
+        {{- if and .Values.global .Values.global.imageRegistry .Values.global.imageRegistry }}
+          {{- $registry := .Values.global.imageRegistry }}
+          {{- if hasPrefix $registry $postgresImageRepo }}
+            {{- $postgresImage = printf "%s:%s" $postgresImageRepo $postgresImageTag }}
+          {{- else }}
+            {{- $postgresImage = printf "%s/%s:%s" $registry $postgresImageRepo $postgresImageTag }}
+          {{- end }}
+        {{- end }}
+        image: {{ $postgresImage | quote }}
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          
+          # Get PostgreSQL admin credentials from postgresql-secrets
+          PG_HOST="${POSTGRES_HOST}"
+          PG_PORT="${POSTGRES_PORT:-5432}"
+          PG_ADMIN_USER="${POSTGRES_USER}"
+          PG_ADMIN_PASSWORD="${POSTGRES_PASSWORD}"
+          
+          # Get TrustGate database and user from trustgate-secrets
+          TG_DB_NAME="${TG_DATABASE_NAME}"
+          TG_DB_USER="${TG_DATABASE_USER}"
+          TG_DB_PASSWORD="${TG_DATABASE_PASSWORD}"
+          
+          # Determine SSL mode for connection
+          PG_SSL_MODE="${POSTGRES_SSL_MODE:-disable}"
+          
+          # Build psql connection options
+          PSQL_OPTS="-h ${PG_HOST} -p ${PG_PORT} -U ${PG_ADMIN_USER}"
+          
+          # Set SSL mode via environment variable (psql reads PGSSLMODE)
+          if [ "${PG_SSL_MODE}" != "disable" ]; then
+            export PGSSLMODE="${PG_SSL_MODE}"
+          fi
+          
+          echo "Connecting to PostgreSQL at ${PG_HOST}:${PG_PORT} as ${PG_ADMIN_USER} (SSL mode: ${PG_SSL_MODE})"
+          echo "Creating database '${TG_DB_NAME}' and user '${TG_DB_USER}' if they don't exist..."
+          
+          # Export PGPASSWORD for psql
+          export PGPASSWORD="${PG_ADMIN_PASSWORD}"
+          
+          # Create user if it doesn't exist
+          echo "Checking if user '${TG_DB_USER}' exists..."
+          USER_EXISTS=$(psql ${PSQL_OPTS} -d postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='${TG_DB_USER}'" 2>/dev/null || echo "0")
+          
+          if [ "${USER_EXISTS}" != "1" ]; then
+            echo "Creating user '${TG_DB_USER}'..."
+            psql ${PSQL_OPTS} -d postgres -c "CREATE USER \"${TG_DB_USER}\" WITH PASSWORD '${TG_DB_PASSWORD}';" || {
+              echo "ERROR: Failed to create user '${TG_DB_USER}'"
+              exit 1
+            }
+            echo "User '${TG_DB_USER}' created successfully"
+          else
+            echo "User '${TG_DB_USER}' already exists, updating password..."
+            psql ${PSQL_OPTS} -d postgres -c "ALTER USER \"${TG_DB_USER}\" WITH PASSWORD '${TG_DB_PASSWORD}';" || {
+              echo "WARNING: Failed to update password for user '${TG_DB_USER}'"
+            }
+          fi
+          
+          # Create database if it doesn't exist
+          echo "Checking if database '${TG_DB_NAME}' exists..."
+          DB_EXISTS=$(psql ${PSQL_OPTS} -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='${TG_DB_NAME}'" 2>/dev/null || echo "0")
+          
+          if [ "${DB_EXISTS}" != "1" ]; then
+            echo "Creating database '${TG_DB_NAME}'..."
+            psql ${PSQL_OPTS} -d postgres -c "CREATE DATABASE \"${TG_DB_NAME}\" OWNER \"${TG_DB_USER}\";" || {
+              echo "ERROR: Failed to create database '${TG_DB_NAME}'"
+              exit 1
+            }
+            echo "Database '${TG_DB_NAME}' created successfully"
+          else
+            echo "Database '${TG_DB_NAME}' already exists"
+          fi
+          
+          # Grant all privileges on the database to the user
+          echo "Granting privileges on database '${TG_DB_NAME}' to user '${TG_DB_USER}'..."
+          psql ${PSQL_OPTS} -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE \"${TG_DB_NAME}\" TO \"${TG_DB_USER}\";" || {
+            echo "WARNING: Failed to grant privileges"
+          }
+          
+          # Grant schema privileges (for PostgreSQL 15+)
+          echo "Granting schema privileges..."
+          psql ${PSQL_OPTS} -d "${TG_DB_NAME}" -c "GRANT ALL ON SCHEMA public TO \"${TG_DB_USER}\";" || {
+            echo "WARNING: Failed to grant schema privileges"
+          }
+          
+          echo "PostgreSQL initialization completed successfully!"
+        env:
+        # PostgreSQL admin credentials from postgresql-secrets
+        - name: POSTGRES_HOST
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: POSTGRES_HOST
+        - name: POSTGRES_PORT
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: POSTGRES_PORT
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: POSTGRES_PASSWORD
+        # TrustGate database and user from trustgate-secrets
+        - name: TG_DATABASE_NAME
+          valueFrom:
+            secretKeyRef:
+              name: {{ $tgSecretName }}
+              key: DATABASE_NAME
+        - name: TG_DATABASE_USER
+          valueFrom:
+            secretKeyRef:
+              name: {{ $tgSecretName }}
+              key: DATABASE_USER
+        - name: TG_DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ $tgSecretName }}
+              key: DATABASE_PASSWORD
+        # SSL mode (check if in-cluster PostgreSQL)
+        - name: POSTGRES_SSL_MODE
+          value: {{ $tgDbSslMode }}
+{{- end }}
+

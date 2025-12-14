@@ -1,18 +1,13 @@
-# Unified NeuralTrust Platform Values
+# Unified NeuralTrust Platform Values (Optimized)
 # This file contains all configuration for deploying NeuralTrust platform components
 # including infrastructure (ClickHouse, Kafka, PostgreSQL), NeuralTrust services,
 # and TrustGate components.
 
-# NOTE: Values are structured for both parent chart and subcharts
-# Subcharts expect: dataPlane.*, controlPlane.*
-# Parent chart uses: neuraltrust.dataPlane.*, neuraltrust.controlPlane.*
-# Both structures are provided for compatibility
-
 # Global settings
 global:
-  openshift: false # set to true if you are using openshift
+  openshift: true # set to true if you are using openshift
   openshiftDomain: "apps.neuraltrust-dev.c4u5.p2.openshiftapps.com" # OpenShift wildcard DNS domain (e.g., *.apps.neuraltrust-dev.c4u5.p2.openshiftapps.com)
-  imageRegistry: "" # Global image registry prefix (e.g., "central.unicaja.es" or "europe-west1-docker.pkg.dev/project/repo"). If set, will be prepended to image repositories.
+  imageRegistry: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/accounts-repo" # Global image registry prefix (e.g., "europe-west1-docker.pkg.dev/project/repo"). If set, will be prepended to image repositories.
   security:
     allowInsecureImages: true # Allow Bitnami charts to use their container images
   storageClass: "" # Global storage class for persistent volumes
@@ -20,26 +15,24 @@ global:
 # ClickHouse subchart values (passed directly to clickhouse subchart)
 # These values are used when infrastructure.clickhouse.deploy=true
 clickhouse:
-  # Small deployment configuration (1 shard, 1 replica)
   fullnameOverride: "clickhouse"
   shards: 1
   replicaCount: 1
   zookeeper:
     enabled: false
   image:
-    registry: docker.io
+    registry: europe-west1-docker.pkg.dev/neuraltrust-app-prod/accounts-repo
     repository: bitnamilegacy/clickhouse  # Set via --set clickhouse.image.repository="your-repo/clickhouse"
     tag: 25.3.2-debian-12-r3
-    pullPolicy: IfNotPresent
-    pullSecrets: []  # Set via --set clickhouse.image.pullSecrets[0]="user-registry"
+    pullPolicy: Always
   global:
-    imagePullSecrets: []  # Set via --set clickhouse.global.imagePullSecrets[0]="user-registry"
+    imagePullSecrets: ["user-registry"]
   auth:
     username: "neuraltrust"
-    password: "" # Define this value
+    password: "12345" # Define this value
     # Use existing secret if it already exists (prevents Helm from trying to manage it)
     # Set to "clickhouse" to use the pre-existing secret named "clickhouse"
-    existingSecret: "clickhouse"  # Set to "" if you want Helm to create/manage the secret
+    existingSecret: ""  # Set to "" if you want Helm to create/manage the secret
     existingSecretKey: "admin-password"  # Key name in the existing secret
   persistence:
     enabled: true
@@ -47,11 +40,11 @@ clickhouse:
     storageClass: ""
   resources:
     requests:
-      memory: 512Mi
-      cpu: 250m
-    limits:
       memory: 1Gi
-      cpu: 500m
+      cpu: 1
+    limits:
+      memory: 2Gi
+      cpu: 2
   logLevel: "fatal"
 
 # Kafka subchart values (passed directly to kafka subchart)
@@ -116,7 +109,7 @@ kafka:
       client:
         enabled: false
     image:
-      registry: docker.io
+      registry: europe-west1-docker.pkg.dev/neuraltrust-app-prod/accounts-repo
       repository: bitnamilegacy/zookeeper
       tag: 3.9.3-debian-12-r0
     resources:
@@ -129,13 +122,12 @@ kafka:
   controller:
     replicaCount: 0
   image:
-    registry: docker.io
-    repository: bitnamilegacy/kafka  # Set via --set kafka.image.repository="your-repo/kafka"
+    registry: europe-west1-docker.pkg.dev/neuraltrust-app-prod/accounts-repo
+    repository: bitnamilegacy/kafka
     tag: 3.9.0-debian-12-r1
-    pullPolicy: IfNotPresent
-    pullSecrets: []  # Set via --set kafka.image.pullSecrets[0]="user-registry"
+    pullPolicy: Always
   global:
-    imagePullSecrets: []  # Set via --set kafka.global.imagePullSecrets[0]="user-registry"
+    imagePullSecrets: ["user-registry"]
   persistence:
     enabled: true
     size: 10Gi
@@ -151,17 +143,16 @@ infrastructure:
     deploy: true
     # External ClickHouse configuration (used when deploy: false)
     external:
-      host: "" # e.g., "clickhouse.clickhouse.svc.cluster.local"
+      host: "clickhouse.clickhouse.svc.cluster.local" # e.g., "clickhouse.clickhouse.svc.cluster.local"
       port: "8123"
       user: "neuraltrust"
-      password: "" # Define this value
+      password: "12345" # Define this value
       database: "neuraltrust"
       # Secret reference for external ClickHouse credentials
-      secretName: "" # Optional: secret containing CLICKHOUSE_PASSWORD
-      secretKey: "password" # Key in secret for password
+      secretName: "clickhouse" # Optional: secret containing CLICKHOUSE_PASSWORD
+      secretKey: "admin-password" # Key in secret for password
     # ClickHouse chart values (used when deploy: true)
     # Values are passed via root-level 'clickhouse:' section above
-    # This section is kept for documentation/reference only
 
   # Kafka Configuration
   kafka:
@@ -178,870 +169,43 @@ infrastructure:
       secretKey: "" # Optional
     # Kafka chart values (used when deploy: true)
     # Values are passed via root-level 'kafka:' section above
-    # This section is kept for documentation/reference only
-
-  # PostgreSQL Configuration
-  postgresql:
-    # Set to true to deploy PostgreSQL, false to use pre-installed instance
-    # Default: false (do NOT deploy)
-    deploy: false
-    # External PostgreSQL configuration (used when deploy: false)
-    external:
-      host: "" # e.g., "postgresql.postgresql.svc.cluster.local"
-      port: "5432"
-      user: "postgres"
-      password: "" # Define this value
-      database: "neuraltrust"
-      # Secret reference for external PostgreSQL credentials
-      secretName: "" # Optional: secret containing DATABASE_PASSWORD
-      secretKey: "password" # Key in secret for password
-    # PostgreSQL deployment configuration (used when deploy: true)
-    # This is managed by neuraltrust-control-plane subchart
-    chart:
-      image:
-        repository: "postgres"
-        tag: "17.2-alpine"
-        pullPolicy: "IfNotPresent"
-        imagePullSecrets:
-          - name: ""
-      persistence:
-        enabled: true
-        size: 10Gi
-        storageClass: ""
-        preserveOnDelete: true
-      resources:
-        requests:
-          memory: 512Mi
-          cpu: 250m
-        limits:
-          memory: 1Gi
-          cpu: 500m
-      service:
-        type: ClusterIP
-        port: 5432
-
-# NeuralTrust Components
-# NOTE: The dataPlane and controlPlane keys are also available at root level
-# for subchart compatibility. The neuraltrust.* structure is for parent chart organization.
-
-# Subchart compatibility: dataPlane values (for neuraltrust-data-plane subchart)
-# This mirrors neuraltrust.dataPlane for subchart access
-dataPlane:
-  enabled: true
-  preserveExistingSecrets: false
-  imagePullSecrets: ""  # Docker registry secret name for pulling images (set via --set dataPlane.imagePullSecrets="secret-name")
-  secrets:
-    openaiApiKeySecretName: "openai-secrets"
-    openaiApiKey: ""
-    googleApiKeySecretName: "google-secrets"
-    googleApiKey: ""
-    resendApiKeySecretName: "resend-secrets"
-    resendApiKey: ""
-    dataPlaneJWTSecretName: "data-plane-jwt-secret"
-    dataPlaneJWTSecret: ""
-    huggingFaceTokenSecretName: "huggingface-secrets"
-    huggingFaceToken: ""
-  components:
-    clickhouse:
-      enabled: true
-      host: "clickhouse"
-      port: "8123"
-      user: "neuraltrust"
-      database: "neuraltrust"
-      image:
-        repository: "clickhouse/clickhouse-server"  # Set via --set dataPlane.components.clickhouse.image.repository="your-repo/clickhouse-server"
-        tag: "25.3.2"  # Set via --set dataPlane.components.clickhouse.image.tag="your-tag"
-        pullPolicy: "IfNotPresent"  # Set via --set dataPlane.components.clickhouse.image.pullPolicy="Always"
-        imagePullSecrets:
-          - name: ""
-      backup:
-        enabled: false
-        type: "s3"
-        image:
-          repository: "curlimages/curl"
-          tag: "8.13.0"
-        s3:
-          bucket: ""
-          region: ""
-          accessKey: ""
-          secretKey: ""
-          endpoint: ""
-        gcs:
-          bucket: ""
-          accessKey: ""
-          secretKey: ""
-      auth:
-        username: "neuraltrust"
-      secrets:
-        name: "clickhouse-secrets"
-      configmap:
-        name: "clickhouse-init-job"
-      resources:
-        requests:
-          memory: 512Mi
-          cpu: 250m
-        limits:
-          memory: 1Gi
-          cpu: 500m
-    kafka:
-      enabled: true
-      connect:
-        replicas: 1
-        image:
-          repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect
-          tag: v0.0.1
-          pullPolicy: Always
-          imagePullSecrets:
-            - name: ""
-        resources:
-          limits:
-            cpu: "1"
-            memory: 4Gi
-          requests:
-            cpu: 500m
-            memory: 2Gi
-      broker:
-        replicas: 1
-        imagePullSecrets:
-          - name: ""
-        resources:
-          requests:
-            memory: 1Gi
-            cpu: 500m
-          limits:
-            memory: 2Gi
-            cpu: 1
-    api:
-      enabled: true
-      host: "data-plane-api.neuraltrust.ai"
-      service:
-        type: LoadBalancer
-      ingress:
-        enabled: true
-        className: "nginx"
-        annotations:
-          nginx.ingress.kubernetes.io/ssl-redirect: "true"
-          nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-          nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
-          nginx.ingress.kubernetes.io/x-frame-options: "DENY"
-          nginx.ingress.kubernetes.io/x-content-type-options: "nosniff"
-          nginx.ingress.kubernetes.io/x-xss-protection: "1; mode=block"
-          nginx.ingress.kubernetes.io/proxy-body-size: "50m"
-          nginx.ingress.kubernetes.io/proxy-connect-timeout: "600"
-          nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
-          nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
-          nginx.ingress.kubernetes.io/enable-cors: "true"
-          nginx.ingress.kubernetes.io/cors-allow-origin: "https://*"
-          nginx.ingress.kubernetes.io/cors-allow-methods: "PUT, GET, POST, OPTIONS, DELETE, PATCH"
-          nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,token,Token,Content-Length,Accept,Origin,Token,token"
-        tls:
-          enabled: true
-          secretName: ""
-      classifierModel: "gpt"
-      image:
-        repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-        tag: v1.7.8
-        pullPolicy: Always
-        imagePullSecrets:
-          - name: gcr-secret
-      accessMode: ReadWriteOnce
-      huggingfaceToken: ""
-      storage: 10Gi
-      trustTestConfig:
-        evaluator:
-          provider: "openai"
-          model: "gpt-5-mini"
-          temperature: 0.0
-          extra_args:
-            reasoning_effort: "low"
-          retry_config:
-            attempts: 3
-        question_generator:
-          provider: "openai"
-          model: "gpt-5-mini"
-          extra_args:
-            reasoning_effort: "low"
-          temperature: 0.0
-          retry_config:
-            attempts: 3
-        translation:
-          provider: "google"
-          model: "gemini-2.0-flash"
-          temperature: 0.0
-          retry_config:
-            attempts: 3
-        topic_summarizer:
-          provider: "google"
-          model: "gemini-2.0-flash"
-          temperature: 0.2
-          retry_config:
-            attempts: 3
-        embeddings:
-          provider: "openai"
-          model: "text-embedding-3-small"
-      replicas: 3
-      resources:
-        requests:
-          cpu: 1
-          memory: 2Gi
-        limits:
-          cpu: 2
-          memory: 3Gi
-    worker:
-      enabled: true
-      replicas: 1
-      image:
-        repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/workers
-        tag: v1.4.0-with-models
-        pullPolicy: Always
-        imagePullSecrets:
-          - name: gcr-secret
-      resources:
-        requests:
-          memory: 4Gi
-          cpu: 1000m
-        limits:
-          memory: 8Gi
-          cpu: 2000m
-    connectorsJob:
-      image: curlimages/curl:8.13.0
-
-# Subchart compatibility: controlPlane values (for neuraltrust-control-plane subchart)
-controlPlane:
-  enabled: true
-  preserveExistingSecrets: false
-  imagePullSecrets: ""  # Docker registry secret name for pulling images (set via --set dataPlane.imagePullSecrets="secret-name")
-  secrets:
-    controlPlaneJWTSecret: ""
-    openaiApiKey: ""
-    resendApiKey: ""
-    resendAlertSender: ""
-    resendInviteSender: ""
-    trustgateJwtSecret: ""
-    firewallJwtSecret: ""
-    modelScannerSecret: ""
-  components:
-    scheduler:
-      enabled: true
-      host: "control-plane-scheduler.neuraltrust.ai"
-      service:
-        type: LoadBalancer
-      ingress:
-        enabled: true
-        className: "nginx"
-        annotations:
-          nginx.ingress.kubernetes.io/ssl-redirect: "true"
-          nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-          nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
-          nginx.ingress.kubernetes.io/x-frame-options: "DENY"
-          nginx.ingress.kubernetes.io/x-content-type-options: "nosniff"
-          nginx.ingress.kubernetes.io/x-xss-protection: "1; mode=block"
-          nginx.ingress.kubernetes.io/proxy-body-size: "50m"
-          nginx.ingress.kubernetes.io/proxy-connect-timeout: "600"
-          nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
-          nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
-          nginx.ingress.kubernetes.io/enable-cors: "true"
-          nginx.ingress.kubernetes.io/cors-allow-origin: "https://*"
-          nginx.ingress.kubernetes.io/cors-allow-methods: "PUT, GET, POST, OPTIONS, DELETE, PATCH"
-          nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,token,Token,Content-Length,Accept,Origin,Token,token"
-          nginx.ingress.kubernetes.io/proxy-buffer-size: "128k"
-        tls:
-          enabled: true
-          secretName: ""
-      replicaCount: 1
-      image:
-        repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/scheduler"
-        tag: "v1.4.0"
-        pullPolicy: "Always"
-        imagePullSecrets:
-          - name: gcr-secret
-      config:
-        # URLs will be auto-generated from OpenShift Routes if global.openshift=true and global.openshiftDomain is set
-        # Otherwise, set these manually or they will default to internal service URLs
-        controlPlaneApiUrl: ""  # Auto: https://control-plane-api.{global.openshiftDomain} or http://control-plane-api-service.{namespace}.svc.cluster.local
-        dataPlaneApiUrl: ""  # Auto: https://data-plane-api.{global.openshiftDomain} or http://data-plane-api-service.{namespace}.svc.cluster.local
-      resources:
-        requests:
-          memory: 256Mi
-          cpu: 100m
-        limits:
-          memory: 512Mi
-          cpu: 200m
-    api:
-      enabled: true
-      host: "control-plane-api.neuraltrust.ai"
-      service:
-        type: LoadBalancer
-      ingress:
-        enabled: true
-        className: "nginx"
-        annotations:
-          nginx.ingress.kubernetes.io/ssl-redirect: "true"
-          nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-          nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
-          nginx.ingress.kubernetes.io/x-frame-options: "DENY"
-          nginx.ingress.kubernetes.io/x-content-type-options: "nosniff"
-          nginx.ingress.kubernetes.io/x-xss-protection: "1; mode=block"
-          nginx.ingress.kubernetes.io/proxy-body-size: "50m"
-          nginx.ingress.kubernetes.io/proxy-connect-timeout: "600"
-          nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
-          nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
-          nginx.ingress.kubernetes.io/enable-cors: "true"
-          nginx.ingress.kubernetes.io/cors-allow-origin: "https://*"
-          nginx.ingress.kubernetes.io/cors-allow-methods: "PUT, GET, POST, OPTIONS, DELETE, PATCH"
-          nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,token,Token,Content-Length,Accept,Origin,Token,token"
-          nginx.ingress.kubernetes.io/proxy-buffer-size: "128k"
-        tls:
-          enabled: true
-          secretName: ""
-      replicaCount: 2
-      image:
-        repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api"
-        tag: "v1.7.3"
-        pullPolicy: "Always"
-        imagePullSecrets:
-          - name: gcr-secret
-      secrets:
-        controlPlaneJWTSecret: ""
-      config:
-        # URLs will be auto-generated from OpenShift Routes if global.openshift=true and global.openshiftDomain is set
-        # Otherwise, set these manually or they will default to internal service URLs
-        controlPlaneApiUrl: ""  # Auto: https://control-plane-api.{global.openshiftDomain} or http://control-plane-api-service.{namespace}.svc.cluster.local
-        dataPlaneApiUrl: ""  # Auto: https://data-plane-api.{global.openshiftDomain} or http://data-plane-api-service.{namespace}.svc.cluster.local
-      resources:
-        requests:
-          memory: 512Mi
-          cpu: 250m
-        limits:
-          memory: 1Gi
-          cpu: 500m
-    app:
-      enabled: true
-      host: "control-plane-app.neuraltrust.ai"
-      secondaryHost: ""
-      service:
-        type: LoadBalancer
-      ingress:
-        enabled: true
-        className: "nginx"
-        annotations:
-          nginx.ingress.kubernetes.io/ssl-redirect: "true"
-          nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-          nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
-          nginx.ingress.kubernetes.io/x-frame-options: "DENY"
-          nginx.ingress.kubernetes.io/x-content-type-options: "nosniff"
-          nginx.ingress.kubernetes.io/x-xss-protection: "1; mode=block"
-          nginx.ingress.kubernetes.io/proxy-body-size: "50m"
-          nginx.ingress.kubernetes.io/proxy-connect-timeout: "600"
-          nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
-          nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
-          nginx.ingress.kubernetes.io/enable-cors: "true"
-          nginx.ingress.kubernetes.io/cors-allow-origin: "https://*"
-          nginx.ingress.kubernetes.io/cors-allow-methods: "PUT, GET, POST, OPTIONS, DELETE, PATCH"
-          nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,token,Token,Content-Length,Accept,Origin,Token,token"
-          nginx.ingress.kubernetes.io/proxy-buffer-size: "128k"
-        tls:
-          enabled: true
-          secretName: ""
-      replicaCount: 1
-      image:
-        repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-        tag: "v1.7.4"
-        pullPolicy: "Always"
-        imagePullSecrets:
-          - name: gcr-secret
-      config:
-        nodeEnv: production
-        port: 3000
-        # URLs will be auto-generated from OpenShift Routes if global.openshift=true and global.openshiftDomain is set
-        # Otherwise, set these manually or they will default to internal service URLs
-        controlPlaneApiUrl: ""  # Auto: https://control-plane-api.{global.openshiftDomain} or http://control-plane-api-service.{namespace}.svc.cluster.local
-        dataPlaneApiUrl: ""  # Auto: https://data-plane-api.{global.openshiftDomain} or http://data-plane-api-service.{namespace}.svc.cluster.local
-        schedulerUrl: ""  # Auto: https://control-plane-scheduler.{global.openshiftDomain} or http://control-plane-scheduler-service.{namespace}.svc.cluster.local
-        trustgateControlPlaneUrl: ""  # Auto: https://trustgate-admin.{global.openshiftDomain} or https://admin.neuraltrust.ai
-        trustgateDataPlaneUrl: ""  # Auto: https://trustgate-gateway.{global.openshiftDomain} or https://gateway.neuraltrust.ai
-        trustgateActionsUrl: ""  # Auto: https://trustgate-actions.{global.openshiftDomain} or https://actions.neuraltrust.ai
-        nextAuthUrl: ""  # Auto: https://{app.host} or https://control-plane-app.neuraltrust.ai
-        firewallApiUrl: ""
-        modelScannerApiUrl: ""
-        openaiModel: "gpt-4o-mini"
-        kafkaHost: "kafka"
-        kafkaPort: "9092"
-      resources:
-        requests:
-          memory: 512Mi
-          cpu: 250m
-        limits:
-          memory: 1Gi
-          cpu: 500m
-      initContainer:
-        resources:
-          requests:
-            memory: 512Mi
-            cpu: 250m
-          limits:
-            memory: 1Gi
-            cpu: 500m
-      postgresql:
-        installInCluster: false
-        secrets:
-          name: "postgresql-secrets"
-          user: "neuraltrust"
-          password: ""
-          database: "neuraltrust"
-          host: ""
-          port: "5432"
-        image:
-          repository: "postgres"
-          tag: "17.2-alpine"
-          pullPolicy: "IfNotPresent"
-          imagePullSecrets:
-            - name: ""
-        persistence:
-          enabled: true
-          size: 10Gi
-          storageClass: ""
-          preserveOnDelete: true
-        resources:
-          requests:
-            memory: 512Mi
-            cpu: 250m
-          limits:
-            memory: 1Gi
-            cpu: 500m
-        service:
-          type: ClusterIP
-          port: 5432
-
-neuraltrust:
-  # Data Plane Configuration
-  dataPlane:
-    enabled: true
-    preserveExistingSecrets: false
-    imagePullSecrets: ""  # Docker registry secret name for pulling images (set via --set dataPlane.imagePullSecrets="secret-name")
-    secrets:
-      openaiApiKeySecretName: "openai-secrets"
-      # You can provide either a direct value (string) or a secret reference (object)
-      # Direct value example: openaiApiKey: "sk-..."
-      # Secret reference example: openaiApiKey: {secretName: "existing-secret", secretKey: "OPENAI_API_KEY"}
-      openaiApiKey: ""  # Define this value or use secret reference
-      googleApiKeySecretName: "google-secrets"
-      googleApiKey: ""  # Define this value or use secret reference
-      resendApiKeySecretName: "resend-secrets"
-      resendApiKey: ""  # Define this value or use secret reference
-      dataPlaneJWTSecretName: "data-plane-jwt-secret"
-      dataPlaneJWTSecret: ""  # Define this value or use secret reference
-      huggingFaceTokenSecretName: "huggingface-secrets"
-      huggingFaceToken: ""  # Define this value or use secret reference
-    components:
-      # ClickHouse connection configuration
-      # IMPORTANT: When infrastructure.clickhouse.deploy=true, set:
-      #   - enabled: true (to enable clickhouse components in data-plane)
-      #   - host: "<release-name>-clickhouse" (will be auto-set by subchart)
-      # When infrastructure.clickhouse.deploy=false, set:
-      #   - enabled: false (clickhouse is external)
-      #   - host: <external-host> (from infrastructure.clickhouse.external.host)
-      #   - port: <external-port> (from infrastructure.clickhouse.external.port)
-      #   - user: <external-user> (from infrastructure.clickhouse.external.user)
-      #   - database: <external-database> (from infrastructure.clickhouse.external.database)
-      clickhouse:
-        enabled: true  # Set to false if using external ClickHouse
-        # Connection details - will be used by subchart to create clickhouse-secrets
-        host: "clickhouse"  # When deploy=true, this will be overridden by subchart. When deploy=false, use external host.
-        port: "8123"
-        user: "neuraltrust"
-        database: "neuraltrust"
-        backup:
-          enabled: false
-          type: "s3"  # s3 or gcs
-          image:
-            repository: "curlimages/curl"
-            tag: "8.13.0"
-          s3:
-            bucket: ""
-            region: ""
-            accessKey: ""
-            secretKey: ""
-            endpoint: ""
-          gcs:
-            bucket: ""
-            accessKey: ""
-            secretKey: ""
-        auth:
-          username: "neuraltrust"
-        secrets:
-          name: "clickhouse-secrets"
-        configmap:
-          name: "clickhouse-init-job"
-        resources:
-          requests:
-            memory: 512Mi
-            cpu: 250m
-          limits:
-            memory: 1Gi
-            cpu: 500m
-      # Kafka connection configuration
-      # IMPORTANT: When infrastructure.kafka.deploy=true, Kafka will be deployed
-      # When infrastructure.kafka.deploy=false, configure external Kafka connection
-      # The KAFKA_BOOTSTRAP_SERVERS env var in deployments uses "kafka:9092" by default
-      # For external Kafka, you may need to update the deployment templates or use a service
-      kafka:
-        enabled: true  # Set to false if using external Kafka
-        connect:
-          replicas: 1
-          image:
-            repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect  # Set via --set dataPlane.components.kafka.connect.image.repository="your-repo/kafka-connect"
-            tag: v0.0.1  # Set via --set dataPlane.components.kafka.connect.image.tag="your-tag"
-            pullPolicy: Always  # Set via --set dataPlane.components.kafka.connect.image.pullPolicy="IfNotPresent"
-            imagePullSecrets:
-              - name: ""
-          resources:
-            limits:
-              cpu: "1"
-              memory: 4Gi
-            requests:
-              cpu: 500m
-              memory: 2Gi
-        broker:
-          replicas: 1
-          imagePullSecrets:
-            - name: ""
-          resources:
-            requests:
-              memory: 1Gi
-              cpu: 500m
-            limits:
-              memory: 2Gi
-              cpu: 1
-      api:
-        enabled: true
-        host: "data-plane-api.neuraltrust.ai" # set to your domain
-        service:
-          type: LoadBalancer
-        ingress:
-          enabled: true
-          className: "nginx"
-          annotations:
-            nginx.ingress.kubernetes.io/ssl-redirect: "true"
-            nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-            nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
-            nginx.ingress.kubernetes.io/x-frame-options: "DENY"
-            nginx.ingress.kubernetes.io/x-content-type-options: "nosniff"
-            nginx.ingress.kubernetes.io/x-xss-protection: "1; mode=block"
-            nginx.ingress.kubernetes.io/proxy-body-size: "50m"
-            nginx.ingress.kubernetes.io/proxy-connect-timeout: "600"
-            nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
-            nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
-            nginx.ingress.kubernetes.io/enable-cors: "true"
-            nginx.ingress.kubernetes.io/cors-allow-origin: "https://*"
-            nginx.ingress.kubernetes.io/cors-allow-methods: "PUT, GET, POST, OPTIONS, DELETE, PATCH"
-            nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,token,Token,Content-Length,Accept,Origin,Token,token"
-          tls:
-            enabled: true
-            secretName: ""
-        classifierModel: "gpt"
-        image:
-          repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.7.8
-          pullPolicy: Always
-          imagePullSecrets:
-            - name: gcr-secret
-        accessMode: ReadWriteOnce
-        huggingfaceToken: ""
-        storage: 10Gi
-        trustTestConfig:
-          evaluator:
-            provider: "openai"
-            model: "gpt-5-mini"
-            temperature: 0.0
-            extra_args:
-              reasoning_effort: "low"
-            retry_config:
-              attempts: 3
-          question_generator:
-            provider: "openai"
-            model: "gpt-5-mini"
-            extra_args:
-              reasoning_effort: "low"
-            temperature: 0.0
-            retry_config:
-              attempts: 3
-          translation:
-            provider: "google"
-            model: "gemini-2.0-flash"
-            temperature: 0.0
-            retry_config:
-              attempts: 3
-          topic_summarizer:
-            provider: "google"
-            model: "gemini-2.0-flash"
-            temperature: 0.2
-            retry_config:
-              attempts: 3
-          embeddings:
-            provider: "openai"
-            model: "text-embedding-3-small"
-        replicas: 3
-        resources:
-          requests:
-            cpu: 1
-            memory: 2Gi
-          limits:
-            cpu: 2
-            memory: 3Gi
-      worker:
-        enabled: true
-        replicas: 1
-        image:
-          repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/workers
-          tag: v1.4.0-with-models
-          pullPolicy: Always
-          imagePullSecrets:
-            - name: gcr-secret
-        resources:
-          requests:
-            memory: 4Gi
-            cpu: 1000m
-          limits:
-            memory: 8Gi
-            cpu: 2000m
-      connectorsJob:
-        image: curlimages/curl:8.13.0
-
-  # Control Plane Configuration
-  controlPlane:
-    enabled: true
-    preserveExistingSecrets: false
-    imagePullSecrets: ""  # Docker registry secret name for pulling images (set via --set dataPlane.imagePullSecrets="secret-name")
-    secrets:
-      # You can provide either a direct value (string) or a secret reference (object)
-      controlPlaneJWTSecret: ""  # Define this value or use secret reference
-      openaiApiKey: ""  # Define this value or use secret reference
-      resendApiKey: ""  # Define this value or use secret reference
-      resendAlertSender: ""  # Define this value or use secret reference
-      resendInviteSender: ""  # Define this value or use secret reference
-      trustgateJwtSecret: ""  # Define this value or use secret reference
-      firewallJwtSecret: ""  # Define this value or use secret reference
-      modelScannerSecret: ""  # Define this value or use secret reference
-    components:
-      scheduler:
-        enabled: true
-        host: "control-plane-scheduler.neuraltrust.ai"
-        service:
-          type: LoadBalancer
-        ingress:
-          enabled: true
-          className: "nginx"
-          annotations:
-            nginx.ingress.kubernetes.io/ssl-redirect: "true"
-            nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-            nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
-            nginx.ingress.kubernetes.io/x-frame-options: "DENY"
-            nginx.ingress.kubernetes.io/x-content-type-options: "nosniff"
-            nginx.ingress.kubernetes.io/x-xss-protection: "1; mode=block"
-            nginx.ingress.kubernetes.io/proxy-body-size: "50m"
-            nginx.ingress.kubernetes.io/proxy-connect-timeout: "600"
-            nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
-            nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
-            nginx.ingress.kubernetes.io/enable-cors: "true"
-            nginx.ingress.kubernetes.io/cors-allow-origin: "https://*"
-            nginx.ingress.kubernetes.io/cors-allow-methods: "PUT, GET, POST, OPTIONS, DELETE, PATCH"
-            nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,token,Token,Content-Length,Accept,Origin,Token,token"
-            nginx.ingress.kubernetes.io/proxy-buffer-size: "128k"
-          tls:
-            enabled: true
-            secretName: ""
-        replicaCount: 1
-        image:
-          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/scheduler"
-          tag: "v1.4.0"
-          pullPolicy: "Always"
-          imagePullSecrets:
-            - name: gcr-secret
-        config:
-          dataPlaneApiUrl: ""
-        resources:
-          requests:
-            memory: 256Mi
-            cpu: 100m
-          limits:
-            memory: 512Mi
-            cpu: 200m
-      api:
-        enabled: true
-        host: "control-plane-api.neuraltrust.ai"
-        service:
-          type: LoadBalancer
-        ingress:
-          enabled: true
-          className: "nginx"
-          annotations:
-            nginx.ingress.kubernetes.io/ssl-redirect: "true"
-            nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-            nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
-            nginx.ingress.kubernetes.io/x-frame-options: "DENY"
-            nginx.ingress.kubernetes.io/x-content-type-options: "nosniff"
-            nginx.ingress.kubernetes.io/x-xss-protection: "1; mode=block"
-            nginx.ingress.kubernetes.io/proxy-body-size: "50m"
-            nginx.ingress.kubernetes.io/proxy-connect-timeout: "600"
-            nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
-            nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
-            nginx.ingress.kubernetes.io/enable-cors: "true"
-            nginx.ingress.kubernetes.io/cors-allow-origin: "https://*"
-            nginx.ingress.kubernetes.io/cors-allow-methods: "PUT, GET, POST, OPTIONS, DELETE, PATCH"
-            nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,token,Token,Content-Length,Accept,Origin,Token,token"
-            nginx.ingress.kubernetes.io/proxy-buffer-size: "128k"
-          tls:
-            enabled: true
-            secretName: ""
-        replicaCount: 2
-        image:
-          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api"
-          tag: "v1.7.3"
-          pullPolicy: "Always"
-          imagePullSecrets:
-            - name: gcr-secret
-        secrets:
-          controlPlaneJWTSecret: ""
-        config:
-          dataPlaneApiUrl: ""
-        resources:
-          requests:
-            memory: 512Mi
-            cpu: 250m
-          limits:
-            memory: 1Gi
-            cpu: 500m
-      app:
-        enabled: true
-        host: "control-plane-app.neuraltrust.ai"
-        secondaryHost: ""
-        service:
-          type: LoadBalancer
-        ingress:
-          enabled: true
-          className: "nginx"
-          annotations:
-            nginx.ingress.kubernetes.io/ssl-redirect: "true"
-            nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-            nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
-            nginx.ingress.kubernetes.io/x-frame-options: "DENY"
-            nginx.ingress.kubernetes.io/x-content-type-options: "nosniff"
-            nginx.ingress.kubernetes.io/x-xss-protection: "1; mode=block"
-            nginx.ingress.kubernetes.io/proxy-body-size: "50m"
-            nginx.ingress.kubernetes.io/proxy-connect-timeout: "600"
-            nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
-            nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
-            nginx.ingress.kubernetes.io/enable-cors: "true"
-            nginx.ingress.kubernetes.io/cors-allow-origin: "https://*"
-            nginx.ingress.kubernetes.io/cors-allow-methods: "PUT, GET, POST, OPTIONS, DELETE, PATCH"
-            nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,token,Token,Content-Length,Accept,Origin,Token,token"
-            nginx.ingress.kubernetes.io/proxy-buffer-size: "128k"
-          tls:
-            enabled: true
-            secretName: ""
-        replicaCount: 1
-        image:
-          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.7.4"
-          pullPolicy: "Always"
-          imagePullSecrets:
-            - name: gcr-secret
-        config:
-          nodeEnv: production
-          port: 3000
-          dataPlaneApiUrl: ""
-          openaiModel: "gpt-4o-mini"
-          trustgateControlPlaneUrl: "https://admin.neuraltrust.ai"
-          trustgateDataPlaneUrl: "https://gateway.neuraltrust.ai"
-          firewallApiUrl: "http://data-plane-api-service.neuraltrust.svc.cluster.local:80"
-          modelScannerApiUrl: "https://trustscan.neuraltrust.ai/v1"
-          kafkaHost: "kafka"
-          kafkaPort: "9092"
-        resources:
-          requests:
-            memory: 512Mi
-            cpu: 250m
-          limits:
-            memory: 1Gi
-            cpu: 500m
-        initContainer:
-          resources:
-            requests:
-              memory: 512Mi
-              cpu: 250m
-            limits:
-              memory: 1Gi
-              cpu: 500m
-      # PostgreSQL connection configuration
-      # IMPORTANT: Set installInCluster based on infrastructure.postgresql.deploy
-      # When infrastructure.postgresql.deploy=true, set installInCluster: true
-      # When infrastructure.postgresql.deploy=false, set installInCluster: false and configure external connection
-      postgresql:
-        installInCluster: false  # Set to true if infrastructure.postgresql.deploy=true
-        secrets:
-          name: "postgresql-secrets"
-          user: "postgres"
-          password: ""
-          database: "neuraltrust"
-          host: ""
-          port: "5432"
-        image:
-          repository: "postgres"
-          tag: "17.2-alpine"
-          pullPolicy: "IfNotPresent"
-          imagePullSecrets:
-            - name: ""
-        persistence:
-          enabled: true
-          size: 10Gi
-          storageClass: ""
-          preserveOnDelete: true
-        resources:
-          requests:
-            memory: 512Mi
-            cpu: 250m
-          limits:
-            memory: 1Gi
-            cpu: 500m
-        service:
-          type: ClusterIP
-          port: 5432
 
 # TrustGate Configuration
 trustgate:
   enabled: true
-  imagePullSecrets: ""  # Docker registry secret name for pulling images (set via --set trustgate.imagePullSecrets="secret-name")
   global:
-    version: "ce"  # can be "ce" or "ee"
-    imageRegistry: "docker.io"
-    imagePullSecrets: []  # If empty, will use global.imagePullSecrets from parent chart
+    version: "ee"  # can be "ce" or "ee"
+    imageRegistry: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/accounts-repo"
     storageClass: ""
     deploymentType: shared  # shared or dedicated
     huggingface:
       apiKeySecret: "hf-api-key"
     image:
       pullPolicy: Always
-      image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee"
-      repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee"
+      image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/accounts-repo/trustgate-ee"
       tag: "v1.9.27"
-      # imagePullSecrets will use trustgate.global.imagePullSecrets if set, otherwise falls back to parent global.imagePullSecrets
-      imagePullSecrets: []  # If empty, will use global.imagePullSecrets converted to array format
+      # imagePullSecrets: if not set, will fall back to parent chart's global.imagePullSecrets
+      imagePullSecrets: ["user-registry"]  # Set to array of secret names, e.g., ["secret-name"] or leave empty to use parent global.imagePullSecrets
     env:
-      SERVER_SECRET_KEY: ""  # Define this value
+      SERVER_SECRET_KEY: "12345"  # Define this value
       SERVER_BASE_DOMAIN: "neuraltrust.ai"
       SERVER_ADMIN_PORT: "8080"
       SERVER_METRICS_PORT: "9090"
       SERVER_PROXY_PORT: "8081"
       SERVER_ACTIONS_PORT: "8084"
       # Database connection (uses infrastructure.postgresql config)
-      DATABASE_HOST: ""  # Will be auto-configured
+      # When control-plane PostgreSQL is installed in-cluster, use:
+      # - DATABASE_HOST: "control-plane-postgresql" (service name)
+      # - DATABASE_USER: "neuraltrust" (matches control-plane PostgreSQL user)
+      # - DATABASE_PASSWORD: same as control-plane PostgreSQL password
+      DATABASE_HOST: "control-plane-postgresql"  # Use control-plane PostgreSQL service name when installInCluster=true
       DATABASE_PORT: "5432"
-      DATABASE_USER: "postgres"
-      DATABASE_PASSWORD: ""  # Will be auto-configured
+      DATABASE_USER: "trustgate"
+      DATABASE_PASSWORD: "12345" #define this value
       DATABASE_NAME: "trustgate"
       # PostgreSQL SSL mode (disable, require, verify-ca, verify-full)
-      DATABASE_SSL_MODE: "require"
+      # Use "disable" when installInCluster=true, "require" for external PostgreSQL
+      DATABASE_SSL_MODE: "disable"  # Use "disable" for in-cluster PostgreSQL, "require" for external
       # Redis connection
       REDIS_HOST: ""  # Will be auto-configured if redis.enabled
       REDIS_PORT: "6379"
@@ -1189,10 +353,10 @@ trustgate:
   redis:
     enabled: true
     image:
-      repository: redislabs/redisearch  # Set via --set trustgate.redis.image.repository="your-repo/redisearch"
+      repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/accounts-repo/redislabs/redisearch
       tag: 2.6.9
-      pullPolicy: IfNotPresent
-      imagePullSecrets: []  # Set via --set trustgate.redis.image.imagePullSecrets[0]="user-registry"
+      pullPolicy: Always
+      imagePullSecrets: ["user-registry"]
     # External Redis configuration if redis.enabled is false
     external:
       host: ""
@@ -1246,26 +410,8 @@ trustgate:
         enabled: true
         replicas: 3
 
-  # Ingress configuration
   ingress:
-    enabled: true
-    className: nginx
-    annotations:
-      nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
-      nginx.ingress.kubernetes.io/cors-expose-headers: "*"
-      nginx.ingress.kubernetes.io/cors-allow-headers: "X-API-KEY,X-API-Key,x-api-key,DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,token,Token,Authorization"
-      nginx.ingress.kubernetes.io/cors-allow-methods: "PUT, GET, POST, OPTIONS, DELETE"
-      nginx.ingress.kubernetes.io/enable-cors: "true"
-      nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-      nginx.ingress.kubernetes.io/proxy-body-size: "50m"
-      nginx.ingress.kubernetes.io/proxy-buffer-size: "128k"
-      nginx.ingress.kubernetes.io/proxy-connect-timeout: "600"
-      nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
-      nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
-      nginx.ingress.kubernetes.io/ssl-redirect: "true"
-      nginx.ingress.kubernetes.io/x-content-type-options: "nosniff"
-      nginx.ingress.kubernetes.io/x-frame-options: "DENY"
-      nginx.ingress.kubernetes.io/x-xss-protection: "1; mode=block"
+    enabled: false
     controlPlane:
       host: "admin.neuraltrust.ai"
     dataPlane:
@@ -1273,66 +419,21 @@ trustgate:
     actions:
       host: "actions.neuraltrust.ai"
 
-  # Ingress Controller configuration
-  ingressController:
-    enabled: true
-    replicas: 1
-    image:
-      repository: k8s.gcr.io/ingress-nginx/controller
-      tag: v1.11.3
-      pullPolicy: IfNotPresent
-    ingressClass: trustgate-nginx
-    watchNamespace: ""
-    resources:
-      requests:
-        cpu: 100m
-        memory: 128Mi
-      limits:
-        cpu: 1000m
-        memory: 1Gi
-    service:
-      type: LoadBalancer
-      annotations: {}
-    config:
-      use-forwarded-headers: "true"
-      proxy-buffer-size: "16k"
-      ssl-redirect: "true"
-      hsts: "true"
-      hsts-include-subdomains: "true"
-      server-tokens: "false"
 
-  # Cert-manager configuration
-  certManager:
-    enabled: true
-    issuerName: "letsencrypt-prod"
-    issuerKind: "ClusterIssuer"
-    email: "admin@neuraltrust.ai"
-    customCertificates:
-        enabled: false
-        controlPlane:
-          cert: |
-            -----BEGIN CERTIFICATE-----
-            -----END CERTIFICATE-----
-          key: |
-            -----BEGIN PRIVATE KEY-----
-            -----END PRIVATE KEY-----
-
-# Subchart value mappings
+# NeuralTrust Control Plane subchart values
 # Helm requires values to be passed to subcharts using the subchart name as a prefix
-# This section maps controlPlane values to the neuraltrust-control-plane subchart
-# NOTE: Update both this section and the root-level controlPlane/neuraltrust.controlPlane sections when making changes
 neuraltrust-control-plane:
   controlPlane:
     enabled: true
     preserveExistingSecrets: false
-    imagePullSecrets: ""
+    imagePullSecrets: "user-registry"  # Set imagePullSecrets for all control-plane components (scheduler, api, app, postgresql)
     secrets:
-      controlPlaneJWTSecret: ""
+      controlPlaneJWTSecret: "12345" #define this value
       openaiApiKey: ""
       resendApiKey: ""
       resendAlertSender: ""
       resendInviteSender: ""
-      trustgateJwtSecret: ""
+      trustgateJwtSecret: "12345" #define this value
       firewallJwtSecret: ""
       modelScannerSecret: ""
     components:
@@ -1342,36 +443,17 @@ neuraltrust-control-plane:
         service:
           type: LoadBalancer
         ingress:
-          enabled: true
-          className: "nginx"
-          annotations:
-            nginx.ingress.kubernetes.io/ssl-redirect: "true"
-            nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-            nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
-            nginx.ingress.kubernetes.io/x-frame-options: "DENY"
-            nginx.ingress.kubernetes.io/x-content-type-options: "nosniff"
-            nginx.ingress.kubernetes.io/x-xss-protection: "1; mode=block"
-            nginx.ingress.kubernetes.io/proxy-body-size: "50m"
-            nginx.ingress.kubernetes.io/proxy-connect-timeout: "600"
-            nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
-            nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
-            nginx.ingress.kubernetes.io/enable-cors: "true"
-            nginx.ingress.kubernetes.io/cors-allow-origin: "https://*"
-            nginx.ingress.kubernetes.io/cors-allow-methods: "PUT, GET, POST, OPTIONS, DELETE, PATCH"
-            nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,token,Token,Content-Length,Accept,Origin,Token,token"
-            nginx.ingress.kubernetes.io/proxy-buffer-size: "128k"
-          tls:
-            enabled: true
-            secretName: ""
+          enabled: false
         replicaCount: 1
         image:
-          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/scheduler"
+          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/accounts-repo/scheduler"
           tag: "v1.4.0"
           pullPolicy: "Always"
-          imagePullSecrets:
-            - name: gcr-secret
         config:
-          dataPlaneApiUrl: ""
+          # URLs will be auto-generated from OpenShift Routes if global.openshift=true and global.openshiftDomain is set
+          # Otherwise, set these manually or they will default to internal service URLs
+          controlPlaneApiUrl: ""  # Auto: https://control-plane-api.{global.openshiftDomain} or http://control-plane-api-service.{namespace}.svc.cluster.local
+          dataPlaneApiUrl: ""  # Auto: https://data-plane-api.{global.openshiftDomain} or http://data-plane-api-service.{namespace}.svc.cluster.local
         resources:
           requests:
             memory: 256Mi
@@ -1385,38 +467,19 @@ neuraltrust-control-plane:
         service:
           type: LoadBalancer
         ingress:
-          enabled: true
-          className: "nginx"
-          annotations:
-            nginx.ingress.kubernetes.io/ssl-redirect: "true"
-            nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-            nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
-            nginx.ingress.kubernetes.io/x-frame-options: "DENY"
-            nginx.ingress.kubernetes.io/x-content-type-options: "nosniff"
-            nginx.ingress.kubernetes.io/x-xss-protection: "1; mode=block"
-            nginx.ingress.kubernetes.io/proxy-body-size: "50m"
-            nginx.ingress.kubernetes.io/proxy-connect-timeout: "600"
-            nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
-            nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
-            nginx.ingress.kubernetes.io/enable-cors: "true"
-            nginx.ingress.kubernetes.io/cors-allow-origin: "https://*"
-            nginx.ingress.kubernetes.io/cors-allow-methods: "PUT, GET, POST, OPTIONS, DELETE, PATCH"
-            nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,token,Token,Content-Length,Accept,Origin,Token,token"
-            nginx.ingress.kubernetes.io/proxy-buffer-size: "128k"
-          tls:
-            enabled: true
-            secretName: ""
+          enabled: false
         replicaCount: 2
         image:
-          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api"
+          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/accounts-repo/control-plane-api"
           tag: "v1.7.3"
           pullPolicy: "Always"
-          imagePullSecrets:
-            - name: gcr-secret
         secrets:
-          controlPlaneJWTSecret: ""
+          controlPlaneJWTSecret: "12345" #define this value
         config:
-          dataPlaneApiUrl: ""
+          # URLs will be auto-generated from OpenShift Routes if global.openshift=true and global.openshiftDomain is set
+          # Otherwise, set these manually or they will default to internal service URLs
+          controlPlaneApiUrl: ""  # Auto: https://control-plane-api.{global.openshiftDomain} or http://control-plane-api-service.{namespace}.svc.cluster.local
+          dataPlaneApiUrl: ""  # Auto: https://data-plane-api.{global.openshiftDomain} or http://data-plane-api-service.{namespace}.svc.cluster.local
         resources:
           requests:
             memory: 512Mi
@@ -1431,43 +494,27 @@ neuraltrust-control-plane:
         service:
           type: LoadBalancer
         ingress:
-          enabled: true
-          className: "nginx"
-          annotations:
-            nginx.ingress.kubernetes.io/ssl-redirect: "true"
-            nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-            nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
-            nginx.ingress.kubernetes.io/x-frame-options: "DENY"
-            nginx.ingress.kubernetes.io/x-content-type-options: "nosniff"
-            nginx.ingress.kubernetes.io/x-xss-protection: "1; mode=block"
-            nginx.ingress.kubernetes.io/proxy-body-size: "50m"
-            nginx.ingress.kubernetes.io/proxy-connect-timeout: "600"
-            nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
-            nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
-            nginx.ingress.kubernetes.io/enable-cors: "true"
-            nginx.ingress.kubernetes.io/cors-allow-origin: "https://*"
-            nginx.ingress.kubernetes.io/cors-allow-methods: "PUT, GET, POST, OPTIONS, DELETE, PATCH"
-            nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,token,Token,Content-Length,Accept,Origin,Token,token"
-            nginx.ingress.kubernetes.io/proxy-buffer-size: "128k"
-          tls:
-            enabled: true
-            secretName: ""
+          enabled: false
         replicaCount: 1
         image:
-          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
+          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/accounts-repo/app"
           tag: "v1.7.4"
           pullPolicy: "Always"
-          imagePullSecrets:
-            - name: gcr-secret
         config:
           nodeEnv: production
           port: 3000
-          dataPlaneApiUrl: ""
+          # URLs will be auto-generated from OpenShift Routes if global.openshift=true and global.openshiftDomain is set
+          # Otherwise, set these manually or they will default to internal service URLs
+          controlPlaneApiUrl: ""  # Auto: https://control-plane-api.{global.openshiftDomain} or http://control-plane-api-service.{namespace}.svc.cluster.local
+          dataPlaneApiUrl: ""  # Auto: https://data-plane-api.{global.openshiftDomain} or http://data-plane-api-service.{namespace}.svc.cluster.local
+          schedulerUrl: ""  # Auto: https://control-plane-scheduler.{global.openshiftDomain} or http://control-plane-scheduler-service.{namespace}.svc.cluster.local
+          trustgateControlPlaneUrl: ""  # Auto: https://trustgate-admin.{global.openshiftDomain} or https://admin.neuraltrust.ai
+          trustgateDataPlaneUrl: ""  # Auto: https://trustgate-gateway.{global.openshiftDomain} or https://gateway.neuraltrust.ai
+          trustgateActionsUrl: ""  # Auto: https://trustgate-actions.{global.openshiftDomain} or https://actions.neuraltrust.ai
+          nextAuthUrl: ""  # Auto: https://{app.host} or https://control-plane-app.neuraltrust.ai
+          firewallApiUrl: ""
+          modelScannerApiUrl: ""
           openaiModel: "gpt-4o-mini"
-          trustgateControlPlaneUrl: "https://admin.neuraltrust.ai"
-          trustgateDataPlaneUrl: "https://gateway.neuraltrust.ai"
-          firewallApiUrl: "http://firewall-api-prod.firewall-prod.svc.cluster.local:80"
-          modelScannerApiUrl: "https://trustscan.neuraltrust.ai/v1"
           kafkaHost: "kafka"
           kafkaPort: "9092"
         resources:
@@ -1486,20 +533,20 @@ neuraltrust-control-plane:
               memory: 1Gi
               cpu: 500m
       postgresql:
-        installInCluster: false  # Set to true via --set to enable in-cluster PostgreSQL deployment
+        installInCluster: true  # Set to true to enable in-cluster PostgreSQL deployment
         secrets:
           name: "postgresql-secrets"
-          user: "postgres"
-          password: ""  # Set via --set neuraltrust-control-plane.controlPlane.components.postgresql.secrets.password="your-password"
-          database: "neuraltrust"
-          host: ""  # Set via --set neuraltrust-control-plane.controlPlane.components.postgresql.secrets.host="control-plane-postgresql" when installInCluster=true
-          port: "5432"
+          user: "neuraltrust"  # PostgreSQL user (default: "neuraltrust" for in-cluster, "postgres" for external)
+          password: "12345"  # PostgreSQL password (required when installInCluster=true or using external PostgreSQL)
+          database: "neuraltrust"  # PostgreSQL database name
+          host: "control-plane-postgresql"  # PostgreSQL host (set to "control-plane-postgresql" when installInCluster=true, or external host when using external PostgreSQL)
+          port: "5432"  # PostgreSQL port
         image:
-          repository: "postgres"
+          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/accounts-repo/postgres"
           tag: "17.2-alpine"
-          pullPolicy: "IfNotPresent"
+          pullPolicy: "Always"
           imagePullSecrets:
-            - name: ""
+            - name: "user-registry"
         persistence:
           enabled: true
           size: 10Gi
@@ -1523,12 +570,13 @@ neuraltrust-control-plane:
           -----BEGIN PRIVATE KEY-----
           -----END PRIVATE KEY-----
 
-# Map dataPlane values to neuraltrust-data-plane subchart
+# NeuralTrust Data Plane subchart values
+# Helm requires values to be passed to subcharts using the subchart name as a prefix
 neuraltrust-data-plane:
   dataPlane:
     enabled: true
     preserveExistingSecrets: false
-    imagePullSecrets: ""
+    imagePullSecrets: "user-registry"  # Set imagePullSecrets for all data-plane components (api, worker, kafka-connect)
     secrets:
       openaiApiKeySecretName: "openai-secrets"
       openaiApiKey: ""
@@ -1537,7 +585,7 @@ neuraltrust-data-plane:
       resendApiKeySecretName: "resend-secrets"
       resendApiKey: ""
       dataPlaneJWTSecretName: "data-plane-jwt-secret"
-      dataPlaneJWTSecret: ""
+      dataPlaneJWTSecret: "12345" #define this value
       huggingFaceTokenSecretName: "huggingface-secrets"
       huggingFaceToken: ""
     components:
@@ -1548,11 +596,9 @@ neuraltrust-data-plane:
         user: "neuraltrust"
         database: "neuraltrust"
         image:
-          repository: "clickhouse/clickhouse-server"
+          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/accounts-repo/clickhouse/clickhouse-server"
           tag: "25.3.2"
-          pullPolicy: "IfNotPresent"
-          imagePullSecrets:
-            - name: ""
+          pullPolicy: "Always"
         auth:
           username: "neuraltrust"
         secrets:
@@ -1571,11 +617,9 @@ neuraltrust-data-plane:
         connect:
           replicas: 1
           image:
-            repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect
+            repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/accounts-repo/kafka-connect
             tag: v0.0.1
             pullPolicy: Always
-            imagePullSecrets:
-              - name: ""
           resources:
             limits:
               cpu: "1"
@@ -1583,50 +627,18 @@ neuraltrust-data-plane:
             requests:
               cpu: 500m
               memory: 2Gi
-        broker:
-          replicas: 1
-          imagePullSecrets:
-            - name: ""
-          resources:
-            requests:
-              memory: 1Gi
-              cpu: 500m
-            limits:
-              memory: 2Gi
-              cpu: 1
       api:
         enabled: true
         host: "data-plane-api.neuraltrust.ai"
         service:
           type: LoadBalancer
         ingress:
-          enabled: true
-          className: "nginx"
-          annotations:
-            nginx.ingress.kubernetes.io/ssl-redirect: "true"
-            nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-            nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
-            nginx.ingress.kubernetes.io/x-frame-options: "DENY"
-            nginx.ingress.kubernetes.io/x-content-type-options: "nosniff"
-            nginx.ingress.kubernetes.io/x-xss-protection: "1; mode=block"
-            nginx.ingress.kubernetes.io/proxy-body-size: "50m"
-            nginx.ingress.kubernetes.io/proxy-connect-timeout: "600"
-            nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
-            nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
-            nginx.ingress.kubernetes.io/enable-cors: "true"
-            nginx.ingress.kubernetes.io/cors-allow-origin: "https://*"
-            nginx.ingress.kubernetes.io/cors-allow-methods: "PUT, GET, POST, OPTIONS, DELETE, PATCH"
-            nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,token,Token,Content-Length,Accept,Origin,Token,token"
-          tls:
-            enabled: true
-            secretName: ""
+          enabled: false
         classifierModel: "gpt"
         image:
-          repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
+          repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/accounts-repo/data-plane-api
           tag: v1.7.8
           pullPolicy: Always
-          imagePullSecrets:
-            - name: gcr-secret
         accessMode: ReadWriteOnce
         huggingfaceToken: ""
         storage: 10Gi
@@ -1674,11 +686,9 @@ neuraltrust-data-plane:
         enabled: true
         replicas: 1
         image:
-          repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/workers
+          repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/accounts-repo/workers
           tag: v1.4.0-with-models
           pullPolicy: Always
-          imagePullSecrets:
-            - name: gcr-secret
         resources:
           requests:
             memory: 4Gi
@@ -1688,4 +698,3 @@ neuraltrust-data-plane:
             cpu: 2000m
       connectorsJob:
         image: curlimages/curl:8.13.0
-

@@ -206,6 +206,11 @@ spec:
             secretKeyRef:
               name: control-plane-secrets
               key: CONTROL_PLANE_JWT_SECRET
+        - name: DEFAULT_DATA_PLANE_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: data-plane-jwt-secret
+              key: DATA_PLANE_JWT_SECRET
         - name: OPENAI_API_KEY
           valueFrom:
             secretKeyRef:
@@ -219,4 +224,5 @@ spec:
               {{- else }}
               name: control-plane-secrets
               key: OPENAI_API_KEY
+              optional: true
               {{- end }}

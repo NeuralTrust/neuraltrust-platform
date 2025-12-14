@@ -218,9 +218,11 @@ spec:
               {{- else }}
               name: control-plane-secrets
               key: resend-api-key
+              optional: true
               {{- end }}
         - name: RESEND_SENDER
           valueFrom:
             secretKeyRef:
               name: control-plane-secrets
               key: resend-alert-sender
+              optional: true

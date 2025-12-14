@@ -56,11 +56,13 @@ spec:
             secretKeyRef:
               name: {{ if and .Values.dataPlane .Values.dataPlane.secrets .Values.dataPlane.secrets.openaiApiKeySecretName }}{{ .Values.dataPlane.secrets.openaiApiKeySecretName }}{{ else }}openai-secrets{{ end }}
               key: OPENAI_API_KEY
+              optional: true
         - name: GOOGLE_API_KEY
           valueFrom:
             secretKeyRef:
               name: {{ if and .Values.dataPlane .Values.dataPlane.secrets .Values.dataPlane.secrets.googleApiKeySecretName }}{{ .Values.dataPlane.secrets.googleApiKeySecretName }}{{ else }}google-secrets{{ end }}
               key: GOOGLE_API_KEY
+              optional: true
         - name: CLICKHOUSE_HOST
           valueFrom:
             secretKeyRef:

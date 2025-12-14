@@ -22,9 +22,51 @@ spec:
         runAsGroup: 999
         runAsNonRoot: true
       {{- end }}
+      {{- $pullSecrets := list }}
+      {{- $componentLevelSet := false }}
+      {{- /* Check component-level imagePullSecrets first */}}
       {{- if .Values.controlPlane.components.postgresql.image.imagePullSecrets }}
+        {{- $componentLevelSet = true }}
+        {{- range .Values.controlPlane.components.postgresql.image.imagePullSecrets }}
+          {{- $secretName := "" }}
+          {{- if kindIs "map" . }}
+            {{- $secretName = .name | default "" }}
+          {{- else if kindIs "string" . }}
+            {{- $secretName = . }}
+          {{- end }}
+          {{- /* Only add if secretName is non-empty and not "none" */}}
+          {{- if and $secretName (ne $secretName "") (ne $secretName "none") (gt (len (toString $secretName)) 0) }}
+            {{- $pullSecrets = append $pullSecrets $secretName }}
+          {{- end }}
+        {{- end }}
+      {{- end }}
+      {{- /* Fall back to root-level controlPlane.imagePullSecrets only if component-level is not explicitly set */}}
+      {{- if and (eq (len $pullSecrets) 0) (not $componentLevelSet) }}
+        {{- if and .Values.controlPlane (hasKey .Values.controlPlane "imagePullSecrets") .Values.controlPlane.imagePullSecrets }}
+          {{- if kindIs "string" .Values.controlPlane.imagePullSecrets }}
+            {{- if and .Values.controlPlane.imagePullSecrets (ne .Values.controlPlane.imagePullSecrets "") (ne .Values.controlPlane.imagePullSecrets "none") (gt (len (toString .Values.controlPlane.imagePullSecrets)) 0) }}
+              {{- $pullSecrets = append $pullSecrets .Values.controlPlane.imagePullSecrets }}
+            {{- end }}
+          {{- else if kindIs "slice" .Values.controlPlane.imagePullSecrets }}
+            {{- range .Values.controlPlane.imagePullSecrets }}
+              {{- $secretName := "" }}
+              {{- if kindIs "map" . }}
+                {{- $secretName = .name | default "" }}
+              {{- else if kindIs "string" . }}
+                {{- $secretName = . }}
+              {{- end }}
+              {{- if and $secretName (ne $secretName "") (ne $secretName "none") (gt (len (toString $secretName)) 0) }}
+                {{- $pullSecrets = append $pullSecrets $secretName }}
+              {{- end }}
+            {{- end }}
+          {{- end }}
+        {{- end }}
+      {{- end }}
+      {{- if gt (len $pullSecrets) 0 }}
       imagePullSecrets:
-        {{- toYaml .Values.controlPlane.components.postgresql.image.imagePullSecrets | nindent 10 }}
+        {{- range $pullSecrets }}
+        - name: {{ . }}
+        {{- end }}
       {{- end }}
       containers:
       - name: postgresql

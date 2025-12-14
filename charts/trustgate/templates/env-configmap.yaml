@@ -1,5 +1,3 @@
-{{- $existingConfigMap := (lookup "v1" "ConfigMap" .Release.Namespace "trustgate-env-vars") }}
-{{- if not $existingConfigMap }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -32,5 +30,4 @@ data:
   CONTROL_PLANE_HOST: trustgate-control-plane
   DATA_PLANE_HOST: trustgate-data-plane
   ACTIONS_HOST: trustgate-actions
-{{- end }}
 

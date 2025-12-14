@@ -12,10 +12,27 @@ Kafka has been deployed in this release.
 Using external Kafka at {{ .Values.infrastructure.kafka.external.bootstrapServers }}
 {{- end }}
 
-{{- if .Values.infrastructure.postgresql.deploy }}
+{{- $postgresql := false }}
+{{- $postgresqlHost := "" }}
+{{- $postgresqlPort := "" }}
+{{- $cpValues := index .Values "neuraltrust-control-plane" }}
+{{- if and $cpValues $cpValues.controlPlane $cpValues.controlPlane.components $cpValues.controlPlane.components.postgresql }}
+  {{- $postgresql = $cpValues.controlPlane.components.postgresql.installInCluster }}
+  {{- if and $cpValues.controlPlane.components.postgresql.secrets $cpValues.controlPlane.components.postgresql.secrets.host }}
+    {{- $postgresqlHost = $cpValues.controlPlane.components.postgresql.secrets.host }}
+  {{- end }}
+  {{- if and $cpValues.controlPlane.components.postgresql.secrets $cpValues.controlPlane.components.postgresql.secrets.port }}
+    {{- $postgresqlPort = $cpValues.controlPlane.components.postgresql.secrets.port }}
+  {{- else }}
+    {{- $postgresqlPort = "5432" }}
+  {{- end }}
+{{- end }}
+{{- if $postgresql }}
 PostgreSQL has been deployed in this release.
+{{- else if $postgresqlHost }}
+Using external PostgreSQL at {{ $postgresqlHost }}:{{ $postgresqlPort }}
 {{- else }}
-Using external PostgreSQL at {{ .Values.infrastructure.postgresql.external.host }}:{{ .Values.infrastructure.postgresql.external.port }}
+PostgreSQL configuration not specified.
 {{- end }}
 
 {{- if .Values.neuraltrust.dataPlane.enabled }}

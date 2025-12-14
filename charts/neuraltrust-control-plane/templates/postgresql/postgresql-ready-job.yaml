@@ -76,12 +76,30 @@ spec:
           value: "control-plane-postgresql.{{ .Release.Namespace }}.svc.cluster.local"
         - name: POSTGRES_PORT
           value: "5432"
+      {{- $pullSecrets := list }}
       {{- if and .Values.controlPlane (hasKey .Values.controlPlane "imagePullSecrets") .Values.controlPlane.imagePullSecrets }}
-      imagePullSecrets:
         {{- if kindIs "string" .Values.controlPlane.imagePullSecrets }}
-        - name: {{ .Values.controlPlane.imagePullSecrets }}
+          {{- if and .Values.controlPlane.imagePullSecrets (ne .Values.controlPlane.imagePullSecrets "") (ne .Values.controlPlane.imagePullSecrets "none") (gt (len (toString .Values.controlPlane.imagePullSecrets)) 0) }}
+            {{- $pullSecrets = append $pullSecrets .Values.controlPlane.imagePullSecrets }}
+          {{- end }}
         {{- else if kindIs "slice" .Values.controlPlane.imagePullSecrets }}
-        {{- toYaml .Values.controlPlane.imagePullSecrets | nindent 8 }}
+          {{- range .Values.controlPlane.imagePullSecrets }}
+            {{- $secretName := "" }}
+            {{- if kindIs "map" . }}
+              {{- $secretName = .name | default "" }}
+            {{- else if kindIs "string" . }}
+              {{- $secretName = . }}
+            {{- end }}
+            {{- if and $secretName (ne $secretName "") (ne $secretName "none") (gt (len (toString $secretName)) 0) }}
+              {{- $pullSecrets = append $pullSecrets $secretName }}
+            {{- end }}
+          {{- end }}
+        {{- end }}
+      {{- end }}
+      {{- if gt (len $pullSecrets) 0 }}
+      imagePullSecrets:
+        {{- range $pullSecrets }}
+        - name: {{ . }}
         {{- end }}
       {{- end }}
 {{- end }}

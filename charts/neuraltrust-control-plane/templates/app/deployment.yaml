@@ -264,18 +264,23 @@ spec:
               {{- else }}
               name: control-plane-secrets
               key: resend-api-key
+              optional: true
               {{- end }}
         - name: RESEND_SENDER
           valueFrom:
             secretKeyRef:
               name: control-plane-secrets
               key: resend-alert-sender
+              optional: true
         - name: APP_URL
-          {{- $appHost := "control-plane-app.neuraltrust.ai" }}
-          {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.host }}
-            {{- $appHost = .Values.controlPlane.components.app.host }}
-          {{- else if and (or .Values.global.openshift $.Values.global.openshift) $openshiftDomain }}
+          {{- $appHost := "" }}
+          {{- /* Prioritize OpenShift domain when OpenShift is enabled */}}
+          {{- if and (or .Values.global.openshift $.Values.global.openshift) $openshiftDomain }}
             {{- $appHost = printf "control-plane-app.%s" $openshiftDomain }}
+          {{- else if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.host }}
+            {{- $appHost = .Values.controlPlane.components.app.host }}
+          {{- else }}
+            {{- $appHost = "control-plane-app.neuraltrust.ai" }}
           {{- end }}
           value: "https://{{ $appHost }}"
         - name: OPENAI_API_KEY
@@ -291,6 +296,7 @@ spec:
               {{- else }}
               name: control-plane-secrets
               key: OPENAI_API_KEY
+              optional: true
               {{- end }}
         - name: OPENAI_MODEL
           value: "{{ $openaiModel }}"
@@ -336,11 +342,14 @@ spec:
           {{- if $nextAuthUrl }}
           value: "{{ $nextAuthUrl }}"
           {{- else }}
-          {{- $appHost := "control-plane-app.neuraltrust.ai" }}
-          {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.host }}
-            {{- $appHost = .Values.controlPlane.components.app.host }}
-          {{- else if and (or .Values.global.openshift $.Values.global.openshift) $openshiftDomain }}
+          {{- $appHost := "" }}
+          {{- /* Prioritize OpenShift domain when OpenShift is enabled */}}
+          {{- if and (or .Values.global.openshift $.Values.global.openshift) $openshiftDomain }}
             {{- $appHost = printf "control-plane-app.%s" $openshiftDomain }}
+          {{- else if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.host }}
+            {{- $appHost = .Values.controlPlane.components.app.host }}
+          {{- else }}
+            {{- $appHost = "control-plane-app.neuraltrust.ai" }}
           {{- end }}
           value: "https://{{ $appHost }}"
           {{- end }}
@@ -349,6 +358,7 @@ spec:
             secretKeyRef:
               name: control-plane-secrets
               key: TRUSTGATE_JWT_SECRET
+              optional: true
         - name: FIREWALL_API_URL
           {{- if $firewallApiUrl }}
           value: "{{ $firewallApiUrl }}"
@@ -367,6 +377,7 @@ spec:
             secretKeyRef:
               name: control-plane-secrets
               key: FIREWALL_JWT_SECRET
+              optional: true
           {{- else }}
           # Use data plane JWT secret as fallback if firewall JWT secret is not present
           valueFrom:

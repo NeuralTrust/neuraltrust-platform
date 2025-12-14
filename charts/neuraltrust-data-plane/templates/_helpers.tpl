@@ -46,7 +46,7 @@ Usage: {{ include "data-plane.image" (dict "repository" .Values.dataPlane.compon
   {{- $registry = .global.imageRegistry }}
 {{- end }}
 {{- if $registry }}
-  {{- /* Check if repository already starts with registry (e.g., "central.unicaja.es/...") */}}
+  {{- /* Check if repository already starts with registry (e.g., "europe-west1-docker.pkg.dev/project/repo/...") */}}
   {{- if hasPrefix $registry $repository }}
     {{- /* Repository already has registry, use as-is */}}
     {{- printf "%s:%s" $repository $tag }}

@@ -17,24 +17,42 @@ spec:
         {{- include "trustgate.actions.labels" . | nindent 8 }}
         component: actions
     spec:
-      {{- $imagePullSecret := "" }}
+      {{- $pullSecrets := list }}
       {{- if .Values.imagePullSecrets }}
-        {{- $imagePullSecret = .Values.imagePullSecrets }}
+        {{- if kindIs "string" .Values.imagePullSecrets }}
+          {{- $pullSecrets = append $pullSecrets .Values.imagePullSecrets }}
+        {{- else if kindIs "slice" .Values.imagePullSecrets }}
+          {{- range .Values.imagePullSecrets }}
+            {{- if kindIs "string" . }}
+              {{- $pullSecrets = append $pullSecrets . }}
+            {{- end }}
+          {{- end }}
+        {{- end }}
       {{- else if .Values.global.image.imagePullSecrets }}
         {{- if kindIs "slice" .Values.global.image.imagePullSecrets }}
-          {{- $imagePullSecret = "array" }}
+          {{- range .Values.global.image.imagePullSecrets }}
+            {{- if kindIs "string" . }}
+              {{- $pullSecrets = append $pullSecrets . }}
+            {{- end }}
+          {{- end }}
         {{- else if kindIs "string" .Values.global.image.imagePullSecrets }}
-          {{- $imagePullSecret = .Values.global.image.imagePullSecrets }}
+          {{- $pullSecrets = append $pullSecrets .Values.global.image.imagePullSecrets }}
         {{- end }}
       {{- else if .Values.global.imagePullSecrets }}
-        {{- $imagePullSecret = .Values.global.imagePullSecrets }}
+        {{- if kindIs "string" .Values.global.imagePullSecrets }}
+          {{- $pullSecrets = append $pullSecrets .Values.global.imagePullSecrets }}
+        {{- else if kindIs "slice" .Values.global.imagePullSecrets }}
+          {{- range .Values.global.imagePullSecrets }}
+            {{- if kindIs "string" . }}
+              {{- $pullSecrets = append $pullSecrets . }}
+            {{- end }}
+          {{- end }}
+        {{- end }}
       {{- end }}
-      {{- if $imagePullSecret }}
+      {{- if gt (len $pullSecrets) 0 }}
       imagePullSecrets:
-        {{- if eq $imagePullSecret "array" }}
-        {{- toYaml .Values.global.image.imagePullSecrets | nindent 8 }}
-        {{- else }}
-        - name: {{ $imagePullSecret }}
+        {{- range $pullSecrets }}
+        - name: {{ . }}
         {{- end }}
       {{- end }}
       volumes:

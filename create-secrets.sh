@@ -49,6 +49,46 @@ trim_value() {
     echo "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr -d '\n\r'
 }
 
+# Function to URL encode a string
+# This function encodes special characters commonly found in passwords and connection strings
+url_encode() {
+    local string="$1"
+    local encoded
+    
+    # Use sed to replace common special characters with their URL-encoded equivalents
+    # This covers the most common cases for database passwords and connection strings
+    encoded=$(printf '%s' "$string" | sed \
+        -e 's/%/%25/g' \
+        -e 's/ /%20/g' \
+        -e 's/!/%21/g' \
+        -e 's/#/%23/g' \
+        -e 's/\$/%24/g' \
+        -e 's/&/%26/g' \
+        -e 's/'\''/%27/g' \
+        -e 's/(/%28/g' \
+        -e 's/)/%29/g' \
+        -e 's/*/%2A/g' \
+        -e 's/+/%2B/g' \
+        -e 's/,/%2C/g' \
+        -e 's/\//%2F/g' \
+        -e 's/:/%3A/g' \
+        -e 's/;/%3B/g' \
+        -e 's/=/%3D/g' \
+        -e 's/?/%3F/g' \
+        -e 's/@/%40/g' \
+        -e 's/\[/%5B/g' \
+        -e 's/\\/%5C/g' \
+        -e 's/\]/%5D/g' \
+        -e 's/\^/%5E/g' \
+        -e 's/`/%60/g' \
+        -e 's/{/%7B/g' \
+        -e 's/|/%7C/g' \
+        -e 's/}/%7D/g' \
+        -e 's/~/%7E/g')
+    
+    echo "$encoded"
+}
+
 # Function to create secret
 create_secret() {
     local secret_name=$1
@@ -113,71 +153,61 @@ add_secret_key() {
     # Check if secret exists
     if kubectl get secret "$secret_name" -n "$NAMESPACE" &>/dev/null; then
         # Secret exists - read all existing keys, merge with new key, and recreate
-        local secret_file=$(mktemp)
-        local value_file=$(mktemp)
-        printf '%s' "$value" > "$value_file"
+        local temp_dir=$(mktemp -d)
+        local kubectl_cmd=("kubectl" "create" "secret" "generic" "$secret_name" "-n" "$NAMESPACE")
         
-        kubectl get secret "$secret_name" -n "$NAMESPACE" -o json > "$secret_file" 2>/dev/null
+        # Get all existing keys from the secret and add them to the kubectl command
+        # Use kubectl to get each key-value pair directly
+        local secret_json
+        secret_json=$(kubectl get secret "$secret_name" -n "$NAMESPACE" -o json 2>/dev/null)
         
-        # Build kubectl command with all existing keys plus the new/updated key
-        if command -v python3 &> /dev/null; then
-            python3 <<PYEOF
-import sys, json, base64, subprocess, os
-
-try:
-    # Read existing secret
-    with open('$secret_file', 'r') as f:
-        secret = json.load(f)
-    
-    data = secret.get('data', {})
-    
-    # Read the new value from file
-    with open('$value_file', 'r') as f:
-        new_value = f.read()
-    
-    # Update or add the key
-    encoded_value = base64.b64encode(new_value.encode('utf-8')).decode('utf-8')
-    data['$key'] = encoded_value
-    
-    # Build kubectl command with all keys
-    cmd = ['kubectl', 'create', 'secret', 'generic', '$secret_name', '-n', '$NAMESPACE']
-    
-    # Add all keys
-    for k, v in data.items():
-        try:
-            decoded = base64.b64decode(v).decode('utf-8')
-        except:
-            decoded = ''
-        cmd.append(f"--from-literal={k}={decoded}")
-    
-    cmd.extend(['--dry-run=client', '-o', 'yaml'])
-    
-    # Execute
-    p1 = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    p2 = subprocess.Popen(['kubectl', 'apply', '-f', '-'], stdin=p1.stdout, stderr=subprocess.PIPE)
-    p1.stdout.close()
-    stdout, stderr = p2.communicate()
-    
-    if p2.returncode != 0:
-        print(f"Error updating secret: {stderr.decode()}", file=sys.stderr)
-        sys.exit(1)
+        if [ -n "$secret_json" ]; then
+            # Extract keys from the data section
+            local existing_keys=""
+            if command -v jq &> /dev/null; then
+                # Use jq if available for better JSON parsing
+                existing_keys=$(echo "$secret_json" | jq -r '.data | keys[]' 2>/dev/null || echo "")
+            else
+                # Fallback: extract keys from JSON using sed/grep
+                # Look for keys in the "data" section
+                existing_keys=$(echo "$secret_json" | sed -n '/"data":/,/}/p' | grep -o '"[^"]*":' | sed 's/":$//; s/^"//' | grep -v '^data$' || echo "")
+            fi
+            
+            # Add all existing keys (decoded) to the kubectl command
+            if [ -n "$existing_keys" ]; then
+                while IFS= read -r existing_key; do
+                    if [ -n "$existing_key" ] && [ "$existing_key" != "$key" ]; then
+                        # Get the existing value and decode it
+                        local existing_value
+                        existing_value=$(kubectl get secret "$secret_name" -n "$NAMESPACE" -o jsonpath="{.data.$existing_key}" 2>/dev/null)
+                        if [ -n "$existing_value" ]; then
+                            # Decode base64 value
+                            existing_value=$(echo "$existing_value" | base64 -d 2>/dev/null || echo "$existing_value")
+                            if [ -n "$existing_value" ]; then
+                                kubectl_cmd+=("--from-literal=${existing_key}=${existing_value}")
+                            fi
+                        fi
+                    fi
+                done <<< "$existing_keys"
+            fi
+        fi
         
-except Exception as e:
-    print(f"Error: {e}", file=sys.stderr)
-    import traceback
-    traceback.print_exc()
-    sys.exit(1)
-finally:
-    for f in ['$secret_file', '$value_file']:
-        if os.path.exists(f):
-            os.remove(f)
-PYEOF
+        # Add the new/updated key
+        kubectl_cmd+=("--from-literal=${key}=${value}")
+        kubectl_cmd+=("--dry-run=client" "-o" "yaml")
+        
+        # Execute kubectl command and apply
+        "${kubectl_cmd[@]}" | kubectl apply -f - 2>/dev/null
+        
+        if [ $? -eq 0 ]; then
+            echo -e "${GREEN}✓ Updated ${key} in ${secret_name}${NC}"
         else
-            echo -e "${RED}Error: Python3 is required for reliable secret key merging${NC}" >&2
-            rm -f "$secret_file" "$value_file"
+            echo -e "${RED}Error: Failed to update secret ${secret_name}${NC}" >&2
+            rm -rf "$temp_dir"
             return 1
         fi
-        rm -f "$secret_file" "$value_file"
+        
+        rm -rf "$temp_dir"
     else
         # Secret doesn't exist - create it with just this key
         kubectl create secret generic "$secret_name" \
@@ -404,10 +434,34 @@ add_secret_key "$SECRET_NAME" "resend-invite-sender" "$RESEND_INVITE_SENDER"
 echo ""
 
 # TrustGate JWT Secret
-echo "--- TrustGate JWT Secret (Optional) ---"
-TRUSTGATE_JWT_SECRET=$(prompt_secret "TRUSTGATE_JWT_SECRET" "Enter TrustGate JWT Secret (optional)")
-if [ -n "$TRUSTGATE_JWT_SECRET" ]; then
-    add_secret_key "$SECRET_NAME" "TRUSTGATE_JWT_SECRET" "$TRUSTGATE_JWT_SECRET"
+echo "--- TrustGate JWT Secret ---"
+if kubectl get secret "$SECRET_NAME" -n "$NAMESPACE" &>/dev/null; then
+    EXISTING_TRUSTGATE_JWT=$(kubectl get secret "$SECRET_NAME" -n "$NAMESPACE" -o jsonpath='{.data.TRUSTGATE_JWT_SECRET}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
+    if [ -n "$EXISTING_TRUSTGATE_JWT" ]; then
+        # Key already exists - check if we should replace it
+        if should_replace_secret "$SECRET_NAME"; then
+            TRUSTGATE_JWT_SECRET=$(prompt_secret "TRUSTGATE_JWT_SECRET" "Enter TrustGate JWT Secret")
+            if [ -n "$TRUSTGATE_JWT_SECRET" ]; then
+                add_secret_key "$SECRET_NAME" "TRUSTGATE_JWT_SECRET" "$TRUSTGATE_JWT_SECRET"
+                echo -e "${GREEN}✓ Updated TRUSTGATE_JWT_SECRET${NC}"
+            fi
+        else
+            echo -e "${GREEN}TRUSTGATE_JWT_SECRET already exists in ${SECRET_NAME}${NC}"
+        fi
+    else
+        # Key doesn't exist - prompt for it
+        TRUSTGATE_JWT_SECRET=$(prompt_secret "TRUSTGATE_JWT_SECRET" "Enter TrustGate JWT Secret")
+        if [ -n "$TRUSTGATE_JWT_SECRET" ]; then
+            add_secret_key "$SECRET_NAME" "TRUSTGATE_JWT_SECRET" "$TRUSTGATE_JWT_SECRET"
+            echo -e "${GREEN}✓ Added TRUSTGATE_JWT_SECRET${NC}"
+        fi
+    fi
+else
+    # Secret doesn't exist - prompt for it
+    TRUSTGATE_JWT_SECRET=$(prompt_secret "TRUSTGATE_JWT_SECRET" "Enter TrustGate JWT Secret")
+    if [ -n "$TRUSTGATE_JWT_SECRET" ]; then
+        add_secret_key "$SECRET_NAME" "TRUSTGATE_JWT_SECRET" "$TRUSTGATE_JWT_SECRET"
+    fi
 fi
 echo ""
 
@@ -556,7 +610,7 @@ if [ -n "$POSTGRES_SECRET_NAME" ]; then
     fi
     
     # Create DATABASE_URL (values are already trimmed)
-    POSTGRES_PASSWORD_ENCODED=$(printf '%s' "$POSTGRES_PASSWORD" | python3 -c "import sys, urllib.parse; print(urllib.parse.quote(sys.stdin.read(), safe=''))" 2>/dev/null || printf '%s' "$POSTGRES_PASSWORD" | sed 's/:/%3A/g; s/@/%40/g; s/\//%2F/g; s/\?/%3F/g; s/=/%3D/g; s/&/%26/g')
+    POSTGRES_PASSWORD_ENCODED=$(url_encode "$POSTGRES_PASSWORD")
     DATABASE_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD_ENCODED}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}?connection_limit=15"
     POSTGRES_PRISMA_URL="$DATABASE_URL"
     
@@ -585,13 +639,33 @@ echo ""
 echo -e "${BLUE}=== TrustGate Secrets ===${NC}"
 
 # TrustGate Server Secret Key
-echo "--- TrustGate Server Secret Key (Optional) ---"
+echo "--- TrustGate Server Secret Key ---"
 TRUSTGATE_SECRET_NAME="trustgate-secrets"
-SERVER_SECRET_KEY=$(prompt_secret "SERVER_SECRET_KEY" "Enter TrustGate Server Secret Key (optional)")
-if [ -n "$SERVER_SECRET_KEY" ]; then
-    if kubectl get secret "$TRUSTGATE_SECRET_NAME" -n "$NAMESPACE" &>/dev/null; then
-        add_secret_key "$TRUSTGATE_SECRET_NAME" "SERVER_SECRET_KEY" "$SERVER_SECRET_KEY"
+if kubectl get secret "$TRUSTGATE_SECRET_NAME" -n "$NAMESPACE" &>/dev/null; then
+    EXISTING_SERVER_SECRET_KEY=$(kubectl get secret "$TRUSTGATE_SECRET_NAME" -n "$NAMESPACE" -o jsonpath='{.data.SERVER_SECRET_KEY}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
+    if [ -n "$EXISTING_SERVER_SECRET_KEY" ]; then
+        # Key already exists - check if we should replace it
+        if should_replace_secret "$TRUSTGATE_SECRET_NAME"; then
+            SERVER_SECRET_KEY=$(prompt_secret "SERVER_SECRET_KEY" "Enter TrustGate Server Secret Key")
+            if [ -n "$SERVER_SECRET_KEY" ]; then
+                add_secret_key "$TRUSTGATE_SECRET_NAME" "SERVER_SECRET_KEY" "$SERVER_SECRET_KEY"
+                echo -e "${GREEN}✓ Updated SERVER_SECRET_KEY${NC}"
+            fi
+        else
+            echo -e "${GREEN}SERVER_SECRET_KEY already exists in ${TRUSTGATE_SECRET_NAME}${NC}"
+        fi
     else
+        # Key doesn't exist - prompt for it
+        SERVER_SECRET_KEY=$(prompt_secret "SERVER_SECRET_KEY" "Enter TrustGate Server Secret Key")
+        if [ -n "$SERVER_SECRET_KEY" ]; then
+            add_secret_key "$TRUSTGATE_SECRET_NAME" "SERVER_SECRET_KEY" "$SERVER_SECRET_KEY"
+            echo -e "${GREEN}✓ Added SERVER_SECRET_KEY${NC}"
+        fi
+    fi
+else
+    # Secret doesn't exist - prompt for it
+    SERVER_SECRET_KEY=$(prompt_secret "SERVER_SECRET_KEY" "Enter TrustGate Server Secret Key")
+    if [ -n "$SERVER_SECRET_KEY" ]; then
         create_secret "$TRUSTGATE_SECRET_NAME" "SERVER_SECRET_KEY" "$SERVER_SECRET_KEY" "TrustGate Server Secret Key"
     fi
 fi
@@ -643,7 +717,7 @@ if kubectl get secret "$TRUSTGATE_SECRET_NAME" -n "$NAMESPACE" &>/dev/null; then
         echo -e "  User: ${EXISTING_DB_USER}"
         echo -e "  Database: ${EXISTING_DB_NAME}"
         echo ""
-        if should_replace_secret "${TRUSTGATE_SECRET_NAME} (database connection)"; then
+        if should_replace_secret "${TRUSTGATE_SECRET_NAME}-database-connection"; then
             SHOULD_REPLACE_DB=true
         else
             echo -e "${GREEN}Keeping existing PostgreSQL connection in ${TRUSTGATE_SECRET_NAME}${NC}"
@@ -660,31 +734,59 @@ fi
 
 # Only prompt if we need to replace or if values don't exist
 if [ "$SHOULD_REPLACE_DB" = true ] || [ -z "$EXISTING_DB_HOST" ]; then
-    DATABASE_HOST=$(prompt_secret "TRUSTGATE_DATABASE_HOST" "Enter Database Host for TrustGate${EXISTING_DB_HOST:+ (current: $EXISTING_DB_HOST)}")
+    # Build prompt messages with defaults
+    if [ -n "$EXISTING_DB_HOST" ]; then
+        HOST_PROMPT="Enter Database Host for TrustGate (current: $EXISTING_DB_HOST, default: control-plane-postgresql)"
+    else
+        HOST_PROMPT="Enter Database Host for TrustGate (default: control-plane-postgresql)"
+    fi
+    DATABASE_HOST=$(prompt_secret "TRUSTGATE_DATABASE_HOST" "$HOST_PROMPT")
+    DATABASE_HOST=${DATABASE_HOST:-${EXISTING_DB_HOST:-control-plane-postgresql}}
     if [ -z "$DATABASE_HOST" ]; then
         echo -e "${RED}Error: Database host is required for TrustGate${NC}"
         exit 1
     fi
 
-    DATABASE_PORT=$(prompt_secret "TRUSTGATE_DATABASE_PORT" "Enter Database Port for TrustGate${EXISTING_DB_PORT:+ (current: $EXISTING_DB_PORT, default: 5432)}")
+    if [ -n "$EXISTING_DB_PORT" ]; then
+        PORT_PROMPT="Enter Database Port for TrustGate (current: $EXISTING_DB_PORT, default: 5432)"
+    else
+        PORT_PROMPT="Enter Database Port for TrustGate (default: 5432)"
+    fi
+    DATABASE_PORT=$(prompt_secret "TRUSTGATE_DATABASE_PORT" "$PORT_PROMPT")
     DATABASE_PORT=${DATABASE_PORT:-${EXISTING_DB_PORT:-5432}}
 
-    DATABASE_USER=$(prompt_secret "TRUSTGATE_DATABASE_USER" "Enter Database User for TrustGate${EXISTING_DB_USER:+ (current: $EXISTING_DB_USER, default: trustgate)}")
+    if [ -n "$EXISTING_DB_USER" ]; then
+        USER_PROMPT="Enter Database User for TrustGate (current: $EXISTING_DB_USER, default: trustgate)"
+    else
+        USER_PROMPT="Enter Database User for TrustGate (default: trustgate)"
+    fi
+    DATABASE_USER=$(prompt_secret "TRUSTGATE_DATABASE_USER" "$USER_PROMPT")
     DATABASE_USER=${DATABASE_USER:-${EXISTING_DB_USER:-trustgate}}
 
-    DATABASE_PASSWORD=$(prompt_secret "TRUSTGATE_DATABASE_PASSWORD" "Enter Database Password for TrustGate${EXISTING_DB_PASSWORD:+ (press Enter to keep existing)}")
+    if [ -n "$EXISTING_DB_PASSWORD" ]; then
+        PASSWORD_PROMPT="Enter Database Password for TrustGate (press Enter to keep existing)"
+    else
+        PASSWORD_PROMPT="Enter Database Password for TrustGate (required)"
+    fi
+    DATABASE_PASSWORD=$(prompt_secret "TRUSTGATE_DATABASE_PASSWORD" "$PASSWORD_PROMPT")
     if [ -z "$DATABASE_PASSWORD" ] && [ -z "$EXISTING_DB_PASSWORD" ]; then
         echo -e "${RED}Error: Database password is required for TrustGate${NC}"
         exit 1
     fi
     DATABASE_PASSWORD=${DATABASE_PASSWORD:-$EXISTING_DB_PASSWORD}
 
-    DATABASE_NAME=$(prompt_secret "TRUSTGATE_DATABASE_NAME" "Enter Database Name for TrustGate${EXISTING_DB_NAME:+ (current: $EXISTING_DB_NAME, default: trustgate)}")
+    if [ -n "$EXISTING_DB_NAME" ]; then
+        NAME_PROMPT="Enter Database Name for TrustGate (current: $EXISTING_DB_NAME, default: trustgate)"
+    else
+        NAME_PROMPT="Enter Database Name for TrustGate (default: trustgate)"
+    fi
+    DATABASE_NAME=$(prompt_secret "TRUSTGATE_DATABASE_NAME" "$NAME_PROMPT")
     DATABASE_NAME=${DATABASE_NAME:-${EXISTING_DB_NAME:-trustgate}}
 fi
 
-# Only update/create if we have values to set
-if [ -n "$DATABASE_HOST" ] && [ -n "$DATABASE_PASSWORD" ]; then
+# Only update/create if we have values to set AND (we're replacing OR values don't exist)
+# Skip update if user chose to keep existing values
+if [ -n "$DATABASE_HOST" ] && [ -n "$DATABASE_PASSWORD" ] && ([ "$SHOULD_REPLACE_DB" = true ] || [ -z "$EXISTING_DB_HOST" ]); then
     # Trim all values to remove newlines and whitespace
     DATABASE_HOST=$(trim_value "$DATABASE_HOST")
     DATABASE_PORT=$(trim_value "$DATABASE_PORT")
@@ -693,7 +795,7 @@ if [ -n "$DATABASE_HOST" ] && [ -n "$DATABASE_PASSWORD" ]; then
     DATABASE_NAME=$(trim_value "$DATABASE_NAME")
     
     # Create PostgreSQL connection string (values are already trimmed)
-    DATABASE_PASSWORD_ENCODED=$(printf '%s' "$DATABASE_PASSWORD" | python3 -c "import sys, urllib.parse; print(urllib.parse.quote(sys.stdin.read(), safe=''))" 2>/dev/null || printf '%s' "$DATABASE_PASSWORD" | sed 's/:/%3A/g; s/@/%40/g; s/\//%2F/g; s/\?/%3F/g; s/=/%3D/g; s/&/%26/g')
+    DATABASE_PASSWORD_ENCODED=$(url_encode "$DATABASE_PASSWORD")
     DATABASE_URL="postgresql://${DATABASE_USER}:${DATABASE_PASSWORD_ENCODED}@${DATABASE_HOST}:${DATABASE_PORT}/${DATABASE_NAME}?connection_limit=15"
     # Remove any newlines from DATABASE_URL
     DATABASE_URL=$(printf '%s' "$DATABASE_URL" | tr -d '\n\r')
@@ -724,6 +826,9 @@ if [ -n "$DATABASE_HOST" ] && [ -n "$DATABASE_PASSWORD" ]; then
             --dry-run=client -o yaml | kubectl apply -f -
         echo -e "${GREEN}✓ Created ${TRUSTGATE_SECRET_NAME} with PostgreSQL connection info${NC}"
     fi
+elif [ -n "$EXISTING_DB_HOST" ] && [ "$SHOULD_REPLACE_DB" != true ]; then
+    # User chose to keep existing values - no update needed
+    echo -e "${GREEN}Skipping update - keeping existing PostgreSQL connection in ${TRUSTGATE_SECRET_NAME}${NC}"
 fi
 echo ""
 
