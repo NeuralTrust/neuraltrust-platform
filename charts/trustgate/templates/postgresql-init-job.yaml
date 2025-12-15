@@ -67,6 +67,14 @@ spec:
       - name: postgresql-init
         {{- $postgresImageRepo := "postgres" }}
         {{- $postgresImageTag := "17.2-alpine" }}
+        {{- if and .Values.global .Values.global.postgresql .Values.global.postgresql.image }}
+          {{- if .Values.global.postgresql.image.repository }}
+            {{- $postgresImageRepo = .Values.global.postgresql.image.repository }}
+          {{- end }}
+          {{- if .Values.global.postgresql.image.tag }}
+            {{- $postgresImageTag = .Values.global.postgresql.image.tag }}
+          {{- end }}
+        {{- end }}
         {{- $postgresImage := printf "%s:%s" $postgresImageRepo $postgresImageTag }}
         {{- if and .Values.global .Values.global.imageRegistry .Values.global.imageRegistry }}
           {{- $registry := .Values.global.imageRegistry }}
