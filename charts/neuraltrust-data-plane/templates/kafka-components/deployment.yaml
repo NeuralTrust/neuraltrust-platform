@@ -150,15 +150,19 @@ spec:
         {{- end }}
         {{- /* If image already contains registry, use as-is, otherwise use helper */}}
         {{- $finalImage := "" }}
-        {{- if contains "/" $connectorsImage }}
-          {{- /* Image already has full path, use directly */}}
+        {{- $imageRepo := "" }}
+        {{- $imageTag := "latest" }}
+        {{- $parts := splitList ":" $connectorsImage }}
+        {{- $imageRepo = index $parts 0 }}
+        {{- if gt (len $parts) 1 }}
+          {{- $imageTag = index $parts 1 }}
+        {{- end }}
+        {{- if and .Values.global.imageRegistry (contains "." $imageRepo) }}
+          {{- /* Image already has registry prefix, use directly */}}
           {{- $finalImage = $connectorsImage }}
         {{- else }}
-          {{- /* Parse and use helper function */}}
-          {{- $parts := splitList ":" $connectorsImage }}
-          {{- $connectorsRepo := index $parts 0 }}
-          {{- $connectorsTag := index $parts 1 | default "latest" }}
-          {{- $finalImage = include "data-plane.image" (dict "repository" $connectorsRepo "tag" $connectorsTag "global" .Values.global) }}
+          {{- /* Use helper function to add registry if needed */}}
+          {{- $finalImage = include "data-plane.image" (dict "repository" $imageRepo "tag" $imageTag "global" .Values.global) }}
         {{- end }}
         image: {{ $finalImage | quote }}
         command: ["/bin/sh", "-c"]

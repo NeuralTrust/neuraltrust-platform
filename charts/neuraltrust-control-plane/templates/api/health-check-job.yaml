@@ -27,6 +27,14 @@ spec:
         {{- /* Parse image and use helper function to add registry if needed */}}
         {{- $healthCheckRepo := "curlimages/curl" }}
         {{- $healthCheckTag := "8.13.0" }}
+        {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.api .Values.controlPlane.components.api.healthCheck .Values.controlPlane.components.api.healthCheck.image }}
+          {{- if .Values.controlPlane.components.api.healthCheck.image.repository }}
+            {{- $healthCheckRepo = .Values.controlPlane.components.api.healthCheck.image.repository }}
+          {{- end }}
+          {{- if .Values.controlPlane.components.api.healthCheck.image.tag }}
+            {{- $healthCheckTag = .Values.controlPlane.components.api.healthCheck.image.tag }}
+          {{- end }}
+        {{- end }}
         image: {{ include "control-plane.image" (dict "repository" $healthCheckRepo "tag" $healthCheckTag "global" .Values.global) | quote }}
         command:
         - /bin/sh

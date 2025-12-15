@@ -31,11 +31,19 @@ spec:
         {{- if and $.Values.dataPlane $.Values.dataPlane.components $.Values.dataPlane.components.connectorsJob $.Values.dataPlane.components.connectorsJob.image }}
           {{- $healthCheckImage = toString $.Values.dataPlane.components.connectorsJob.image }}
         {{- end }}
-        {{- /* Parse image and use helper function to add registry if needed */}}
+        {{- /* If image already contains registry (has a dot), use as-is, otherwise use helper */}}
         {{- $parts := splitList ":" $healthCheckImage }}
         {{- $healthCheckRepo := index $parts 0 }}
         {{- $healthCheckTag := index $parts 1 | default "latest" }}
-        image: {{ include "data-plane.image" (dict "repository" $healthCheckRepo "tag" $healthCheckTag "global" $.Values.global) | quote }}
+        {{- $finalImage := "" }}
+        {{- if and $.Values.global.imageRegistry (contains "." $healthCheckRepo) }}
+          {{- /* Image already has registry prefix, use directly */}}
+          {{- $finalImage = $healthCheckImage }}
+        {{- else }}
+          {{- /* Use helper function to add registry if needed */}}
+          {{- $finalImage = include "data-plane.image" (dict "repository" $healthCheckRepo "tag" $healthCheckTag "global" $.Values.global) }}
+        {{- end }}
+        image: {{ $finalImage | quote }}
         command:
         - /bin/sh
         - -c
