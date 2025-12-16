@@ -48,7 +48,19 @@ spec:
                 port:
                   name: http
 {{- end }}
-{{- if and .Values.global.openshift (not (and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.ingress .Values.dataPlane.components.api.ingress.enabled)) }}
+{{- $useRoutes := false }}
+{{- if .Values.global.openshift }}
+  {{- $ingressEnabled := false }}
+  {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.ingress (hasKey .Values.dataPlane.components.api.ingress "enabled") }}
+    {{- if .Values.dataPlane.components.api.ingress.enabled }}
+      {{- $ingressEnabled = true }}
+    {{- end }}
+  {{- end }}
+  {{- if not $ingressEnabled }}
+    {{- $useRoutes = true }}
+  {{- end }}
+{{- end }}
+{{- if $useRoutes }}
   {{- $host := "" }}
   {{- if .Values.global.openshiftDomain }}
     {{- $host = printf "data-plane-api.%s" .Values.global.openshiftDomain }}

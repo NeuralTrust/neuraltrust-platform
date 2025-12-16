@@ -62,7 +62,19 @@ spec:
                   name: http
   {{- end }}
 {{- end }}
-{{- if and .Values.global.openshift (not (and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.api .Values.controlPlane.components.api.ingress .Values.controlPlane.components.api.ingress.enabled)) }}
+{{- $useRoutes := false }}
+{{- if .Values.global.openshift }}
+  {{- $ingressEnabled := false }}
+  {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.api .Values.controlPlane.components.api.ingress (hasKey .Values.controlPlane.components.api.ingress "enabled") }}
+    {{- if .Values.controlPlane.components.api.ingress.enabled }}
+      {{- $ingressEnabled = true }}
+    {{- end }}
+  {{- end }}
+  {{- if not $ingressEnabled }}
+    {{- $useRoutes = true }}
+  {{- end }}
+{{- end }}
+{{- if $useRoutes }}
   {{- $host := "" }}
   {{- if .Values.global.openshiftDomain }}
     {{- $host = printf "control-plane-api.%s" .Values.global.openshiftDomain }}
