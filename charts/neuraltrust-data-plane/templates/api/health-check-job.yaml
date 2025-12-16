@@ -1,7 +1,13 @@
 {{- with .Values.dataPlane }}
   {{- with .components }}
     {{- with .api }}
-      {{- if .enabled }}
+      {{- $healthCheckEnabled := true }}
+      {{- if hasKey . "healthCheck" }}
+        {{- if hasKey .healthCheck "enabled" }}
+          {{- $healthCheckEnabled = .healthCheck.enabled }}
+        {{- end }}
+      {{- end }}
+      {{- if and .enabled $healthCheckEnabled }}
 apiVersion: batch/v1
 kind: Job
 metadata:

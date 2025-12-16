@@ -1,4 +1,10 @@
-{{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.api .Values.controlPlane.components.api.enabled }}
+{{- $healthCheckEnabled := true }}
+{{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.api .Values.controlPlane.components.api.healthCheck }}
+  {{- if hasKey .Values.controlPlane.components.api.healthCheck "enabled" }}
+    {{- $healthCheckEnabled = .Values.controlPlane.components.api.healthCheck.enabled }}
+  {{- end }}
+{{- end }}
+{{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.api .Values.controlPlane.components.api.enabled $healthCheckEnabled }}
 apiVersion: batch/v1
 kind: Job
 metadata:
