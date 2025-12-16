@@ -65,25 +65,43 @@ metadata:
 spec:
   host: {{ $host | quote }}
   tls:
+    {{- $tlsConfig := dict }}
     {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.ingress .Values.dataPlane.components.api.ingress.tls }}
-    termination: {{ .Values.dataPlane.components.api.ingress.tls.termination | default "edge" }}
-    {{- if .Values.dataPlane.components.api.ingress.tls.certificate }}
-    certificate: {{ .Values.dataPlane.components.api.ingress.tls.certificate | quote }}
+      {{- $tlsConfig = .Values.dataPlane.components.api.ingress.tls }}
     {{- end }}
-    {{- if .Values.dataPlane.components.api.ingress.tls.key }}
-    key: {{ .Values.dataPlane.components.api.ingress.tls.key | quote }}
+    {{- $tlsSecretName := "" }}
+    {{- $certFromSecret := "" }}
+    {{- $keyFromSecret := "" }}
+    {{- if $tlsConfig.secretName }}
+      {{- $tlsSecretName = $tlsConfig.secretName }}
+      {{- $tlsSecret := (lookup "v1" "Secret" .Release.Namespace $tlsSecretName) }}
+      {{- if $tlsSecret }}
+        {{- if hasKey $tlsSecret.data "tls.crt" }}
+          {{- $certFromSecret = index $tlsSecret.data "tls.crt" | b64dec }}
+        {{- end }}
+        {{- if hasKey $tlsSecret.data "tls.key" }}
+          {{- $keyFromSecret = index $tlsSecret.data "tls.key" | b64dec }}
+        {{- end }}
+      {{- end }}
     {{- end }}
-    {{- if .Values.dataPlane.components.api.ingress.tls.caCertificate }}
-    caCertificate: {{ .Values.dataPlane.components.api.ingress.tls.caCertificate | quote }}
+    termination: {{ if $tlsConfig.termination }}{{ $tlsConfig.termination }}{{ else }}edge{{ end }}
+    {{- if $certFromSecret }}
+    certificate: {{ $certFromSecret | quote }}
+    {{- else if $tlsConfig.certificate }}
+    certificate: {{ $tlsConfig.certificate | quote }}
     {{- end }}
-    {{- if .Values.dataPlane.components.api.ingress.tls.destinationCACertificate }}
-    destinationCACertificate: {{ .Values.dataPlane.components.api.ingress.tls.destinationCACertificate | quote }}
+    {{- if $keyFromSecret }}
+    key: {{ $keyFromSecret | quote }}
+    {{- else if $tlsConfig.key }}
+    key: {{ $tlsConfig.key | quote }}
     {{- end }}
-    insecureEdgeTerminationPolicy: {{ .Values.dataPlane.components.api.ingress.tls.insecureEdgeTerminationPolicy | default "Redirect" }}
-    {{- else }}
-    termination: edge
-    insecureEdgeTerminationPolicy: Redirect
+    {{- if $tlsConfig.caCertificate }}
+    caCertificate: {{ $tlsConfig.caCertificate | quote }}
     {{- end }}
+    {{- if $tlsConfig.destinationCACertificate }}
+    destinationCACertificate: {{ $tlsConfig.destinationCACertificate | quote }}
+    {{- end }}
+    insecureEdgeTerminationPolicy: {{ if $tlsConfig.insecureEdgeTerminationPolicy }}{{ $tlsConfig.insecureEdgeTerminationPolicy }}{{ else }}Redirect{{ end }}
   to:
     kind: Service
     name: "data-plane-api-service"

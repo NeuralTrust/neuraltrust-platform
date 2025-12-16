@@ -108,8 +108,43 @@ spec:
   port:
     targetPort: http
   tls:
-    termination: edge
-    insecureEdgeTerminationPolicy: Redirect
+    {{- $tlsConfig := dict }}
+    {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.ingress .Values.controlPlane.components.app.ingress.tls }}
+      {{- $tlsConfig = .Values.controlPlane.components.app.ingress.tls }}
+    {{- end }}
+    {{- $tlsSecretName := "" }}
+    {{- $certFromSecret := "" }}
+    {{- $keyFromSecret := "" }}
+    {{- if $tlsConfig.secretName }}
+      {{- $tlsSecretName = $tlsConfig.secretName }}
+      {{- $tlsSecret := (lookup "v1" "Secret" .Release.Namespace $tlsSecretName) }}
+      {{- if $tlsSecret }}
+        {{- if hasKey $tlsSecret.data "tls.crt" }}
+          {{- $certFromSecret = index $tlsSecret.data "tls.crt" | b64dec }}
+        {{- end }}
+        {{- if hasKey $tlsSecret.data "tls.key" }}
+          {{- $keyFromSecret = index $tlsSecret.data "tls.key" | b64dec }}
+        {{- end }}
+      {{- end }}
+    {{- end }}
+    termination: {{ if $tlsConfig.termination }}{{ $tlsConfig.termination }}{{ else }}edge{{ end }}
+    {{- if $certFromSecret }}
+    certificate: {{ $certFromSecret | quote }}
+    {{- else if $tlsConfig.certificate }}
+    certificate: {{ $tlsConfig.certificate | quote }}
+    {{- end }}
+    {{- if $keyFromSecret }}
+    key: {{ $keyFromSecret | quote }}
+    {{- else if $tlsConfig.key }}
+    key: {{ $tlsConfig.key | quote }}
+    {{- end }}
+    {{- if $tlsConfig.caCertificate }}
+    caCertificate: {{ $tlsConfig.caCertificate | quote }}
+    {{- end }}
+    {{- if $tlsConfig.destinationCACertificate }}
+    destinationCACertificate: {{ $tlsConfig.destinationCACertificate | quote }}
+    {{- end }}
+    insecureEdgeTerminationPolicy: {{ if $tlsConfig.insecureEdgeTerminationPolicy }}{{ $tlsConfig.insecureEdgeTerminationPolicy }}{{ else }}Redirect{{ end }}
     {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.secondaryHost }}
 ---
 apiVersion: route.openshift.io/v1
