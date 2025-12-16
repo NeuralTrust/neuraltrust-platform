@@ -1,4 +1,4 @@
-{{- if and (not (or .Values.global.openshift $.Values.global.openshift)) .Values.ingress.enabled }}
+{{- if .Values.ingress.enabled }}
 # Control Plane Ingress
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -14,6 +14,14 @@ metadata:
 spec:
   {{- if .Values.ingress.className }}
   ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  {{- if and .Values.ingress.tls .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.controlPlane.host }}
+      {{- if .Values.ingress.tls.secretName }}
+      secretName: {{ .Values.ingress.tls.secretName }}
+      {{- end }}
   {{- end }}
   rules:
     - host: {{ .Values.ingress.controlPlane.host }}
@@ -43,6 +51,14 @@ spec:
   {{- if .Values.ingress.className }}
   ingressClassName: {{ .Values.ingress.className }}
   {{- end }}
+  {{- if and .Values.ingress.tls .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.dataPlane.host }}
+      {{- if .Values.ingress.tls.secretName }}
+      secretName: {{ .Values.ingress.tls.secretName }}
+      {{- end }}
+  {{- end }}
   rules:
     - host: {{ .Values.ingress.dataPlane.host }}
       http:
@@ -71,6 +87,14 @@ metadata:
 spec:
   {{- if .Values.ingress.className }}
   ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  {{- if and .Values.ingress.tls .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.actions.host }}
+      {{- if .Values.ingress.tls.secretName }}
+      secretName: {{ .Values.ingress.tls.secretName }}
+      {{- end }}
   {{- end }}
   rules:
     - host: {{ .Values.ingress.actions.host }}

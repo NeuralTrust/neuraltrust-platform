@@ -34,7 +34,7 @@ spec:
       {{- end }}
       targetPort: {{ $targetPort }}
       name: http
-{{- if and (not .Values.global.openshift) .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.ingress .Values.controlPlane.components.app.ingress.enabled }}
+{{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.ingress .Values.controlPlane.components.app.ingress.enabled }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -85,7 +85,7 @@ spec:
                   name: http
     {{- end }}
 {{- end }}
-{{- if .Values.global.openshift }}
+{{- if and .Values.global.openshift (not (and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.ingress .Values.controlPlane.components.app.ingress.enabled)) }}
   {{- $host := "" }}
   {{- if .Values.global.openshiftDomain }}
     {{- $host = printf "control-plane-app.%s" .Values.global.openshiftDomain }}

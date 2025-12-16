@@ -147,7 +147,7 @@ spec:
   selector:
     {{- include "trustgate.actions.labels" . | nindent 4 }}
     component: actions
-{{- if or .Values.global.openshift $.Values.global.openshift }}
+{{- if and (or .Values.global.openshift $.Values.global.openshift) (not (and .Values.ingress .Values.ingress.enabled)) }}
 ---
 apiVersion: route.openshift.io/v1
 kind: Route

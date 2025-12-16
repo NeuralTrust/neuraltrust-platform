@@ -24,7 +24,7 @@ spec:
       name: http
   selector:
     app: control-plane-scheduler
-{{- if and (not .Values.global.openshift) .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.scheduler .Values.controlPlane.components.scheduler.ingress .Values.controlPlane.components.scheduler.ingress.enabled }}
+{{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.scheduler .Values.controlPlane.components.scheduler.ingress .Values.controlPlane.components.scheduler.ingress.enabled }}
   {{- with .Values.controlPlane.components.scheduler }}
 ---
 apiVersion: networking.k8s.io/v1
@@ -62,7 +62,7 @@ spec:
                   name: http
   {{- end }}
 {{- end }}
-{{- if .Values.global.openshift }}
+{{- if and .Values.global.openshift (not (and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.scheduler .Values.controlPlane.components.scheduler.ingress .Values.controlPlane.components.scheduler.ingress.enabled)) }}
   {{- with .Values.controlPlane }}
     {{- with .components }}
       {{- with .scheduler }}

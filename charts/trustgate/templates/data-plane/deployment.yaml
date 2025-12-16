@@ -162,7 +162,7 @@ spec:
   selector:
     {{- include "trustgate.dataPlane.labels" . | nindent 4 }}
     component: data-plane
-{{- if or .Values.global.openshift $.Values.global.openshift }}
+{{- if and (or .Values.global.openshift $.Values.global.openshift) (not (and .Values.ingress .Values.ingress.enabled)) }}
 ---
 apiVersion: route.openshift.io/v1
 kind: Route
