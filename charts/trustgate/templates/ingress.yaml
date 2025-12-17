@@ -33,7 +33,7 @@ spec:
               service:
                 name: trustgate-control-plane
                 port:
-                  number: {{ .Values.controlPlane.ports.http }}
+                  name: http
 ---
 # Data Plane Ingress
 apiVersion: networking.k8s.io/v1
@@ -69,7 +69,7 @@ spec:
               service:
                 name: trustgate-data-plane
                 port:
-                  number: {{ .Values.dataPlane.ports.http }}
+                  name: http
 
 ---
 # Actions Ingress
@@ -106,5 +106,5 @@ spec:
               service:
                 name: trustgate-actions
                 port:
-                  number: {{ .Values.actions.ports.http }}
+                  name: http
 {{- end }}
