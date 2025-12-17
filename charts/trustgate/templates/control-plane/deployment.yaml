@@ -147,10 +147,17 @@ spec:
   selector:
     {{- include "trustgate.controlPlane.labels" . | nindent 4 }}
     component: control-plane
-{{- /* In OpenShift, create Routes even when Ingress is enabled (client requirement) */}}
 {{- $useRoutes := false }}
 {{- if or .Values.global.openshift $.Values.global.openshift }}
-  {{- $useRoutes = true }}
+  {{- $ingressEnabled := false }}
+  {{- if and .Values.ingress (hasKey .Values.ingress "enabled") }}
+    {{- if .Values.ingress.enabled }}
+      {{- $ingressEnabled = true }}
+    {{- end }}
+  {{- end }}
+  {{- if not $ingressEnabled }}
+    {{- $useRoutes = true }}
+  {{- end }}
 {{- end }}
 {{- if $useRoutes }}
 ---

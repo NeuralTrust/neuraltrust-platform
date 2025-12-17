@@ -62,10 +62,17 @@ spec:
                   name: http
   {{- end }}
 {{- end }}
-{{- /* In OpenShift, create Routes even when Ingress is enabled (client requirement) */}}
 {{- $useRoutes := false }}
 {{- if .Values.global.openshift }}
-  {{- $useRoutes = true }}
+  {{- $ingressEnabled := false }}
+  {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.api .Values.controlPlane.components.api.ingress (hasKey .Values.controlPlane.components.api.ingress "enabled") }}
+    {{- if .Values.controlPlane.components.api.ingress.enabled }}
+      {{- $ingressEnabled = true }}
+    {{- end }}
+  {{- end }}
+  {{- if not $ingressEnabled }}
+    {{- $useRoutes = true }}
+  {{- end }}
 {{- end }}
 {{- if $useRoutes }}
   {{- $host := "" }}
