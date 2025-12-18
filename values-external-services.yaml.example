@@ -1,37 +1,87 @@
 # Example: Deploy NeuralTrust with external ClickHouse, Kafka, and PostgreSQL
 # This example shows how to configure the chart to use pre-installed infrastructure services
+#
+# Usage:
+#   helm install neuraltrust-platform . -f values-external-services.yaml.example
+#
+# This example shows:
+# - Using external infrastructure services (ClickHouse, Kafka, PostgreSQL)
+# - Deploying NeuralTrust components (Control Plane and Data Plane)
+# - Deploying TrustGate
+# - Using Helm-managed secrets (preserveExistingSecrets: false)
+# - Using Ingress for external access (Kubernetes) or Routes (OpenShift)
 
+# Global settings
+global:
+  openshift: false  # Set to true if using OpenShift
+  openshiftDomain: ""  # OpenShift wildcard DNS domain (e.g., *.apps.example.com)
+  imageRegistry: ""  # Global image registry prefix
+  preserveExistingSecrets: false  # Set to true if secrets are pre-generated
+  storageClass: ""  # Global storage class for persistent volumes
+
+# Infrastructure Components - Use external services
 infrastructure:
   clickhouse:
-    deploy: false
+    deploy: false  # Use external ClickHouse
     external:
-      host: "clickhouse.clickhouse.svc.cluster.local"
+      host: "clickhouse.clickhouse.svc.cluster.local"  # External ClickHouse service
       port: "8123"
       user: "neuraltrust"
-      password: "your-clickhouse-password"
+      password: "your-clickhouse-password"  # Define this value
       database: "neuraltrust"
+      # Optional: Use secret reference instead of password
+      # secretName: "clickhouse"  # Secret containing CLICKHOUSE_PASSWORD
+      # secretKey: "admin-password"  # Key in secret for password
 
   kafka:
-    deploy: false
+    deploy: false  # Use external Kafka
     external:
       bootstrapServers: "kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
+      # Or individual brokers:
+      # brokers: ["kafka-0.kafka-headless:9092", "kafka-1.kafka-headless:9092"]
+      # Optional: Secret reference for external Kafka credentials (if using SASL)
+      # secretName: ""  # Optional
+      # secretKey: ""  # Optional
 
-  postgresql:
-    deploy: false
-    external:
-      host: "postgresql.postgresql.svc.cluster.local"
-      port: "5432"
-      user: "postgres"
-      password: "your-postgres-password"
-      database: "neuraltrust"
+# NeuralTrust Control Plane - Use external PostgreSQL
+neuraltrust-control-plane:
+  controlPlane:
+    enabled: true
+    preserveExistingSecrets: false  # Helm will create secrets from values
+    components:
+      postgresql:
+        installInCluster: false  # Use external PostgreSQL
+        secrets:
+          host: "postgresql.postgresql.svc.cluster.local"  # External PostgreSQL service
+          port: "5432"
+          user: "postgres"  # Or "neuraltrust" depending on your setup
+          password: "your-postgres-password"  # Define this value
+          database: "neuraltrust"
+      api:
+        enabled: true
+        host: "control-plane-api.example.com"
+        ingress:
+          enabled: true  # Use Ingress for external access
+      app:
+        enabled: true
+        host: "control-plane-app.example.com"
+        ingress:
+          enabled: true  # Use Ingress for external access
+      scheduler:
+        enabled: true
+        host: "control-plane-scheduler.example.com"
+        ingress:
+          enabled: true  # Use Ingress for external access
 
-neuraltrust:
+# NeuralTrust Data Plane - Use external ClickHouse and Kafka
+neuraltrust-data-plane:
   dataPlane:
     enabled: true
+    preserveExistingSecrets: false  # Helm will create secrets from values
     components:
       clickhouse:
         enabled: false  # External ClickHouse
-        host: "clickhouse.clickhouse.svc.cluster.local"
+        host: "clickhouse.clickhouse.svc.cluster.local"  # External ClickHouse service
         port: "8123"
         user: "neuraltrust"
         database: "neuraltrust"
@@ -40,36 +90,27 @@ neuraltrust:
       api:
         enabled: true
         host: "data-plane-api.example.com"
+        ingress:
+          enabled: true  # Use Ingress for external access
       worker:
         enabled: true
 
-  controlPlane:
-    enabled: true
-    components:
-      postgresql:
-        installInCluster: false  # External PostgreSQL
-        secrets:
-          host: "postgresql.postgresql.svc.cluster.local"
-          port: "5432"
-          user: "postgres"
-          password: "your-postgres-password"
-          database: "neuraltrust"
-      api:
-        enabled: true
-        host: "control-plane-api.example.com"
-      app:
-        enabled: true
-        host: "control-plane-app.example.com"
-      scheduler:
-        enabled: true
-
+# TrustGate - Use external PostgreSQL
 trustgate:
   enabled: true
   global:
     env:
-      DATABASE_HOST: "postgresql.postgresql.svc.cluster.local"
+      DATABASE_HOST: "postgresql.postgresql.svc.cluster.local"  # External PostgreSQL
       DATABASE_PORT: "5432"
-      DATABASE_USER: "postgres"
-      DATABASE_PASSWORD: "your-postgres-password"
+      DATABASE_USER: "postgres"  # Or "trustgate" depending on your setup
+      DATABASE_PASSWORD: "your-postgres-password"  # Define this value
       DATABASE_NAME: "trustgate"
-
+      DATABASE_SSL_MODE: "require"  # Use "require" for external PostgreSQL
+  ingress:
+    enabled: true  # Use Ingress for external access
+    controlPlane:
+      host: "admin.example.com"
+    dataPlane:
+      host: "gateway.example.com"
+    actions:
+      host: "actions.example.com"

@@ -1,14 +1,25 @@
-# Unified NeuralTrust Platform Values (Optimized)
+# Unified NeuralTrust Platform Values (OpenShift with Ingress)
 # This file contains all configuration for deploying NeuralTrust platform components
 # including infrastructure (ClickHouse, Kafka, PostgreSQL), NeuralTrust services,
 # and TrustGate components.
+#
+# This example shows OpenShift deployment using Ingress instead of Routes,
+# with pre-generated secrets (CICD-friendly configuration).
+#
+# Usage:
+#   helm install neuraltrust-platform . -f values-openshift-ingress.yaml.example
+#
+# IMPORTANT: Before using this file:
+#   1. Replace all placeholder values (YOUR_DOMAIN, your-registry, etc.)
+#   2. Pre-generate all required secrets if preserveExistingSecrets: true
+#   3. Adjust image registries and pull secrets to match your environment
 
 # Global settings
 global:
-  openshift: false # set to true if you are using openshift
-  openshiftDomain: "" # OpenShift wildcard DNS domain (e.g., *.apps.neuraltrust-dev.c4u5.p2.openshiftapps.com)
+  openshift: true # set to true for OpenShift (Ingress can still be used in OpenShift)
+  openshiftDomain: "YOUR_DOMAIN" # OpenShift wildcard DNS domain (e.g., *.apps.example.com)
   imageRegistry: "" # Global image registry prefix (e.g., "europe-west1-docker.pkg.dev/project/repo"). If set, will be prepended to image repositories.
-  preserveExistingSecrets: false  # Set to true to prevent Helm from creating/updating secrets (secrets are pre-generated). When true, secret templates are NOT rendered.
+  preserveExistingSecrets: true  # Set to true to prevent Helm from creating/updating secrets (secrets are pre-generated). When true, secret templates are NOT rendered.
   security:
     allowInsecureImages: true # Allow Bitnami charts to use their container images
   storageClass: "" # Global storage class for persistent volumes
@@ -27,14 +38,25 @@ clickhouse:
     tag: 25.3.2-debian-12-r3
     pullPolicy: Always
   global:
-    imagePullSecrets: ["user-registry"]
+    imagePullSecrets: ["user-registry"]  # Set to your image pull secret name
   auth:
     username: "neuraltrust"
-    password: "12345" # Define this value
+    password: ""  # Ignored when preserveExistingSecrets: true (secret is pre-generated)
     # Use existing secret if it already exists (prevents Helm from trying to manage it)
     # Set to "clickhouse" to use the pre-existing secret named "clickhouse"
-    existingSecret: ""  # Set to "" if you want Helm to create/manage the secret
+    # IMPORTANT: When preserveExistingSecrets: true, the ClickHouse secret template is NOT rendered.
+    # The secret "clickhouse" must be pre-generated with key "admin-password" containing the password.
+    existingSecret: "clickhouse"  # Set to secret name (e.g., "clickhouse") if secret already exists, or "" to let Helm manage it
     existingSecretKey: "admin-password"  # Key name in the existing secret
+  # Prevent ClickHouse from creating additional secrets
+  initdbScripts: {}  # Empty to prevent init-scripts-secret creation
+  initdbScriptsSecret: ""  # Use existing secret if needed
+  startdbScripts: {}  # Empty to prevent start-scripts-secret creation
+  startdbScriptsSecret: ""  # Use existing secret if needed
+  tls:
+    enabled: false  # Disable TLS to prevent TLS secret creation
+  ingress:
+    enabled: false  # Disable ingress to prevent ingress-tls-secrets creation
   persistence:
     enabled: true
     size: 10Gi
@@ -75,6 +97,14 @@ kafka:
   auth:
     interBrokerProtocol: PLAINTEXT
     clientProtocol: PLAINTEXT
+    # Prevent Kafka from creating auth secrets by using existing secrets (if needed)
+    # existingSecret: "kafka-auth-secret"  # Uncomment and set if you have pre-generated auth secret
+  # Prevent Kafka from creating service binding secrets
+  serviceBindings:
+    enabled: false  # Disable service bindings to prevent secret creation
+  # Prevent Kafka from creating TLS secrets
+  tls:
+    enabled: false  # Disable TLS to prevent TLS secret creation
   listeners:
     client:
       containerPort: 9092
@@ -108,7 +138,14 @@ kafka:
     podAntiAffinityPreset: hard
     auth:
       client:
-        enabled: false
+        enabled: false  # Disable client auth to prevent secret creation
+        # existingSecret: "zookeeper-client-auth"  # Use existing secret if needed
+      quorum:
+        enabled: false  # Disable quorum auth to prevent secret creation
+        # existingSecret: "zookeeper-quorum-auth"  # Use existing secret if needed
+    # Prevent ZooKeeper from creating TLS secrets
+    tls:
+      enabled: false  # Disable TLS to prevent TLS secret creation
     image:
       registry: docker.io
       repository: bitnamilegacy/zookeeper
@@ -128,7 +165,7 @@ kafka:
     tag: 3.9.0-debian-12-r1
     pullPolicy: Always
   global:
-    imagePullSecrets: ["user-registry"]
+    imagePullSecrets: ["user-registry"]  # Set to your image pull secret name
   persistence:
     enabled: true
     size: 10Gi
@@ -176,14 +213,15 @@ trustgate:
   enabled: true
   global:
     version: "ee"  # can be "ce" or "ee"
-    imageRegistry: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker"
+    imageRegistry: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker"  # Set to your image registry
     storageClass: ""
     deploymentType: shared  # shared or dedicated
+    preserveExistingSecrets: true  # Set to true to prevent Helm from creating/updating secrets (secrets are pre-generated)
     huggingface:
       apiKeySecret: "hf-api-key"
     image:
       pullPolicy: Always
-      image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee"
+      image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee"  # Set to your image
       tag: "v1.9.27"
       # imagePullSecrets: if not set, will fall back to parent chart's global.imagePullSecrets
       imagePullSecrets: ["user-registry"]  # Set to array of secret names, e.g., ["secret-name"] or leave empty to use parent global.imagePullSecrets
@@ -194,16 +232,11 @@ trustgate:
         tag: "17.2-alpine"  # PostgreSQL image tag
     env:
       SERVER_SECRET_KEY: "12345"  # Define this value
-      SERVER_BASE_DOMAIN: "neuraltrust.ai"
+      SERVER_BASE_DOMAIN: "YOUR_DOMAIN"  # Set to your OpenShift domain
       SERVER_ADMIN_PORT: "8080"
       SERVER_METRICS_PORT: "9090"
       SERVER_PROXY_PORT: "8081"
       SERVER_ACTIONS_PORT: "8084"
-      # Database connection (uses infrastructure.postgresql config)
-      # When control-plane PostgreSQL is installed in-cluster, use:
-      # - DATABASE_HOST: "control-plane-postgresql" (service name)
-      # - DATABASE_USER: "neuraltrust" (matches control-plane PostgreSQL user)
-      # - DATABASE_PASSWORD: same as control-plane PostgreSQL password
       DATABASE_HOST: "control-plane-postgresql"  # Use control-plane PostgreSQL service name when installInCluster=true
       DATABASE_PORT: "5432"
       DATABASE_USER: "trustgate"
@@ -217,9 +250,9 @@ trustgate:
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ""  # Will be auto-configured if redis.enabled
       REDIS_DB: "0"
-      CONTROL_PLANE_HOST: "admin.neuraltrust.ai"
-      DATA_PLANE_HOST: "gateway.neuraltrust.ai"
-      ACTIONS_HOST: "actions.neuraltrust.ai"
+      CONTROL_PLANE_HOST: "admin.YOUR_DOMAIN"  # Set to your domain
+      DATA_PLANE_HOST: "gateway.YOUR_DOMAIN"  # Set to your domain
+      ACTIONS_HOST: "actions.YOUR_DOMAIN"  # Set to your domain
 
   # Service Account configuration
   serviceAccount:
@@ -230,7 +263,7 @@ trustgate:
   # Common configurations
   config:
     logLevel: "info"
-    baseDomain: "neuraltrust.ai"
+    baseDomain: "YOUR_DOMAIN"  # Set to your domain
     providers: {}
 
   # Control Plane settings
@@ -362,7 +395,7 @@ trustgate:
       repository: redislabs/redisearch
       tag: 2.6.9
       pullPolicy: Always
-      imagePullSecrets: ["user-registry"]
+      imagePullSecrets: ["user-registry"]  # Set to your image pull secret name
     # External Redis configuration if redis.enabled is false
     external:
       host: ""
@@ -418,21 +451,23 @@ trustgate:
 
   ingress:
     enabled: true  # Enable Ingress (Ingress supports TLS secrets via secretName)
-    className: "nginx"  # Ingress class name (e.g., "nginx", "traefik")
-    annotations: {}
+    className: "openshift-default"  # Ingress class name (e.g., "nginx", "traefik", "openshift-default")
+    annotations:
+      route.openshift.io/termination: "edge"
+      route.openshift.io/insecure-edge-termination-policy: "Redirect"
     controlPlane:
-      host: "admin.neuraltrust.ai"
+      host: "admin.YOUR_DOMAIN"  # Set to your domain
     dataPlane:
-      host: "gateway.neuraltrust.ai"
+      host: "gateway.YOUR_DOMAIN"  # Set to your domain
     actions:
-      host: "actions.neuraltrust.ai"
+      host: "actions.YOUR_DOMAIN"  # Set to your domain
     # TLS configuration for Ingress
     # When using an existing wildcard TLS secret (type: kubernetes.io/tls) in the namespace,
     # set tls.enabled: true and tls.secretName to the name of that secret
     # The secret should contain tls.crt and tls.key keys
     tls:
-      enabled: false
-      secretName: ""  # Name of existing kubernetes.io/tls secret in namespace
+      enabled: true
+      secretName: "wildcard-tls-secret"  # Name of existing kubernetes.io/tls secret in namespace
 
 
 # NeuralTrust Control Plane subchart values
@@ -440,37 +475,42 @@ trustgate:
 neuraltrust-control-plane:
   controlPlane:
     enabled: true
-    preserveExistingSecrets: false
+    preserveExistingSecrets: true  # Set to true to prevent Helm from creating/updating secrets (secrets are pre-generated). When true, secret templates are NOT rendered.
     imagePullSecrets: "user-registry"  # Set imagePullSecrets for all control-plane components (scheduler, api, app, postgresql)
     secrets:
-      controlPlaneJWTSecret: "12345" #define this value
-      openaiApiKey: ""
-      resendApiKey: ""
-      resendAlertSender: ""
-      resendInviteSender: ""
-      trustgateJwtSecret: "12345" #define this value
-      firewallJwtSecret: ""
-      modelScannerSecret: ""
+      # IMPORTANT: When preserveExistingSecrets: true, these values are ignored and secret templates are NOT rendered.
+      # All secrets must be pre-generated with the correct values before deployment.
+      # Secret names that must exist: postgresql-secrets, control-plane-secrets
+      controlPlaneJWTSecret: ""  # Ignored when preserveExistingSecrets: true
+      openaiApiKey: ""  # Ignored when preserveExistingSecrets: true
+      resendApiKey: ""  # Ignored when preserveExistingSecrets: true
+      resendAlertSender: ""  # Ignored when preserveExistingSecrets: true
+      resendInviteSender: ""  # Ignored when preserveExistingSecrets: true
+      trustgateJwtSecret: ""  # Ignored when preserveExistingSecrets: true
+      firewallJwtSecret: ""  # Ignored when preserveExistingSecrets: true
+      modelScannerSecret: ""  # Ignored when preserveExistingSecrets: true
     components:
       scheduler:
         enabled: true
-        host: "control-plane-scheduler.neuraltrust.ai"
+        host: "control-plane-scheduler.YOUR_DOMAIN"  # Set to your domain
         service:
-          type: LoadBalancer
+          type: ClusterIP
         ingress:
           enabled: true  # Enable Ingress (Ingress supports TLS secrets)
-          className: "nginx"  # Ingress class name (e.g., "nginx", "traefik")
-          annotations: {}
+          className: "openshift-default"  # Ingress class name (e.g., "nginx", "traefik", "openshift-default")
+          annotations:
+            route.openshift.io/termination: "edge"
+            route.openshift.io/insecure-edge-termination-policy: "Redirect"
           # TLS configuration for Ingress
           # When using an existing wildcard TLS secret (type: kubernetes.io/tls) in the namespace,
           # set tls.secretName to the name of that secret
           # The secret should contain tls.crt and tls.key keys
           tls:
-            enabled: false
-            secretName: ""  # Name of existing kubernetes.io/tls secret in namespace
+            enabled: true
+            secretName: "wildcard-tls-secret"  # Name of existing kubernetes.io/tls secret in namespace
         replicaCount: 1
         image:
-          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/scheduler"
+          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/scheduler"  # Set to your image
           tag: "v1.7.2"
           pullPolicy: "Always"
         config:
@@ -487,23 +527,25 @@ neuraltrust-control-plane:
             cpu: 200m
       api:
         enabled: true
-        host: "control-plane-api.neuraltrust.ai"
+        host: "control-plane-api.YOUR_DOMAIN"  # Set to your domain
         service:
-          type: LoadBalancer
+          type: ClusterIP
         ingress:
           enabled: true  # Enable Ingress (Ingress supports TLS secrets)
-          className: "nginx"  # Ingress class name (e.g., "nginx", "traefik")
-          annotations: {}
+          className: "openshift-default"  # Ingress class name (e.g., "nginx", "traefik", "openshift-default")
+          annotations:
+            route.openshift.io/termination: "edge"
+            route.openshift.io/insecure-edge-termination-policy: "Redirect"
           # TLS configuration for Ingress
           # When using an existing wildcard TLS secret (type: kubernetes.io/tls) in the namespace,
           # set tls.secretName to the name of that secret
           # The secret should contain tls.crt and tls.key keys
           tls:
-            enabled: false
-            secretName: ""  # Name of existing kubernetes.io/tls secret in namespace
+            enabled: true
+            secretName: "wildcard-tls-secret"  # Name of existing kubernetes.io/tls secret in namespace
         replicaCount: 2
         image:
-          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api"
+          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api"  # Set to your image
           tag: "v1.7.3"
           pullPolicy: "Always"
         secrets:
@@ -520,31 +562,24 @@ neuraltrust-control-plane:
           limits:
             memory: 1Gi
             cpu: 500m
-        healthCheck:
-          # Health check job image (used for post-install/post-upgrade health checks)
-          image:
-            repository: "curlimages/curl"  # Default: curlimages/curl (without hub/)
-            tag: "8.13.0"
       app:
         enabled: true
-        host: "control-plane-app.neuraltrust.ai"
+        host: "control-plane-app.YOUR_DOMAIN"  # Set to your domain
         secondaryHost: ""
         service:
-          type: LoadBalancer
+          type: ClusterIP
         ingress:
           enabled: true  # Enable Ingress (Ingress supports TLS secrets)
-          className: "nginx"  # Ingress class name (e.g., "nginx", "traefik")
-          annotations: {}
-          # TLS configuration for Ingress
-          # When using an existing wildcard TLS secret (type: kubernetes.io/tls) in the namespace,
-          # set tls.secretName to the name of that secret
-          # The secret should contain tls.crt and tls.key keys
+          className: "openshift-default"  # Ingress class name (e.g., "nginx", "traefik", "openshift-default")
+          annotations:
+            route.openshift.io/termination: "edge"
+            route.openshift.io/insecure-edge-termination-policy: "Redirect"
           tls:
-            enabled: false
-            secretName: ""  # Name of existing kubernetes.io/tls secret in namespace
+            enabled: true
+            secretName: "wildcard-tls-secret"  # Name of existing kubernetes.io/tls secret in namespace
         replicaCount: 1
         image:
-          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
+          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"  # Set to your image
           tag: "v1.7.4"
           pullPolicy: "Always"
         config:
@@ -582,18 +617,20 @@ neuraltrust-control-plane:
       postgresql:
         installInCluster: true  # Set to true to enable in-cluster PostgreSQL deployment
         secrets:
+          # IMPORTANT: When preserveExistingSecrets: true, these values are ignored and the postgresql-secrets template is NOT rendered.
+          # The secret "postgresql-secrets" must be pre-generated with keys: POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB, POSTGRES_HOST, POSTGRES_PORT, DATABASE_URL, POSTGRES_PRISMA_URL
           name: "postgresql-secrets"
-          user: "neuraltrust"  # PostgreSQL user (default: "neuraltrust" for in-cluster, "postgres" for external)
-          password: "12345"  # PostgreSQL password (required when installInCluster=true or using external PostgreSQL)
-          database: "neuraltrust"  # PostgreSQL database name
-          host: "control-plane-postgresql"  # PostgreSQL host (set to "control-plane-postgresql" when installInCluster=true, or external host when using external PostgreSQL)
-          port: "5432"  # PostgreSQL port
+          user: ""  # PostgreSQL user (ignored when preserveExistingSecrets: true)
+          password: ""  # PostgreSQL password (ignored when preserveExistingSecrets: true)
+          database: ""  # PostgreSQL database name (ignored when preserveExistingSecrets: true)
+          host: ""  # PostgreSQL host (ignored when preserveExistingSecrets: true)
+          port: ""  # PostgreSQL port (ignored when preserveExistingSecrets: true)
         image:
           repository: "postgres"
           tag: "17.2-alpine"
           pullPolicy: "Always"
           imagePullSecrets:
-            - name: "user-registry"
+            - name: "user-registry"  # Set to your image pull secret name
         persistence:
           enabled: true
           size: 10Gi
@@ -615,19 +652,22 @@ neuraltrust-control-plane:
 neuraltrust-data-plane:
   dataPlane:
     enabled: true
-    preserveExistingSecrets: false
+    preserveExistingSecrets: true  # Set to true to prevent Helm from creating/updating secrets (secrets are pre-generated). When true, secret templates are NOT rendered.
     imagePullSecrets: "user-registry"  # Set imagePullSecrets for all data-plane components (api, worker, kafka-connect)
     secrets:
+      # IMPORTANT: When preserveExistingSecrets: true, these values are ignored and secret templates are NOT rendered.
+      # All secrets must be pre-generated with the correct values before deployment.
+      # Secret names that must exist: data-plane-jwt-secret, openai-secrets, google-secrets, resend-secrets, huggingface-secrets
       openaiApiKeySecretName: "openai-secrets"
-      openaiApiKey: ""
+      openaiApiKey: ""  # Ignored when preserveExistingSecrets: true
       googleApiKeySecretName: "google-secrets"
-      googleApiKey: ""
+      googleApiKey: ""  # Ignored when preserveExistingSecrets: true
       resendApiKeySecretName: "resend-secrets"
-      resendApiKey: ""
+      resendApiKey: ""  # Ignored when preserveExistingSecrets: true
       dataPlaneJWTSecretName: "data-plane-jwt-secret"
-      dataPlaneJWTSecret: "12345" #define this value
+      dataPlaneJWTSecret: ""  # Ignored when preserveExistingSecrets: true
       huggingFaceTokenSecretName: "huggingface-secrets"
-      huggingFaceToken: ""
+      huggingFaceToken: ""  # Ignored when preserveExistingSecrets: true
     components:
       clickhouse:
         enabled: true
@@ -657,7 +697,7 @@ neuraltrust-data-plane:
         connect:
           replicas: 1
           image:
-            repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect
+            repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect  # Set to your image
             tag: v0.0.1
             pullPolicy: Always
           resources:
@@ -669,23 +709,25 @@ neuraltrust-data-plane:
               memory: 2Gi
       api:
         enabled: true
-        host: "data-plane-api.neuraltrust.ai"
+        host: "data-plane-api.YOUR_DOMAIN"  # Set to your domain
         service:
-          type: LoadBalancer
+          type: ClusterIP
         ingress:
           enabled: true  # Enable Ingress (Ingress supports TLS secrets)
-          className: "nginx"  # Ingress class name (e.g., "nginx", "traefik")
-          annotations: {}
+          className: "openshift-default"  # Ingress class name (e.g., "nginx", "traefik", "openshift-default")
+          annotations:
+            route.openshift.io/termination: "edge"
+            route.openshift.io/insecure-edge-termination-policy: "Redirect"
           # TLS configuration for Ingress
           # When using an existing wildcard TLS secret (type: kubernetes.io/tls) in the namespace,
           # set tls.secretName to the name of that secret
           # The secret should contain tls.crt and tls.key keys
           tls:
-            enabled: false
-            secretName: ""  # Name of existing kubernetes.io/tls secret in namespace
+            enabled: true
+            secretName: "wildcard-tls-secret"  # Name of existing kubernetes.io/tls secret in namespace
         classifierModel: "gpt"
         image:
-          repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
+          repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api  # Set to your image
           tag: v1.7.8
           pullPolicy: Always
         accessMode: ReadWriteOnce
@@ -735,7 +777,7 @@ neuraltrust-data-plane:
         enabled: true
         replicas: 1
         image:
-          repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/workers
+          repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/workers  # Set to your image
           tag: v1.4.0-with-models
           pullPolicy: Always
         resources:
@@ -747,3 +789,4 @@ neuraltrust-data-plane:
             cpu: 2000m
       connectorsJob:
         image: curlimages/curl:8.13.0
+

@@ -5,8 +5,8 @@
 
 # Global settings
 global:
-  openshift: false # set to true if you are using openshift
-  openshiftDomain: "" # OpenShift wildcard DNS domain (e.g., *.apps.neuraltrust-dev.c4u5.p2.openshiftapps.com)
+  openshift: true # set to true if you are using openshift
+  openshiftDomain: "YOUR_DOMAIN" # OpenShift wildcard DNS domain (e.g., *.apps.neuraltrust-dev.c4u5.p2.openshiftapps.com)
   imageRegistry: "" # Global image registry prefix (e.g., "europe-west1-docker.pkg.dev/project/repo"). If set, will be prepended to image repositories.
   preserveExistingSecrets: false  # Set to true to prevent Helm from creating/updating secrets (secrets are pre-generated). When true, secret templates are NOT rendered.
   security:
@@ -187,11 +187,6 @@ trustgate:
       tag: "v1.9.27"
       # imagePullSecrets: if not set, will fall back to parent chart's global.imagePullSecrets
       imagePullSecrets: ["user-registry"]  # Set to array of secret names, e.g., ["secret-name"] or leave empty to use parent global.imagePullSecrets
-    postgresql:
-      # PostgreSQL image used for TrustGate database initialization job
-      image:
-        repository: "postgres"  # PostgreSQL image repository
-        tag: "17.2-alpine"  # PostgreSQL image tag
     env:
       SERVER_SECRET_KEY: "12345"  # Define this value
       SERVER_BASE_DOMAIN: "neuraltrust.ai"
@@ -417,16 +412,18 @@ trustgate:
         replicas: 3
 
   ingress:
-    enabled: true  # Enable Ingress (Ingress supports TLS secrets via secretName)
-    className: "nginx"  # Ingress class name (e.g., "nginx", "traefik")
-    annotations: {}
+    enabled: false  # Set to true to use Ingress instead of Routes in OpenShift
+    className: "openshift-default"  # Ingress class name (e.g., "nginx", "traefik", "openshift-default")
+    annotations:
+      route.openshift.io/termination: "edge"
+      route.openshift.io/insecure-edge-termination-policy: "Redirect"
     controlPlane:
       host: "admin.neuraltrust.ai"
     dataPlane:
       host: "gateway.neuraltrust.ai"
     actions:
       host: "actions.neuraltrust.ai"
-    # TLS configuration for Ingress
+    # TLS configuration for Ingress (when ingress.enabled: true)
     # When using an existing wildcard TLS secret (type: kubernetes.io/tls) in the namespace,
     # set tls.enabled: true and tls.secretName to the name of that secret
     # The secret should contain tls.crt and tls.key keys
@@ -456,12 +453,14 @@ neuraltrust-control-plane:
         enabled: true
         host: "control-plane-scheduler.neuraltrust.ai"
         service:
-          type: LoadBalancer
+          type: ClusterIP  # Use ClusterIP for OpenShift (Routes handle external access)
         ingress:
-          enabled: true  # Enable Ingress (Ingress supports TLS secrets)
-          className: "nginx"  # Ingress class name (e.g., "nginx", "traefik")
-          annotations: {}
-          # TLS configuration for Ingress
+          enabled: false  # Set to true to use Ingress instead of Routes in OpenShift
+          className: "openshift-default"  # Ingress class name (e.g., "nginx", "traefik", "openshift-default")
+          annotations:
+            route.openshift.io/termination: "edge"
+            route.openshift.io/insecure-edge-termination-policy: "Redirect"
+          # TLS configuration for Ingress (when ingress.enabled: true)
           # When using an existing wildcard TLS secret (type: kubernetes.io/tls) in the namespace,
           # set tls.secretName to the name of that secret
           # The secret should contain tls.crt and tls.key keys
@@ -489,12 +488,14 @@ neuraltrust-control-plane:
         enabled: true
         host: "control-plane-api.neuraltrust.ai"
         service:
-          type: LoadBalancer
+          type: ClusterIP  # Use ClusterIP for OpenShift (Routes handle external access)
         ingress:
-          enabled: true  # Enable Ingress (Ingress supports TLS secrets)
-          className: "nginx"  # Ingress class name (e.g., "nginx", "traefik")
-          annotations: {}
-          # TLS configuration for Ingress
+          enabled: false  # Set to true to use Ingress instead of Routes in OpenShift
+          className: "openshift-default"  # Ingress class name (e.g., "nginx", "traefik", "openshift-default")
+          annotations:
+            route.openshift.io/termination: "edge"
+            route.openshift.io/insecure-edge-termination-policy: "Redirect"
+          # TLS configuration for Ingress (when ingress.enabled: true)
           # When using an existing wildcard TLS secret (type: kubernetes.io/tls) in the namespace,
           # set tls.secretName to the name of that secret
           # The secret should contain tls.crt and tls.key keys
@@ -520,22 +521,19 @@ neuraltrust-control-plane:
           limits:
             memory: 1Gi
             cpu: 500m
-        healthCheck:
-          # Health check job image (used for post-install/post-upgrade health checks)
-          image:
-            repository: "curlimages/curl"  # Default: curlimages/curl (without hub/)
-            tag: "8.13.0"
       app:
         enabled: true
         host: "control-plane-app.neuraltrust.ai"
         secondaryHost: ""
         service:
-          type: LoadBalancer
+          type: ClusterIP  # Use ClusterIP for OpenShift (Routes handle external access)
         ingress:
-          enabled: true  # Enable Ingress (Ingress supports TLS secrets)
-          className: "nginx"  # Ingress class name (e.g., "nginx", "traefik")
-          annotations: {}
-          # TLS configuration for Ingress
+          enabled: false  # Set to true to use Ingress instead of Routes in OpenShift
+          className: "openshift-default"  # Ingress class name (e.g., "nginx", "traefik", "openshift-default")
+          annotations:
+            route.openshift.io/termination: "edge"
+            route.openshift.io/insecure-edge-termination-policy: "Redirect"
+          # TLS configuration for Ingress (when ingress.enabled: true)
           # When using an existing wildcard TLS secret (type: kubernetes.io/tls) in the namespace,
           # set tls.secretName to the name of that secret
           # The secret should contain tls.crt and tls.key keys
@@ -671,12 +669,14 @@ neuraltrust-data-plane:
         enabled: true
         host: "data-plane-api.neuraltrust.ai"
         service:
-          type: LoadBalancer
+          type: ClusterIP  # Use ClusterIP for OpenShift (Routes handle external access)
         ingress:
-          enabled: true  # Enable Ingress (Ingress supports TLS secrets)
-          className: "nginx"  # Ingress class name (e.g., "nginx", "traefik")
-          annotations: {}
-          # TLS configuration for Ingress
+          enabled: false  # Set to true to use Ingress instead of Routes in OpenShift
+          className: "openshift-default"  # Ingress class name (e.g., "nginx", "traefik", "openshift-default")
+          annotations:
+            route.openshift.io/termination: "edge"
+            route.openshift.io/insecure-edge-termination-policy: "Redirect"
+          # TLS configuration for Ingress (when ingress.enabled: true)
           # When using an existing wildcard TLS secret (type: kubernetes.io/tls) in the namespace,
           # set tls.secretName to the name of that secret
           # The secret should contain tls.crt and tls.key keys
