@@ -142,6 +142,18 @@ spec:
         app: create-connectors
         job-name: create-connectors
     spec:
+      {{- $imagePullSecret := "" }}
+      {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.connectorsJob .Values.dataPlane.components.connectorsJob.imagePullSecrets }}
+        {{- if kindIs "slice" .Values.dataPlane.components.connectorsJob.imagePullSecrets }}
+          {{- $imagePullSecret = index .Values.dataPlane.components.connectorsJob.imagePullSecrets 0 }}
+        {{- else }}
+          {{- $imagePullSecret = .Values.dataPlane.components.connectorsJob.imagePullSecrets }}
+        {{- end }}
+      {{- end }}
+      {{- if and $imagePullSecret (ne $imagePullSecret "none") (ne $imagePullSecret "") }}
+      imagePullSecrets:
+        - name: {{ $imagePullSecret }}
+      {{- end }}
       containers:
       - name: create-connectors
         {{- $connectorsImage := "curlimages/curl:8.13.0" }}
