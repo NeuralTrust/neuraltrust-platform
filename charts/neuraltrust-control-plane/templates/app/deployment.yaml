@@ -183,13 +183,13 @@ spec:
           {{- $schedulerUrl = printf "http://control-plane-scheduler-service.%s.svc.cluster.local:80" $namespace }}
         {{- end }}
         {{- if not $trustgateControlPlaneUrl }}
-          {{- $trustgateControlPlaneUrl = printf "http://trustgate-control-plane.%s.svc.cluster.local:8080" $namespace }}
+          {{- $trustgateControlPlaneUrl = printf "http://trustgate-control-plane.%s.svc.cluster.local:80" $namespace }}
         {{- end }}
         {{- if not $trustgateDataPlaneUrl }}
-          {{- $trustgateDataPlaneUrl = printf "http://trustgate-data-plane.%s.svc.cluster.local:8081" $namespace }}
+          {{- $trustgateDataPlaneUrl = printf "http://trustgate-data-plane.%s.svc.cluster.local:80" $namespace }}
         {{- end }}
         {{- if not $trustgateActionsUrl }}
-          {{- $trustgateActionsUrl = printf "http://trustgate-actions.%s.svc.cluster.local:8084" $namespace }}
+          {{- $trustgateActionsUrl = printf "http://trustgate-actions.%s.svc.cluster.local:80" $namespace }}
         {{- end }}
         image: {{ include "control-plane.image" (dict "repository" $appImageRepo "tag" $appImageTag "global" .Values.global) | quote }}
         imagePullPolicy: "{{ $appPullPolicy }}"
