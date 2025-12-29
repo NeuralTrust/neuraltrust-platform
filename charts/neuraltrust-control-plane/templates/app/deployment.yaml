@@ -171,37 +171,25 @@ spec:
           {{- if .Values.controlPlane.components.app.config.kafkaHost }}{{- $kafkaHost = .Values.controlPlane.components.app.config.kafkaHost }}{{- end }}
           {{- if .Values.controlPlane.components.app.config.kafkaPort }}{{- $kafkaPort = .Values.controlPlane.components.app.config.kafkaPort }}{{- end }}
         {{- end }}
-        {{- /* Auto-generate URLs from OpenShift Routes if OpenShift is enabled and URLs are not explicitly set */}}
-        {{- if and (or .Values.global.openshift $.Values.global.openshift) $openshiftDomain }}
-          {{- if not $controlPlaneApiUrl }}
-            {{- $controlPlaneApiUrl = printf "https://control-plane-api.%s" $openshiftDomain }}
-          {{- end }}
-          {{- if not $dataPlaneApiUrl }}
-            {{- $dataPlaneApiUrl = printf "https://data-plane-api.%s" $openshiftDomain }}
-          {{- end }}
-          {{- if not $schedulerUrl }}
-            {{- $schedulerUrl = printf "https://control-plane-scheduler.%s" $openshiftDomain }}
-          {{- end }}
-          {{- if not $trustgateControlPlaneUrl }}
-            {{- $trustgateControlPlaneUrl = printf "https://trustgate-admin.%s" $openshiftDomain }}
-          {{- end }}
-          {{- if not $trustgateDataPlaneUrl }}
-            {{- $trustgateDataPlaneUrl = printf "https://trustgate-gateway.%s" $openshiftDomain }}
-          {{- end }}
-          {{- if not $trustgateActionsUrl }}
-            {{- $trustgateActionsUrl = printf "https://trustgate-actions.%s" $openshiftDomain }}
-          {{- end }}
-        {{- else }}
-          {{- /* Default values for non-OpenShift deployments */}}
-          {{- if not $trustgateControlPlaneUrl }}
-            {{- $trustgateControlPlaneUrl = "https://admin.neuraltrust.ai" }}
-          {{- end }}
-          {{- if not $trustgateDataPlaneUrl }}
-            {{- $trustgateDataPlaneUrl = "https://gateway.neuraltrust.ai" }}
-          {{- end }}
-          {{- if not $trustgateActionsUrl }}
-            {{- $trustgateActionsUrl = "https://actions.neuraltrust.ai" }}
-          {{- end }}
+        {{- /* Use internal Kubernetes service URLs for inter-service communication */}}
+        {{- $namespace := .Release.Namespace }}
+        {{- if not $controlPlaneApiUrl }}
+          {{- $controlPlaneApiUrl = printf "http://control-plane-api-service.%s.svc.cluster.local:80" $namespace }}
+        {{- end }}
+        {{- if not $dataPlaneApiUrl }}
+          {{- $dataPlaneApiUrl = printf "http://data-plane-api-service.%s.svc.cluster.local:80" $namespace }}
+        {{- end }}
+        {{- if not $schedulerUrl }}
+          {{- $schedulerUrl = printf "http://control-plane-scheduler-service.%s.svc.cluster.local:80" $namespace }}
+        {{- end }}
+        {{- if not $trustgateControlPlaneUrl }}
+          {{- $trustgateControlPlaneUrl = printf "http://trustgate-control-plane.%s.svc.cluster.local:8080" $namespace }}
+        {{- end }}
+        {{- if not $trustgateDataPlaneUrl }}
+          {{- $trustgateDataPlaneUrl = printf "http://trustgate-data-plane.%s.svc.cluster.local:8081" $namespace }}
+        {{- end }}
+        {{- if not $trustgateActionsUrl }}
+          {{- $trustgateActionsUrl = printf "http://trustgate-actions.%s.svc.cluster.local:8084" $namespace }}
         {{- end }}
         image: {{ include "control-plane.image" (dict "repository" $appImageRepo "tag" $appImageTag "global" .Values.global) | quote }}
         imagePullPolicy: "{{ $appPullPolicy }}"
@@ -301,43 +289,27 @@ spec:
         - name: OPENAI_MODEL
           value: "{{ $openaiModel }}"
         - name: CONTROL_PLANE_API_URL
-          {{- if $controlPlaneApiUrl }}
           value: "{{ $controlPlaneApiUrl }}"
-          {{- else }}
-          value: "http://control-plane-api-service.{{ .Release.Namespace }}.svc.cluster.local"
-          {{- end }}
         - name: CONTROL_PLANE_JWT_SECRET
           valueFrom:
             secretKeyRef:
               name: control-plane-secrets
               key: CONTROL_PLANE_JWT_SECRET
         - name: DATA_PLANE_API_URL
-          {{- if $dataPlaneApiUrl }}
           value: "{{ $dataPlaneApiUrl }}"
-          {{- else }}
-          value: "http://data-plane-api-service.{{ .Release.Namespace }}.svc.cluster.local"
-          {{- end }}
         - name: DATA_PLANE_JWT_SECRET
           valueFrom:
             secretKeyRef:
               name: data-plane-jwt-secret
               key: DATA_PLANE_JWT_SECRET
         - name: CONTROL_PLANE_SCHEDULER_URL
-          {{- if $schedulerUrl }}
           value: "{{ $schedulerUrl }}"
-          {{- else }}
-          value: "http://control-plane-scheduler-service.{{ .Release.Namespace }}.svc.cluster.local"
-          {{- end }}
         - name: TRUSTGATE_CONTROL_PLANE_URL
           value: "{{ $trustgateControlPlaneUrl }}"
         - name: TRUSTGATE_DATA_PLANE_URL
           value: "{{ $trustgateDataPlaneUrl }}"
         - name: TRUSTGATE_ACTIONS_URL
-          {{- if $trustgateActionsUrl }}
           value: "{{ $trustgateActionsUrl }}"
-          {{- else }}
-          value: ""
-          {{- end }}
         - name: NEXTAUTH_URL
           {{- if $nextAuthUrl }}
           value: "{{ $nextAuthUrl }}"
@@ -364,11 +336,7 @@ spec:
           value: "{{ $firewallApiUrl }}"
           {{- else }}
           # Use data plane API URL as default for firewall
-          {{- if $dataPlaneApiUrl }}
           value: "{{ $dataPlaneApiUrl }}"
-          {{- else }}
-          value: "http://data-plane-api-service.{{ .Release.Namespace }}.svc.cluster.local"
-          {{- end }}
           {{- end }}
         - name: FIREWALL_JWT_SECRET
           {{- if and .Values.controlPlane .Values.controlPlane.secrets .Values.controlPlane.secrets.firewallJwtSecret (or (kindIs "map" .Values.controlPlane.secrets.firewallJwtSecret) (and (kindIs "string" .Values.controlPlane.secrets.firewallJwtSecret) (ne .Values.controlPlane.secrets.firewallJwtSecret ""))) }}
