@@ -127,8 +127,7 @@ spec:
         ports:
         - containerPort: 8000
         env:
-        {{- /* Auto-generate URLs from OpenShift Routes if OpenShift is enabled and URLs are not explicitly set */}}
-        {{- $openshiftDomain := .Values.global.openshiftDomain | default $.Values.global.openshiftDomain }}
+        {{- /* Use internal Kubernetes service URLs for inter-service communication */}}
         {{- $defaultDataPlaneUrl := "" }}
         {{- $controlPlaneApiUrl := "" }}
         {{- $dataPlaneApiUrl := "" }}
@@ -141,28 +140,15 @@ spec:
             {{- $controlPlaneApiUrl = .Values.controlPlane.components.api.config.controlPlaneApiUrl }}
           {{- end }}
         {{- end }}
-        {{- /* Auto-generate from OpenShift Routes if not explicitly set */}}
-        {{- if and (or .Values.global.openshift $.Values.global.openshift) $openshiftDomain }}
-          {{- if not $defaultDataPlaneUrl }}
-            {{- $defaultDataPlaneUrl = printf "https://data-plane-api.%s" $openshiftDomain }}
-          {{- end }}
-          {{- if not $controlPlaneApiUrl }}
-            {{- $controlPlaneApiUrl = printf "https://control-plane-api.%s" $openshiftDomain }}
-          {{- end }}
-          {{- if not $dataPlaneApiUrl }}
-            {{- $dataPlaneApiUrl = printf "https://data-plane-api.%s" $openshiftDomain }}
-          {{- end }}
-        {{- else }}
-          {{- /* Default to internal service URLs if not set */}}
-          {{- if not $defaultDataPlaneUrl }}
-            {{- $defaultDataPlaneUrl = printf "http://data-plane-api-service.%s.svc.cluster.local" .Release.Namespace }}
-          {{- end }}
-          {{- if not $controlPlaneApiUrl }}
-            {{- $controlPlaneApiUrl = printf "http://control-plane-api-service.%s.svc.cluster.local" .Release.Namespace }}
-          {{- end }}
-          {{- if not $dataPlaneApiUrl }}
-            {{- $dataPlaneApiUrl = printf "http://data-plane-api-service.%s.svc.cluster.local" .Release.Namespace }}
-          {{- end }}
+        {{- /* Default to internal service URLs if not explicitly set */}}
+        {{- if not $defaultDataPlaneUrl }}
+          {{- $defaultDataPlaneUrl = "http://data-plane-api-service:80" }}
+        {{- end }}
+        {{- if not $controlPlaneApiUrl }}
+          {{- $controlPlaneApiUrl = "http://control-plane-api-service:80" }}
+        {{- end }}
+        {{- if not $dataPlaneApiUrl }}
+          {{- $dataPlaneApiUrl = "http://data-plane-api-service:80" }}
         {{- end }}
         - name: DEFAULT_DATA_PLANE_URL
           value: {{ $defaultDataPlaneUrl | quote }}

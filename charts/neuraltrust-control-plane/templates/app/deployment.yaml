@@ -172,24 +172,23 @@ spec:
           {{- if .Values.controlPlane.components.app.config.kafkaPort }}{{- $kafkaPort = .Values.controlPlane.components.app.config.kafkaPort }}{{- end }}
         {{- end }}
         {{- /* Use internal Kubernetes service URLs for inter-service communication */}}
-        {{- $namespace := .Release.Namespace }}
         {{- if not $controlPlaneApiUrl }}
-          {{- $controlPlaneApiUrl = printf "http://control-plane-api-service.%s.svc.cluster.local:80" $namespace }}
+          {{- $controlPlaneApiUrl = "http://control-plane-api-service:80" }}
         {{- end }}
         {{- if not $dataPlaneApiUrl }}
-          {{- $dataPlaneApiUrl = printf "http://data-plane-api-service.%s.svc.cluster.local:80" $namespace }}
+          {{- $dataPlaneApiUrl = "http://data-plane-api-service:80" }}
         {{- end }}
         {{- if not $schedulerUrl }}
-          {{- $schedulerUrl = printf "http://control-plane-scheduler-service.%s.svc.cluster.local:80" $namespace }}
+          {{- $schedulerUrl = "http://control-plane-scheduler-service:80" }}
         {{- end }}
         {{- if not $trustgateControlPlaneUrl }}
-          {{- $trustgateControlPlaneUrl = printf "http://trustgate-control-plane.%s.svc.cluster.local:80" $namespace }}
+          {{- $trustgateControlPlaneUrl = "http://trustgate-control-plane:80" }}
         {{- end }}
         {{- if not $trustgateDataPlaneUrl }}
-          {{- $trustgateDataPlaneUrl = printf "http://trustgate-data-plane.%s.svc.cluster.local:80" $namespace }}
+          {{- $trustgateDataPlaneUrl = "http://trustgate-data-plane:80" }}
         {{- end }}
         {{- if not $trustgateActionsUrl }}
-          {{- $trustgateActionsUrl = printf "http://trustgate-actions.%s.svc.cluster.local:80" $namespace }}
+          {{- $trustgateActionsUrl = "http://trustgate-actions:80" }}
         {{- end }}
         image: {{ include "control-plane.image" (dict "repository" $appImageRepo "tag" $appImageTag "global" .Values.global) | quote }}
         imagePullPolicy: "{{ $appPullPolicy }}"
@@ -202,8 +201,6 @@ spec:
           value: "{{ $appPort }}"
         - name: HOSTNAME
           value: "0.0.0.0"
-        - name: NT_API_URL
-          value: "http://neuraltrust-api-service.neuraltrust.svc.cluster.local"
         - name: POSTGRES_HOST
           valueFrom:
             secretKeyRef:
