@@ -584,7 +584,15 @@ if kubectl get secret "$POSTGRES_SECRET_NAME" -n "$NAMESPACE" &>/dev/null; then
 fi
 
 if [ -n "$POSTGRES_SECRET_NAME" ]; then
-    POSTGRES_HOST=$(prompt_secret "POSTGRES_HOST" "Enter PostgreSQL Host")
+    # Check for existing POSTGRES_HOST in the secret
+    EXISTING_POSTGRES_HOST=$(kubectl get secret "$POSTGRES_SECRET_NAME" -n "$NAMESPACE" -o jsonpath='{.data.POSTGRES_HOST}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
+    if [ -n "$EXISTING_POSTGRES_HOST" ]; then
+        HOST_PROMPT="Enter PostgreSQL Host (current: $EXISTING_POSTGRES_HOST, default: control-plane-postgresql)"
+    else
+        HOST_PROMPT="Enter PostgreSQL Host (default: control-plane-postgresql)"
+    fi
+    POSTGRES_HOST=$(prompt_secret "POSTGRES_HOST" "$HOST_PROMPT")
+    POSTGRES_HOST=${POSTGRES_HOST:-${EXISTING_POSTGRES_HOST:-control-plane-postgresql}}
     POSTGRES_PORT=$(prompt_secret "POSTGRES_PORT" "Enter PostgreSQL Port (default: 5432)")
     POSTGRES_PORT=${POSTGRES_PORT:-5432}
     POSTGRES_USER=$(prompt_secret "POSTGRES_USER" "Enter PostgreSQL User (default: neuraltrust)")
