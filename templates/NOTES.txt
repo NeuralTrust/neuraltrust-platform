@@ -52,8 +52,34 @@ TrustGate is enabled.
 To get the status of your deployment, run:
   kubectl get pods -n {{ .Release.Namespace }}
 
-To view logs:
-  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=neuraltrust-platform
+To view logs for specific components:
+{{- $cpValues := index .Values "neuraltrust-control-plane" }}
+{{- if and $cpValues $cpValues.controlPlane $cpValues.controlPlane.enabled }}
+  # NeuralTrust Control Plane
+  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=neuraltrust-control-plane,app.kubernetes.io/instance={{ .Release.Name }}
+{{- end }}
+{{- $dpValues := index .Values "neuraltrust-data-plane" }}
+{{- if and $dpValues $dpValues.dataPlane $dpValues.dataPlane.enabled }}
+  # NeuralTrust Data Plane
+  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=neuraltrust-data-plane,app.kubernetes.io/instance={{ .Release.Name }}
+{{- end }}
+{{- if .Values.trustgate.enabled }}
+  # TrustGate Control Plane
+  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=trustgate,app.kubernetes.io/instance={{ .Release.Name }},component=control-plane
+  # TrustGate Data Plane
+  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=trustgate,app.kubernetes.io/instance={{ .Release.Name }},component=data-plane
+{{- end }}
+{{- if .Values.infrastructure.clickhouse.deploy }}
+  # ClickHouse
+  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=clickhouse,app.kubernetes.io/instance={{ .Release.Name }}
+{{- end }}
+{{- if .Values.infrastructure.kafka.deploy }}
+  # Kafka
+  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=kafka,app.kubernetes.io/instance={{ .Release.Name }}
+{{- end }}
+
+To view logs for all pods in the namespace:
+  kubectl logs -n {{ .Release.Namespace }} --all-containers=true -l app.kubernetes.io/instance={{ .Release.Name }}
 
 For more information, see the README.md file.
 

@@ -18,6 +18,7 @@ This Helm chart provides a unified deployment for the complete NeuralTrust platf
 - Kubernetes 1.19+ or OpenShift 4.10+
 - Helm 3.2.0+
 - kubectl configured to access your cluster
+- **Docker Registry Secret (Required for NeuralTrust/TrustGate images)**: A Kubernetes secret with permission to pull container images from Google Container Registry (GCR) must exist in your namespace. The default secret name is `gcr-secret`. For Docker Hub images (infrastructure components), the default is empty `[]` (for public images) or a user-provided Docker Hub secret (for private images). See [Image Pull Secrets](#image-pull-secrets) section below for details.
 - (Optional) Ingress controller - **Not included in this chart**. Install separately if needed:
   - For Kubernetes: [ingress-nginx](https://kubernetes.github.io/ingress-nginx/deploy/) or [Traefik](https://doc.traefik.io/traefik/getting-started/install-traefik/)
   - For OpenShift: Routes are available by default (no additional installation needed)
@@ -145,6 +146,90 @@ kubectl create secret generic control-plane-secrets \
 - See [SECRETS.md](./SECRETS.md) for the complete list of required secrets
 
 See [SECRETS.md](./SECRETS.md) for detailed secrets management guide, including all secret names and keys.
+
+## Image Pull Secrets
+
+**NeuralTrust and TrustGate images are stored in a private Google Container Registry (GCR).** You must create a Kubernetes secret with credentials to pull these images. The GCR JSON key file will be provided by NeuralTrust.
+
+### Google Container Registry (GCR)
+
+**Note:** NeuralTrust and TrustGate container images are hosted in a private GCR registry. You will receive a GCR JSON key file from NeuralTrust to access these images.
+
+For GCR, use the provided script:
+
+```bash
+./create-image-pull-secret.sh --namespace neuraltrust
+```
+
+The script will prompt you for the GCR JSON key file path (provided by NeuralTrust), or you can provide it via environment variable:
+
+```bash
+GCR_KEY_FILE=./gcr-keys.json ./create-image-pull-secret.sh --namespace neuraltrust
+```
+
+Or create it manually using the GCR JSON key file provided by NeuralTrust:
+
+```bash
+kubectl create secret docker-registry gcr-secret \
+  --docker-server=europe-west1-docker.pkg.dev \
+  --docker-username=_json_key \
+  --docker-password="$(cat path/to/gcr-keys.json)" \
+  --docker-email=admin@neuraltrust.ai \
+  -n neuraltrust
+```
+
+### Docker Hub or Other Registries
+
+For Docker Hub or other registries, create the secret manually:
+
+```bash
+# Docker Hub
+kubectl create secret docker-registry user-registry \
+  --docker-server=docker.io \
+  --docker-username=your-username \
+  --docker-password=your-password \
+  --docker-email=your-email@example.com \
+  -n neuraltrust
+
+# Other registries
+kubectl create secret docker-registry <secret-name> \
+  --docker-server=<registry-server> \
+  --docker-username=<username> \
+  --docker-password=<password> \
+  --docker-email=<email> \
+  -n neuraltrust
+```
+
+### Configuring Image Pull Secrets in values.yaml
+
+After creating the secret, configure it in your `values.yaml`:
+
+```yaml
+# For components using GCR (default: gcr-secret)
+neuraltrust-control-plane:
+  controlPlane:
+    imagePullSecrets: "gcr-secret"
+
+neuraltrust-data-plane:
+  dataPlane:
+    imagePullSecrets: "gcr-secret"
+
+trustgate:
+  global:
+    image:
+      imagePullSecrets: ["gcr-secret"]
+
+# For infrastructure components using Docker Hub (default: user-registry or empty)
+clickhouse:
+  global:
+    imagePullSecrets: ["user-registry"]  # or [] for public images
+
+kafka:
+  global:
+    imagePullSecrets: ["user-registry"]  # or [] for public images
+```
+
+**Note:** If your images are public (e.g., from Docker Hub public repositories), you can leave `imagePullSecrets` as an empty array `[]` or omit it entirely.
 
 ## Infrastructure Configuration
 
