@@ -18,8 +18,13 @@ This Helm chart provides a unified deployment for the complete NeuralTrust platf
 - Kubernetes 1.19+ or OpenShift 4.10+
 - Helm 3.2.0+
 - kubectl configured to access your cluster
-- (Optional) cert-manager for TLS certificates
-- (Optional) Ingress controller (nginx-ingress recommended)
+- (Optional) Ingress controller - **Not included in this chart**. Install separately if needed:
+  - For Kubernetes: [ingress-nginx](https://kubernetes.github.io/ingress-nginx/deploy/) or [Traefik](https://doc.traefik.io/traefik/getting-started/install-traefik/)
+  - For OpenShift: Routes are available by default (no additional installation needed)
+- (Optional) cert-manager - **Not included in this chart**. Install separately if you want automatic TLS certificate management:
+  - Install cert-manager: `helm install cert-manager jetstack/cert-manager --namespace cert-manager --create-namespace --set installCRDs=true`
+  - See [cert-manager documentation](https://cert-manager.io/docs/installation/) for details
+  - If not using cert-manager, provide pre-existing `kubernetes.io/tls` secrets
 
 ## Note on Helm Lint
 
@@ -47,43 +52,6 @@ export CONTROL_PLANE_JWT_SECRET="your-secret"
 ```
 
 See [SECRETS.md](./SECRETS.md) for detailed secrets management guide.
-
-## Troubleshooting
-
-### Kafka Cluster ID Mismatch Error
-
-If you see an error like:
-```
-Invalid cluster.id in: /bitnami/kafka/data/meta.properties. Expected X, but read Y
-```
-
-This happens when the persistent volume has old cluster ID data from a previous deployment. To fix:
-
-**Option 1: Delete and recreate the PVC (loses all data)**
-```bash
-# Scale down Kafka
-kubectl scale statefulset kafka-broker -n neuraltrust --replicas=0
-
-# Delete the PVC
-kubectl delete pvc data-kafka-broker-0 -n neuraltrust
-
-# Scale back up (new PVC will be created)
-kubectl scale statefulset kafka-broker -n neuraltrust --replicas=1
-```
-
-**Option 2: Clear the meta.properties file (keeps other data)**
-```bash
-# Scale down Kafka
-kubectl scale statefulset kafka-broker -n neuraltrust --replicas=0
-
-# Delete the pod to release the volume
-kubectl delete pod kafka-broker-0 -n neuraltrust
-
-# Use a debug pod to clear the file
-kubectl run -it --rm debug --image=bitnami/kafka:3.9.0 --restart=Never -n neuraltrust -- bash
-# Inside the pod, mount the PVC and delete meta.properties
-# Then exit and scale Kafka back up
-```
 
 ### 2. Install Dependencies
 
@@ -195,7 +163,7 @@ infrastructure:
 Enable/disable the data plane:
 
 ```yaml
-neuraltrust:
+neuraltrust-data-plane:
   dataPlane:
     enabled: true
     components:
@@ -211,7 +179,7 @@ neuraltrust:
 Enable/disable the control plane:
 
 ```yaml
-neuraltrust:
+neuraltrust-control-plane:
   controlPlane:
     enabled: true
     components:
@@ -269,9 +237,11 @@ infrastructure:
       password: "your-postgres-password"
       database: "neuraltrust"
 
-neuraltrust:
+neuraltrust-data-plane:
   dataPlane:
     enabled: true
+
+neuraltrust-control-plane:
   controlPlane:
     enabled: true
 
@@ -301,9 +271,11 @@ infrastructure:
   postgresql:
     deploy: false  # Default: use external
 
-neuraltrust:
+neuraltrust-data-plane:
   dataPlane:
     enabled: true
+
+neuraltrust-control-plane:
   controlPlane:
     enabled: true
 
@@ -332,55 +304,101 @@ helm uninstall neuraltrust-platform --namespace neuraltrust
 
 **Note**: If you set `infrastructure.postgresql.chart.persistence.preserveOnDelete: true`, the PostgreSQL PVC will be preserved.
 
-## Troubleshooting
+## TLS Certificate Management
 
-### Check Pod Status
+The chart supports TLS certificates in two ways:
 
-```bash
-kubectl get pods -n neuraltrust
+### Option 1: Pre-existing TLS Secrets (Default)
+
+Create `kubernetes.io/tls` secrets manually and reference them in your values:
+
+```yaml
+trustgate:
+  ingress:
+    tls:
+      enabled: true
+      secretName: "wildcard-tls-secret"  # Pre-existing secret
+
+neuraltrust-control-plane:
+  controlPlane:
+    components:
+      api:
+        ingress:
+          tls:
+            enabled: true
+            secretName: "api-tls-secret"  # Pre-existing secret
 ```
 
-### View Logs
+### Option 2: cert-manager (Automatic Certificate Management)
 
+**Note:** cert-manager is not included in this chart. You must install it separately before using this option.
+
+**Install cert-manager:**
 ```bash
-# NeuralTrust Data Plane API
-kubectl logs -n neuraltrust -l app=neuraltrust-data-plane-api
+# Add the Jetstack Helm repository
+helm repo add jetstack https://charts.jetstack.io
+helm repo update
 
-# NeuralTrust Control Plane API
-kubectl logs -n neuraltrust -l app=neuraltrust-control-plane-api
-
-# TrustGate Control Plane
-kubectl logs -n neuraltrust -l app=trustgate-control-plane
+# Install cert-manager
+helm install cert-manager jetstack/cert-manager \
+  --namespace cert-manager \
+  --create-namespace \
+  --set installCRDs=true
 ```
 
-### Check Services
-
-```bash
-kubectl get svc -n neuraltrust
+**Create a ClusterIssuer (example for Let's Encrypt):**
+```yaml
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: your-email@example.com
+    privateKeySecretRef:
+      name: letsencrypt-prod
+    solvers:
+    - http01:
+        ingress:
+          class: nginx
 ```
 
-### Verify Infrastructure Connections
+**Configure the chart to use cert-manager:**
 
-```bash
-# Test ClickHouse connection
-kubectl run -it --rm clickhouse-client --image=clickhouse/clickhouse-client --restart=Never -- \
-  clickhouse-client --host=<clickhouse-host> --port=8123 --user=neuraltrust --password=<password>
+Add cert-manager annotations to Ingress resources. cert-manager will automatically create and manage the TLS secrets:
 
-# Test Kafka connection
-kubectl run -it --rm kafka-client --image=bitnami/kafka:latest --restart=Never -- \
-  kafka-topics.sh --bootstrap-server <kafka-host>:9092 --list
+```yaml
+trustgate:
+  ingress:
+    enabled: true
+    annotations:
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"  # or "letsencrypt-staging"
+    tls:
+      enabled: true
+      # secretName will be auto-created by cert-manager
 
-# Test PostgreSQL connection
-kubectl run -it --rm postgres-client --image=postgres:17.2-alpine --restart=Never -- \
-  psql -h <postgres-host> -U postgres -d neuraltrust
+neuraltrust-control-plane:
+  controlPlane:
+    components:
+      api:
+        ingress:
+          enabled: true
+          annotations:
+            cert-manager.io/cluster-issuer: "letsencrypt-prod"
+          tls:
+            enabled: true
 ```
+
+**Note:** When using cert-manager, you don't need to create the TLS secrets manually. cert-manager will create them automatically based on the annotations. See [cert-manager documentation](https://cert-manager.io/docs/) for more details.
 
 ## Configuration Reference
 
 See `values.yaml` for all available configuration options. Key sections:
 
 - `infrastructure.*` - Infrastructure component configuration
-- `neuraltrust.*` - NeuralTrust service configuration
+- `neuraltrust-data-plane.*` - NeuralTrust Data Plane service configuration
+- `neuraltrust-control-plane.*` - NeuralTrust Control Plane service configuration
 - `trustgate.*` - TrustGate configuration
 - `global.*` - Global settings
 
@@ -392,6 +410,21 @@ The Helm chart supports using pre-defined Kubernetes secrets or environment vari
 - Using pre-defined secrets
 - Secret names and keys
 - Security best practices
+
+## Troubleshooting
+
+For troubleshooting deployment issues, see:
+
+- **[DEPLOYMENT.md](./DEPLOYMENT.md)** - Deployment scenarios, connection verification, and common issues
+- **[README-OPENSHIFT.md](./README-OPENSHIFT.md)** - OpenShift-specific troubleshooting (SCC issues, Routes, image pull errors, etc.)
+- **[SECRETS.md](./SECRETS.md)** - Troubleshooting secret-related issues
+
+### Common Issues
+
+- **Kafka Cluster ID Mismatch**: See [DEPLOYMENT.md](./DEPLOYMENT.md#troubleshooting) for solutions
+- **Pod startup failures**: Check pod logs and events (see [DEPLOYMENT.md](./DEPLOYMENT.md#troubleshooting))
+- **Secret not found errors**: See [SECRETS.md](./SECRETS.md#troubleshooting)
+- **OpenShift-specific issues**: See [README-OPENSHIFT.md](./README-OPENSHIFT.md#troubleshooting)
 
 ## Support
 

@@ -9,6 +9,11 @@ This guide provides step-by-step instructions for deploying the NeuralTrust Plat
 - `oc` CLI configured to access your OpenShift cluster
 - Appropriate permissions to create namespaces, secrets, and deploy Helm charts
 - Docker registry credentials (if using private images)
+- (Optional) Ingress controller - **Not included in this chart**. OpenShift Routes are available by default, but if you want to use Ingress instead, install an Ingress controller separately (e.g., [ingress-nginx](https://kubernetes.github.io/ingress-nginx/deploy/))
+- (Optional) cert-manager - **Not included in this chart**. Install separately if you want automatic TLS certificate management:
+  - Install cert-manager: `helm install cert-manager jetstack/cert-manager --namespace cert-manager --create-namespace --set installCRDs=true`
+  - See [cert-manager documentation](https://cert-manager.io/docs/installation/) for details
+  - If not using cert-manager, provide pre-existing `kubernetes.io/tls` secrets
 
 ## Table of Contents
 
@@ -336,7 +341,9 @@ trustgate:
 
 ### OpenShift Route Configuration
 
-When `global.openshift=true`, the chart automatically creates OpenShift Routes instead of Ingress resources. Routes provide native OpenShift ingress capabilities.
+When `global.openshift=true` and `ingress.enabled=false` (default), the chart automatically creates OpenShift Routes instead of Ingress resources. Routes provide native OpenShift ingress capabilities.
+
+**Note:** You can also use Ingress in OpenShift by setting `ingress.enabled=true` for the components you want to expose via Ingress. When Ingress is enabled, Routes are automatically disabled for those components.
 
 ### Security Context Constraints (SCC)
 
@@ -425,9 +432,11 @@ infrastructure:
       user: "postgres"
       database: "neuraltrust"
 
-neuraltrust:
+neuraltrust-data-plane:
   dataPlane:
     enabled: true
+
+neuraltrust-control-plane:
   controlPlane:
     enabled: true
 
@@ -488,10 +497,10 @@ Routes should be created for:
 
 ```bash
 # Test Data Plane API
-curl https://$(oc get route neuraltrust-platform-data-plane-api -n neuraltrust -o jsonpath='{.spec.host}')/health
+curl https://$(oc get route data-plane-api-route -n neuraltrust -o jsonpath='{.spec.host}')/health
 
 # Test Control Plane API
-curl https://$(oc get route neuraltrust-platform-control-plane-api -n neuraltrust -o jsonpath='{.spec.host}')/health
+curl https://$(oc get route control-plane-api-route -n neuraltrust -o jsonpath='{.spec.host}')/health
 ```
 
 ### Verify Secrets
