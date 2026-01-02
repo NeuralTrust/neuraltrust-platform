@@ -31,14 +31,16 @@ infrastructure:
     # Kafka chart values are passed via root-level 'kafka:' section
     # See values.yaml for full configuration
 
+  postgresql:
+    deploy: true  # Deploy PostgreSQL (via control-plane subchart)
+    # PostgreSQL chart values are passed via 'neuraltrust-control-plane.controlPlane.components.postgresql:' section below
+
 # NeuralTrust Control Plane - Deploy all components
 neuraltrust-control-plane:
   controlPlane:
     enabled: true
-    preserveExistingSecrets: false  # Helm will create secrets from values
     components:
       postgresql:
-        installInCluster: true  # Deploy PostgreSQL in-cluster
         secrets:
           password: "your-postgres-password"  # Define this value
           database: "neuraltrust"
@@ -62,7 +64,6 @@ neuraltrust-control-plane:
 neuraltrust-data-plane:
   dataPlane:
     enabled: true
-    preserveExistingSecrets: false  # Helm will create secrets from values
     components:
       clickhouse:
         enabled: true  # ClickHouse will be deployed via infrastructure.clickhouse.deploy

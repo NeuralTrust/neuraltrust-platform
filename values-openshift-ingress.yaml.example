@@ -208,6 +208,29 @@ infrastructure:
     # Kafka chart values (used when deploy: true)
     # Values are passed via root-level 'kafka:' section above
 
+  # PostgreSQL Configuration
+  postgresql:
+    # Set to true to deploy PostgreSQL (via control-plane subchart), false to use pre-installed instance
+    # Default: true (deploy)
+    deploy: true
+    # External PostgreSQL configuration (used when deploy: false)
+    external:
+      host: "postgresql.postgresql.svc.cluster.local" # e.g., "postgresql.postgresql.svc.cluster.local"
+      port: "5432"
+      user: "postgres" # Default: "postgres" for external, "neuraltrust" for in-cluster
+      password: "" # Define this value
+      database: "neuraltrust"
+      # Secret reference for external PostgreSQL credentials
+      secretName: "" # Optional: secret containing POSTGRES_PASSWORD
+      secretKey: "" # Optional: key in secret for password
+    # PostgreSQL chart values (used when deploy: true)
+    # Values are passed via 'neuraltrust-control-plane.controlPlane.components.postgresql:' section below
+
+  # Redis Configuration
+  # Note: Redis is deployed as part of TrustGate, not as a separate subchart
+  # Control Redis deployment via 'trustgate.redis.enabled' (see trustgate.redis section below)
+  # External Redis configuration is available in 'trustgate.redis.external' section below
+
 # TrustGate Configuration
 trustgate:
   enabled: true
@@ -216,7 +239,6 @@ trustgate:
     imageRegistry: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker"  # Set to your image registry
     storageClass: ""
     deploymentType: shared  # shared or dedicated
-    preserveExistingSecrets: true  # Set to true to prevent Helm from creating/updating secrets (secrets are pre-generated)
     huggingface:
       apiKeySecret: "hf-api-key"
     image:
@@ -237,13 +259,13 @@ trustgate:
       SERVER_METRICS_PORT: "9090"
       SERVER_PROXY_PORT: "8081"
       SERVER_ACTIONS_PORT: "8084"
-      DATABASE_HOST: "control-plane-postgresql"  # Use control-plane PostgreSQL service name when installInCluster=true
+      DATABASE_HOST: "control-plane-postgresql"  # Use control-plane PostgreSQL service name when infrastructure.postgresql.deploy=true
       DATABASE_PORT: "5432"
       DATABASE_USER: "trustgate"
       DATABASE_PASSWORD: "12345" #define this value
       DATABASE_NAME: "trustgate"
       # PostgreSQL SSL mode (disable, require, verify-ca, verify-full)
-      # Use "disable" when installInCluster=true, "require" for external PostgreSQL
+      # Use "disable" when infrastructure.postgresql.deploy=true, "require" for external PostgreSQL
       DATABASE_SSL_MODE: "disable"  # Use "disable" for in-cluster PostgreSQL, "require" for external
       # Redis connection
       REDIS_HOST: ""  # Will be auto-configured if redis.enabled
@@ -475,7 +497,6 @@ trustgate:
 neuraltrust-control-plane:
   controlPlane:
     enabled: true
-    preserveExistingSecrets: true  # Set to true to prevent Helm from creating/updating secrets (secrets are pre-generated). When true, secret templates are NOT rendered.
     imagePullSecrets: "user-registry"  # Set imagePullSecrets for all control-plane components (scheduler, api, app, postgresql)
     secrets:
       # IMPORTANT: When preserveExistingSecrets: true, these values are ignored and secret templates are NOT rendered.
@@ -615,7 +636,6 @@ neuraltrust-control-plane:
               memory: 1Gi
               cpu: 500m
       postgresql:
-        installInCluster: true  # Set to true to enable in-cluster PostgreSQL deployment
         secrets:
           # IMPORTANT: When preserveExistingSecrets: true, these values are ignored and the postgresql-secrets template is NOT rendered.
           # The secret "postgresql-secrets" must be pre-generated with keys: POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB, POSTGRES_HOST, POSTGRES_PORT, DATABASE_URL, POSTGRES_PRISMA_URL
@@ -652,7 +672,6 @@ neuraltrust-control-plane:
 neuraltrust-data-plane:
   dataPlane:
     enabled: true
-    preserveExistingSecrets: true  # Set to true to prevent Helm from creating/updating secrets (secrets are pre-generated). When true, secret templates are NOT rendered.
     imagePullSecrets: "user-registry"  # Set imagePullSecrets for all data-plane components (api, worker, kafka-connect)
     secrets:
       # IMPORTANT: When preserveExistingSecrets: true, these values are ignored and secret templates are NOT rendered.

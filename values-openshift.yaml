@@ -171,6 +171,29 @@ infrastructure:
     # Kafka chart values (used when deploy: true)
     # Values are passed via root-level 'kafka:' section above
 
+  # PostgreSQL Configuration
+  postgresql:
+    # Set to true to deploy PostgreSQL (via control-plane subchart), false to use pre-installed instance
+    # Default: true (deploy)
+    deploy: true
+    # External PostgreSQL configuration (used when deploy: false)
+    external:
+      host: "postgresql.postgresql.svc.cluster.local" # e.g., "postgresql.postgresql.svc.cluster.local"
+      port: "5432"
+      user: "postgres" # Default: "postgres" for external, "neuraltrust" for in-cluster
+      password: "" # Define this value
+      database: "neuraltrust"
+      # Secret reference for external PostgreSQL credentials
+      secretName: "" # Optional: secret containing POSTGRES_PASSWORD
+      secretKey: "" # Optional: key in secret for password
+    # PostgreSQL chart values (used when deploy: true)
+    # Values are passed via 'neuraltrust-control-plane.controlPlane.components.postgresql:' section below
+
+  # Redis Configuration
+  # Note: Redis is deployed as part of TrustGate, not as a separate subchart
+  # Control Redis deployment via 'trustgate.redis.enabled' (see trustgate.redis section below)
+  # External Redis configuration is available in 'trustgate.redis.external' section below
+
 # TrustGate Configuration
 trustgate:
   enabled: true
@@ -195,17 +218,17 @@ trustgate:
       SERVER_PROXY_PORT: "8081"
       SERVER_ACTIONS_PORT: "8084"
       # Database connection (uses infrastructure.postgresql config)
-      # When control-plane PostgreSQL is installed in-cluster, use:
+      # When control-plane PostgreSQL is installed in-cluster (infrastructure.postgresql.deploy=true), use:
       # - DATABASE_HOST: "control-plane-postgresql" (service name)
       # - DATABASE_USER: "neuraltrust" (matches control-plane PostgreSQL user)
       # - DATABASE_PASSWORD: same as control-plane PostgreSQL password
-      DATABASE_HOST: "control-plane-postgresql"  # Use control-plane PostgreSQL service name when installInCluster=true
+      DATABASE_HOST: "control-plane-postgresql"  # Use control-plane PostgreSQL service name when infrastructure.postgresql.deploy=true
       DATABASE_PORT: "5432"
       DATABASE_USER: "trustgate"
       DATABASE_PASSWORD: "12345" #define this value
       DATABASE_NAME: "trustgate"
       # PostgreSQL SSL mode (disable, require, verify-ca, verify-full)
-      # Use "disable" when installInCluster=true, "require" for external PostgreSQL
+      # Use "disable" when infrastructure.postgresql.deploy=true, "require" for external PostgreSQL
       DATABASE_SSL_MODE: "disable"  # Use "disable" for in-cluster PostgreSQL, "require" for external
       # Redis connection
       REDIS_HOST: ""  # Will be auto-configured if redis.enabled
@@ -437,7 +460,6 @@ trustgate:
 neuraltrust-control-plane:
   controlPlane:
     enabled: true
-    preserveExistingSecrets: false
     imagePullSecrets: "user-registry"  # Set imagePullSecrets for all control-plane components (scheduler, api, app, postgresql)
     secrets:
       controlPlaneJWTSecret: "12345" #define this value
@@ -578,13 +600,12 @@ neuraltrust-control-plane:
               memory: 1Gi
               cpu: 500m
       postgresql:
-        installInCluster: true  # Set to true to enable in-cluster PostgreSQL deployment
         secrets:
           name: "postgresql-secrets"
           user: "neuraltrust"  # PostgreSQL user (default: "neuraltrust" for in-cluster, "postgres" for external)
-          password: "12345"  # PostgreSQL password (required when installInCluster=true or using external PostgreSQL)
+          password: "12345"  # PostgreSQL password (required when infrastructure.postgresql.deploy=true or using external PostgreSQL)
           database: "neuraltrust"  # PostgreSQL database name
-          host: "control-plane-postgresql"  # PostgreSQL host (set to "control-plane-postgresql" when installInCluster=true, or external host when using external PostgreSQL)
+          host: "control-plane-postgresql"  # PostgreSQL host (set to "control-plane-postgresql" when infrastructure.postgresql.deploy=true, or external host when using external PostgreSQL)
           port: "5432"  # PostgreSQL port
         image:
           repository: "postgres"
@@ -613,7 +634,6 @@ neuraltrust-control-plane:
 neuraltrust-data-plane:
   dataPlane:
     enabled: true
-    preserveExistingSecrets: false
     imagePullSecrets: "user-registry"  # Set imagePullSecrets for all data-plane components (api, worker, kafka-connect)
     secrets:
       openaiApiKeySecretName: "openai-secrets"

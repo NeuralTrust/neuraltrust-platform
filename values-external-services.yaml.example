@@ -43,14 +43,24 @@ infrastructure:
       # secretName: ""  # Optional
       # secretKey: ""  # Optional
 
+  postgresql:
+    deploy: false  # Use external PostgreSQL
+    external:
+      host: "postgresql.postgresql.svc.cluster.local"  # External PostgreSQL service
+      port: "5432"
+      user: "postgres"  # Or "neuraltrust" depending on your setup
+      password: "your-postgres-password"  # Define this value
+      database: "neuraltrust"
+      # Optional: Secret reference for external PostgreSQL credentials
+      # secretName: ""  # Optional: secret containing POSTGRES_PASSWORD
+      # secretKey: ""  # Optional: key in secret for password
+
 # NeuralTrust Control Plane - Use external PostgreSQL
 neuraltrust-control-plane:
   controlPlane:
     enabled: true
-    preserveExistingSecrets: false  # Helm will create secrets from values
     components:
       postgresql:
-        installInCluster: false  # Use external PostgreSQL
         secrets:
           host: "postgresql.postgresql.svc.cluster.local"  # External PostgreSQL service
           port: "5432"
@@ -77,7 +87,6 @@ neuraltrust-control-plane:
 neuraltrust-data-plane:
   dataPlane:
     enabled: true
-    preserveExistingSecrets: false  # Helm will create secrets from values
     components:
       clickhouse:
         enabled: false  # External ClickHouse

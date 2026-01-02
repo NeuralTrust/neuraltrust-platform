@@ -32,9 +32,95 @@ When running `helm lint`, you may see errors related to subchart templates acces
 
 ## Quick Start
 
-### 1. Create Secrets (Required)
+### 1. Install Dependencies
 
-Before deploying, create all necessary secrets:
+```bash
+helm dependency update
+```
+
+### 2. Configure Values
+
+Copy and edit the values file:
+
+```bash
+cp values.yaml my-values.yaml
+# Edit my-values.yaml with your configuration
+```
+
+**Set your secrets in `my-values.yaml`.** By default (`preserveExistingSecrets: false`), Helm will automatically create Kubernetes secrets from the values you provide:
+
+```yaml
+global:
+  preserveExistingSecrets: false  # Default: Helm creates secrets from values.yaml
+
+neuraltrust-control-plane:
+  controlPlane:
+    secrets:
+      controlPlaneJWTSecret: "your-jwt-secret"
+      trustgateJwtSecret: "your-trustgate-secret"
+      # ... set other required secrets
+
+neuraltrust-data-plane:
+  dataPlane:
+    secrets:
+      dataPlaneJWTSecret: "your-data-plane-secret"
+      # ... set other required secrets
+```
+
+### 3. Deploy
+
+```bash
+helm upgrade --install neuraltrust-platform . \
+  --namespace neuraltrust \
+  --create-namespace \
+  -f my-values.yaml
+```
+
+The Helm chart will automatically create all required Kubernetes secrets from your `values.yaml` configuration during deployment.
+
+## Secrets Management
+
+The chart supports two modes for managing secrets:
+
+### Default Mode: Helm-Managed Secrets (`preserveExistingSecrets: false`)
+
+**This is the recommended approach for most users.** Helm automatically creates Kubernetes secrets from values in your `values.yaml`:
+
+```yaml
+global:
+  preserveExistingSecrets: false  # Default
+
+neuraltrust-control-plane:
+  controlPlane:
+    secrets:
+      controlPlaneJWTSecret: "your-secret-value"
+      trustgateJwtSecret: "your-secret-value"
+      # ... set other secrets in values.yaml
+```
+
+**Benefits:**
+- Simple: Just set values in `values.yaml` and deploy
+- No manual secret creation required
+- Helm manages secret lifecycle (create/update)
+- Secrets are updated automatically when you change values in `values.yaml`
+
+**Note:** When `preserveExistingSecrets: false`, Helm will create secrets if they don't exist and update them if they do exist (based on your `values.yaml`). This allows Helm to fully manage secrets throughout the deployment lifecycle.
+
+### Advanced Mode: Pre-Generated Secrets (`preserveExistingSecrets: true`)
+
+For CI/CD pipelines or environments where secrets are managed externally, you can pre-generate secrets and tell Helm to use them:
+
+```yaml
+global:
+  preserveExistingSecrets: true  # Helm will NOT create/update secrets
+```
+
+**When to use this mode:**
+- Secrets are managed by external secret management systems (e.g., Vault, Sealed Secrets)
+- CI/CD pipelines that generate secrets before deployment
+- Compliance requirements for secret management
+
+**How to pre-generate secrets:**
 
 ```bash
 # Option A: Use the interactive script
@@ -46,36 +132,19 @@ export CONTROL_PLANE_JWT_SECRET="your-secret"
 # ... set other secrets ...
 ./create-secrets.sh --namespace neuraltrust
 
-# Option C: Use pre-defined secrets
-# If you already have secrets in your cluster, skip this step
-# The Helm chart will automatically use them
+# Option C: Create secrets manually
+kubectl create secret generic control-plane-secrets \
+  --from-literal=CONTROL_PLANE_JWT_SECRET="your-secret" \
+  --namespace neuraltrust
 ```
 
-See [SECRETS.md](./SECRETS.md) for detailed secrets management guide.
+**Important:** When `preserveExistingSecrets: true`:
+- Helm will **NOT** create or update any secrets
+- All required secrets must exist before deployment
+- Secret templates are not rendered (Helm skips them entirely)
+- See [SECRETS.md](./SECRETS.md) for the complete list of required secrets
 
-### 2. Install Dependencies
-
-```bash
-helm dependency update
-```
-
-### 3. Configure Values
-
-Copy and edit the values file:
-
-```bash
-cp values.yaml my-values.yaml
-# Edit my-values.yaml with your configuration
-```
-
-### 4. Deploy
-
-```bash
-helm upgrade --install neuraltrust-platform . \
-  --namespace neuraltrust \
-  --create-namespace \
-  -f my-values.yaml
-```
+See [SECRETS.md](./SECRETS.md) for detailed secrets management guide, including all secret names and keys.
 
 ## Infrastructure Configuration
 
@@ -402,14 +471,15 @@ See `values.yaml` for all available configuration options. Key sections:
 - `trustgate.*` - TrustGate configuration
 - `global.*` - Global settings
 
-## Secrets Management
+## Advanced Secrets Management
 
-The Helm chart supports using pre-defined Kubernetes secrets or environment variables. See [SECRETS.md](./SECRETS.md) for:
-- How to create secrets using the provided script
-- Environment variable support
-- Using pre-defined secrets
-- Secret names and keys
+For advanced use cases, see [SECRETS.md](./SECRETS.md) for:
+- Complete list of all required secrets and their keys
+- Using the `create-secrets.sh` script for pre-generating secrets
+- Environment variable support for secret creation
+- Secret names and structure
 - Security best practices
+- Troubleshooting secret-related issues
 
 ## Troubleshooting
 
