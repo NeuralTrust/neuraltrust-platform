@@ -8,7 +8,7 @@ This guide provides step-by-step instructions for deploying the NeuralTrust Plat
 - Helm 3.2.0+ installed and configured
 - `oc` CLI configured to access your OpenShift cluster
 - Appropriate permissions to create namespaces, secrets, and deploy Helm charts
-- Docker registry credentials (if using private images)
+- **Docker Registry Secret (Required for NeuralTrust/TrustGate images)**: A Kubernetes secret with permission to pull container images from Google Container Registry (GCR) must exist in your namespace. The default secret name is `gcr-secret`. For Docker Hub images (infrastructure components), the default is empty `[]` (for public images) or a user-provided Docker Hub secret (for private images). See [Image Pull Secrets](#image-pull-secrets) section below for details.
 - (Optional) Ingress controller - **Not included in this chart**. OpenShift Routes are available by default, but if you want to use Ingress instead, install an Ingress controller separately (e.g., [ingress-nginx](https://kubernetes.github.io/ingress-nginx/deploy/))
 - (Optional) cert-manager - **Not included in this chart**. Install separately if you want automatic TLS certificate management:
   - Install cert-manager: `helm install cert-manager jetstack/cert-manager --namespace cert-manager --create-namespace --set installCRDs=true`
@@ -118,7 +118,7 @@ All secrets must be created in the target namespace before deployment. The follo
 
 | Secret Name | Type | Required | Description |
 |------------|------|----------|-------------|
-| `gcr-secret` | `docker-registry` | **Yes** (if using private images) | Docker registry credentials for pulling container images |
+| `gcr-secret` | `docker-registry` | **Yes** (required for NeuralTrust/TrustGate images) | Docker registry credentials for pulling container images from Google Container Registry (GCR). NeuralTrust and TrustGate images are stored in a private GCR. |
 
 ## Creating Secrets
 
@@ -248,7 +248,9 @@ oc create secret generic hf-api-key \
   -n neuraltrust
 ```
 
-#### Docker Registry Secret (Required if using private images)
+#### Docker Registry Secret (Required for NeuralTrust/TrustGate images)
+
+**Note:** NeuralTrust and TrustGate container images are hosted in a private GCR registry. You will receive a GCR JSON key file from NeuralTrust to access these images.
 
 ```bash
 oc create secret docker-registry gcr-secret \

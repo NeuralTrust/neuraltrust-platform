@@ -151,7 +151,7 @@ helm install neuraltrust-platform . -f values-external-services.yaml.example
 - Set `infrastructure.clickhouse.deploy: false`
 - Set `infrastructure.kafka.deploy: false`
 - Configure external services in `infrastructure.*.external` sections
-- Set `neuraltrust-control-plane.controlPlane.components.postgresql.installInCluster: false`
+- Set `infrastructure.postgresql.deploy: false`
 - Configure external PostgreSQL connection
 
 ### Scenario 5: Deploy Only NeuralTrust + Infrastructure (No TrustGate)
@@ -163,10 +163,7 @@ helm install neuraltrust-platform . -f values-external-services.yaml.example
 
 ### Scenario 6: Use Pre-generated Secrets (CICD-friendly)
 **File:** Custom values file based on `values-openshift.yaml`
-- Set `global.preserveExistingSecrets: true`
-- Set `neuraltrust-control-plane.controlPlane.preserveExistingSecrets: true`
-- Set `neuraltrust-data-plane.dataPlane.preserveExistingSecrets: true`
-- Set `trustgate.global.preserveExistingSecrets: true`
+- Set `global.preserveExistingSecrets: true` (single global flag controls all subcharts)
 - Pre-generate all required secrets before deployment
 - Secret templates will NOT be rendered (prevents conflicts)
 
@@ -252,7 +249,7 @@ neuraltrust-control-plane:
     enabled: true
     components:
       postgresql:
-        installInCluster: false
+        # PostgreSQL deployment controlled by infrastructure.postgresql.deploy
         secrets:
           host: "external-postgresql"
 

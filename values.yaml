@@ -227,13 +227,13 @@ trustgate:
       # - DATABASE_HOST: "control-plane-postgresql" (service name)
       # - DATABASE_USER: "neuraltrust" (matches control-plane PostgreSQL user)
       # - DATABASE_PASSWORD: same as control-plane PostgreSQL password
-      DATABASE_HOST: "control-plane-postgresql"  # Use control-plane PostgreSQL service name when installInCluster=true
+      DATABASE_HOST: "control-plane-postgresql"  # Use control-plane PostgreSQL service name when infrastructure.postgresql.deploy=true
       DATABASE_PORT: "5432"
       DATABASE_USER: "trustgate"
       DATABASE_PASSWORD: "12345" #define this value
       DATABASE_NAME: "trustgate"
       # PostgreSQL SSL mode (disable, require, verify-ca, verify-full)
-      # Use "disable" when installInCluster=true, "require" for external PostgreSQL
+      # Use "disable" when infrastructure.postgresql.deploy=true, "require" for external PostgreSQL
       DATABASE_SSL_MODE: "disable"  # Use "disable" for in-cluster PostgreSQL, "require" for external
       # Redis connection
       REDIS_HOST: ""  # Will be auto-configured if redis.enabled
@@ -579,9 +579,9 @@ neuraltrust-control-plane:
         secrets:
           name: "postgresql-secrets"
           user: "neuraltrust"  # PostgreSQL user (default: "neuraltrust" for in-cluster, "postgres" for external)
-          password: "12345"  # PostgreSQL password (required when installInCluster=true or using external PostgreSQL)
+          password: "12345"  # PostgreSQL password (required when infrastructure.postgresql.deploy=true or using external PostgreSQL)
           database: "neuraltrust"  # PostgreSQL database name
-          host: "control-plane-postgresql"  # PostgreSQL host (set to "control-plane-postgresql" when installInCluster=true, or external host when using external PostgreSQL)
+          host: "control-plane-postgresql"  # PostgreSQL host (set to "control-plane-postgresql" when infrastructure.postgresql.deploy=true, or external host when using external PostgreSQL)
           port: "5432"  # PostgreSQL port
         image:
           repository: "postgres"

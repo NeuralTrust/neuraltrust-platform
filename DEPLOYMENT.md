@@ -95,7 +95,6 @@ neuraltrust-control-plane:
     enabled: true
     components:
       postgresql:
-        installInCluster: false  # External
         secrets:
           host: "postgresql.postgresql.svc.cluster.local"
           port: "5432"
@@ -132,7 +131,6 @@ neuraltrust-control-plane:
     enabled: true
     components:
       postgresql:
-        installInCluster: true  # Use deployed PostgreSQL
         secrets:
           password: "your-password"
           database: "neuraltrust"
@@ -148,7 +146,7 @@ The chart automatically maps infrastructure configuration to subchart values:
 
 - **Kafka**: When `infrastructure.kafka.deploy=true`, the Kafka subchart is deployed. The data-plane subchart connects to Kafka using the service name.
 
-- **PostgreSQL**: When `infrastructure.postgresql.deploy=true`, PostgreSQL is deployed by the control-plane subchart. Set `neuraltrust-control-plane.controlPlane.components.postgresql.installInCluster=true`.
+- **PostgreSQL**: When `infrastructure.postgresql.deploy=true`, PostgreSQL is deployed by the control-plane subchart. The connection is automatically configured to use the in-cluster PostgreSQL service.
 
 ### Connection Details
 
