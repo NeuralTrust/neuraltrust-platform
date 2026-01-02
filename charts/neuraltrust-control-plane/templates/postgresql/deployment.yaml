@@ -1,4 +1,4 @@
-{{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.postgresql .Values.controlPlane.components.postgresql.installInCluster }}
+{{- if include "control-plane.postgresql.deploy" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:

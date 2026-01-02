@@ -33,16 +33,10 @@ Usage: {{ include "control-plane.getSecretValue" (dict "value" .Values.controlPl
 {{- $secretKey := .secretKey }}
 {{- $context := .context }}
 {{- $preserveSecrets := false }}
-{{- if $context.Values }}
-  {{- if $context.Values.controlPlane }}
-    {{- $cp := $context.Values.controlPlane }}
-    {{- if kindIs "map" $cp }}
-      {{- if hasKey $cp "preserveExistingSecrets" }}
-        {{- $preserveVal := index $cp "preserveExistingSecrets" }}
-        {{- if $preserveVal }}
-          {{- $preserveSecrets = $preserveVal }}
-        {{- end }}
-      {{- end }}
+{{- if $context.Values.global }}
+  {{- if hasKey $context.Values.global "preserveExistingSecrets" }}
+    {{- if $context.Values.global.preserveExistingSecrets }}
+      {{- $preserveSecrets = true }}
     {{- end }}
   {{- end }}
 {{- end }}
@@ -90,16 +84,10 @@ Usage: {{ include "control-plane.getSecretValueRaw" (dict "value" .Values.contro
 {{- $secretKey := .secretKey }}
 {{- $context := .context }}
 {{- $preserveSecrets := false }}
-{{- if $context.Values }}
-  {{- if $context.Values.controlPlane }}
-    {{- $cp := $context.Values.controlPlane }}
-    {{- if kindIs "map" $cp }}
-      {{- if hasKey $cp "preserveExistingSecrets" }}
-        {{- $preserveVal := index $cp "preserveExistingSecrets" }}
-        {{- if $preserveVal }}
-          {{- $preserveSecrets = $preserveVal }}
-        {{- end }}
-      {{- end }}
+{{- if $context.Values.global }}
+  {{- if hasKey $context.Values.global "preserveExistingSecrets" }}
+    {{- if $context.Values.global.preserveExistingSecrets }}
+      {{- $preserveSecrets = true }}
     {{- end }}
   {{- end }}
 {{- end }}
@@ -135,5 +123,27 @@ Usage: {{ include "control-plane.getSecretValueRaw" (dict "value" .Values.contro
     {{- "" }}
   {{- end }}
 {{- end }}
+{{- end }}
+
+{{/*
+Helper to check if PostgreSQL should be deployed
+Checks infrastructure.postgresql.deploy from parent chart first (new way), falls back to installInCluster (backward compatibility)
+Usage: {{ include "control-plane.postgresql.deploy" . }}
+*/}}
+{{- define "control-plane.postgresql.deploy" -}}
+{{- $deploy := false }}
+{{- /* Try to get from parent chart values (infrastructure.postgresql.deploy) */}}
+{{- if .Release.Parent }}
+  {{- if and .Release.Parent.Values.infrastructure .Release.Parent.Values.infrastructure.postgresql .Release.Parent.Values.infrastructure.postgresql.deploy }}
+    {{- $deploy = true }}
+  {{- end }}
+{{- /* Fallback: check if passed via subchart values */}}
+{{- else if and .Values.infrastructure .Values.infrastructure.postgresql .Values.infrastructure.postgresql.deploy }}
+  {{- $deploy = true }}
+{{- /* Backward compatibility: check installInCluster */}}
+{{- else if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.postgresql .Values.controlPlane.components.postgresql.installInCluster }}
+  {{- $deploy = true }}
+{{- end }}
+{{- $deploy }}
 {{- end }}
 

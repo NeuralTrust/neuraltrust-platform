@@ -106,7 +106,7 @@ Get PostgreSQL connection details
 */}}
 {{- define "neuraltrust-platform.postgresql.host" -}}
 {{- if .Values.infrastructure.postgresql.deploy }}
-{{- printf "%s-postgresql" .Release.Name }}
+{{- printf "control-plane-postgresql" }}
 {{- else }}
 {{- .Values.infrastructure.postgresql.external.host }}
 {{- end }}
@@ -122,7 +122,7 @@ Get PostgreSQL connection details
 
 {{- define "neuraltrust-platform.postgresql.user" -}}
 {{- if .Values.infrastructure.postgresql.deploy }}
-{{- "postgres" }}
+{{- "neuraltrust" }}
 {{- else }}
 {{- .Values.infrastructure.postgresql.external.user }}
 {{- end }}

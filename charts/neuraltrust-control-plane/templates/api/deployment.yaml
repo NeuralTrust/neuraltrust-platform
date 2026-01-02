@@ -182,7 +182,7 @@ spec:
               name: {{ $pgSecretName }}
               key: POSTGRES_PASSWORD
         {{- $postgresSslMode := "require" }}
-        {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.postgresql .Values.controlPlane.components.postgresql.installInCluster }}
+        {{- if include "control-plane.postgresql.deploy" . }}
           {{- $postgresSslMode = "disable" }}
         {{- end }}
         - name: POSTGRES_SSL

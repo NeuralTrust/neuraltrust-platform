@@ -8,10 +8,70 @@ global:
   openshift: false # set to true if you are using openshift
   openshiftDomain: "" # OpenShift wildcard DNS domain (e.g., *.apps.neuraltrust-dev.c4u5.p2.openshiftapps.com)
   imageRegistry: "" # Global image registry prefix (e.g., "europe-west1-docker.pkg.dev/project/repo"). If set, will be prepended to image repositories.
-  preserveExistingSecrets: false  # Set to true to prevent Helm from creating/updating secrets (secrets are pre-generated). When true, secret templates are NOT rendered.
+  preserveExistingSecrets: true  # Set to true to prevent Helm from creating/updating secrets (secrets are pre-generated). When true, secret templates are NOT rendered.
   security:
     allowInsecureImages: true # Allow Bitnami charts to use their container images
   storageClass: "" # Global storage class for persistent volumes
+
+# Infrastructure Components
+# These can be deployed or configured to use pre-installed instances
+infrastructure:
+  # ClickHouse Configuration
+  clickhouse:
+    # Set to true to deploy ClickHouse, false to use pre-installed instance
+    # Default: true (deploy)
+    deploy: true
+    # External ClickHouse configuration (used when deploy: false)
+    external:
+      host: "clickhouse.clickhouse.svc.cluster.local" # e.g., "clickhouse.clickhouse.svc.cluster.local"
+      port: "8123"
+      user: "neuraltrust"
+      password: "12345" # Define this value
+      database: "neuraltrust"
+      # Secret reference for external ClickHouse credentials
+      secretName: "clickhouse" # Optional: secret containing CLICKHOUSE_PASSWORD
+      secretKey: "admin-password" # Key in secret for password
+    # ClickHouse chart values (used when deploy: true)
+    # Values are passed via root-level 'clickhouse:' section below
+
+  # Kafka Configuration
+  kafka:
+    # Set to true to deploy Kafka, false to use pre-installed instance
+    # Default: true (deploy)
+    deploy: true
+    # External Kafka configuration (used when deploy: false)
+    external:
+      bootstrapServers: "" # e.g., "kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
+      # Or individual brokers:
+      brokers: [] # e.g., ["kafka-0.kafka-headless:9092", "kafka-1.kafka-headless:9092"]
+      # Secret reference for external Kafka credentials (if using SASL)
+      secretName: "" # Optional
+      secretKey: "" # Optional
+    # Kafka chart values (used when deploy: true)
+    # Values are passed via root-level 'kafka:' section below
+
+  # PostgreSQL Configuration
+  postgresql:
+    # Set to true to deploy PostgreSQL (via control-plane subchart), false to use pre-installed instance
+    # Default: true (deploy)
+    deploy: true
+    # External PostgreSQL configuration (used when deploy: false)
+    external:
+      host: "postgresql.postgresql.svc.cluster.local" # e.g., "postgresql.postgresql.svc.cluster.local"
+      port: "5432"
+      user: "postgres" # Default: "postgres" for external, "neuraltrust" for in-cluster
+      password: "" # Define this value
+      database: "neuraltrust"
+      # Secret reference for external PostgreSQL credentials
+      secretName: "" # Optional: secret containing POSTGRES_PASSWORD
+      secretKey: "" # Optional: key in secret for password
+    # PostgreSQL chart values (used when deploy: true)
+    # Values are passed via 'neuraltrust-control-plane.controlPlane.components.postgresql:' section below
+
+  # Redis Configuration
+  # Note: Redis is deployed as part of TrustGate, not as a separate subchart
+  # Control Redis deployment via 'trustgate.redis.enabled' (see trustgate.redis section below)
+  # External Redis configuration is available in 'trustgate.redis.external' section below
 
 # ClickHouse subchart values (passed directly to clickhouse subchart)
 # These values are used when infrastructure.clickhouse.deploy=true
@@ -27,7 +87,7 @@ clickhouse:
     tag: 25.3.2-debian-12-r3
     pullPolicy: Always
   global:
-    imagePullSecrets: ["user-registry"]
+    imagePullSecrets: []
   auth:
     username: "neuraltrust"
     password: "12345" # Define this value
@@ -128,48 +188,11 @@ kafka:
     tag: 3.9.0-debian-12-r1
     pullPolicy: Always
   global:
-    imagePullSecrets: ["user-registry"]
+    imagePullSecrets: []
   persistence:
     enabled: true
     size: 10Gi
     storageClass: ""
-
-# Infrastructure Components
-# These can be deployed or configured to use pre-installed instances
-infrastructure:
-  # ClickHouse Configuration
-  clickhouse:
-    # Set to true to deploy ClickHouse, false to use pre-installed instance
-    # Default: true (deploy)
-    deploy: true
-    # External ClickHouse configuration (used when deploy: false)
-    external:
-      host: "clickhouse.clickhouse.svc.cluster.local" # e.g., "clickhouse.clickhouse.svc.cluster.local"
-      port: "8123"
-      user: "neuraltrust"
-      password: "12345" # Define this value
-      database: "neuraltrust"
-      # Secret reference for external ClickHouse credentials
-      secretName: "clickhouse" # Optional: secret containing CLICKHOUSE_PASSWORD
-      secretKey: "admin-password" # Key in secret for password
-    # ClickHouse chart values (used when deploy: true)
-    # Values are passed via root-level 'clickhouse:' section above
-
-  # Kafka Configuration
-  kafka:
-    # Set to true to deploy Kafka, false to use pre-installed instance
-    # Default: true (deploy)
-    deploy: true
-    # External Kafka configuration (used when deploy: false)
-    external:
-      bootstrapServers: "" # e.g., "kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
-      # Or individual brokers:
-      brokers: [] # e.g., ["kafka-0.kafka-headless:9092", "kafka-1.kafka-headless:9092"]
-      # Secret reference for external Kafka credentials (if using SASL)
-      secretName: "" # Optional
-      secretKey: "" # Optional
-    # Kafka chart values (used when deploy: true)
-    # Values are passed via root-level 'kafka:' section above
 
 # TrustGate Configuration
 trustgate:
@@ -186,7 +209,7 @@ trustgate:
       image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee"
       tag: "v1.9.27"
       # imagePullSecrets: if not set, will fall back to parent chart's global.imagePullSecrets
-      imagePullSecrets: ["user-registry"]  # Set to array of secret names, e.g., ["secret-name"] or leave empty to use parent global.imagePullSecrets
+      imagePullSecrets: ["gcr-secret"]  # Set to array of secret names, e.g., ["secret-name"] or leave empty to use parent global.imagePullSecrets
     postgresql:
       # PostgreSQL image used for TrustGate database initialization job
       image:
@@ -356,13 +379,15 @@ trustgate:
       port: 8084
 
   # Redis configuration
+  # Note: Redis is deployed as part of TrustGate (not as a separate infrastructure subchart)
+  # Set enabled: false to use external Redis, then configure trustgate.redis.external below
   redis:
     enabled: true
     image:
       repository: redislabs/redisearch
       tag: 2.6.9
       pullPolicy: Always
-      imagePullSecrets: ["user-registry"]
+      imagePullSecrets: []
     # External Redis configuration if redis.enabled is false
     external:
       host: ""
@@ -388,34 +413,6 @@ trustgate:
       service:
         port: 6379
 
-  # Monitoring settings
-  monitoring:
-    serviceMonitor:
-      enabled: false
-      interval: 30s
-      labels: {}
-    external:
-      enabled: false
-      endpoint: ""
-      scrapeInterval: 30s
-    grafanaDashboards:
-      enabled: true
-    prometheusRules:
-      enabled: true
-      rules:
-        - alert: HighErrorRate
-          expr: rate(http_requests_total{status=~"5.."}[5m]) > 1
-          for: 5m
-          labels:
-            severity: critical
-          annotations:
-            description: High error rate detected
-    logging:
-      enabled: true
-      elasticsearch:
-        enabled: true
-        replicas: 3
-
   ingress:
     enabled: true  # Enable Ingress (Ingress supports TLS secrets via secretName)
     className: "nginx"  # Ingress class name (e.g., "nginx", "traefik")
@@ -440,8 +437,7 @@ trustgate:
 neuraltrust-control-plane:
   controlPlane:
     enabled: true
-    preserveExistingSecrets: false
-    imagePullSecrets: "user-registry"  # Set imagePullSecrets for all control-plane components (scheduler, api, app, postgresql)
+    imagePullSecrets: "gcr-secret"  # Set imagePullSecrets for all control-plane components (scheduler, api, app, postgresql)
     secrets:
       controlPlaneJWTSecret: "12345" #define this value
       openaiApiKey: ""
@@ -456,7 +452,7 @@ neuraltrust-control-plane:
         enabled: true
         host: "control-plane-scheduler.neuraltrust.ai"
         service:
-          type: LoadBalancer
+          type: ClusterIP
         ingress:
           enabled: true  # Enable Ingress (Ingress supports TLS secrets)
           className: "nginx"  # Ingress class name (e.g., "nginx", "traefik")
@@ -489,7 +485,7 @@ neuraltrust-control-plane:
         enabled: true
         host: "control-plane-api.neuraltrust.ai"
         service:
-          type: LoadBalancer
+          type: ClusterIP
         ingress:
           enabled: true  # Enable Ingress (Ingress supports TLS secrets)
           className: "nginx"  # Ingress class name (e.g., "nginx", "traefik")
@@ -530,7 +526,7 @@ neuraltrust-control-plane:
         host: "control-plane-app.neuraltrust.ai"
         secondaryHost: ""
         service:
-          type: LoadBalancer
+          type: ClusterIP
         ingress:
           enabled: true  # Enable Ingress (Ingress supports TLS secrets)
           className: "nginx"  # Ingress class name (e.g., "nginx", "traefik")
@@ -580,7 +576,6 @@ neuraltrust-control-plane:
               memory: 1Gi
               cpu: 500m
       postgresql:
-        installInCluster: true  # Set to true to enable in-cluster PostgreSQL deployment
         secrets:
           name: "postgresql-secrets"
           user: "neuraltrust"  # PostgreSQL user (default: "neuraltrust" for in-cluster, "postgres" for external)
@@ -593,7 +588,7 @@ neuraltrust-control-plane:
           tag: "17.2-alpine"
           pullPolicy: "Always"
           imagePullSecrets:
-            - name: "user-registry"
+            - name: ""
         persistence:
           enabled: true
           size: 10Gi
@@ -615,8 +610,7 @@ neuraltrust-control-plane:
 neuraltrust-data-plane:
   dataPlane:
     enabled: true
-    preserveExistingSecrets: false
-    imagePullSecrets: "user-registry"  # Set imagePullSecrets for all data-plane components (api, worker, kafka-connect)
+    imagePullSecrets: "gcr-secret"  # Set imagePullSecrets for all data-plane components (api, worker, kafka-connect)
     secrets:
       openaiApiKeySecretName: "openai-secrets"
       openaiApiKey: ""
@@ -671,7 +665,7 @@ neuraltrust-data-plane:
         enabled: true
         host: "data-plane-api.neuraltrust.ai"
         service:
-          type: LoadBalancer
+          type: ClusterIP
         ingress:
           enabled: true  # Enable Ingress (Ingress supports TLS secrets)
           className: "nginx"  # Ingress class name (e.g., "nginx", "traefik")

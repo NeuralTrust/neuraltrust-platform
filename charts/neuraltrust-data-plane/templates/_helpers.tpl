@@ -69,8 +69,12 @@ Usage: {{ include "data-plane.getSecretValue" (dict "value" .Values.dataPlane.se
 {{- $secretKey := .secretKey }}
 {{- $context := .context }}
 {{- $preserveSecrets := false }}
-{{- if and $context.Values.dataPlane $context.Values.dataPlane.preserveExistingSecrets }}
-  {{- $preserveSecrets = $context.Values.dataPlane.preserveExistingSecrets }}
+{{- if $context.Values.global }}
+  {{- if hasKey $context.Values.global "preserveExistingSecrets" }}
+    {{- if $context.Values.global.preserveExistingSecrets }}
+      {{- $preserveSecrets = true }}
+    {{- end }}
+  {{- end }}
 {{- end }}
 
 {{- if kindIs "map" $value }}
