@@ -26,7 +26,7 @@ infrastructure:
       host: "clickhouse.clickhouse.svc.cluster.local" # e.g., "clickhouse.clickhouse.svc.cluster.local"
       port: "8123"
       user: "neuraltrust"
-      password: "12345" # Define this value
+      password: "" # Define this value
       database: "neuraltrust"
       # Secret reference for external ClickHouse credentials
       secretName: "clickhouse" # Optional: secret containing CLICKHOUSE_PASSWORD
@@ -90,7 +90,7 @@ clickhouse:
     imagePullSecrets: []
   auth:
     username: "neuraltrust"
-    password: "12345" # Define this value
+    password: "" # Define this value
     # Use existing secret if it already exists (prevents Helm from trying to manage it)
     # Set to "clickhouse" to use the pre-existing secret named "clickhouse"
     existingSecret: ""  # Set to "" if you want Helm to create/manage the secret
@@ -216,7 +216,7 @@ trustgate:
         repository: "postgres"  # PostgreSQL image repository
         tag: "17.2-alpine"  # PostgreSQL image tag
     env:
-      SERVER_SECRET_KEY: "12345"  # Define this value
+      SERVER_SECRET_KEY: ""  # Define this value
       SERVER_BASE_DOMAIN: "neuraltrust.ai"
       SERVER_ADMIN_PORT: "8080"
       SERVER_METRICS_PORT: "9090"
@@ -230,7 +230,7 @@ trustgate:
       DATABASE_HOST: "control-plane-postgresql"  # Use control-plane PostgreSQL service name when infrastructure.postgresql.deploy=true
       DATABASE_PORT: "5432"
       DATABASE_USER: "trustgate"
-      DATABASE_PASSWORD: "12345" #define this value
+      DATABASE_PASSWORD: "" #define this value
       DATABASE_NAME: "trustgate"
       # PostgreSQL SSL mode (disable, require, verify-ca, verify-full)
       # Use "disable" when infrastructure.postgresql.deploy=true, "require" for external PostgreSQL
@@ -439,12 +439,12 @@ neuraltrust-control-plane:
     enabled: true
     imagePullSecrets: "gcr-secret"  # Set imagePullSecrets for all control-plane components (scheduler, api, app, postgresql)
     secrets:
-      controlPlaneJWTSecret: "12345" #define this value
+      controlPlaneJWTSecret: "" #define this value
       openaiApiKey: ""
       resendApiKey: ""
       resendAlertSender: ""
       resendInviteSender: ""
-      trustgateJwtSecret: "12345" #define this value
+      trustgateJwtSecret: "" #define this value
       firewallJwtSecret: ""
       modelScannerSecret: ""
     components:
@@ -503,7 +503,7 @@ neuraltrust-control-plane:
           tag: "v1.7.3"
           pullPolicy: "Always"
         secrets:
-          controlPlaneJWTSecret: "12345" #define this value
+          controlPlaneJWTSecret: "" #define this value
         config:
           # URLs will be auto-generated from OpenShift Routes if global.openshift=true and global.openshiftDomain is set
           # Otherwise, set these manually or they will default to internal service URLs
@@ -579,7 +579,7 @@ neuraltrust-control-plane:
         secrets:
           name: "postgresql-secrets"
           user: "neuraltrust"  # PostgreSQL user (default: "neuraltrust" for in-cluster, "postgres" for external)
-          password: "12345"  # PostgreSQL password (required when infrastructure.postgresql.deploy=true or using external PostgreSQL)
+          password: ""  # PostgreSQL password (required when infrastructure.postgresql.deploy=true or using external PostgreSQL)
           database: "neuraltrust"  # PostgreSQL database name
           host: "control-plane-postgresql"  # PostgreSQL host (set to "control-plane-postgresql" when infrastructure.postgresql.deploy=true, or external host when using external PostgreSQL)
           port: "5432"  # PostgreSQL port
@@ -619,7 +619,7 @@ neuraltrust-data-plane:
       resendApiKeySecretName: "resend-secrets"
       resendApiKey: ""
       dataPlaneJWTSecretName: "data-plane-jwt-secret"
-      dataPlaneJWTSecret: "12345" #define this value
+      dataPlaneJWTSecret: "" #define this value
       huggingFaceTokenSecretName: "huggingface-secrets"
       huggingFaceToken: ""
     components:
