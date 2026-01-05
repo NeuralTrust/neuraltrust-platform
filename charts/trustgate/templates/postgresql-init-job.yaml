@@ -106,6 +106,46 @@ spec:
           # Determine SSL mode for connection
           PG_SSL_MODE="${POSTGRES_SSL_MODE:-disable}"
           
+          # Wait for trustgate-secrets to exist and have required values
+          # The secret is created by Helm, but there may be a timing issue during upgrade
+          echo "Waiting for trustgate-secrets to be available..."
+          SECRET_MAX_ATTEMPTS=60
+          SECRET_ATTEMPT=0
+          
+          while [ $SECRET_ATTEMPT -lt $SECRET_MAX_ATTEMPTS ]; do
+            if [ -n "${TG_DATABASE_NAME}" ] && [ -n "${TG_DATABASE_USER}" ] && [ -n "${TG_DATABASE_PASSWORD}" ]; then
+              echo "✓ trustgate-secrets values loaded successfully"
+              break
+            fi
+            
+            SECRET_ATTEMPT=$((SECRET_ATTEMPT + 1))
+            if [ $((SECRET_ATTEMPT % 5)) -eq 0 ]; then
+              echo "Attempt $SECRET_ATTEMPT/$SECRET_MAX_ATTEMPTS: Waiting for trustgate-secrets..."
+              echo "  Missing:"
+              [ -z "${TG_DATABASE_NAME}" ] && echo "    - TG_DATABASE_NAME (DATABASE_NAME)"
+              [ -z "${TG_DATABASE_USER}" ] && echo "    - TG_DATABASE_USER (DATABASE_USER)"
+              [ -z "${TG_DATABASE_PASSWORD}" ] && echo "    - TG_DATABASE_PASSWORD (DATABASE_PASSWORD)"
+            fi
+            sleep 2
+          done
+          
+          if [ -z "${TG_DATABASE_NAME}" ] || [ -z "${TG_DATABASE_USER}" ] || [ -z "${TG_DATABASE_PASSWORD}" ]; then
+            echo "ERROR: trustgate-secrets not found or incomplete after $((SECRET_MAX_ATTEMPTS * 2)) seconds."
+            echo "Missing values:"
+            [ -z "${TG_DATABASE_NAME}" ] && echo "  - TG_DATABASE_NAME (DATABASE_NAME)"
+            [ -z "${TG_DATABASE_USER}" ] && echo "  - TG_DATABASE_USER (DATABASE_USER)"
+            [ -z "${TG_DATABASE_PASSWORD}" ] && echo "  - TG_DATABASE_PASSWORD (DATABASE_PASSWORD)"
+            echo ""
+            echo "Ensure the following are set in values.yaml:"
+            echo "  trustgate.global.env.DATABASE_HOST"
+            echo "  trustgate.global.env.DATABASE_PASSWORD"
+            echo "  trustgate.global.env.DATABASE_NAME (optional, defaults to 'trustgate')"
+            echo "  trustgate.global.env.DATABASE_USER (optional, defaults to 'trustgate')"
+            echo ""
+            echo "The trustgate-secrets will be created automatically if DATABASE_HOST and DATABASE_PASSWORD are set."
+            exit 1
+          fi
+          
           # Wait for PostgreSQL to be ready before attempting initialization
           echo "Waiting for PostgreSQL to be ready at ${PG_HOST}:${PG_PORT}..."
           MAX_ATTEMPTS=240

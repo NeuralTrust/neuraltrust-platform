@@ -40,7 +40,7 @@ kafka:
 
 # TrustGate Configuration
 trustgate:
-  enabled: false
+  enabled: true
   global:
     version: "ee"
     imageRegistry: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker"
