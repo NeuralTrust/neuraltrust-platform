@@ -52,10 +52,9 @@ infrastructure:
 
   # PostgreSQL Configuration
   postgresql:
-    # Set to true to deploy PostgreSQL (via control-plane subchart), false to use pre-installed instance
-    # Default: true (deploy)
-    deploy: true
-    # External PostgreSQL configuration (used when deploy: false)
+    # Note: PostgreSQL deployment is controlled by neuraltrust-control-plane.infrastructure.postgresql.deploy below
+    # Set deploy: true/false in that section to enable/disable in-cluster PostgreSQL deployment
+    # External PostgreSQL configuration (used when neuraltrust-control-plane.infrastructure.postgresql.deploy=false)
     external:
       host: "postgresql.postgresql.svc.cluster.local" # e.g., "postgresql.postgresql.svc.cluster.local"
       port: "5432"
@@ -435,6 +434,9 @@ trustgate:
 # NeuralTrust Control Plane subchart values
 # Helm requires values to be passed to subcharts using the subchart name as a prefix
 neuraltrust-control-plane:
+  infrastructure:
+    postgresql:
+      deploy: true  # Deploy PostgreSQL in-cluster (set to false to use external PostgreSQL)
   controlPlane:
     enabled: true
     imagePullSecrets: "gcr-secret"  # Set imagePullSecrets for all control-plane components (scheduler, api, app, postgresql)

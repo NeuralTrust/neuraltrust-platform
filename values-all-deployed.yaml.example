@@ -32,11 +32,14 @@ infrastructure:
     # See values.yaml for full configuration
 
   postgresql:
-    deploy: true  # Deploy PostgreSQL (via control-plane subchart)
-    # PostgreSQL chart values are passed via 'neuraltrust-control-plane.controlPlane.components.postgresql:' section below
+    # Note: PostgreSQL deployment is controlled by neuraltrust-control-plane.infrastructure.postgresql.deploy below
+    # Set deploy: true/false in that section to enable/disable in-cluster PostgreSQL deployment
 
 # NeuralTrust Control Plane - Deploy all components
 neuraltrust-control-plane:
+  infrastructure:
+    postgresql:
+      deploy: true  # Deploy PostgreSQL in-cluster
   controlPlane:
     enabled: true
     components:

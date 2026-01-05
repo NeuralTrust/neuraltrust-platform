@@ -151,8 +151,8 @@ helm install neuraltrust-platform . -f values-external-services.yaml.example
 - Set `infrastructure.clickhouse.deploy: false`
 - Set `infrastructure.kafka.deploy: false`
 - Configure external services in `infrastructure.*.external` sections
-- Set `infrastructure.postgresql.deploy: false`
-- Configure external PostgreSQL connection
+- Set `neuraltrust-control-plane.infrastructure.postgresql.deploy: false` to use external PostgreSQL
+- Configure external PostgreSQL connection in `infrastructure.postgresql.external` section
 
 ### Scenario 5: Deploy Only NeuralTrust + Infrastructure (No TrustGate)
 **File:** Custom values file based on `values.yaml`
@@ -249,7 +249,7 @@ neuraltrust-control-plane:
     enabled: true
     components:
       postgresql:
-        # PostgreSQL deployment controlled by infrastructure.postgresql.deploy
+        # PostgreSQL deployment controlled by neuraltrust-control-plane.infrastructure.postgresql.deploy
         secrets:
           host: "external-postgresql"
 

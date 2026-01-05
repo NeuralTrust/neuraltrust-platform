@@ -44,7 +44,8 @@ infrastructure:
       # secretKey: ""  # Optional
 
   postgresql:
-    deploy: false  # Use external PostgreSQL
+    # Note: PostgreSQL deployment is controlled by neuraltrust-control-plane.infrastructure.postgresql.deploy below
+    # Set deploy: false in that section to use external PostgreSQL
     external:
       host: "postgresql.postgresql.svc.cluster.local"  # External PostgreSQL service
       port: "5432"
@@ -57,6 +58,9 @@ infrastructure:
 
 # NeuralTrust Control Plane - Use external PostgreSQL
 neuraltrust-control-plane:
+  infrastructure:
+    postgresql:
+      deploy: false  # Use external PostgreSQL (configured in infrastructure.postgresql.external above)
   controlPlane:
     enabled: true
     components:

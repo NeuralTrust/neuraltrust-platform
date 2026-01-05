@@ -16,13 +16,14 @@ infrastructure:
     deploy: true
 
   postgresql:
-    deploy: true
+    # Note: PostgreSQL deployment is controlled by neuraltrust-control-plane.infrastructure.postgresql.deploy below
+    # Set deploy: true/false in that section to enable/disable in-cluster PostgreSQL deployment
 
 # ClickHouse subchart (only if infrastructure.clickhouse.deploy=true)
 clickhouse:
   auth:
     username: "neuraltrust"
-    password: "12345" # Required
+    password: "" # Required
   image:
     repository: "bitnamilegacy/clickhouse"
     tag: "25.3.2-debian-12-r3"
@@ -39,7 +40,7 @@ kafka:
 
 # TrustGate Configuration
 trustgate:
-  enabled: true
+  enabled: false
   global:
     version: "ee"
     imageRegistry: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker"
@@ -48,9 +49,9 @@ trustgate:
       tag: "v1.9.27" # Required
       imagePullSecrets: ["gcr-secret"]
     env:
-      SERVER_SECRET_KEY: "12345" # Required (for trustgate-secrets)
+      SERVER_SECRET_KEY: "" # Required (for trustgate-secrets)
       DATABASE_HOST: "control-plane-postgresql" # Required (for trustgate-secrets)
-      DATABASE_PASSWORD: "12345" # Required (for trustgate-secrets)
+      DATABASE_PASSWORD: "" # Required (for trustgate-secrets)
   redis:
     enabled: true
     auth:
@@ -58,12 +59,15 @@ trustgate:
 
 # NeuralTrust Control Plane
 neuraltrust-control-plane:
+  infrastructure:
+    postgresql:
+      deploy: true
   controlPlane:
     enabled: true
     imagePullSecrets: "gcr-secret"
     secrets:
-      controlPlaneJWTSecret: "12345" # Required
-      trustgateJwtSecret: "12345" # Required
+      controlPlaneJWTSecret: "" # Required
+      trustgateJwtSecret: "" # Required
     components:
       scheduler:
         enabled: true
@@ -76,7 +80,7 @@ neuraltrust-control-plane:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api"
           tag: "v1.7.3"
         secrets:
-          controlPlaneJWTSecret: "12345" # Required
+          controlPlaneJWTSecret: "" # Required
       app:
         enabled: true
         image:
@@ -84,7 +88,7 @@ neuraltrust-control-plane:
           tag: "v1.7.4"
       postgresql:
         secrets:
-          password: "12345" # Required if infrastructure.postgresql.deploy=true
+          password: "" # Required if infrastructure.postgresql.deploy=true
         image:
           repository: "postgres"
           tag: "17.2-alpine"
@@ -95,7 +99,7 @@ neuraltrust-data-plane:
     enabled: true
     imagePullSecrets: "gcr-secret"
     secrets:
-      dataPlaneJWTSecret: "12345" # Required
+      dataPlaneJWTSecret: "" # Required
     components:
       api:
         enabled: true

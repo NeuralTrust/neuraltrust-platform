@@ -372,27 +372,51 @@ infrastructure:
 
 ### PostgreSQL
 
-**Deploy PostgreSQL:**
+**Deploy PostgreSQL in-cluster:**
 ```yaml
 infrastructure:
   postgresql:
-    deploy: true
-    chart:
-      persistence:
-        size: 10Gi
+    # Note: PostgreSQL deployment is controlled by neuraltrust-control-plane.infrastructure.postgresql.deploy
+    # External configuration is only used when deploy: false
+
+neuraltrust-control-plane:
+  infrastructure:
+    postgresql:
+      deploy: true  # Deploy PostgreSQL in-cluster
+  controlPlane:
+    components:
+      postgresql:
+        secrets:
+          password: "your-password"
+        persistence:
+          size: 10Gi
 ```
 
-**Use External PostgreSQL (default):**
+**Use External PostgreSQL:**
 ```yaml
 infrastructure:
   postgresql:
-    deploy: false
+    # Note: PostgreSQL deployment is controlled by neuraltrust-control-plane.infrastructure.postgresql.deploy
     external:
       host: "postgresql.postgresql.svc.cluster.local"
       port: "5432"
       user: "postgres"
       password: "your-password"
       database: "neuraltrust"
+
+neuraltrust-control-plane:
+  infrastructure:
+    postgresql:
+      deploy: false  # Use external PostgreSQL
+  controlPlane:
+    components:
+      postgresql:
+        secrets:
+          host: "postgresql.postgresql.svc.cluster.local"
+          port: "5432"
+          user: "postgres"
+          password: "your-password"
+          database: "neuraltrust"
 ```
 
 ## Component Configuration
@@ -468,7 +492,7 @@ infrastructure:
       bootstrapServers: "kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
   
   postgresql:
-    deploy: false
+    # Note: PostgreSQL deployment is controlled by neuraltrust-control-plane.infrastructure.postgresql.deploy
     external:
       host: "postgresql.postgresql.svc.cluster.local"
       port: "5432"
@@ -481,8 +505,19 @@ neuraltrust-data-plane:
     enabled: true
 
 neuraltrust-control-plane:
+  infrastructure:
+    postgresql:
+      deploy: false  # Use external PostgreSQL
   controlPlane:
     enabled: true
+    components:
+      postgresql:
+        secrets:
+          host: "postgresql.postgresql.svc.cluster.local"
+          port: "5432"
+          user: "postgres"
+          password: "your-postgres-password"
+          database: "neuraltrust"
 
 trustgate:
   enabled: true
@@ -526,13 +561,16 @@ infrastructure:
   kafka:
     deploy: true  # Default
   postgresql:
-    deploy: true  # Default: deploy in-cluster
+    # Note: PostgreSQL deployment is controlled by neuraltrust-control-plane.infrastructure.postgresql.deploy
 
 neuraltrust-data-plane:
   dataPlane:
     enabled: true
 
 neuraltrust-control-plane:
+  infrastructure:
+    postgresql:
+      deploy: true  # Default: deploy PostgreSQL in-cluster
   controlPlane:
     enabled: true
 
