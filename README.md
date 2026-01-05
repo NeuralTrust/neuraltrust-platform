@@ -41,10 +41,26 @@ helm dependency update
 
 ### 2. Configure Values
 
-Copy and edit the values file:
+Choose a values file based on your needs:
+
+**Quick Start:**
+```bash
+# Use values-required.yaml for a deployment with only required/mandatory configuration
+cp values-required.yaml my-values.yaml
+# Edit my-values.yaml and set your secrets
+```
+
+**Comprehensive Examples:**
+- **Kubernetes**: Use `values.yaml` for a comprehensive Kubernetes deployment with all options
+- **OpenShift**: Use `values-openshift.yaml` for OpenShift-specific configuration with Routes
 
 ```bash
+# For Kubernetes (comprehensive)
 cp values.yaml my-values.yaml
+
+# OR for OpenShift (comprehensive)
+cp values-openshift.yaml my-values.yaml
+
 # Edit my-values.yaml with your configuration
 ```
 
@@ -78,6 +94,75 @@ helm upgrade --install neuraltrust-platform . \
 ```
 
 The Helm chart will automatically create all required Kubernetes secrets from your `values.yaml` configuration during deployment.
+
+## Available Values Files
+
+The chart provides several values files for different use cases:
+
+### `values-required.yaml` - Quick Start (Recommended for First-Time Users)
+
+**Best for:** Quick deployments with only required configuration
+
+This file contains only the mandatory/required configuration needed to deploy the platform. It's ideal for:
+- First-time deployments
+- Understanding the required configuration
+- Quick testing and development
+
+**Usage:**
+```bash
+cp values-required.yaml my-values.yaml
+# Edit my-values.yaml and set your secrets
+helm upgrade --install neuraltrust-platform . \
+  --namespace neuraltrust \
+  --create-namespace \
+  -f my-values.yaml
+```
+
+### `values.yaml` - Comprehensive Kubernetes Configuration
+
+**Best for:** Production Kubernetes deployments with full customization options
+
+This file includes all available configuration options with detailed comments. Use it when you need:
+- Full control over all settings
+- Resource limits and requests
+- Advanced ingress/TLS configuration
+- Autoscaling and PDB settings
+- Complete customization
+
+**Usage:**
+```bash
+cp values.yaml my-values.yaml
+# Edit my-values.yaml with your configuration
+helm upgrade --install neuraltrust-platform . \
+  --namespace neuraltrust \
+  --create-namespace \
+  -f my-values.yaml
+```
+
+### `values-openshift.yaml` - OpenShift Configuration
+
+**Best for:** OpenShift deployments with Routes
+
+This file is pre-configured for OpenShift with:
+- Routes enabled by default (Ingress disabled)
+- OpenShift-specific settings
+- Proper service account configurations
+
+**Usage:**
+```bash
+cp values-openshift.yaml my-values.yaml
+# Edit my-values.yaml and set your OpenShift domain
+helm upgrade --install neuraltrust-platform . \
+  --namespace neuraltrust \
+  --create-namespace \
+  -f my-values.yaml
+```
+
+### Other Example Files
+
+- `values-external-services.yaml.example` - Example for using external infrastructure
+- `values-openshift-ingress.yaml.example` - Example for OpenShift with Ingress instead of Routes
+- `values-red-teaming.yaml.example` - Example for deploying without TrustGate (for red teaming only)
 
 ## Secrets Management
 
@@ -414,7 +499,25 @@ helm upgrade --install neuraltrust-platform . \
 
 ## Example: Deploy Everything (Default)
 
-Deploy all infrastructure and services:
+Deploy all infrastructure and services. You can use `values-required.yaml` for a quick start, or `values.yaml` for comprehensive configuration:
+
+**Quick Start (Required Configuration Only):**
+```bash
+helm upgrade --install neuraltrust-platform . \
+  --namespace neuraltrust \
+  --create-namespace \
+  -f values-required.yaml
+```
+
+**Comprehensive Configuration:**
+```bash
+helm upgrade --install neuraltrust-platform . \
+  --namespace neuraltrust \
+  --create-namespace \
+  -f values.yaml
+```
+
+Both files deploy all infrastructure and services by default:
 
 ```yaml
 infrastructure:
@@ -423,7 +526,7 @@ infrastructure:
   kafka:
     deploy: true  # Default
   postgresql:
-    deploy: false  # Default: use external
+    deploy: true  # Default: deploy in-cluster
 
 neuraltrust-data-plane:
   dataPlane:

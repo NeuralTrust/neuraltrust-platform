@@ -1,0 +1,114 @@
+# Required NeuralTrust Platform Values
+# Only mandatory/required configuration - all other values use defaults
+
+global:
+  openshift: false
+  imageRegistry: ""
+  preserveExistingSecrets: false
+  storageClass: ""
+
+# Infrastructure Components
+infrastructure:
+  clickhouse:
+    deploy: true
+
+  kafka:
+    deploy: true
+
+  postgresql:
+    deploy: true
+
+# ClickHouse subchart (only if infrastructure.clickhouse.deploy=true)
+clickhouse:
+  auth:
+    username: "neuraltrust"
+    password: "12345" # Required
+  image:
+    repository: "bitnamilegacy/clickhouse"
+    tag: "25.3.2-debian-12-r3"
+  global:
+    imagePullSecrets: []
+
+# Kafka subchart (only if infrastructure.kafka.deploy=true)
+kafka:
+  image:
+    repository: "bitnamilegacy/kafka"
+    tag: "3.9.0-debian-12-r1"
+  global:
+    imagePullSecrets: []
+
+# TrustGate Configuration
+trustgate:
+  enabled: true
+  global:
+    version: "ee"
+    imageRegistry: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker"
+    image:
+      image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee" # Required
+      tag: "v1.9.27" # Required
+      imagePullSecrets: ["gcr-secret"]
+    env:
+      SERVER_SECRET_KEY: "12345" # Required (for trustgate-secrets)
+      DATABASE_HOST: "control-plane-postgresql" # Required (for trustgate-secrets)
+      DATABASE_PASSWORD: "12345" # Required (for trustgate-secrets)
+  redis:
+    enabled: true
+    auth:
+      password: "" # Optional, but recommended
+
+# NeuralTrust Control Plane
+neuraltrust-control-plane:
+  controlPlane:
+    enabled: true
+    imagePullSecrets: "gcr-secret"
+    secrets:
+      controlPlaneJWTSecret: "12345" # Required
+      trustgateJwtSecret: "12345" # Required
+    components:
+      scheduler:
+        enabled: true
+        image:
+          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/scheduler"
+          tag: "v1.7.2"
+      api:
+        enabled: true
+        image:
+          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api"
+          tag: "v1.7.3"
+        secrets:
+          controlPlaneJWTSecret: "12345" # Required
+      app:
+        enabled: true
+        image:
+          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
+          tag: "v1.7.4"
+      postgresql:
+        secrets:
+          password: "12345" # Required if infrastructure.postgresql.deploy=true
+        image:
+          repository: "postgres"
+          tag: "17.2-alpine"
+
+# NeuralTrust Data Plane
+neuraltrust-data-plane:
+  dataPlane:
+    enabled: true
+    imagePullSecrets: "gcr-secret"
+    secrets:
+      dataPlaneJWTSecret: "12345" # Required
+    components:
+      api:
+        enabled: true
+        image:
+          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api"
+          tag: "v1.7.8"
+      worker:
+        enabled: true
+        image:
+          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/workers"
+          tag: "v1.4.0-with-models"
+      kafka:
+        connect:
+          image:
+            repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect"
+            tag: "v0.0.1"
