@@ -44,7 +44,8 @@ metadata:
     {{- include "trustgate.labels" . | nindent 4 }}
     app.kubernetes.io/component: postgresql-init
   annotations:
-    {{- /* If using in-cluster PostgreSQL (control-plane-postgresql), run after it's ready */}}
+    {{- /* If using in-cluster PostgreSQL (control-plane-postgresql), run after deployment is complete */}}
+    {{- /* PostgreSQL deployment readiness probes ensure it's ready before this hook runs */}}
     {{- if eq $tgDbHost "control-plane-postgresql" }}
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-weight": "-15"
@@ -53,7 +54,7 @@ metadata:
     "helm.sh/hook-weight": "-5"
     {{- end }}
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
-    "helm.sh/hook-timeout": "300"
+    "helm.sh/hook-timeout": "600"
 spec:
   backoffLimit: 3
   template:
@@ -104,6 +105,44 @@ spec:
           
           # Determine SSL mode for connection
           PG_SSL_MODE="${POSTGRES_SSL_MODE:-disable}"
+          
+          # Wait for PostgreSQL to be ready before attempting initialization
+          echo "Waiting for PostgreSQL to be ready at ${PG_HOST}:${PG_PORT}..."
+          MAX_ATTEMPTS=240
+          ATTEMPT=0
+          
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            # First check if the service endpoint is accessible
+            if nc -z -w 2 "${PG_HOST}" "${PG_PORT}" 2>/dev/null; then
+              echo "PostgreSQL service is accessible, verifying database is ready..."
+              
+              # Export PGPASSWORD for pg_isready
+              export PGPASSWORD="${PG_ADMIN_PASSWORD}"
+              
+              # Try to connect to PostgreSQL using pg_isready
+              # pg_isready checks if PostgreSQL is accepting connections
+              if pg_isready -h "${PG_HOST}" -p "${PG_PORT}" -U "${PG_ADMIN_USER}" -t 2 >/dev/null 2>&1; then
+                echo "✓ PostgreSQL is ready and accepting connections!"
+                break
+              else
+                echo "PostgreSQL port is open but not ready yet, waiting..."
+              fi
+            else
+              echo "PostgreSQL service not accessible yet, waiting..."
+            fi
+            
+            ATTEMPT=$((ATTEMPT + 1))
+            if [ $((ATTEMPT % 10)) -eq 0 ]; then
+              echo "Attempt $ATTEMPT/$MAX_ATTEMPTS: PostgreSQL not ready yet, waiting..."
+            fi
+            sleep 2
+          done
+          
+          if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
+            echo "ERROR: PostgreSQL did not become ready at ${PG_HOST}:${PG_PORT} within $((MAX_ATTEMPTS * 2)) seconds."
+            echo "Check PostgreSQL pod logs and status for more information."
+            exit 1
+          fi
           
           # Build psql connection options
           PSQL_OPTS="-h ${PG_HOST} -p ${PG_PORT} -U ${PG_ADMIN_USER}"
