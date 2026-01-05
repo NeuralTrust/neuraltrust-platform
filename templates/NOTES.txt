@@ -15,14 +15,23 @@ Using external Kafka at {{ .Values.infrastructure.kafka.external.bootstrapServer
 {{- $postgresql := false }}
 {{- $postgresqlHost := "" }}
 {{- $postgresqlPort := "" }}
+{{- $postgresqlDeploy := false }}
+{{- if and .Values.infrastructure .Values.infrastructure.postgresql (hasKey .Values.infrastructure.postgresql "deploy") }}
+  {{- $postgresqlDeploy = .Values.infrastructure.postgresql.deploy }}
+{{- end }}
 {{- $cpValues := index .Values "neuraltrust-control-plane" }}
-{{- if and $cpValues $cpValues.controlPlane $cpValues.controlPlane.components $cpValues.controlPlane.components.postgresql }}
-  {{- $postgresql = $cpValues.controlPlane.components.postgresql.installInCluster }}
-  {{- if and $cpValues.controlPlane.components.postgresql.secrets $cpValues.controlPlane.components.postgresql.secrets.host }}
-    {{- $postgresqlHost = $cpValues.controlPlane.components.postgresql.secrets.host }}
-  {{- end }}
-  {{- if and $cpValues.controlPlane.components.postgresql.secrets $cpValues.controlPlane.components.postgresql.secrets.port }}
-    {{- $postgresqlPort = $cpValues.controlPlane.components.postgresql.secrets.port }}
+{{- if and (not $postgresqlDeploy) $cpValues $cpValues.infrastructure $cpValues.infrastructure.postgresql (hasKey $cpValues.infrastructure.postgresql "deploy") }}
+  {{- $postgresqlDeploy = $cpValues.infrastructure.postgresql.deploy }}
+{{- end }}
+{{- if $postgresqlDeploy }}
+  {{- $postgresql = true }}
+  {{- $postgresqlHost = "control-plane-postgresql" }}
+  {{- $postgresqlPort = "5432" }}
+{{- else if and .Values.infrastructure .Values.infrastructure.postgresql .Values.infrastructure.postgresql.external }}
+  {{- $postgresql = false }}
+  {{- $postgresqlHost = .Values.infrastructure.postgresql.external.host }}
+  {{- if .Values.infrastructure.postgresql.external.port }}
+    {{- $postgresqlPort = .Values.infrastructure.postgresql.external.port }}
   {{- else }}
     {{- $postgresqlPort = "5432" }}
   {{- end }}

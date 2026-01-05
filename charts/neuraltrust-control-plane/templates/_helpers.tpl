@@ -127,23 +127,22 @@ Usage: {{ include "control-plane.getSecretValueRaw" (dict "value" .Values.contro
 
 {{/*
 Helper to check if PostgreSQL should be deployed
-Checks infrastructure.postgresql.deploy from parent chart first (new way), falls back to installInCluster (backward compatibility)
+Checks infrastructure.postgresql.deploy from parent chart first, then subchart values
+Explicitly respects deploy: false to disable deployment
 Usage: {{ include "control-plane.postgresql.deploy" . }}
 */}}
 {{- define "control-plane.postgresql.deploy" -}}
 {{- $deploy := false }}
-{{- /* Try to get from parent chart values (infrastructure.postgresql.deploy) */}}
-{{- if .Release.Parent }}
-  {{- if and .Release.Parent.Values.infrastructure .Release.Parent.Values.infrastructure.postgresql .Release.Parent.Values.infrastructure.postgresql.deploy }}
-    {{- $deploy = true }}
+{{- /* Check if passed via subchart values (when parent passes infrastructure to subchart via neuraltrust-control-plane.infrastructure.postgresql.deploy) */}}
+{{- if and .Values.infrastructure .Values.infrastructure.postgresql (hasKey .Values.infrastructure.postgresql "deploy") }}
+  {{- $deploy = .Values.infrastructure.postgresql.deploy }}
+{{- /* Fallback: Try to get from parent chart values (infrastructure.postgresql.deploy) */}}
+{{- else if .Release.Parent }}
+  {{- if and .Release.Parent.Values.infrastructure .Release.Parent.Values.infrastructure.postgresql (hasKey .Release.Parent.Values.infrastructure.postgresql "deploy") }}
+    {{- $deploy = .Release.Parent.Values.infrastructure.postgresql.deploy }}
   {{- end }}
-{{- /* Fallback: check if passed via subchart values */}}
-{{- else if and .Values.infrastructure .Values.infrastructure.postgresql .Values.infrastructure.postgresql.deploy }}
-  {{- $deploy = true }}
-{{- /* Backward compatibility: check installInCluster */}}
-{{- else if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.postgresql .Values.controlPlane.components.postgresql.installInCluster }}
-  {{- $deploy = true }}
 {{- end }}
-{{- $deploy }}
+{{- /* Return empty string for false, non-empty for true - Helm's include returns strings, and empty string is falsy */}}
+{{- if $deploy }}{{- "true" }}{{- end }}
 {{- end }}
 
