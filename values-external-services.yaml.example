@@ -45,22 +45,14 @@ infrastructure:
 
   postgresql:
     # Note: PostgreSQL deployment is controlled by neuraltrust-control-plane.infrastructure.postgresql.deploy below
-    # Set deploy: false in that section to use external PostgreSQL
-    external:
-      host: "postgresql.postgresql.svc.cluster.local"  # External PostgreSQL service
-      port: "5432"
-      user: "postgres"  # Or "neuraltrust" depending on your setup
-      password: "your-postgres-password"  # Define this value
-      database: "neuraltrust"
-      # Optional: Secret reference for external PostgreSQL credentials
-      # secretName: ""  # Optional: secret containing POSTGRES_PASSWORD
-      # secretKey: ""  # Optional: key in secret for password
+    # External PostgreSQL connection details are configured in neuraltrust-control-plane.controlPlane.components.postgresql.secrets below
+    # The infrastructure.postgresql.external section is no longer used - all PostgreSQL configuration is in the control-plane section
 
 # NeuralTrust Control Plane - Use external PostgreSQL
 neuraltrust-control-plane:
   infrastructure:
     postgresql:
-      deploy: false  # Use external PostgreSQL (configured in infrastructure.postgresql.external above)
+      deploy: false  # Use external PostgreSQL (configured in controlPlane.components.postgresql.secrets below)
   controlPlane:
     enabled: true
     components:
@@ -68,7 +60,7 @@ neuraltrust-control-plane:
         secrets:
           host: "postgresql.postgresql.svc.cluster.local"  # External PostgreSQL service
           port: "5432"
-          user: "postgres"  # Or "neuraltrust" depending on your setup
+          user: "neuraltrust"
           password: "your-postgres-password"  # Define this value
           database: "neuraltrust"
       api:

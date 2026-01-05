@@ -103,36 +103,66 @@ Get Kafka connection details
 
 {{/*
 Get PostgreSQL connection details
+Uses neuraltrust-control-plane.infrastructure.postgresql.deploy to determine if deployed
+Uses neuraltrust-control-plane.controlPlane.components.postgresql.secrets for external connection
 */}}
 {{- define "neuraltrust-platform.postgresql.host" -}}
-{{- if .Values.infrastructure.postgresql.deploy }}
+{{- $cpValues := index .Values "neuraltrust-control-plane" }}
+{{- $deploy := false }}
+{{- if and $cpValues $cpValues.infrastructure $cpValues.infrastructure.postgresql (hasKey $cpValues.infrastructure.postgresql "deploy") }}
+  {{- $deploy = $cpValues.infrastructure.postgresql.deploy }}
+{{- end }}
+{{- if $deploy }}
 {{- printf "control-plane-postgresql" }}
+{{- else if and $cpValues $cpValues.controlPlane $cpValues.controlPlane.components $cpValues.controlPlane.components.postgresql $cpValues.controlPlane.components.postgresql.secrets $cpValues.controlPlane.components.postgresql.secrets.host }}
+{{- $cpValues.controlPlane.components.postgresql.secrets.host }}
 {{- else }}
-{{- .Values.infrastructure.postgresql.external.host }}
+{{- "control-plane-postgresql" }}
 {{- end }}
 {{- end }}
 
 {{- define "neuraltrust-platform.postgresql.port" -}}
-{{- if .Values.infrastructure.postgresql.deploy }}
+{{- $cpValues := index .Values "neuraltrust-control-plane" }}
+{{- $deploy := false }}
+{{- if and $cpValues $cpValues.infrastructure $cpValues.infrastructure.postgresql (hasKey $cpValues.infrastructure.postgresql "deploy") }}
+  {{- $deploy = $cpValues.infrastructure.postgresql.deploy }}
+{{- end }}
+{{- if $deploy }}
 {{- "5432" }}
+{{- else if and $cpValues $cpValues.controlPlane $cpValues.controlPlane.components $cpValues.controlPlane.components.postgresql $cpValues.controlPlane.components.postgresql.secrets $cpValues.controlPlane.components.postgresql.secrets.port }}
+{{- $cpValues.controlPlane.components.postgresql.secrets.port }}
 {{- else }}
-{{- .Values.infrastructure.postgresql.external.port }}
+{{- "5432" }}
 {{- end }}
 {{- end }}
 
 {{- define "neuraltrust-platform.postgresql.user" -}}
-{{- if .Values.infrastructure.postgresql.deploy }}
+{{- $cpValues := index .Values "neuraltrust-control-plane" }}
+{{- $deploy := false }}
+{{- if and $cpValues $cpValues.infrastructure $cpValues.infrastructure.postgresql (hasKey $cpValues.infrastructure.postgresql "deploy") }}
+  {{- $deploy = $cpValues.infrastructure.postgresql.deploy }}
+{{- end }}
+{{- if $deploy }}
 {{- "neuraltrust" }}
+{{- else if and $cpValues $cpValues.controlPlane $cpValues.controlPlane.components $cpValues.controlPlane.components.postgresql $cpValues.controlPlane.components.postgresql.secrets $cpValues.controlPlane.components.postgresql.secrets.user }}
+{{- $cpValues.controlPlane.components.postgresql.secrets.user }}
 {{- else }}
-{{- .Values.infrastructure.postgresql.external.user }}
+{{- "neuraltrust" }}
 {{- end }}
 {{- end }}
 
 {{- define "neuraltrust-platform.postgresql.database" -}}
-{{- if .Values.infrastructure.postgresql.deploy }}
+{{- $cpValues := index .Values "neuraltrust-control-plane" }}
+{{- $deploy := false }}
+{{- if and $cpValues $cpValues.infrastructure $cpValues.infrastructure.postgresql (hasKey $cpValues.infrastructure.postgresql "deploy") }}
+  {{- $deploy = $cpValues.infrastructure.postgresql.deploy }}
+{{- end }}
+{{- if $deploy }}
 {{- "neuraltrust" }}
+{{- else if and $cpValues $cpValues.controlPlane $cpValues.controlPlane.components $cpValues.controlPlane.components.postgresql $cpValues.controlPlane.components.postgresql.secrets $cpValues.controlPlane.components.postgresql.secrets.database }}
+{{- $cpValues.controlPlane.components.postgresql.secrets.database }}
 {{- else }}
-{{- .Values.infrastructure.postgresql.external.database }}
+{{- "neuraltrust" }}
 {{- end }}
 {{- end }}
 

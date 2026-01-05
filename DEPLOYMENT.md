@@ -159,8 +159,8 @@ The chart automatically maps infrastructure configuration to subchart values:
 - External: Uses `infrastructure.kafka.external.bootstrapServers`
 
 **PostgreSQL Connection:**
-- Deployed: Uses service name `<release-name>-postgresql` (managed by control-plane subchart)
-- External: Uses `infrastructure.postgresql.external.host`
+- Deployed: Uses service name `control-plane-postgresql` (managed by control-plane subchart)
+- External: Uses `neuraltrust-control-plane.controlPlane.components.postgresql.secrets.host`
 
 ## Troubleshooting
 

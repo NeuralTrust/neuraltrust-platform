@@ -397,12 +397,7 @@ neuraltrust-control-plane:
 infrastructure:
   postgresql:
     # Note: PostgreSQL deployment is controlled by neuraltrust-control-plane.infrastructure.postgresql.deploy
-    external:
-      host: "postgresql.postgresql.svc.cluster.local"
-      port: "5432"
-      user: "postgres"
-      password: "your-password"
-      database: "neuraltrust"
+    # External PostgreSQL connection details are configured in neuraltrust-control-plane.controlPlane.components.postgresql.secrets below
 
 neuraltrust-control-plane:
   infrastructure:
@@ -412,9 +407,9 @@ neuraltrust-control-plane:
     components:
       postgresql:
         secrets:
-          host: "postgresql.postgresql.svc.cluster.local"
+          host: "postgresql.postgresql.svc.cluster.local"  # External PostgreSQL host
           port: "5432"
-          user: "postgres"
+          user: "neuraltrust"
           password: "your-password"
           database: "neuraltrust"
 ```
@@ -493,12 +488,7 @@ infrastructure:
   
   postgresql:
     # Note: PostgreSQL deployment is controlled by neuraltrust-control-plane.infrastructure.postgresql.deploy
-    external:
-      host: "postgresql.postgresql.svc.cluster.local"
-      port: "5432"
-      user: "postgres"
-      password: "your-postgres-password"
-      database: "neuraltrust"
+    # External PostgreSQL connection details are configured in neuraltrust-control-plane.controlPlane.components.postgresql.secrets below
 
 neuraltrust-data-plane:
   dataPlane:
@@ -513,11 +503,10 @@ neuraltrust-control-plane:
     components:
       postgresql:
         secrets:
-          host: "postgresql.postgresql.svc.cluster.local"
+          host: "postgresql.postgresql.svc.cluster.local"  # External PostgreSQL host
           port: "5432"
-          user: "postgres"
+          user: "neuraltrust"
           password: "your-postgres-password"
-          database: "neuraltrust"
 
 trustgate:
   enabled: true
