@@ -31,7 +31,7 @@ If you already have secrets in your cluster, the Helm chart will automatically u
 You can also pass secrets directly via Helm values, though this is less secure:
 
 ```yaml
-neuraltrust:
+neuraltrust-data-plane:
   dataPlane:
     secrets:
       dataPlaneJWTSecret: "your-secret"
@@ -58,8 +58,7 @@ The chart expects the following secret names in your namespace:
 - `postgresql-secrets` - PostgreSQL connection (shared with control plane)
 
 ### TrustGate Secrets
-- `trustgate-secrets` - TrustGate server secret (key: `SERVER_SECRET_KEY`)
-- `trustgate-redis` - Redis password (key: `redis-password`)
+- `trustgate-secrets` - TrustGate server secret and Redis password (keys: `SERVER_SECRET_KEY`, `redis-password`, and database connection details)
 - `hf-api-key` - Hugging Face API key for firewall (key: `HUGGINGFACE_TOKEN`)
 
 ### Docker Registry
@@ -127,7 +126,7 @@ The Helm chart supports referencing secrets in two ways:
 ### 1. Direct Value (Less Secure)
 
 ```yaml
-neuraltrust:
+neuraltrust-data-plane:
   dataPlane:
     secrets:
       dataPlaneJWTSecret: "your-secret-value"
@@ -136,7 +135,7 @@ neuraltrust:
 ### 2. Secret Reference (Recommended)
 
 ```yaml
-neuraltrust:
+neuraltrust-data-plane:
   dataPlane:
     secrets:
       dataPlaneJWTSecret:

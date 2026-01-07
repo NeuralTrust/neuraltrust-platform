@@ -65,17 +65,17 @@ neuraltrust-control-plane:
           database: "neuraltrust"
       api:
         enabled: true
-        host: "control-plane-api.example.com"
+        host: "control-plane-api.yourdomain.com"  # Set to your domain
         ingress:
           enabled: true  # Use Ingress for external access
       app:
         enabled: true
-        host: "control-plane-app.example.com"
+        host: "control-plane-app.yourdomain.com"  # Set to your domain
         ingress:
           enabled: true  # Use Ingress for external access
       scheduler:
         enabled: true
-        host: "control-plane-scheduler.example.com"
+        host: "control-plane-scheduler.yourdomain.com"  # Set to your domain
         ingress:
           enabled: true  # Use Ingress for external access
 
@@ -94,7 +94,7 @@ neuraltrust-data-plane:
         enabled: false  # External Kafka
       api:
         enabled: true
-        host: "data-plane-api.example.com"
+        host: "data-plane-api.yourdomain.com"  # Set to your domain
         ingress:
           enabled: true  # Use Ingress for external access
       worker:
@@ -114,8 +114,8 @@ trustgate:
   ingress:
     enabled: true  # Use Ingress for external access
     controlPlane:
-      host: "admin.example.com"
+      host: "admin.yourdomain.com"  # Set to your domain
     dataPlane:
-      host: "gateway.example.com"
+      host: "gateway.yourdomain.com"  # Set to your domain
     actions:
-      host: "actions.example.com"
+      host: "actions.yourdomain.com"  # Set to your domain

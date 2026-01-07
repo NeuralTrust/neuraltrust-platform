@@ -211,7 +211,7 @@ trustgate:
       imagePullSecrets: ["user-registry"]  # Set to array of secret names, e.g., ["secret-name"] or leave empty to use parent global.imagePullSecrets
     env:
       SERVER_SECRET_KEY: ""  # Define this value
-      SERVER_BASE_DOMAIN: "neuraltrust.ai"
+      SERVER_BASE_DOMAIN: "yourdomain.com"  # Set to your domain
       SERVER_ADMIN_PORT: "8080"
       SERVER_METRICS_PORT: "9090"
       SERVER_PROXY_PORT: "8081"
@@ -234,9 +234,9 @@ trustgate:
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ""  # Will be auto-configured if redis.enabled
       REDIS_DB: "0"
-      CONTROL_PLANE_HOST: "admin.neuraltrust.ai"
-      DATA_PLANE_HOST: "gateway.neuraltrust.ai"
-      ACTIONS_HOST: "actions.neuraltrust.ai"
+      CONTROL_PLANE_HOST: "admin.yourdomain.com"  # Set to your domain
+      DATA_PLANE_HOST: "gateway.yourdomain.com"  # Set to your domain
+      ACTIONS_HOST: "actions.yourdomain.com"  # Set to your domain
 
   # Service Account configuration
   serviceAccount:
@@ -247,7 +247,7 @@ trustgate:
   # Common configurations
   config:
     logLevel: "info"
-    baseDomain: "neuraltrust.ai"
+    baseDomain: "yourdomain.com"  # Set to your domain
     providers: {}
 
   # Control Plane settings
@@ -440,11 +440,11 @@ trustgate:
       route.openshift.io/termination: "edge"
       route.openshift.io/insecure-edge-termination-policy: "Redirect"
     controlPlane:
-      host: "admin.neuraltrust.ai"
+      host: "admin.yourdomain.com"  # Set to your domain
     dataPlane:
-      host: "gateway.neuraltrust.ai"
+      host: "gateway.yourdomain.com"  # Set to your domain
     actions:
-      host: "actions.neuraltrust.ai"
+      host: "actions.yourdomain.com"  # Set to your domain
     # TLS configuration for Ingress (when ingress.enabled: true)
     # When using an existing wildcard TLS secret (type: kubernetes.io/tls) in the namespace,
     # set tls.enabled: true and tls.secretName to the name of that secret
@@ -475,7 +475,7 @@ neuraltrust-control-plane:
     components:
       scheduler:
         enabled: true
-        host: "control-plane-scheduler.neuraltrust.ai"
+        host: "control-plane-scheduler.yourdomain.com"  # Set to your domain
         service:
           type: ClusterIP  # Use ClusterIP for OpenShift (Routes handle external access)
         ingress:
@@ -510,7 +510,7 @@ neuraltrust-control-plane:
             cpu: 200m
       api:
         enabled: true
-        host: "control-plane-api.neuraltrust.ai"
+        host: "control-plane-api.yourdomain.com"  # Set to your domain
         service:
           type: ClusterIP  # Use ClusterIP for OpenShift (Routes handle external access)
         ingress:
@@ -547,7 +547,7 @@ neuraltrust-control-plane:
             cpu: 500m
       app:
         enabled: true
-        host: "control-plane-app.neuraltrust.ai"
+        host: "control-plane-app.yourdomain.com"  # Set to your domain
         secondaryHost: ""
         service:
           type: ClusterIP  # Use ClusterIP for OpenShift (Routes handle external access)
@@ -574,13 +574,13 @@ neuraltrust-control-plane:
           port: 3000
           # URLs will be auto-generated from OpenShift Routes if global.openshift=true and global.openshiftDomain is set
           # Otherwise, set these manually or they will default to internal service URLs
-          controlPlaneApiUrl: ""  # Auto: https://control-plane-api.{global.openshiftDomain} or http://control-plane-api-service.{namespace}.svc.cluster.local
-          dataPlaneApiUrl: ""  # Auto: https://data-plane-api.{global.openshiftDomain} or http://data-plane-api-service.{namespace}.svc.cluster.local
-          schedulerUrl: ""  # Auto: https://control-plane-scheduler.{global.openshiftDomain} or http://control-plane-scheduler-service.{namespace}.svc.cluster.local
-          trustgateControlPlaneUrl: ""  # Auto: https://trustgate-admin.{global.openshiftDomain} or https://admin.neuraltrust.ai
-          trustgateDataPlaneUrl: ""  # Auto: https://trustgate-gateway.{global.openshiftDomain} or https://gateway.neuraltrust.ai
-          trustgateActionsUrl: ""  # Auto: https://trustgate-actions.{global.openshiftDomain} or https://actions.neuraltrust.ai
-          nextAuthUrl: ""  # Auto: https://{app.host} or https://control-plane-app.neuraltrust.ai
+          controlPlaneApiUrl: ""  # Auto: https://control-plane-api.{global.openshiftDomain} or http://control-plane-api-service:80 (same namespace)
+          dataPlaneApiUrl: ""  # Auto: https://data-plane-api.{global.openshiftDomain} or http://data-plane-api-service:80 (same namespace)
+          schedulerUrl: ""  # Auto: https://control-plane-scheduler.{global.openshiftDomain} or http://control-plane-scheduler-service:80 (same namespace)
+          trustgateControlPlaneUrl: ""  # Auto: https://trustgate-admin.{global.openshiftDomain} or http://trustgate-control-plane:80 (same namespace)
+          trustgateDataPlaneUrl: ""  # Auto: https://trustgate-gateway.{global.openshiftDomain} or http://trustgate-data-plane:80 (same namespace)
+          trustgateActionsUrl: ""  # Auto: https://trustgate-actions.{global.openshiftDomain} or http://trustgate-actions:80 (same namespace)
+          nextAuthUrl: ""  # Auto: https://{app.host} or https://control-plane-app.yourdomain.com
           firewallApiUrl: ""
           modelScannerApiUrl: ""
           openaiModel: "gpt-4o-mini"
@@ -689,7 +689,7 @@ neuraltrust-data-plane:
               memory: 2Gi
       api:
         enabled: true
-        host: "data-plane-api.neuraltrust.ai"
+        host: "data-plane-api.yourdomain.com"  # Set to your domain
         service:
           type: ClusterIP  # Use ClusterIP for OpenShift (Routes handle external access)
         ingress:

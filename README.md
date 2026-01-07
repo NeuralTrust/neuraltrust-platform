@@ -372,6 +372,8 @@ infrastructure:
 
 ### PostgreSQL
 
+**Important:** PostgreSQL deployment is **ONLY** controlled by `neuraltrust-control-plane.infrastructure.postgresql.deploy`. The `infrastructure.postgresql` section in the root values file is for documentation and external connection reference only - it does NOT control deployment.
+
 **Deploy PostgreSQL in-cluster:**
 ```yaml
 infrastructure:
@@ -716,7 +718,7 @@ For troubleshooting deployment issues, see:
 For issues and questions:
 - 📚 [Documentation](https://docs.neuraltrust.ai)
 - 💬 [Slack Community](https://join.slack.com/t/neuraltrustcommunity/shared_invite/zt-2xl47cag6-_HFNpltIULnA3wh4R6AqBg)
-- 🐛 [Report Issues](https://github.com/NeuralTrust/neuraltrust-deploy/issues)
+- 🐛 [Report Issues](https://github.com/NeuralTrust/neuraltrust-platform/issues)
 
 ## License
 

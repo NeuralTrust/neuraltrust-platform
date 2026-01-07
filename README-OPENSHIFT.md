@@ -41,7 +41,7 @@ helm dependency update
 helm upgrade --install neuraltrust-platform . \
   --namespace neuraltrust \
   --set global.openshift=true \
-  --set global.openshiftDomain="apps.neuraltrust-dev.c4u5.p2.openshiftapps.com" \
+  --set global.openshiftDomain="YOUR_DOMAIN" \
   -f values.yaml
 
 # Optional: If using a custom image pull secret (instead of default 'gcr-secret'):
@@ -49,7 +49,7 @@ helm upgrade --install neuraltrust-platform . \
 helm upgrade --install neuraltrust-platform . \
   --namespace neuraltrust \
   --set global.openshift=true \
-  --set global.openshiftDomain="apps.neuraltrust-dev.c4u5.p2.openshiftapps.com" \
+  --set global.openshiftDomain="YOUR_DOMAIN" \
   --set neuraltrust-data-plane.imagePullSecrets="my-custom-secret" \
   --set neuraltrust-control-plane.imagePullSecrets="my-custom-secret" \
   --set trustgate.imagePullSecrets="my-custom-secret" \
@@ -282,7 +282,7 @@ Set the `global.openshift` flag to `true` in your values file or via Helm comman
 helm upgrade --install neuraltrust-platform . \
   --namespace neuraltrust \
   --set global.openshift=true \
-  --set global.openshiftDomain="apps.neuraltrust-dev.c4u5.p2.openshiftapps.com" \
+  --set global.openshiftDomain="YOUR_DOMAIN" \
   -f values.yaml
 ```
 
@@ -291,7 +291,7 @@ Or in your `values.yaml`:
 ```yaml
 global:
   openshift: true
-  openshiftDomain: "apps.neuraltrust-dev.c4u5.p2.openshiftapps.com"  # Your OpenShift wildcard DNS domain
+  openshiftDomain: "YOUR_DOMAIN"  # Your OpenShift wildcard DNS domain (e.g., apps.neuraltrust-dev.c4u5.p2.openshiftapps.com)
 ```
 
 ### Custom Image Pull Secret
@@ -302,7 +302,7 @@ To use a custom image pull secret instead of the default `gcr-secret`, set the i
 helm upgrade --install neuraltrust-platform . \
   --namespace neuraltrust \
   --set global.openshift=true \
-  --set global.openshiftDomain="apps.neuraltrust-dev.c4u5.p2.openshiftapps.com" \
+  --set global.openshiftDomain="YOUR_DOMAIN" \
   --set neuraltrust-data-plane.imagePullSecrets="my-custom-secret" \
   --set neuraltrust-control-plane.imagePullSecrets="my-custom-secret" \
   --set trustgate.imagePullSecrets="my-custom-secret" \
@@ -314,7 +314,7 @@ Or configure in `values.yaml`:
 ```yaml
 global:
   openshift: true
-  openshiftDomain: "apps.neuraltrust-dev.c4u5.p2.openshiftapps.com"
+  openshiftDomain: "YOUR_DOMAIN"  # Your OpenShift wildcard DNS domain (e.g., apps.neuraltrust-dev.c4u5.p2.openshiftapps.com)
 
 # Note: When using --set, use the subchart name prefix:
 # --set neuraltrust-data-plane.imagePullSecrets="my-custom-secret"
@@ -413,7 +413,7 @@ Create or modify your values file for OpenShift:
 ```yaml
 global:
   openshift: true
-  openshiftDomain: "apps.neuraltrust-dev.c4u5.p2.openshiftapps.com"  # Your OpenShift wildcard DNS domain
+  openshiftDomain: "YOUR_DOMAIN"  # Your OpenShift wildcard DNS domain (e.g., apps.neuraltrust-dev.c4u5.p2.openshiftapps.com)
   storageClass: "gp2"  # Your OpenShift storage class
 
 infrastructure:
@@ -452,7 +452,7 @@ trustgate:
 helm upgrade --install neuraltrust-platform . \
   --namespace neuraltrust \
   --set global.openshift=true \
-  --set global.openshiftDomain="apps.neuraltrust-dev.c4u5.p2.openshiftapps.com" \
+  --set global.openshiftDomain="YOUR_DOMAIN" \
   -f values.yaml
 ```
 
@@ -683,7 +683,7 @@ echo "Secrets created successfully!"
 echo ""
 echo "Next steps:"
 echo "1. Update Helm dependencies: helm dependency update"
-echo "2. Deploy with: helm upgrade --install $RELEASE_NAME . --namespace $NAMESPACE --set global.openshift=true --set global.openshiftDomain=\"apps.neuraltrust-dev.c4u5.p2.openshiftapps.com\" -f values.yaml"
+echo "2. Deploy with: helm upgrade --install $RELEASE_NAME . --namespace $NAMESPACE --set global.openshift=true --set global.openshiftDomain=\"YOUR_DOMAIN\" -f values-openshift.yaml"
 ```
 
 Save this as `create-secrets-openshift.sh`, make it executable, and run:
@@ -704,5 +704,5 @@ chmod +x create-secrets-openshift.sh
 For issues and questions:
 - 📚 [Documentation](https://docs.neuraltrust.ai)
 - 💬 [Slack Community](https://join.slack.com/t/neuraltrustcommunity/shared_invite/zt-2xl47cag6-_HFNpltIULnA3wh4R6AqBg)
-- 🐛 [Report Issues](https://github.com/NeuralTrust/neuraltrust-deploy/issues)
+- 🐛 [Report Issues](https://github.com/NeuralTrust/neuraltrust-platform/issues)
 
