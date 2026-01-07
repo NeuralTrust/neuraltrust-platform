@@ -23,13 +23,13 @@ dependencies:
   # NeuralTrust components
   - name: neuraltrust-data-plane
     version: 0.1.0
-    condition: neuraltrust.dataPlane.enabled
+    condition: neuraltrust-data-plane.dataPlane.enabled
     repository: file://./charts/neuraltrust-data-plane
     tags:
       - neuraltrust
   - name: neuraltrust-control-plane
     version: 0.1.0
-    condition: neuraltrust.controlPlane.enabled
+    condition: neuraltrust-control-plane.controlPlane.enabled
     repository: file://./charts/neuraltrust-control-plane
     tags:
       - neuraltrust
