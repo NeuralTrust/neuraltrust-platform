@@ -4,7 +4,7 @@ description: Unified Helm chart for NeuralTrust platform including Data Plane, C
 type: application
 version: 0.1.0
 appVersion: "1.0.0"
-icon: https://kubernetes.io/images/favicon.png
+icon: https://neuraltrust.ai/favicon.ico
 
 dependencies:
   # Infrastructure components (conditional deployment)
