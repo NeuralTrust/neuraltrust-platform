@@ -687,38 +687,9 @@ neuraltrust-data-plane:
         accessMode: ReadWriteOnce
         huggingfaceToken: ""
         storage: 10Gi
-        trustTestConfig:
-          evaluator:
-            provider: "openai"
-            model: "gpt-5-mini"
-            temperature: 0.0
-            extra_args:
-              reasoning_effort: "low"
-            retry_config:
-              attempts: 3
-          question_generator:
-            provider: "openai"
-            model: "gpt-5-mini"
-            extra_args:
-              reasoning_effort: "low"
-            temperature: 0.0
-            retry_config:
-              attempts: 3
-          translation:
-            provider: "google"
-            model: "gemini-2.0-flash"
-            temperature: 0.0
-            retry_config:
-              attempts: 3
-          topic_summarizer:
-            provider: "google"
-            model: "gemini-2.0-flash"
-            temperature: 0.2
-            retry_config:
-              attempts: 3
-          embeddings:
-            provider: "openai"
-            model: "text-embedding-3-small"
+        # TrustTest configuration: Set to {} to enable volume mounting of trusttest config
+        # The ConfigMap content is generated from charts/neuraltrust-data-plane/files/.trusttest_config.json
+        trustTestConfig: {}
         replicas: 3
         resources:
           requests:

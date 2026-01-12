@@ -1,7 +1,6 @@
 {{- if .Values.dataPlane }}
   {{- if .Values.dataPlane.components }}
     {{- if .Values.dataPlane.components.api }}
-      {{- if .Values.dataPlane.components.api.trustTestConfig }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -11,8 +10,7 @@ metadata:
     plane: data
 data:
   .trusttest_config.json: |-
-    {{ .Values.dataPlane.components.api.trustTestConfig | toJson | nindent 4 }}
-      {{- end }}
+{{ .Files.Get "files/.trusttest_config.json" | indent 4 }}
     {{- end }}
   {{- end }}
 {{- end }} 
