@@ -37,7 +37,7 @@ clickhouse:
     existingSecretKey: "admin-password"  # Key name in the existing secret
   persistence:
     enabled: true
-    size: 10Gi
+    size: 50Gi
     storageClass: ""
   resources:
     requests:

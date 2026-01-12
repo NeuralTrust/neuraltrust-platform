@@ -329,7 +329,7 @@ infrastructure:
       auth:
         password: "your-password"
       persistence:
-        size: 10Gi
+        size: 50Gi
 ```
 
 **Use External ClickHouse:**

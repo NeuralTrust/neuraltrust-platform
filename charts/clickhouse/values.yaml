@@ -966,7 +966,7 @@ persistence:
     - ReadWriteOnce
   ## @param persistence.size Size of data volume
   ##
-  size: 8Gi
+  size: 50Gi
   ## @param persistence.selector Selector to match an existing Persistent Volume for ClickHouse data PVC
   ## If set, the PVC can't have a PV dynamically provisioned for it
   ## E.g.
