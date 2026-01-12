@@ -60,13 +60,13 @@ echo "Checking existing connectors..."
 EXISTING_CONNECTORS=$(curl -s ${KAFKA_CONNECT_URL}/connectors 2>/dev/null || echo "[]")
 echo "Existing connectors: ${EXISTING_CONNECTORS}"
 
-echo "Creating ClickHouse traces_processed sink connector..."
-create_or_update_connector "clickhouse-traces-processed-sink" '{
-  "name": "clickhouse-traces-processed-sink",
+echo "Creating ClickHouse Audit Logs Ingest sink connector..."
+create_or_update_connector "clickhouse-audit-logs-ingest-sink" '{
+  "name": "clickhouse-audit-logs-ingest-sink",
   "config": {
     "connector.class": "com.clickhouse.kafka.connect.ClickHouseSinkConnector",
     "tasks.max": "1",
-    "topics": "traces_processed",
+    "topics": "audit_logs_ingest",
     "hostname": "'${CLICKHOUSE_HOST}'",
     "port": "'${CLICKHOUSE_PORT}'",
     "database": "'${CLICKHOUSE_DATABASE}'",
@@ -82,7 +82,7 @@ create_or_update_connector "clickhouse-traces-processed-sink" '{
     "errors.tolerance": "all",
     "errors.log.enable": "true",
     "errors.log.include.messages": "true",
-    "table.name": "traces_processed",
+    "table.name": "audit_logs_ingest",
     "key.converter": "org.apache.kafka.connect.storage.StringConverter",
     "value.converter": "org.apache.kafka.connect.json.JsonConverter",
     "value.converter.schemas.enable": "false",
@@ -92,68 +92,7 @@ create_or_update_connector "clickhouse-traces-processed-sink" '{
   }
 }'
 
-echo "Creating ClickHouse metrics sink connector..."
-create_or_update_connector "clickhouse-metrics-sink" '{
-  "name": "clickhouse-metrics-sink",
-  "config": {
-    "connector.class": "com.clickhouse.kafka.connect.ClickHouseSinkConnector",
-    "tasks.max": "1",
-    "topics": "metrics",
-    "hostname": "'${CLICKHOUSE_HOST}'",
-    "port": "'${CLICKHOUSE_PORT}'",
-    "database": "'${CLICKHOUSE_DATABASE}'",
-    "username": "'${CLICKHOUSE_USER}'",
-    "password": "'${CLICKHOUSE_PASSWORD}'",
-    "ssl": "false",
-    "exactlyOnce": "false",
-    "state.provider.class": "com.clickhouse.kafka.connect.sink.state.provider.FileStateProvider",
-    "state.provider.working.dir": "/tmp/clickhouse-sink",
-    "queue.max.wait.ms": "5000",
-    "retry.max.count": "5",
-    "errors.retry.timeout": "60",
-    "errors.tolerance": "all",
-    "errors.log.enable": "true",
-    "errors.log.include.messages": "true",
-    "table.name": "metrics",
-    "key.converter": "org.apache.kafka.connect.storage.StringConverter",
-    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
-    "value.converter.schemas.enable": "false"
-  }
-}'
-
-echo "Creating ClickHouse traces sink connector..."
-create_or_update_connector "clickhouse-traces-sink" '{
-  "name": "clickhouse-traces-sink",
-  "config": {
-    "connector.class": "com.clickhouse.kafka.connect.ClickHouseSinkConnector",
-    "tasks.max": "1",
-    "topics": "traces",
-    "hostname": "'${CLICKHOUSE_HOST}'",
-    "port": "'${CLICKHOUSE_PORT}'",
-    "database": "'${CLICKHOUSE_DATABASE}'",
-    "username": "'${CLICKHOUSE_USER}'",
-    "password": "'${CLICKHOUSE_PASSWORD}'",
-    "ssl": "false",
-    "exactlyOnce": "false",
-    "state.provider.class": "com.clickhouse.kafka.connect.sink.state.provider.FileStateProvider",
-    "state.provider.working.dir": "/tmp/clickhouse-sink",
-    "queue.max.wait.ms": "5000",
-    "retry.max.count": "5",
-    "errors.retry.timeout": "60",
-    "errors.tolerance": "all",
-    "errors.log.enable": "true",
-    "errors.log.include.messages": "true",
-    "table.name": "traces",
-    "key.converter": "org.apache.kafka.connect.storage.StringConverter",
-    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
-    "value.converter.schemas.enable": "false",
-    "transforms": "flattenJson",
-    "transforms.flattenJson.type": "org.apache.kafka.connect.transforms.Flatten$Value",
-    "transforms.flattenJson.delimiter": "_"
-  }
-}'
-
-echo "Creating ClickHouse discover events sink connector..."
+echo "Creating ClickHouse Discover Events sink connector..."
 create_or_update_connector "clickhouse-discover-events-sink" '{
   "name": "clickhouse-discover-events-sink",
   "config": {
@@ -185,39 +124,7 @@ create_or_update_connector "clickhouse-discover-events-sink" '{
   }
 }'
 
-echo "Creating ClickHouse agents events sink connector..."
-create_or_update_connector "clickhouse-agents-events-sink" '{
-  "name": "clickhouse-agents-events-sink",
-  "config": {
-    "connector.class": "com.clickhouse.kafka.connect.ClickHouseSinkConnector",
-    "tasks.max": "1",
-    "topics": "agent_traces",
-    "hostname": "'${CLICKHOUSE_HOST}'",
-    "port": "'${CLICKHOUSE_PORT}'",
-    "database": "'${CLICKHOUSE_DATABASE}'",
-    "username": "'${CLICKHOUSE_USER}'",
-    "password": "'${CLICKHOUSE_PASSWORD}'",
-    "ssl": "false",
-    "exactlyOnce": "false",
-    "state.provider.class": "com.clickhouse.kafka.connect.sink.state.provider.FileStateProvider",
-    "state.provider.working.dir": "/tmp/clickhouse-sink",
-    "queue.max.wait.ms": "5000",
-    "retry.max.count": "5",
-    "errors.retry.timeout": "60",
-    "errors.tolerance": "all",
-    "errors.log.enable": "true",
-    "errors.log.include.messages": "true",
-    "table.name": "agent_traces",
-    "value.converter.schemas.enable": "false",
-    "key.converter": "org.apache.kafka.connect.storage.StringConverter",
-    "value.converter": "org.apache.kafka.connect.storage.StringConverter",
-    "transforms": "hoist",
-    "transforms.hoist.type": "org.apache.kafka.connect.transforms.HoistField$Value",
-    "transforms.hoist.field": "raw_json"
-  }
-}'
-
-echo "Creating ClickHouse gpt_usage sink connector..."
+echo "Creating ClickHouse Gpt Usage sink connector..."
 create_or_update_connector "clickhouse-gpt-usage-sink" '{
   "name": "clickhouse-gpt-usage-sink",
   "config": {
@@ -252,6 +159,99 @@ create_or_update_connector "clickhouse-gpt-usage-sink" '{
   }
 }'
 
+echo "Creating ClickHouse Metrics sink connector..."
+create_or_update_connector "clickhouse-metrics-sink" '{
+  "name": "clickhouse-metrics-sink",
+  "config": {
+    "connector.class": "com.clickhouse.kafka.connect.ClickHouseSinkConnector",
+    "tasks.max": "1",
+    "topics": "metrics",
+    "hostname": "'${CLICKHOUSE_HOST}'",
+    "port": "'${CLICKHOUSE_PORT}'",
+    "database": "'${CLICKHOUSE_DATABASE}'",
+    "username": "'${CLICKHOUSE_USER}'",
+    "password": "'${CLICKHOUSE_PASSWORD}'",
+    "ssl": "false",
+    "exactlyOnce": "false",
+    "state.provider.class": "com.clickhouse.kafka.connect.sink.state.provider.FileStateProvider",
+    "state.provider.working.dir": "/tmp/clickhouse-sink",
+    "queue.max.wait.ms": "5000",
+    "retry.max.count": "5",
+    "errors.retry.timeout": "60",
+    "errors.tolerance": "all",
+    "errors.log.enable": "true",
+    "errors.log.include.messages": "true",
+    "table.name": "metrics",
+    "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false"
+  }
+}'
+
+echo "Creating ClickHouse Traces Processed sink connector..."
+create_or_update_connector "clickhouse-traces-processed-sink" '{
+  "name": "clickhouse-traces-processed-sink",
+  "config": {
+    "connector.class": "com.clickhouse.kafka.connect.ClickHouseSinkConnector",
+    "tasks.max": "1",
+    "topics": "traces_processed",
+    "hostname": "'${CLICKHOUSE_HOST}'",
+    "port": "'${CLICKHOUSE_PORT}'",
+    "database": "'${CLICKHOUSE_DATABASE}'",
+    "username": "'${CLICKHOUSE_USER}'",
+    "password": "'${CLICKHOUSE_PASSWORD}'",
+    "ssl": "false",
+    "exactlyOnce": "false",
+    "state.provider.class": "com.clickhouse.kafka.connect.sink.state.provider.FileStateProvider",
+    "state.provider.working.dir": "/tmp/clickhouse-sink",
+    "queue.max.wait.ms": "5000",
+    "retry.max.count": "5",
+    "errors.retry.timeout": "60",
+    "errors.tolerance": "all",
+    "errors.log.enable": "true",
+    "errors.log.include.messages": "true",
+    "table.name": "traces_processed",
+    "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false",
+    "transforms": "flattenJson",
+    "transforms.flattenJson.type": "org.apache.kafka.connect.transforms.Flatten$Value",
+    "transforms.flattenJson.delimiter": "_"
+  }
+}'
+
+echo "Creating ClickHouse Traces sink connector..."
+create_or_update_connector "clickhouse-traces-sink" '{
+  "name": "clickhouse-traces-sink",
+  "config": {
+    "connector.class": "com.clickhouse.kafka.connect.ClickHouseSinkConnector",
+    "tasks.max": "1",
+    "topics": "traces",
+    "hostname": "'${CLICKHOUSE_HOST}'",
+    "port": "'${CLICKHOUSE_PORT}'",
+    "database": "'${CLICKHOUSE_DATABASE}'",
+    "username": "'${CLICKHOUSE_USER}'",
+    "password": "'${CLICKHOUSE_PASSWORD}'",
+    "ssl": "false",
+    "exactlyOnce": "false",
+    "state.provider.class": "com.clickhouse.kafka.connect.sink.state.provider.FileStateProvider",
+    "state.provider.working.dir": "/tmp/clickhouse-sink",
+    "queue.max.wait.ms": "5000",
+    "retry.max.count": "5",
+    "errors.retry.timeout": "60",
+    "errors.tolerance": "all",
+    "errors.log.enable": "true",
+    "errors.log.include.messages": "true",
+    "table.name": "traces",
+    "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false",
+    "transforms": "flattenJson",
+    "transforms.flattenJson.type": "org.apache.kafka.connect.transforms.Flatten$Value",
+    "transforms.flattenJson.delimiter": "_"
+  }
+}'
+
 echo ""
 echo "=== Connector creation summary ==="
 echo "Checking final connector status..."
@@ -259,7 +259,7 @@ FINAL_CONNECTORS=$(curl -s ${KAFKA_CONNECT_URL}/connectors 2>/dev/null || echo "
 echo "All connectors: ${FINAL_CONNECTORS}"
 
 # Verify all expected connectors exist
-EXPECTED_CONNECTORS="clickhouse-traces-processed-sink clickhouse-metrics-sink clickhouse-traces-sink clickhouse-discover-events-sink clickhouse-agents-events-sink clickhouse-gpt-usage-sink"
+EXPECTED_CONNECTORS="clickhouse-audit-logs-ingest-sink clickhouse-discover-events-sink clickhouse-gpt-usage-sink clickhouse-metrics-sink clickhouse-traces-processed-sink clickhouse-traces-sink"
 MISSING_CONNECTORS=""
 
 for connector in ${EXPECTED_CONNECTORS}; do
