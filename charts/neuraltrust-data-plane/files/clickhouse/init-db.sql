@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS teams
     modelDeploymentName String,
     modelExtraHeaders String,
     dataPlaneEndpoint String,
+    siemConfig String,
     createdAt DateTime64(6, 'UTC'),
     updatedAt DateTime64(6, 'UTC'),
     PRIMARY KEY (id)
@@ -48,6 +49,43 @@ CREATE TABLE IF NOT EXISTS apps
     PRIMARY KEY (id)
 ) ENGINE = MergeTree()
 ORDER BY (id);
+
+CREATE TABLE IF NOT EXISTS audit_logs_ingest
+(
+    id String,
+    version String DEFAULT '1.0',
+    team_id String,
+    timestamp DateTime64(6, 'UTC'),
+    event_type String,
+    event_category String,
+    event_description String DEFAULT '',
+    event_status String DEFAULT '',
+    event_error_message String DEFAULT '',
+    actor_id String DEFAULT '',
+    actor_email String DEFAULT '',
+    actor_type String DEFAULT '',
+    target_type String DEFAULT '',
+    target_id String DEFAULT '',
+    target_name String DEFAULT '',
+    context_ip_address String DEFAULT '',
+    context_user_agent String DEFAULT '',
+    context_session_id String DEFAULT '',
+    context_request_id String DEFAULT '',
+    changes_previous String DEFAULT '{}',
+    changes_current String DEFAULT '{}',
+    metadata String DEFAULT '{}',
+    event_date Date MATERIALIZED toDate(timestamp),
+
+    INDEX idx_team_id (team_id) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_event_type (event_type) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_event_category (event_category) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_event_status (event_status) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_actor_id (actor_id) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_target_id (target_id) TYPE bloom_filter(0.01) GRANULARITY 1
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMM(event_date)
+ORDER BY (team_id, timestamp, id)
+TTL event_date + INTERVAL 12 MONTH;
 
 -- Classifiers table
 CREATE TABLE IF NOT EXISTS classifiers
