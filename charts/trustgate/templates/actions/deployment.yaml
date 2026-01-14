@@ -6,7 +6,11 @@ metadata:
     {{- include "trustgate.actions.labels" . | nindent 4 }}
     component: actions
 spec:
-  replicas: {{ .Values.actions.replicas | default 1 }}
+  {{- if hasKey .Values.actions "replicas" }}
+  replicas: {{ .Values.actions.replicas }}
+  {{- else }}
+  replicas: 1
+  {{- end }}
   selector:
     matchLabels:
       {{- include "trustgate.actions.labels" . | nindent 6 }}

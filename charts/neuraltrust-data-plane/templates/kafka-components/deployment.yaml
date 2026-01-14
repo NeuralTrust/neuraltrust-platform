@@ -4,7 +4,11 @@ metadata:
   name: kafka-connect
   namespace: {{ .Release.Namespace }}
 spec:
-  replicas: {{ if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect }}{{ .Values.dataPlane.components.kafka.connect.replicas | default 1 }}{{ else }}1{{ end }}
+  {{- $kafkaConnectReplicas := 1 }}
+  {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect (hasKey .Values.dataPlane.components.kafka.connect "replicas") }}
+    {{- $kafkaConnectReplicas = .Values.dataPlane.components.kafka.connect.replicas }}
+  {{- end }}
+  replicas: {{ $kafkaConnectReplicas }}
   selector:
     matchLabels:
       app: kafka-connect
@@ -74,11 +78,11 @@ spec:
             - name: CONNECT_STATUS_STORAGE_TOPIC
               value: "connect-status"
             - name: CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR
-              value: "{{ if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect }}{{ .Values.dataPlane.components.kafka.connect.replicas | default 1 }}{{ else }}1{{ end }}"
+              value: "{{ $kafkaConnectReplicas }}"
             - name: CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR
-              value: "{{ if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect }}{{ .Values.dataPlane.components.kafka.connect.replicas | default 1 }}{{ else }}1{{ end }}"
+              value: "{{ $kafkaConnectReplicas }}"
             - name: CONNECT_STATUS_STORAGE_REPLICATION_FACTOR
-              value: "{{ if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect }}{{ .Values.dataPlane.components.kafka.connect.replicas | default 1 }}{{ else }}1{{ end }}"
+              value: "{{ $kafkaConnectReplicas }}"
             - name: CONNECT_KEY_CONVERTER
               value: "org.apache.kafka.connect.storage.StringConverter"
             - name: CONNECT_VALUE_CONVERTER
@@ -96,11 +100,11 @@ spec:
             - name: CONNECT_LOG4J_LOGGERS
               value: "org.apache.zookeeper=INFO,org.I0Itec.zkclient=INFO,org.reflections=ERROR"
             - name: CONNECT_CONSUMER_OFFSETS_TOPIC_REPLICATION_FACTOR
-              value: "{{ if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect }}{{ .Values.dataPlane.components.kafka.connect.replicas | default 1 }}{{ else }}1{{ end }}"
+              value: "{{ $kafkaConnectReplicas }}"
             - name: CONNECT_CONSUMER_OFFSETS_TOPIC_NUM_PARTITIONS
-              value: "{{ if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect }}{{ .Values.dataPlane.components.kafka.connect.replicas | default 1 }}{{ else }}1{{ end }}"
+              value: "{{ $kafkaConnectReplicas }}"
             - name: CONNECT_INTERNAL_REPLICATION_FACTOR
-              value: "{{ if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect }}{{ .Values.dataPlane.components.kafka.connect.replicas | default 1 }}{{ else }}1{{ end }}"
+              value: "{{ $kafkaConnectReplicas }}"
             - name: KAFKA_NUM_PARTITIONS
               value: "3"
             - name: CONNECT_PRODUCER_DEFAULT_PARTITIONS

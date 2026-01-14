@@ -6,7 +6,11 @@ metadata:
     app: api
     plane: data
 spec:
-  replicas: {{ if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api }}{{ .Values.dataPlane.components.api.replicas | default 3 }}{{ else }}3{{ end }}
+  {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api (hasKey .Values.dataPlane.components.api "replicas") }}
+  replicas: {{ .Values.dataPlane.components.api.replicas }}
+  {{- else }}
+  replicas: 3
+  {{- end }}
   selector:
     matchLabels:
       app: api
