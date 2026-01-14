@@ -44,3 +44,6 @@ data:
       host: {{ .Values.global.env.REDIS_HOST }}
       port: {{ .Values.global.env.REDIS_PORT }}
       db: {{ .Values.global.env.REDIS_DB }}
+      {{- if and .Values.global.env.REDIS_PASSWORD (ne .Values.global.env.REDIS_PASSWORD "") }}
+      password: {{ .Values.global.env.REDIS_PASSWORD }}
+      {{- end }}

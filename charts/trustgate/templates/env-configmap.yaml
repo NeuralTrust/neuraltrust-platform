@@ -24,10 +24,23 @@ data:
   SERVER_ACTIONS_PORT: "8084"
   OPENTELEMETRY_ENABLED: "false"
   OPENTELEMETRY_INSECURE: "true"
+  # Redis configuration
+  {{- if .Values.redis.enabled }}
+  # Internal Redis - use default service name and no password
   REDIS_HOST: trustgate-redis
   REDIS_PORT: "6379"
   REDIS_DB: "0"
+  {{- else }}
+  # External Redis - use values from global.env or redis.external
+  REDIS_HOST: {{ .Values.global.env.REDIS_HOST | default .Values.redis.external.host | default "trustgate-redis" }}
+  REDIS_PORT: {{ .Values.global.env.REDIS_PORT | default .Values.redis.external.port | default "6379" }}
+  {{- if and .Values.global.env.REDIS_PASSWORD (ne .Values.global.env.REDIS_PASSWORD "") }}
+  REDIS_PASSWORD: {{ .Values.global.env.REDIS_PASSWORD }}
+  {{- else if and .Values.redis.external.password (ne .Values.redis.external.password "") }}
+  REDIS_PASSWORD: {{ .Values.redis.external.password }}
+  {{- end }}
+  REDIS_DB: {{ .Values.global.env.REDIS_DB | default "0" }}
+  {{- end }}
   CONTROL_PLANE_HOST: trustgate-control-plane
   DATA_PLANE_HOST: trustgate-data-plane
   ACTIONS_HOST: trustgate-actions
-

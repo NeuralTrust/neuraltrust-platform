@@ -29,6 +29,7 @@ global:
     DATABASE_NAME: ${DATABASE_NAME}
     REDIS_HOST: ${REDIS_HOST}
     REDIS_PORT: ${REDIS_PORT}
+    REDIS_PASSWORD: ${REDIS_PASSWORD}
     REDIS_DB: ${REDIS_DB}
     CONTROL_PLANE_HOST: ${CONTROL_PLANE_HOST}
     DATA_PLANE_HOST: ${DATA_PLANE_HOST}
@@ -188,12 +189,11 @@ redis:
     tag: 2.6.9
     pullPolicy: IfNotPresent
   # External Redis configuration if redis.enabled is false
+  # When using external Redis, set trustgate.global.env.REDIS_HOST, REDIS_PORT, and REDIS_PASSWORD
   external:
-    host: ""
-    port: 6379
-    password: ""
-  auth:
-    password: "<password>"
+    host: ""  # External Redis host (set via trustgate.global.env.REDIS_HOST when redis.enabled=false)
+    port: 6379  # External Redis port (set via trustgate.global.env.REDIS_PORT when redis.enabled=false)
+    password: ""  # External Redis password (set via trustgate.global.env.REDIS_PASSWORD when redis.enabled=false)
   master:
     service:
       port: 6379

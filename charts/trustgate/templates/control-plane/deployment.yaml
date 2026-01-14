@@ -107,6 +107,14 @@ spec:
             secretKeyRef:
               name: trustgate-secrets
               key: DATABASE_URL
+        # REDIS_PASSWORD is optional - can come from ConfigMap (trustgate-env-vars) or secret
+        # If provided in secret, it will override ConfigMap value
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: trustgate-secrets
+              key: redis-password
+              optional: true
         imagePullPolicy: {{ .Values.global.image.pullPolicy }}
         ports:
         - containerPort: {{ .Values.controlPlane.ports.http }}
