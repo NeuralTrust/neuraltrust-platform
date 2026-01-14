@@ -9,7 +9,7 @@ spec:
   replicas: {{ .Values.dataPlane.replicas }}
   selector:
     matchLabels:
-      {{- include "trustgate.dataPlane.labels" . | nindent 6 }}
+      {{- include "trustgate.dataPlane.selectorLabels" . | nindent 6 }}
       component: data-plane
   template:
     metadata:

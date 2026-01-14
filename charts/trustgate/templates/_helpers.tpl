@@ -33,6 +33,7 @@ Common labels
 */}}
 {{- define "trustgate.labels" -}}
 helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+app.kubernetes.io/name: {{ include "trustgate.name" . }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
@@ -92,5 +93,29 @@ Actions labels
 */}}
 {{- define "trustgate.actions.labels" -}}
 {{ include "trustgate.labels" . }}
+app.kubernetes.io/component: actions
+{{- end }}
+
+{{/*
+Control Plane selector labels (for immutable selector fields)
+*/}}
+{{- define "trustgate.controlPlane.selectorLabels" -}}
+{{ include "trustgate.selectorLabels" . }}
+app.kubernetes.io/component: control-plane
+{{- end }}
+
+{{/*
+Data Plane selector labels (for immutable selector fields)
+*/}}
+{{- define "trustgate.dataPlane.selectorLabels" -}}
+{{ include "trustgate.selectorLabels" . }}
+app.kubernetes.io/component: data-plane
+{{- end }}
+
+{{/*
+Actions selector labels (for immutable selector fields)
+*/}}
+{{- define "trustgate.actions.selectorLabels" -}}
+{{ include "trustgate.selectorLabels" . }}
 app.kubernetes.io/component: actions
 {{- end }}

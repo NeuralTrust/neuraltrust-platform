@@ -13,7 +13,7 @@ spec:
   {{- end }}
   selector:
     matchLabels:
-      {{- include "trustgate.actions.labels" . | nindent 6 }}
+      {{- include "trustgate.actions.selectorLabels" . | nindent 6 }}
       component: actions
   template:
     metadata:

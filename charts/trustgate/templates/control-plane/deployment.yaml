@@ -13,7 +13,7 @@ spec:
   {{- end }}
   selector:
     matchLabels:
-      {{- include "trustgate.controlPlane.labels" . | nindent 6 }}
+      {{- include "trustgate.controlPlane.selectorLabels" . | nindent 6 }}
       component: control-plane
   template:
     metadata:
