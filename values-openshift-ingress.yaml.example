@@ -269,7 +269,6 @@ trustgate:
       # Redis connection
       REDIS_HOST: ""  # Will be auto-configured if redis.enabled
       REDIS_PORT: "6379"
-      REDIS_PASSWORD: ""  # Will be auto-configured if redis.enabled
       REDIS_DB: "0"
       CONTROL_PLANE_HOST: "admin.YOUR_DOMAIN"  # Set to your domain
       DATA_PLANE_HOST: "gateway.YOUR_DOMAIN"  # Set to your domain

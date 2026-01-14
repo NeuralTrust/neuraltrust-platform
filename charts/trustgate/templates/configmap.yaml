@@ -44,5 +44,3 @@ data:
       host: {{ .Values.global.env.REDIS_HOST }}
       port: {{ .Values.global.env.REDIS_PORT }}
       db: {{ .Values.global.env.REDIS_DB }}
-      username: {{ .Values.global.env.REDIS_USERNAME }}
-      password: {{ .Values.global.env.REDIS_PASSWORD }}

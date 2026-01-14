@@ -35,16 +35,8 @@ spec:
         command: ["redis-server"]
         args:
         - /etc/redis/redis.conf
-        - --requirepass
-        - "{{ .Values.redis.auth.password }}"
         - --loadmodule
         - /usr/lib/redis/modules/redisearch.so
-        env:
-        - name: REDIS_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: trustgate-secrets
-              key: redis-password
         ports:
         - containerPort: 6379
           name: redis

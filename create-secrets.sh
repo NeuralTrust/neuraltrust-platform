@@ -256,7 +256,6 @@ while [[ $# -gt 0 ]]; do
             echo "  - HUGGINGFACE_TOKEN"
             echo "  - CLICKHOUSE_PASSWORD"
             echo "  - POSTGRES_PASSWORD"
-            echo "  - REDIS_PASSWORD"
             echo "  - TRUSTGATE_JWT_SECRET"
             echo "  - FIREWALL_JWT_SECRET"
             echo "  - SERVER_SECRET_KEY (TrustGate)"
@@ -675,24 +674,6 @@ else
     SERVER_SECRET_KEY=$(prompt_secret "SERVER_SECRET_KEY" "Enter TrustGate Server Secret Key")
     if [ -n "$SERVER_SECRET_KEY" ]; then
         create_secret "$TRUSTGATE_SECRET_NAME" "SERVER_SECRET_KEY" "$SERVER_SECRET_KEY" "TrustGate Server Secret Key"
-    fi
-fi
-echo ""
-
-# Redis Password (for TrustGate - stored in trustgate-secrets)
-echo "--- Redis Password for TrustGate (Optional) ---"
-REDIS_PASSWORD=$(prompt_secret "REDIS_PASSWORD" "Enter Redis Password (optional)")
-if [ -z "$REDIS_PASSWORD" ]; then
-    REDIS_PASSWORD=$(openssl rand -base64 32)
-    echo -e "${YELLOW}No password provided, generated random password${NC}"
-fi
-if [ -n "$REDIS_PASSWORD" ]; then
-    if kubectl get secret "$TRUSTGATE_SECRET_NAME" -n "$NAMESPACE" &>/dev/null; then
-        add_secret_key "$TRUSTGATE_SECRET_NAME" "redis-password" "$REDIS_PASSWORD"
-        echo -e "${GREEN}✓ Added redis-password to ${TRUSTGATE_SECRET_NAME}${NC}"
-    else
-        # Create trustgate-secrets if it doesn't exist
-        create_secret "$TRUSTGATE_SECRET_NAME" "redis-password" "$REDIS_PASSWORD" "Redis Password"
     fi
 fi
 echo ""

@@ -12,9 +12,7 @@ data:
     bind 0.0.0.0
     protected-mode yes
     
-    # Authentication (force password)
-    requirepass "{{ .Values.redis.auth.password }}"
-    masterauth "{{ .Values.redis.auth.password }}"
+    # No password required - internal cluster communication only
     
     # Performance tuning
     maxmemory 1gb

@@ -58,7 +58,7 @@ The chart expects the following secret names in your namespace:
 - `postgresql-secrets` - PostgreSQL connection (shared with control plane)
 
 ### TrustGate Secrets
-- `trustgate-secrets` - TrustGate server secret and Redis password (keys: `SERVER_SECRET_KEY`, `redis-password`, and database connection details)
+- `trustgate-secrets` - TrustGate server secret and database connection details (keys: `SERVER_SECRET_KEY` and database connection details)
 - `hf-api-key` - Hugging Face API key for firewall (key: `HUGGINGFACE_TOKEN`)
 
 ### Docker Registry
@@ -94,7 +94,6 @@ export POSTGRES_DB="neuraltrust"
 
 # TrustGate
 export SERVER_SECRET_KEY="your-secret"
-export REDIS_PASSWORD="your-password"
 export HF_API_KEY="your-key"
 
 # Run the script

@@ -103,11 +103,6 @@ spec:
             secretKeyRef:
               name: trustgate-secrets
               key: DATABASE_URL
-        - name: REDIS_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: trustgate-secrets
-              key: redis-password
         imagePullPolicy: {{ .Values.global.image.pullPolicy }}
         ports:
         - containerPort: {{ .Values.controlPlane.ports.http }}

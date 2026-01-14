@@ -105,7 +105,7 @@ All secrets must be created in the target namespace before deployment. The follo
 | Secret Name | Key | Required | Description |
 |------------|-----|----------|-------------|
 | `trustgate-secrets` | `SERVER_SECRET_KEY` | No | TrustGate server secret key |
-| `trustgate-secrets` | `redis-password` | No | Redis password for TrustGate Redis instance (stored in `trustgate-secrets`, not a separate secret) |
+| `trustgate-secrets` | `SERVER_SECRET_KEY` | No | TrustGate server secret key |
 | `trustgate-secrets` | `DATABASE_HOST` | No | Database hostname for TrustGate (if using external database) |
 | `trustgate-secrets` | `DATABASE_PORT` | No | Database port for TrustGate (if using external database) |
 | `trustgate-secrets` | `DATABASE_USER` | No | Database username for TrustGate (if using external database) |
@@ -228,10 +228,9 @@ oc create secret generic huggingface-secrets \
 #### TrustGate Secrets (Optional)
 
 ```bash
-# TrustGate Secrets (including Redis password)
+# TrustGate Secrets
 oc create secret generic trustgate-secrets \
   --from-literal=SERVER_SECRET_KEY="$(openssl rand -hex 32)" \
-  --from-literal=redis-password="$(openssl rand -base64 32)" \
   -n neuraltrust
 
 # Hugging Face API Key for Firewall
@@ -615,7 +614,6 @@ oc create namespace "$NAMESPACE" --dry-run=client -o yaml | oc apply -f -
 DATA_PLANE_JWT=$(openssl rand -hex 32)
 CONTROL_PLANE_JWT=$(openssl rand -hex 32)
 CLICKHOUSE_PASSWORD=$(openssl rand -base64 32)
-REDIS_PASSWORD=$(openssl rand -base64 32)
 
 # PostgreSQL configuration (adjust as needed)
 POSTGRES_HOST="${POSTGRES_HOST:-postgresql.postgresql.svc.cluster.local}"
@@ -656,10 +654,9 @@ oc create secret generic clickhouse \
   --from-literal=admin-password="$CLICKHOUSE_PASSWORD" \
   -n "$NAMESPACE" --dry-run=client -o yaml | oc apply -f -
 
-# TrustGate Secrets (including Redis password)
+# TrustGate Secrets
 oc create secret generic trustgate-secrets \
   --from-literal=SERVER_SECRET_KEY="$(openssl rand -hex 32)" \
-  --from-literal=redis-password="$REDIS_PASSWORD" \
   -n "$NAMESPACE" --dry-run=client -o yaml | oc apply -f -
 
 # Hugging Face API Key for Firewall (reuse from huggingface-secrets if it exists)
