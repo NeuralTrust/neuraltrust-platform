@@ -128,19 +128,38 @@ Usage: {{ include "control-plane.getSecretValueRaw" (dict "value" .Values.contro
 {{/*
 Helper to check if PostgreSQL should be deployed
 Checks infrastructure.postgresql.deploy from parent chart first, then subchart values
+Also supports legacy installInCluster variable for backward compatibility
 Explicitly respects deploy: false to disable deployment
 Usage: {{ include "control-plane.postgresql.deploy" . }}
 */}}
 {{- define "control-plane.postgresql.deploy" -}}
-{{- $deploy := false }}
+{{- $deploy := true }}
+{{- $found := false }}
 {{- /* Check if passed via subchart values (when parent passes infrastructure to subchart via neuraltrust-control-plane.infrastructure.postgresql.deploy) */}}
-{{- if and .Values.infrastructure .Values.infrastructure.postgresql (hasKey .Values.infrastructure.postgresql "deploy") }}
-  {{- $deploy = .Values.infrastructure.postgresql.deploy }}
-{{- /* Fallback: Try to get from parent chart values (infrastructure.postgresql.deploy) */}}
-{{- else if .Release.Parent }}
-  {{- if and .Release.Parent.Values.infrastructure .Release.Parent.Values.infrastructure.postgresql (hasKey .Release.Parent.Values.infrastructure.postgresql "deploy") }}
-    {{- $deploy = .Release.Parent.Values.infrastructure.postgresql.deploy }}
+{{- if and .Values.infrastructure .Values.infrastructure.postgresql }}
+  {{- if hasKey .Values.infrastructure.postgresql "deploy" }}
+    {{- $deploy = .Values.infrastructure.postgresql.deploy }}
+    {{- $found = true }}
+  {{- else if hasKey .Values.infrastructure.postgresql "installInCluster" }}
+    {{- /* Legacy support: installInCluster as alternative to deploy */}}
+    {{- $deploy = .Values.infrastructure.postgresql.installInCluster }}
+    {{- $found = true }}
   {{- end }}
+{{- end }}
+{{- /* Fallback: Try to get from parent chart values (infrastructure.postgresql.deploy or installInCluster) */}}
+{{- if and (not $found) .Release.Parent }}
+  {{- if and .Release.Parent.Values.infrastructure .Release.Parent.Values.infrastructure.postgresql }}
+    {{- if hasKey .Release.Parent.Values.infrastructure.postgresql "deploy" }}
+      {{- $deploy = .Release.Parent.Values.infrastructure.postgresql.deploy }}
+    {{- else if hasKey .Release.Parent.Values.infrastructure.postgresql "installInCluster" }}
+      {{- /* Legacy support: installInCluster as alternative to deploy */}}
+      {{- $deploy = .Release.Parent.Values.infrastructure.postgresql.installInCluster }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+{{- /* Also check controlPlane.components.postgresql.installInCluster for backward compatibility */}}
+{{- if and (not $found) .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.postgresql (hasKey .Values.controlPlane.components.postgresql "installInCluster") }}
+  {{- $deploy = .Values.controlPlane.components.postgresql.installInCluster }}
 {{- end }}
 {{- /* Return empty string for false, non-empty for true - Helm's include returns strings, and empty string is falsy */}}
 {{- if $deploy }}{{- "true" }}{{- end }}
