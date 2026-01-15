@@ -54,8 +54,7 @@ trustgate:
       DATABASE_PASSWORD: "" # Required (for trustgate-secrets)
   redis:
     enabled: true
-    auth:
-      password: "" # Optional, but recommended
+    # Note: redis.auth.password is optional - only recommended when using external Redis (redis.enabled: false)
 
 # NeuralTrust Control Plane
 neuraltrust-control-plane:

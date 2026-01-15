@@ -135,7 +135,7 @@ metadata:
   annotations:
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-weight": "10"
-    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    "helm.sh/hook-delete-policy": before-hook-creation
     "helm.sh/hook-timeout": "600"
 spec:
   backoffLimit: 3
@@ -185,8 +185,7 @@ spec:
         args:
           - |
             echo "=== Kafka Connectors Job ==="
-            echo "This job will check if connectors exist and create missing ones."
-            echo "If connectors already exist, they will be skipped."
+            echo "This job will create or update connectors on every sync/upgrade."
             echo ""
             ls -la /scripts
             /scripts/create-clickhouse-sink.sh {{ .Release.Namespace }}

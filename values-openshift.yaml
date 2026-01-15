@@ -383,9 +383,7 @@ trustgate:
     external:
       host: ""
       port: 6379
-      password: ""
-    auth:
-      password: ""  # Define this value
+      password: ""  # Optional - recommended when using external Redis (redis.enabled: false)
     master:
       service:
         port: 6379

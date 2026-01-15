@@ -19,46 +19,60 @@ done
 
 echo "Kafka Connect is ready!"
 
-# Function to check if a connector exists
-connector_exists() {
+# Function to delete a connector (idempotent - safe if doesn't exist)
+delete_connector() {
   local connector_name=$1
-  if curl -s -f ${KAFKA_CONNECT_URL}/connectors/${connector_name} > /dev/null 2>&1; then
-    return 0  # Connector exists
+  echo "Deleting connector '${connector_name}'..."
+  local response=$(curl -s -w "\n%{http_code}" -X DELETE ${KAFKA_CONNECT_URL}/connectors/${connector_name})
+  local http_code=$(echo "$response" | tail -n1)
+  
+  if [ "$http_code" -eq 204 ] || [ "$http_code" -eq 200 ]; then
+    echo "✓ Successfully deleted connector '${connector_name}'"
   else
-    return 1  # Connector does not exist
+    # Connector might not exist, which is fine - we'll create it anyway
+    echo "  Connector '${connector_name}' not found or already deleted (HTTP ${http_code})"
+  fi
+  # Wait a moment for deletion to complete
+  sleep 2
+}
+
+# Function to create a connector
+create_connector() {
+  local connector_name=$1
+  local connector_config=$2
+  
+  echo "Creating connector '${connector_name}'..."
+  local response=$(curl -s -w "\n%{http_code}" -X POST ${KAFKA_CONNECT_URL}/connectors \
+    -H "Content-Type: application/json" \
+    -d "${connector_config}")
+  local http_code=$(echo "$response" | tail -n1)
+  local body=$(echo "$response" | sed '$d')
+  
+  if [ "$http_code" -eq 201 ] || [ "$http_code" -eq 200 ]; then
+    echo "✓ Successfully created connector '${connector_name}'"
+    return 0
+  else
+    echo "✗ Failed to create connector '${connector_name}'. HTTP code: ${http_code}"
+    echo "Response: ${body}"
+    return 1
   fi
 }
 
-# Function to create or update a connector
+# Function to delete and recreate a connector (always on upgrade)
 create_or_update_connector() {
   local connector_name=$1
   local connector_config=$2
   
-  if connector_exists "${connector_name}"; then
-    echo "Connector '${connector_name}' already exists, skipping creation."
-    return 0
-  else
-    echo "Creating connector '${connector_name}'..."
-    local response=$(curl -s -w "\n%{http_code}" -X POST ${KAFKA_CONNECT_URL}/connectors \
-      -H "Content-Type: application/json" \
-      -d "${connector_config}")
-    local http_code=$(echo "$response" | tail -n1)
-    local body=$(echo "$response" | sed '$d')
-    
-    if [ "$http_code" -eq 201 ] || [ "$http_code" -eq 200 ]; then
-      echo "✓ Successfully created connector '${connector_name}'"
-      return 0
-    else
-      echo "✗ Failed to create connector '${connector_name}'. HTTP code: ${http_code}"
-      echo "Response: ${body}"
-      return 1
-    fi
-  fi
+  # Always delete first (idempotent - safe if doesn't exist)
+  delete_connector "${connector_name}"
+  
+  # Then create (or recreate)
+  create_connector "${connector_name}" "${connector_config}"
 }
 
-echo "Checking existing connectors..."
-EXISTING_CONNECTORS=$(curl -s ${KAFKA_CONNECT_URL}/connectors 2>/dev/null || echo "[]")
-echo "Existing connectors: ${EXISTING_CONNECTORS}"
+echo "=== Creating/Updating ClickHouse Connectors ==="
+echo "All connectors will be deleted and recreated on every upgrade/sync"
+echo ""
 
 echo "Creating ClickHouse Audit Logs Ingest sink connector..."
 create_or_update_connector "clickhouse-audit-logs-ingest-sink" '{
