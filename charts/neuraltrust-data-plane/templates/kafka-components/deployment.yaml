@@ -68,7 +68,7 @@ spec:
             - name: CONNECT_ERRORS_RETRY_TIMEOUT
               value: "60"
             - name: CONNECT_BOOTSTRAP_SERVERS
-              value: "kafka-broker-0.kafka-broker-headless.{{ .Release.Namespace }}.svc.cluster.local:9094"
+              value: {{ .Values.dataPlane.components.kafka.connect.bootstrapServers | default "kafka:9092" | quote }}
             - name: CONNECT_GROUP_ID
               value: "connect-cluster"
             - name: CONNECT_CONFIG_STORAGE_TOPIC
