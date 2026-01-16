@@ -272,6 +272,16 @@ echo "Checking final connector status..."
 FINAL_CONNECTORS=$(curl -s ${KAFKA_CONNECT_URL}/connectors 2>/dev/null || echo "[]")
 echo "All connectors: ${FINAL_CONNECTORS}"
 
+# Function to check if a connector exists (for summary verification)
+connector_exists() {
+  local connector_name=$1
+  if curl -s -f ${KAFKA_CONNECT_URL}/connectors/${connector_name} > /dev/null 2>&1; then
+    return 0  # Connector exists
+  else
+    return 1  # Connector does not exist
+  fi
+}
+
 # Verify all expected connectors exist
 EXPECTED_CONNECTORS="clickhouse-audit-logs-ingest-sink clickhouse-discover-events-sink clickhouse-gpt-usage-sink clickhouse-metrics-sink clickhouse-traces-processed-sink clickhouse-traces-sink"
 MISSING_CONNECTORS=""
