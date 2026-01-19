@@ -2,7 +2,7 @@ apiVersion: v2
 name: neuraltrust-platform
 description: Unified Helm chart for NeuralTrust platform including Data Plane, Control Plane, TrustGate, and infrastructure components
 type: application
-version: 1.2.1
+version: 1.2.2
 appVersion: "1.0.0"
 icon: https://neuraltrust.ai/favicon.ico
 
