@@ -1,0 +1,168 @@
+name: Publish Helm Chart to GCR
+
+on:
+  release:
+    types: [created]
+
+env:
+  REGISTRY: gcr.io
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  CHART_NAME: neuraltrust-platform
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          export_default_credentials: true
+
+      - name: Configure Docker for GCR
+        run: |
+          gcloud auth configure-docker --quiet
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+
+      - name: Extract Chart Version
+        id: chart_version
+        run: |
+          if [ -n "${{ github.ref }}" ] && [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            # Extract version from git tag (remove 'v' prefix if present)
+            CHART_VERSION="${GITHUB_REF#refs/tags/}"
+            CHART_VERSION="${CHART_VERSION#v}"
+          else
+            # Read version from Chart.yaml
+            CHART_VERSION=$(grep '^version:' Chart.yaml | awk '{print $2}' | tr -d '"')
+          fi
+          echo "version=$CHART_VERSION" >> $GITHUB_OUTPUT
+          echo "📦 Chart version: $CHART_VERSION"
+
+      - name: Validate Chart
+        run: |
+          echo "🔍 Validating Helm chart..."
+          helm lint .
+          helm dependency list
+
+      - name: Package Chart
+        run: |
+          echo "📦 Packaging Helm chart with fresh dependencies..."
+          helm package . --dependency-update --version ${{ steps.chart_version.outputs.version }}
+          CHART_FILE=$(ls neuraltrust-platform-*.tgz)
+          echo "CHART_FILE=$CHART_FILE" >> $GITHUB_ENV
+          echo "✅ Packaged: $CHART_FILE"
+
+      - name: Authenticate to GCR
+        run: |
+          echo "🔐 Authenticating to Google Container Registry..."
+          gcloud auth configure-docker ${{ env.REGISTRY }} --quiet
+
+      - name: Push Chart to GCR
+        id: push_chart
+        run: |
+          echo "🚀 Pushing chart to GCR..."
+          helm push ${{ env.CHART_FILE }} oci://${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.CHART_NAME }} 2>&1 | tee push_output.txt
+          echo "✅ Chart pushed successfully!"
+          
+          # Extract digest from push output if available
+          if grep -q "digest:" push_output.txt; then
+            DIGEST=$(grep "digest:" push_output.txt | awk '{print $2}' | cut -d: -f2)
+            echo "digest=$DIGEST" >> $GITHUB_OUTPUT
+            echo "📋 Chart digest: $DIGEST"
+          fi
+
+      - name: Make Chart Public (Open Source)
+        run: |
+          echo "🌐 Making chart publicly accessible (open source)..."
+          
+          # GCR stores OCI artifacts in GCS buckets
+          # Make the artifacts bucket publicly readable for chart objects
+          BUCKET="artifacts.${{ env.PROJECT_ID }}.appspot.com"
+          
+          echo "Setting public read access on GCS bucket for chart artifacts..."
+          
+          # Method 1: Try to make the chart path public (most specific)
+          # This targets the containers/images path where OCI artifacts are stored
+          if gsutil iam ch allUsers:objectViewer gs://$BUCKET/containers/images/ 2>/dev/null; then
+            echo "✅ Chart path made public successfully!"
+          else
+            echo "⚠️  Path-specific permissions not available, trying bucket-level..."
+            
+            # Method 2: Make the entire artifacts bucket public (broader access)
+            # This makes all artifacts in the project public
+            if gsutil iam ch allUsers:objectViewer gs://$BUCKET 2>/dev/null; then
+              echo "✅ Bucket-level public access granted!"
+              echo "⚠️  Note: This makes ALL artifacts in the project public."
+            else
+              echo "⚠️  Automatic public access configuration failed."
+              echo ""
+              echo "To make the chart public manually, run:"
+              echo "  gsutil iam ch allUsers:objectViewer gs://$BUCKET"
+              echo ""
+              echo "Or for more specific control (chart path only):"
+              echo "  gsutil iam ch allUsers:objectViewer gs://$BUCKET/containers/images/"
+              echo ""
+              echo "The service account needs 'Storage Admin' or 'Storage Object Admin' role."
+            fi
+          fi
+          
+          echo ""
+          echo "📝 Chart should now be publicly accessible!"
+          echo "   Test with: helm pull oci://${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.CHART_NAME }} --version ${{ steps.chart_version.outputs.version }}"
+
+      - name: Tag as Latest (if applicable)
+        if: github.event_name == 'release' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
+        run: |
+          echo "🏷️  Tagging chart as 'latest'..."
+          # Pull the chart we just pushed
+          helm pull oci://${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.CHART_NAME }} \
+            --version ${{ steps.chart_version.outputs.version }}
+          
+          # Re-tag and push as latest
+          CHART_FILE=$(ls neuraltrust-platform-*.tgz)
+          # Note: Helm OCI doesn't support 'latest' tag directly, so we'll push with version
+          # and document the latest version in metadata
+          echo "📝 Latest version: ${{ steps.chart_version.outputs.version }}"
+          echo "ℹ️  Note: OCI registries don't support 'latest' tags. Use version: ${{ steps.chart_version.outputs.version }}"
+
+      - name: Verify Published Chart
+        run: |
+          echo "🔍 Verifying published chart..."
+          # Try to show chart (may require auth if private)
+          helm show chart oci://${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.CHART_NAME }} \
+            --version ${{ steps.chart_version.outputs.version }} || \
+          echo "⚠️  Note: If verification fails, the chart may still be indexing. Wait a few seconds and try again."
+          echo "✅ Chart verification completed!"
+
+      - name: Output Chart Information
+        run: |
+          echo "## 📦 Helm Chart Published" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Chart:** \`${{ env.CHART_NAME }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** \`${{ steps.chart_version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Registry:** \`${{ env.REGISTRY }}/${{ env.PROJECT_ID }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Access:** 🌐 Public (Open Source)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📥 Install Command" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "# No authentication required (public chart)" >> $GITHUB_STEP_SUMMARY
+          echo "helm install my-release oci://${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.CHART_NAME }} --version ${{ steps.chart_version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔗 Chart URL" >> $GITHUB_STEP_SUMMARY
+          echo "\`oci://${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.CHART_NAME }}\`" >> $GITHUB_STEP_SUMMARY

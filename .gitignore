@@ -45,3 +45,4 @@ rendered-charts/
 # values-*.yaml
 # !values-*.yaml.example
 gcr-keys.json
+key.json
