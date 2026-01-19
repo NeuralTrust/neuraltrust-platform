@@ -20,7 +20,7 @@ Creating a release triggers **Publish Helm Chart to GCR**, which publishes the c
 
 ## Publish Helm Chart to GCR
 
-This workflow publishes the Helm chart to Google Container Registry (GCR) **when a new GitHub Release is created** (by the Create GitHub Release workflow).
+This workflow publishes the Helm chart to Google Container Registry (GCR) **when a GitHub Release is published** (e.g. by the Create GitHub Release workflow when you push `Chart.yaml` to `main`). It runs on `release` events of type `published` only (draft releases do not trigger it).
 
 ### Setup Required
 

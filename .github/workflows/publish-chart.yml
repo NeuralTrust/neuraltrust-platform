@@ -2,7 +2,7 @@ name: Publish Helm Chart to GCR
 
 on:
   release:
-    types: [created]
+    types: [published]
 
 env:
   REGISTRY: gcr.io
@@ -20,6 +20,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.release.tag_name || github.ref }}
           fetch-depth: 0
 
       - name: Set up Cloud SDK
