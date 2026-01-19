@@ -22,12 +22,13 @@ charts/*.tgz
 Thumbs.db
 .DS_Store
 
-# Sensitive files (uncomment if you want to ignore these)
-# *.key
-# *.pem
-# *-secret.yaml
-# secrets.yaml
-# gcr-keys.json
+# Sensitive files
+*.key
+*.pem
+# *-secret.yaml: only ignore files whose name ends with -secret.yaml (not templates like secrets.yaml)
+*-secret.yaml
+# /secrets.yaml: ignore only a root-level file used to store secret values (not chart templates)
+/secrets.yaml
 
 # Helm test output
 test-results/
