@@ -206,7 +206,7 @@ trustgate:
     image:
       pullPolicy: Always
       image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee"
-      tag: "v1.9.27"
+      tag: "v1.9.46"
       # imagePullSecrets: if not set, will fall back to parent chart's global.imagePullSecrets
       imagePullSecrets: ["gcr-secret"]  # Set to array of secret names, e.g., ["secret-name"] or leave empty to use parent global.imagePullSecrets
     postgresql:
@@ -499,7 +499,7 @@ neuraltrust-control-plane:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api"
-          tag: "v1.7.3"
+          tag: "v1.8.1"
           pullPolicy: "Always"
         secrets:
           controlPlaneJWTSecret: "" #define this value
@@ -540,7 +540,7 @@ neuraltrust-control-plane:
         replicaCount: 1
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.7.4"
+          tag: "v1.7.9"
           pullPolicy: "Always"
         config:
           nodeEnv: production
@@ -679,7 +679,7 @@ neuraltrust-data-plane:
         classifierModel: "gpt"
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.7.8
+          tag: v1.8.2
           pullPolicy: Always
         accessMode: ReadWriteOnce
         huggingfaceToken: ""

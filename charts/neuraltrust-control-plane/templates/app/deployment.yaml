@@ -39,7 +39,7 @@ spec:
       initContainers:
       - name: init-db
         {{- $initImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
-        {{- $initImageTag := "latest" }}
+        {{- $initImageTag := "v1.7.9" }}
         {{- $initPullPolicy := "Always" }}
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.image }}
           {{- if .Values.controlPlane.components.app.image.repository }}{{- $initImageRepo = .Values.controlPlane.components.app.image.repository }}{{- end }}
@@ -133,7 +133,7 @@ spec:
       containers:
       - name: app
         {{- $appImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
-        {{- $appImageTag := "latest" }}
+        {{- $appImageTag := "v1.7.9" }}
         {{- $appPullPolicy := "Always" }}
         {{- $appPort := 3000 }}
         {{- $nodeEnv := "production" }}

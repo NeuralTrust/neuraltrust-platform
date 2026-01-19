@@ -46,7 +46,7 @@ trustgate:
     imageRegistry: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker"
     image:
       image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee" # Required
-      tag: "v1.9.27" # Required
+      tag: "v1.9.46" # Required
       imagePullSecrets: ["gcr-secret"]
     env:
       SERVER_SECRET_KEY: "" # Required (for trustgate-secrets)
@@ -77,14 +77,14 @@ neuraltrust-control-plane:
         enabled: true
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api"
-          tag: "v1.7.3"
+          tag: "v1.8.1"
         secrets:
           controlPlaneJWTSecret: "" # Required
       app:
         enabled: true
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.7.4"
+          tag: "v1.7.9"
       postgresql:
         secrets:
           password: "" # Required if infrastructure.postgresql.deploy=true
@@ -104,7 +104,7 @@ neuraltrust-data-plane:
         enabled: true
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api"
-          tag: "v1.7.8"
+          tag: "v1.8.2"
       worker:
         enabled: true
         image:

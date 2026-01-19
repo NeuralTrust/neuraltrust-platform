@@ -104,7 +104,7 @@ spec:
       containers:
       - name: control-plane-scheduler
         {{- $imageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/scheduler" }}
-        {{- $imageTag := "latest" }}
+        {{- $imageTag := "v1.7.2" }}
         {{- $pullPolicy := "Always" }}
         {{- with .Values.controlPlane }}
           {{- with .components }}
