@@ -101,6 +101,17 @@ spec:
             secretKeyRef:
               name: {{ $pgSecretName }}
               key: POSTGRES_PORT
+        resources:
+          {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.scheduler .Values.controlPlane.components.scheduler.initContainerResources }}
+          {{- toYaml .Values.controlPlane.components.scheduler.initContainerResources | nindent 10 }}
+          {{- else }}
+          requests:
+            cpu: 250m
+            memory: 64Mi
+          limits:
+            cpu: 500m
+            memory: 128Mi
+          {{- end }}
       containers:
       - name: control-plane-scheduler
         {{- $imageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/scheduler" }}
@@ -165,12 +176,20 @@ spec:
         {{- /* Use internal Kubernetes service URLs for inter-service communication */}}
         {{- $dataPlaneApiUrl := "" }}
         {{- $controlPlaneApiUrl := "" }}
+        {{- $kafkaBrokers := "kafka:9092" }}
+        {{- $kafkaTopic := "audit_events" }}
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.scheduler .Values.controlPlane.components.scheduler.config }}
           {{- if .Values.controlPlane.components.scheduler.config.dataPlaneApiUrl }}
             {{- $dataPlaneApiUrl = .Values.controlPlane.components.scheduler.config.dataPlaneApiUrl }}
           {{- end }}
           {{- if .Values.controlPlane.components.scheduler.config.controlPlaneApiUrl }}
             {{- $controlPlaneApiUrl = .Values.controlPlane.components.scheduler.config.controlPlaneApiUrl }}
+          {{- end }}
+          {{- if .Values.controlPlane.components.scheduler.config.kafkaBrokers }}
+            {{- $kafkaBrokers = .Values.controlPlane.components.scheduler.config.kafkaBrokers }}
+          {{- end }}
+          {{- if .Values.controlPlane.components.scheduler.config.kafkaTopic }}
+            {{- $kafkaTopic = .Values.controlPlane.components.scheduler.config.kafkaTopic }}
           {{- end }}
         {{- end }}
         {{- /* Default to internal service URLs if not explicitly set */}}
@@ -180,6 +199,10 @@ spec:
         {{- if not $controlPlaneApiUrl }}
           {{- $controlPlaneApiUrl = "http://control-plane-api-service:80" }}
         {{- end }}
+        - name: KAFKA_BROKERS
+          value: {{ $kafkaBrokers | quote }}
+        - name: KAFKA_TOPIC
+          value: {{ $kafkaTopic | quote }}
         - name: DATA_PLANE_API_URL
           value: {{ $dataPlaneApiUrl | quote }}
         - name: DATA_PLANE_JWT_SECRET

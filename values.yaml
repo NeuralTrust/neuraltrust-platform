@@ -153,6 +153,13 @@ kafka:
   broker:
     replicaCount: 1
     podAntiAffinityPreset: hard
+    initContainerResources:
+      requests:
+        cpu: 250m
+        memory: 64Mi
+      limits:
+        cpu: 500m
+        memory: 128Mi
     resources:
       requests:
         memory: 1Gi
@@ -264,10 +271,10 @@ trustgate:
       fsGroup: 1001
     resources:
       requests:
-        cpu: 100m
+        cpu: 250m
         memory: 1Gi
       limits:
-        cpu: 200m
+        cpu: 500m
         memory: 2Gi
     podDisruptionBudget:
       enabled: true
@@ -344,10 +351,10 @@ trustgate:
       fsGroup: 1001
     resources:
       requests:
-        cpu: 100m
+        cpu: 250m
         memory: 1Gi
       limits:
-        cpu: 200m
+        cpu: 500m
         memory: 2Gi
     podDisruptionBudget:
       enabled: true
@@ -473,6 +480,10 @@ neuraltrust-control-plane:
           # Otherwise, set these manually or they will default to internal service URLs
           controlPlaneApiUrl: ""  # Auto: https://control-plane-api.{global.openshiftDomain} or http://control-plane-api-service.{namespace}.svc.cluster.local
           dataPlaneApiUrl: ""  # Auto: https://data-plane-api.{global.openshiftDomain} or http://data-plane-api-service.{namespace}.svc.cluster.local
+        # initContainerResources: override for wait-for-postgresql initContainer (default: requests 250m/64Mi, limits 500m/128Mi)
+        # initContainerResources:
+        #   requests: { cpu: 250m, memory: 64Mi }
+        #   limits: { cpu: 500m, memory: 128Mi }
         resources:
           requests:
             memory: 256Mi
@@ -508,6 +519,10 @@ neuraltrust-control-plane:
           # Otherwise, set these manually or they will default to internal service URLs
           controlPlaneApiUrl: ""  # Auto: https://control-plane-api.{global.openshiftDomain} or http://control-plane-api-service.{namespace}.svc.cluster.local
           dataPlaneApiUrl: ""  # Auto: https://data-plane-api.{global.openshiftDomain} or http://data-plane-api-service.{namespace}.svc.cluster.local
+        # initContainerResources: override for wait-for-postgresql initContainer (default: requests 250m/64Mi, limits 500m/128Mi)
+        # initContainerResources:
+        #   requests: { cpu: 250m, memory: 64Mi }
+        #   limits: { cpu: 500m, memory: 128Mi }
         resources:
           requests:
             memory: 512Mi
@@ -559,6 +574,10 @@ neuraltrust-control-plane:
           openaiModel: "gpt-4o-mini"
           kafkaHost: "kafka"
           kafkaPort: "9092"
+        # initContainerResources: override for init-db initContainer (default: requests 250m/256Mi, limits 500m/512Mi)
+        # initContainerResources:
+        #   requests: { cpu: 250m, memory: 256Mi }
+        #   limits: { cpu: 500m, memory: 512Mi }
         resources:
           requests:
             memory: 512Mi
@@ -688,6 +707,10 @@ neuraltrust-data-plane:
         # The ConfigMap content is generated from charts/neuraltrust-data-plane/files/.trusttest_config.json
         trustTestConfig: {}
         replicas: 3
+        # initContainerResources: override for clickhouse-migrations initContainer (default: requests 250m/256Mi, limits 500m/512Mi)
+        # initContainerResources:
+        #   requests: { cpu: 250m, memory: 256Mi }
+        #   limits: { cpu: 500m, memory: 512Mi }
         resources:
           requests:
             cpu: 1

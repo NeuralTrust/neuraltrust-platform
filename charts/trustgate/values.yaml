@@ -47,6 +47,12 @@ config:
   baseDomain: "neuraltrust.ai"
   providers: { }
 
+# postgresqlInit.resources: optional override for postgresql-init Job container (default: requests 250m/64Mi, limits 500m/128Mi)
+# postgresqlInit:
+#   resources:
+#     requests: { cpu: 250m, memory: 64Mi }
+#     limits: { cpu: 500m, memory: 128Mi }
+
 # Control Plane settings
 controlPlane:
   name: trustgate-control-plane
@@ -57,10 +63,10 @@ controlPlane:
     fsGroup: 1001
   resources:
     requests:
-      cpu: 100m
+      cpu: 250m
       memory: 1Gi
     limits:
-      cpu: 200m
+      cpu: 500m
       memory: 2Gi
 
   podDisruptionBudget:
@@ -145,10 +151,10 @@ actions:
     fsGroup: 1001
   resources:
     requests:
-      cpu: 100m
+      cpu: 250m
       memory: 1Gi
     limits:
-      cpu: 200m
+      cpu: 500m
       memory: 2Gi
 
   podDisruptionBudget:

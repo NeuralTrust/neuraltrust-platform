@@ -101,6 +101,17 @@ spec:
             secretKeyRef:
               name: {{ $pgSecretName }}
               key: POSTGRES_PORT
+        resources:
+          {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.api .Values.controlPlane.components.api.initContainerResources }}
+          {{- toYaml .Values.controlPlane.components.api.initContainerResources | nindent 10 }}
+          {{- else }}
+          requests:
+            cpu: 250m
+            memory: 64Mi
+          limits:
+            cpu: 500m
+            memory: 128Mi
+          {{- end }}
       containers:
       - name: control-plane-api
         {{- $apiImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api" }}

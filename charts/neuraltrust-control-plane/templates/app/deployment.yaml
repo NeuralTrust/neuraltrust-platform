@@ -130,6 +130,17 @@ spec:
           value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DATABASE)?connection_limit=15&sslmode={{ $sslMode }}"
         - name: DATABASE_URL
           value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DATABASE)?connection_limit=15&sslmode={{ $sslMode }}"
+        resources:
+          {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.initContainerResources }}
+          {{- toYaml .Values.controlPlane.components.app.initContainerResources | nindent 10 }}
+          {{- else }}
+          requests:
+            cpu: 250m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          {{- end }}
       containers:
       - name: app
         {{- $appImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}

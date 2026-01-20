@@ -244,6 +244,17 @@ spec:
           }
           
           echo "PostgreSQL initialization completed successfully!"
+        resources:
+          {{- if .Values.postgresqlInit.resources }}
+          {{- toYaml .Values.postgresqlInit.resources | nindent 10 }}
+          {{- else }}
+          requests:
+            cpu: 250m
+            memory: 64Mi
+          limits:
+            cpu: 500m
+            memory: 128Mi
+          {{- end }}
         env:
         # PostgreSQL admin credentials from postgresql-secrets
         - name: POSTGRES_HOST
