@@ -23,7 +23,7 @@ infrastructure:
 clickhouse:
   auth:
     username: "neuraltrust"
-    password: "" # Required
+    password: "12345678" # Required
   image:
     repository: "bitnamilegacy/clickhouse"
     tag: "25.3.2-debian-12-r3"
@@ -47,9 +47,9 @@ trustgate:
     image:
       imagePullSecrets: ["gcr-secret"]
     env:
-      SERVER_SECRET_KEY: "" # Required (for trustgate-secrets)
+      SERVER_SECRET_KEY: "12345678" # Required (for trustgate-secrets)
       DATABASE_HOST: "control-plane-postgresql" # Required (for trustgate-secrets)
-      DATABASE_PASSWORD: "" # Required (for trustgate-secrets)
+      DATABASE_PASSWORD: "12345678" # Required (for trustgate-secrets)
   redis:
     enabled: true
     # Note: redis.auth.password is optional - only recommended when using external Redis (redis.enabled: false)
@@ -63,20 +63,20 @@ neuraltrust-control-plane:
     enabled: true
     imagePullSecrets: "gcr-secret"
     secrets:
-      controlPlaneJWTSecret: "" # Required
-      trustgateJwtSecret: "" # Required
+      controlPlaneJWTSecret: "12345678" # Required
+      trustgateJwtSecret: "12345678" # Required
     components:
       scheduler:
         enabled: true
       api:
         enabled: true
         secrets:
-          controlPlaneJWTSecret: "" # Required
+          controlPlaneJWTSecret: "12345678" # Required
       app:
         enabled: true
       postgresql:
         secrets:
-          password: "" # Required if infrastructure.postgresql.deploy=true
+          password: "12345678" # Required if infrastructure.postgresql.deploy=true
         image:
           repository: "postgres"
           tag: "17.2-alpine"
@@ -87,7 +87,7 @@ neuraltrust-data-plane:
     enabled: true
     imagePullSecrets: "gcr-secret"
     secrets:
-      dataPlaneJWTSecret: "" # Required
+      dataPlaneJWTSecret: "12345678" # Required
     components:
       api:
         enabled: true
