@@ -16,11 +16,17 @@ Creates a GitHub Release when the chart version in `Chart.yaml` changes on `main
 
 Creating a release triggers **Publish Helm Chart to GCR**, which publishes the chart to GCR.
 
+**Required secret (Create GitHub Release):**
+- **GH_TOKEN** — A [Personal Access Token (PAT)](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token) with `repo` scope.  
+  The default `GITHUB_TOKEN` cannot start other workflows, so the release would not trigger **Publish Helm Chart to GCR**. Using a PAT when creating the release allows the `release` event to start the publish workflow.  
+  - Settings → Secrets and variables → Actions → New repository secret → Name: `GH_TOKEN`  
+  - If `GH_TOKEN` is not set, the workflow falls back to `GITHUB_TOKEN`; the release is created but **Publish Helm Chart to GCR** will not run.
+
 ---
 
 ## Publish Helm Chart to GCR
 
-This workflow publishes the Helm chart to Google Container Registry (GCR) **when a GitHub Release is published** (e.g. by the Create GitHub Release workflow when you push `Chart.yaml` to `main`). It runs on `release` events of type `published` only (draft releases do not trigger it).
+This workflow publishes the Helm chart to Google Container Registry (GCR) **when a GitHub Release is published** (e.g. by the Create GitHub Release workflow when you push `Chart.yaml` to `main`). It runs on `release` events of type `published` only (draft-only releases do not trigger it).
 
 ### Setup Required
 

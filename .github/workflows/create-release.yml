@@ -53,6 +53,10 @@ jobs:
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
+        env:
+          # Use a PAT so the release event triggers the Publish Helm Chart workflow.
+          # The default GITHUB_TOKEN does not trigger other workflows (GitHub prevents recursive runs).
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: ${{ steps.version.outputs.tag }}
@@ -86,5 +90,3 @@ jobs:
           files: neuraltrust-platform-*.tgz
           generate_release_notes: false
           draft: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
