@@ -104,7 +104,7 @@ spec:
       containers:
       - name: control-plane-api
         {{- $apiImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api" }}
-        {{- $apiImageTag := "v1.8.1" }}
+        {{- $apiImageTag := "v1.8.2" }}
         {{- $apiPullPolicy := "Always" }}
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.api .Values.controlPlane.components.api.image }}
           {{- if .Values.controlPlane.components.api.image.repository }}{{- $apiImageRepo = .Values.controlPlane.components.api.image.repository }}{{- end }}
