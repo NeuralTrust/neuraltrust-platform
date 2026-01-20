@@ -80,9 +80,9 @@ jobs:
             curl -sL -O https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag }}/neuraltrust-platform-${{ steps.version.outputs.version }}.tgz
             ```
 
-            **3. Install from OCI (GCR)**
+            **3. Install from OCI (Artifact Registry)**
             ```bash
-            helm pull oci://gcr.io/neuraltrust-app-prod/neuraltrust-platform --version ${{ steps.version.outputs.version }}
+            helm pull oci://europe-west1-docker.pkg.dev/neuraltrust-app-prod/helm-charts/neuraltrust-platform --version ${{ steps.version.outputs.version }}
             ```
 
             ---

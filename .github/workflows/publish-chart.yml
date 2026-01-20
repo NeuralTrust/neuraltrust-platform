@@ -1,11 +1,14 @@
-name: Publish Helm Chart to GCR
+name: Publish Helm Chart to Artifact Registry
 
 on:
   release:
     types: [published]
 
+# Artifact Registry (gcr.io does not support OCI Helm: 404 "Repository gcr.io not found")
 env:
-  REGISTRY: gcr.io
+  AR_REGISTRY: europe-west1-docker.pkg.dev
+  AR_LOCATION: europe-west1
+  AR_REPO: helm-charts
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   CHART_NAME: neuraltrust-platform
 
@@ -33,10 +36,10 @@ jobs:
         with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
 
-      - name: Configure Docker for GCR
+      - name: Configure Docker for Artifact Registry
         run: |
           gcloud auth activate-service-account --key-file="$GOOGLE_APPLICATION_CREDENTIALS"
-          gcloud auth configure-docker --quiet
+          gcloud auth configure-docker ${{ env.AR_REGISTRY }} --quiet
 
       - name: Set up Helm
         uses: azure/setup-helm@v4
@@ -71,19 +74,19 @@ jobs:
           echo "CHART_FILE=$CHART_FILE" >> $GITHUB_ENV
           echo "✅ Packaged: $CHART_FILE"
 
-      - name: Authenticate to GCR
+      - name: Authenticate to Artifact Registry
         run: |
-          echo "🔐 Authenticating to Google Container Registry..."
-          gcloud auth configure-docker ${{ env.REGISTRY }} --quiet
+          echo "🔐 Authenticating to Artifact Registry..."
+          gcloud auth configure-docker ${{ env.AR_REGISTRY }} --quiet
           # Helm OCI does not use Docker's credential helper; log in explicitly
-          gcloud auth print-access-token | helm registry login -u oauth2accesstoken --password-stdin ${{ env.REGISTRY }}
+          gcloud auth print-access-token | helm registry login -u oauth2accesstoken --password-stdin ${{ env.AR_REGISTRY }}
 
-      - name: Push Chart to GCR
+      - name: Push Chart to Artifact Registry
         id: push_chart
         run: |
           set -o pipefail
-          echo "🚀 Pushing chart to GCR..."
-          helm push ${{ env.CHART_FILE }} oci://${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.CHART_NAME }} 2>&1 | tee push_output.txt
+          echo "🚀 Pushing chart to Artifact Registry..."
+          helm push ${{ env.CHART_FILE }} oci://${{ env.AR_REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.AR_REPO }} 2>&1 | tee push_output.txt
           echo "✅ Chart pushed successfully!"
           
           # Extract digest from push output if available
@@ -96,81 +99,50 @@ jobs:
       - name: Make Chart Public (Open Source)
         run: |
           echo "🌐 Making chart publicly accessible (open source)..."
-          
-          # GCR stores OCI artifacts in GCS buckets
-          # Make the artifacts bucket publicly readable for chart objects
-          BUCKET="artifacts.${{ env.PROJECT_ID }}.appspot.com"
-          
-          echo "Setting public read access on GCS bucket for chart artifacts..."
-          
-          # Method 1: Try to make the chart path public (most specific)
-          # This targets the containers/images path where OCI artifacts are stored
-          if gsutil iam ch allUsers:objectViewer gs://$BUCKET/containers/images/ 2>/dev/null; then
-            echo "✅ Chart path made public successfully!"
+          if gcloud artifacts repositories add-iam-policy-binding ${{ env.AR_REPO }} \
+            --location=${{ env.AR_LOCATION }} \
+            --project=${{ env.PROJECT_ID }} \
+            --member=allUsers \
+            --role=roles/artifactregistry.reader 2>/dev/null; then
+            echo "✅ Chart repository made public successfully!"
           else
-            echo "⚠️  Path-specific permissions not available, trying bucket-level..."
-            
-            # Method 2: Make the entire artifacts bucket public (broader access)
-            # This makes all artifacts in the project public
-            if gsutil iam ch allUsers:objectViewer gs://$BUCKET 2>/dev/null; then
-              echo "✅ Bucket-level public access granted!"
-              echo "⚠️  Note: This makes ALL artifacts in the project public."
-            else
-              echo "⚠️  Automatic public access configuration failed."
-              echo ""
-              echo "To make the chart public manually, run:"
-              echo "  gsutil iam ch allUsers:objectViewer gs://$BUCKET"
-              echo ""
-              echo "Or for more specific control (chart path only):"
-              echo "  gsutil iam ch allUsers:objectViewer gs://$BUCKET/containers/images/"
-              echo ""
-              echo "The service account needs 'Storage Admin' or 'Storage Object Admin' role."
-            fi
+            echo "⚠️  Automatic public access failed (org policy may block allUsers)."
+            echo "To make the chart public manually, run:"
+            echo "  gcloud artifacts repositories add-iam-policy-binding ${{ env.AR_REPO }} --location=${{ env.AR_LOCATION }} --member=allUsers --role=roles/artifactregistry.reader"
           fi
-          
-          echo ""
-          echo "📝 Chart should now be publicly accessible!"
-          echo "   Test with: helm pull oci://${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.CHART_NAME }} --version ${{ steps.chart_version.outputs.version }}"
+          CHART_REF="oci://${{ env.AR_REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.CHART_NAME }}"
+          echo "   Test with: helm pull $CHART_REF --version ${{ steps.chart_version.outputs.version }}"
 
       - name: Tag as Latest (if applicable)
         if: github.event_name == 'release' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
         run: |
-          echo "🏷️  Tagging chart as 'latest'..."
-          # Pull the chart we just pushed
-          helm pull oci://${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.CHART_NAME }} \
-            --version ${{ steps.chart_version.outputs.version }}
-          
-          # Re-tag and push as latest
-          CHART_FILE=$(ls neuraltrust-platform-*.tgz)
-          # Note: Helm OCI doesn't support 'latest' tag directly, so we'll push with version
-          # and document the latest version in metadata
-          echo "📝 Latest version: ${{ steps.chart_version.outputs.version }}"
-          echo "ℹ️  Note: OCI registries don't support 'latest' tags. Use version: ${{ steps.chart_version.outputs.version }}"
+          echo "🏷️  Latest version: ${{ steps.chart_version.outputs.version }}"
+          echo "ℹ️  OCI registries don't support 'latest' tags. Use --version ${{ steps.chart_version.outputs.version }}"
 
       - name: Verify Published Chart
         run: |
           echo "🔍 Verifying published chart..."
-          # Try to show chart (may require auth if private)
-          helm show chart oci://${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.CHART_NAME }} \
+          helm show chart oci://${{ env.AR_REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.CHART_NAME }} \
             --version ${{ steps.chart_version.outputs.version }} || \
-          echo "⚠️  Note: If verification fails, the chart may still be indexing. Wait a few seconds and try again."
+          echo "⚠️  If verification fails, the chart may still be indexing. Wait a few seconds and try again."
           echo "✅ Chart verification completed!"
 
       - name: Output Chart Information
         run: |
+          CHART_REF="oci://${{ env.AR_REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.CHART_NAME }}"
           echo "## 📦 Helm Chart Published" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Chart:** \`${{ env.CHART_NAME }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Version:** \`${{ steps.chart_version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Registry:** \`${{ env.REGISTRY }}/${{ env.PROJECT_ID }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Registry:** \`${{ env.AR_REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Access:** 🌐 Public (Open Source)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 📥 Install Command" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
           echo "# No authentication required (public chart)" >> $GITHUB_STEP_SUMMARY
-          echo "helm install my-release oci://${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.CHART_NAME }} --version ${{ steps.chart_version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "helm install my-release $CHART_REF --version ${{ steps.chart_version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🔗 Chart URL" >> $GITHUB_STEP_SUMMARY
-          echo "\`oci://${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.CHART_NAME }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "\`$CHART_REF\`" >> $GITHUB_STEP_SUMMARY
