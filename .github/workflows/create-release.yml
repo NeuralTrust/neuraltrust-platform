@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'Chart.yaml'
+      - '.github/workflows/create-release.yml'
 
 permissions:
   contents: write
@@ -52,7 +53,7 @@ jobs:
           echo "Packaged: $CHART"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v2.4.2
         env:
           # Use a PAT so the release event triggers the Publish Helm Chart workflow.
           # The default GITHUB_TOKEN does not trigger other workflows (GitHub prevents recursive runs).
