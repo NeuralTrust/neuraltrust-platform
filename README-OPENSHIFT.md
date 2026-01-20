@@ -29,34 +29,42 @@ This guide provides step-by-step instructions for deploying the NeuralTrust Plat
 
 ## Quick Start
 
+**Values file (all methods):** Copy `values.yaml` or `values-openshift.yaml` from the [repository](https://github.com/NeuralTrust/neuraltrust-platform), save as `my-values.yaml`, **fill every value marked `# Required`** (and `global.openshiftDomain`), then run `helm upgrade --install` with `-f my-values.yaml`. Create the image pull secret (`gcr-secret`) and any pre-existing secrets if required; see [Required Secrets](#required-secrets).
+
+**From OCI (Artifact Registry) — no clone required:**
+
+```bash
+oc create namespace neuraltrust
+# Create required secrets (see Required Secrets section)
+
+helm install neuraltrust-platform oci://europe-west1-docker.pkg.dev/neuraltrust-app-prod/helm-charts/neuraltrust-platform \
+  --version VERSION -f my-values.yaml \
+  --namespace neuraltrust \
+  --set global.openshift=true \
+  --set global.openshiftDomain="YOUR_DOMAIN"
+```
+
+Replace `VERSION` with a [release version](https://github.com/NeuralTrust/neuraltrust-platform/releases) (e.g. `1.2.7`). For full OpenShift options, copy `values-openshift.yaml` instead of `values.yaml`.
+
+**From a local chart (clone or tarball):**
+
 ```bash
 # 1. Create namespace
 oc create namespace neuraltrust
 
-# 2. Create all required secrets (see Required Secrets section)
-# ... (create secrets using oc commands or the provided script)
+# 2. Create image pull secret and any pre-existing secrets (see Required Secrets) if not using Helm-managed secrets from values
 
-# 3. Update Helm dependencies (only if using a local clone; skip when using OCI or a .tgz)
+# 3. Copy values-openshift.yaml (or values.yaml) to my-values.yaml and fill every value marked # Required
+
+# 4. Update Helm dependencies (only if using a local clone; skip when using OCI or a .tgz)
 helm dependency update
 
-# 4. Deploy with OpenShift configuration
-# Use . when you have the chart locally; or use oci://europe-west1-docker.pkg.dev/neuraltrust-app-prod/helm-charts/neuraltrust-platform --version VERSION
+# 5. Deploy
 helm upgrade --install neuraltrust-platform . \
   --namespace neuraltrust \
   --set global.openshift=true \
   --set global.openshiftDomain="YOUR_DOMAIN" \
-  -f values.yaml
-
-# Optional: If using a custom image pull secret (instead of default 'gcr-secret'):
-# Set imagePullSecrets for each component separately using subchart name prefix
-helm upgrade --install neuraltrust-platform . \
-  --namespace neuraltrust \
-  --set global.openshift=true \
-  --set global.openshiftDomain="YOUR_DOMAIN" \
-  --set neuraltrust-data-plane.imagePullSecrets="my-custom-secret" \
-  --set neuraltrust-control-plane.imagePullSecrets="my-custom-secret" \
-  --set trustgate.imagePullSecrets="my-custom-secret" \
-  -f values.yaml
+  -f my-values.yaml
 ```
 
 ## Required Secrets

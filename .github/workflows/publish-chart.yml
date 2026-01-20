@@ -82,14 +82,16 @@ jobs:
 
       - name: Summary
         run: |
-          CHART_REF="oci://${{ env.AR_REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.CHART_NAME }}"
+          OCI_URL="oci://europe-west1-docker.pkg.dev/neuraltrust-app-prod/helm-charts/neuraltrust-platform"
+          V="${{ steps.chart_version.outputs.version }}"
           echo "## Helm Chart Published" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Chart:** \`${{ env.CHART_NAME }}\` · **Version:** \`${{ steps.chart_version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Chart:** \`${{ env.CHART_NAME }}\` · **Version:** \`$V\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Install" >> $GITHUB_STEP_SUMMARY
+          echo "Copy \`values.yaml\` from the repo, save as \`my-values.yaml\`, fill every value marked \`# Required\`, then:" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-          echo "helm install my-release $CHART_REF --version ${{ steps.chart_version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "helm install neuraltrust-platform $OCI_URL --version $V --namespace neuraltrust --create-namespace -f my-values.yaml" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "\`$CHART_REF\`" >> $GITHUB_STEP_SUMMARY
+          echo "\`$OCI_URL\`" >> $GITHUB_STEP_SUMMARY

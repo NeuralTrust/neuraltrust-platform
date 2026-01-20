@@ -4,30 +4,41 @@ This document explains the different values files available and when to use each
 
 ## Available Values Files
 
-### 1. `values.yaml` - Base Configuration (Kubernetes with Ingress)
-**Use case:** Standard Kubernetes deployment with Ingress for external access
+### 1. `values.yaml` - Default / Required-Only Configuration
+**Use case:** Minimal, working deployment with only required settings
 
 **Features:**
-- Kubernetes cluster
-- Ingress enabled by default for all services
+- Required-only configuration; all other options use chart defaults
+- Kubernetes cluster (set `global.openshift: true` for OpenShift)
 - Helm-managed secrets (`preserveExistingSecrets: false`)
 - Deploys all infrastructure and services by default
 
-**Key settings:**
-```yaml
-global:
-  openshift: false
-  preserveExistingSecrets: false
-```
-
-**Usage:**
+**Usage:** Copy from the repo, **fill every value marked `# Required`**, then:
 ```bash
-helm install neuraltrust-platform . -f values.yaml
+cp values.yaml my-values.yaml
+# Edit my-values.yaml: set every value marked # Required
+helm upgrade --install neuraltrust-platform . --namespace neuraltrust --create-namespace -f my-values.yaml
 ```
 
 ---
 
-### 2. `values-openshift.yaml` - OpenShift with Routes (Default)
+### 2. `values-detailed.yaml` - Comprehensive Kubernetes Configuration
+**Use case:** Full customization with all options and inline comments
+
+**Features:**
+- All available keys with comments and examples
+- Ingress, resources, autoscaling, TLS, and other advanced options
+
+**Usage:** Copy from the repo, **fill every value marked `# Required`** (and any overrides), then:
+```bash
+cp values-detailed.yaml my-values.yaml
+# Edit my-values.yaml: set every value marked # Required
+helm upgrade --install neuraltrust-platform . --namespace neuraltrust --create-namespace -f my-values.yaml
+```
+
+---
+
+### 3. `values-openshift.yaml` - OpenShift with Routes (Default)
 **Use case:** OpenShift deployment using Routes for external access
 
 **Features:**
@@ -56,7 +67,7 @@ helm install neuraltrust-platform . -f values-openshift.yaml
 
 ---
 
-### 3. `values-openshift-ingress.yaml.example` - OpenShift with Ingress
+### 4. `values-openshift-ingress.yaml.example` - OpenShift with Ingress
 **Use case:** OpenShift deployment using Ingress instead of Routes (best working example)
 
 **Features:**
@@ -89,7 +100,7 @@ helm install neuraltrust-platform . -f values-openshift-ingress.yaml
 
 ---
 
-### 4. `values-all-deployed.yaml.example` - Example: Deploy Everything
+### 5. `values-all-deployed.yaml.example` - Example: Deploy Everything
 **Use case:** Example configuration showing how to deploy all components
 
 **Features:**
@@ -106,7 +117,7 @@ helm install neuraltrust-platform . -f values-all-deployed.yaml.example
 
 ---
 
-### 5. `values-external-services.yaml.example` - Example: External Services
+### 6. `values-external-services.yaml.example` - Example: External Services
 **Use case:** Example configuration using external infrastructure services
 
 **Features:**
@@ -126,7 +137,7 @@ helm install neuraltrust-platform . -f values-external-services.yaml.example
 ## Configuration Scenarios
 
 ### Scenario 1: Kubernetes with Ingress
-**File:** `values.yaml`
+**File:** `values.yaml` (minimal) or `values-detailed.yaml` (full options)
 - Set `global.openshift: false` (default for Kubernetes)
 - Set `ingress.enabled: true` for all services
 - Set `preserveExistingSecrets: false` (Helm manages secrets)
@@ -155,7 +166,7 @@ helm install neuraltrust-platform . -f values-external-services.yaml.example
 - **Configure external PostgreSQL connection** in `neuraltrust-control-plane.controlPlane.components.postgresql.secrets` section with `host`, `port`, `user`, `password`, and `database` keys
 
 ### Scenario 5: Deploy Only NeuralTrust + Infrastructure (No TrustGate)
-**File:** Custom values file based on `values.yaml`
+**File:** Custom values file based on `values.yaml` or `values-detailed.yaml`
 - Set `trustgate.enabled: false`
 - Keep `infrastructure.*.deploy: true`
 - Keep `neuraltrust-control-plane.controlPlane.enabled: true`
@@ -287,7 +298,7 @@ trustgate:
 
 | Scenario | File | OpenShift | Ingress | Routes | Secrets |
 |----------|------|-----------|---------|--------|---------|
-| Kubernetes | `values.yaml` | No | Yes | No | Helm |
+| Kubernetes | `values.yaml` or `values-detailed.yaml` | No | Yes | No | Helm |
 | OpenShift Default | `values-openshift.yaml` | Yes | No | Yes | Helm |
 | OpenShift Ingress | `values-openshift-ingress.yaml.example` | Yes | Yes | No | Pre-gen |
 | All Deployed | `values-all-deployed.yaml.example` | Configurable | Yes | Configurable | Helm |

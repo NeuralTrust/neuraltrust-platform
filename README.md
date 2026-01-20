@@ -44,25 +44,32 @@ We recommend installing from a **GitHub Release** or **Artifact Registry**, not 
 | Chart available from OCI registry | Must clone repo to install |
 | Official published chart | Risk of drift from released chart |
 
+### Values file (all installation methods)
+
+For **any** installation method:
+
+1. **Copy** `values.yaml` from the [repository](https://github.com/NeuralTrust/neuraltrust-platform).
+2. **Save** as `my-values.yaml` (or another name) and **fill every value marked `# Required`**.
+3. Run **`helm upgrade --install`** (or `helm install`) with `-f my-values.yaml`.
+
 ### Install the chart (choose one)
 
 Replace `VERSION` with a release version (e.g. `1.2.0`). Prefer **OCI** or **tarball** for production.
 
 **1. From OCI (Artifact Registry) — recommended**
 
-No clone required:
-
-```bash
-helm pull oci://europe-west1-docker.pkg.dev/neuraltrust-app-prod/helm-charts/neuraltrust-platform --version VERSION
-helm upgrade --install neuraltrust-platform ./neuraltrust-platform-VERSION.tgz \
-  --namespace neuraltrust --create-namespace -f my-values.yaml
-```
-
-Or install in one step:
+Copy `values.yaml` from the repo, fill `# Required`, then:
 
 ```bash
 helm install neuraltrust-platform oci://europe-west1-docker.pkg.dev/neuraltrust-app-prod/helm-charts/neuraltrust-platform \
   --version VERSION --namespace neuraltrust --create-namespace -f my-values.yaml
+```
+
+Or pull the chart, then install:
+
+```bash
+helm pull oci://europe-west1-docker.pkg.dev/neuraltrust-app-prod/helm-charts/neuraltrust-platform --version VERSION
+helm install neuraltrust-platform ./neuraltrust-platform-VERSION.tgz --namespace neuraltrust --create-namespace -f my-values.yaml
 ```
 
 **2. Download tarball from a GitHub Release**
@@ -99,27 +106,21 @@ helm dependency update
 
 ### 2. Configure Values
 
-Choose a values file based on your needs:
+Copy a values file from the repo, then **fill every value marked `# Required`** before installing.
 
-**Quick Start:**
+**Quick Start (`values.yaml`):**
 ```bash
-# Use values-required.yaml for a deployment with only required/mandatory configuration
-cp values-required.yaml my-values.yaml
-# Edit my-values.yaml and set your secrets
+cp values.yaml my-values.yaml
+# Edit my-values.yaml: set every value marked # Required
 ```
 
-**Comprehensive Examples:**
-- **Kubernetes**: Use `values.yaml` for a comprehensive Kubernetes deployment with all options
-- **OpenShift**: Use `values-openshift.yaml` for OpenShift-specific configuration with Routes
+**Comprehensive examples (more options and comments):**
+- **Kubernetes**: `values-detailed.yaml`
+- **OpenShift**: `values-openshift.yaml`
 
 ```bash
-# For Kubernetes (comprehensive)
-cp values.yaml my-values.yaml
-
-# OR for OpenShift (comprehensive)
-cp values-openshift.yaml my-values.yaml
-
-# Edit my-values.yaml with your configuration
+cp values-detailed.yaml my-values.yaml   # or values-openshift.yaml
+# Edit my-values.yaml: set every value marked # Required (and any optional overrides)
 ```
 
 **Set your secrets in `my-values.yaml`.** By default (`preserveExistingSecrets: false`), Helm will automatically create Kubernetes secrets from the values you provide:
@@ -157,40 +158,32 @@ The Helm chart will automatically create all required Kubernetes secrets from yo
 
 The chart provides several values files for different use cases:
 
-### `values-required.yaml` - Quick Start (Recommended for First-Time Users)
+### `values.yaml` - Quick Start (Default, Recommended for First-Time Users)
 
 **Best for:** Quick deployments with only required configuration
 
-This file contains only the mandatory/required configuration needed to deploy the platform. It's ideal for:
-- First-time deployments
-- Understanding the required configuration
-- Quick testing and development
+Minimal values file with placeholders. You must **fill every value marked `# Required`** before install. Ideal for first-time deployments and quick testing.
 
 **Usage:**
 ```bash
-cp values-required.yaml my-values.yaml
-# Edit my-values.yaml and set your secrets
+cp values.yaml my-values.yaml
+# Edit my-values.yaml: set every value marked # Required
 helm upgrade --install neuraltrust-platform . \
   --namespace neuraltrust \
   --create-namespace \
   -f my-values.yaml
 ```
 
-### `values.yaml` - Comprehensive Kubernetes Configuration
+### `values-detailed.yaml` - Comprehensive Kubernetes Configuration
 
 **Best for:** Production Kubernetes deployments with full customization options
 
-This file includes all available configuration options with detailed comments. Use it when you need:
-- Full control over all settings
-- Resource limits and requests
-- Advanced ingress/TLS configuration
-- Autoscaling and PDB settings
-- Complete customization
+All available options with comments. **Fill every value marked `# Required`**; customize any other keys as needed.
 
 **Usage:**
 ```bash
-cp values.yaml my-values.yaml
-# Edit my-values.yaml with your configuration
+cp values-detailed.yaml my-values.yaml
+# Edit my-values.yaml: set every value marked # Required (and optional overrides)
 helm upgrade --install neuraltrust-platform . \
   --namespace neuraltrust \
   --create-namespace \
@@ -201,15 +194,12 @@ helm upgrade --install neuraltrust-platform . \
 
 **Best for:** OpenShift deployments with Routes
 
-This file is pre-configured for OpenShift with:
-- Routes enabled by default (Ingress disabled)
-- OpenShift-specific settings
-- Proper service account configurations
+Pre-configured for OpenShift (Routes, service accounts). **Fill every value marked `# Required`** (and `global.openshiftDomain` etc.).
 
 **Usage:**
 ```bash
 cp values-openshift.yaml my-values.yaml
-# Edit my-values.yaml and set your OpenShift domain
+# Edit my-values.yaml: set every value marked # Required
 helm upgrade --install neuraltrust-platform . \
   --namespace neuraltrust \
   --create-namespace \
@@ -583,22 +573,13 @@ helm upgrade --install neuraltrust-platform . \
 
 ## Example: Deploy Everything (Default)
 
-Deploy all infrastructure and services. You can use `values-required.yaml` for a quick start, or `values.yaml` for comprehensive configuration:
+Deploy all infrastructure and services. Copy `values.yaml` or `values-detailed.yaml` to `my-values.yaml`, **fill every value marked `# Required`**, then:
 
-**Quick Start (Required Configuration Only):**
 ```bash
 helm upgrade --install neuraltrust-platform . \
   --namespace neuraltrust \
   --create-namespace \
-  -f values-required.yaml
-```
-
-**Comprehensive Configuration:**
-```bash
-helm upgrade --install neuraltrust-platform . \
-  --namespace neuraltrust \
-  --create-namespace \
-  -f values.yaml
+  -f my-values.yaml
 ```
 
 Both files deploy all infrastructure and services by default:
@@ -738,7 +719,7 @@ neuraltrust-control-plane:
 
 ## Configuration Reference
 
-See `values.yaml` for all available configuration options. Key sections:
+See `values.yaml` for the default required configuration and `values-detailed.yaml` for all available options and comments. Key sections:
 
 - `infrastructure.*` - Infrastructure component configuration
 - `neuraltrust-data-plane.*` - NeuralTrust Data Plane service configuration

@@ -115,7 +115,7 @@ kubectl create secret generic data-plane-jwt-secret \
 # The Helm chart will automatically use it
 helm upgrade --install neuraltrust-platform . \
   --namespace neuraltrust \
-  -f values.yaml
+  -f my-values.yaml
 ```
 
 ## Secret Reference in Values
@@ -166,7 +166,7 @@ Options:
 ## Security Best Practices
 
 1. **Use Pre-defined Secrets**: Create secrets before deployment using the script or kubectl
-2. **Avoid Values Files**: Don't store secrets in values.yaml files that are committed to git
+2. **Avoid Values Files**: Don't store secrets in your values file (e.g. my-values.yaml) if it is committed to git
 3. **Use Secret Management**: Consider using external secret management systems (Sealed Secrets, External Secrets Operator, etc.)
 4. **Rotate Secrets**: Regularly rotate secrets, especially JWT secrets
 5. **Limit Access**: Use RBAC to limit who can read secrets
@@ -224,7 +224,7 @@ export CLICKHOUSE_PASSWORD=$(openssl rand -hex 16)
 helm dependency update
 helm upgrade --install neuraltrust-platform . \
   --namespace neuraltrust \
-  -f values.yaml
+  -f my-values.yaml
 ```
 
 ### Using External Secret Management
@@ -255,6 +255,6 @@ spec:
 
 After creating secrets:
 1. Verify secrets are created: `kubectl get secrets -n neuraltrust`
-2. Deploy the Helm chart: `helm upgrade --install neuraltrust-platform . -n neuraltrust -f values.yaml`
+2. Deploy the Helm chart: `helm upgrade --install neuraltrust-platform . -n neuraltrust -f my-values.yaml`
 3. Check pod logs if issues occur: `kubectl logs -n neuraltrust <pod-name>`
 

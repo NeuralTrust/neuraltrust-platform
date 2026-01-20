@@ -6,17 +6,24 @@ This guide explains how to deploy the NeuralTrust Platform using the unified Hel
 
 ## Quick Start
 
+**Values file (all methods):** Copy `values.yaml` from the [repository](https://github.com/NeuralTrust/neuraltrust-platform), save as `my-values.yaml`, **fill every value marked `# Required`**, then run `helm upgrade --install` with `-f my-values.yaml`.
+
+**From OCI (Artifact Registry) — no clone required:**
+
+```bash
+helm install neuraltrust-platform oci://europe-west1-docker.pkg.dev/neuraltrust-app-prod/helm-charts/neuraltrust-platform \
+  --version VERSION --namespace neuraltrust --create-namespace -f my-values.yaml
+```
+
+Replace `VERSION` with a [release version](https://github.com/NeuralTrust/neuraltrust-platform/releases) (e.g. `1.2.7`). For more options, copy `values-detailed.yaml` or `values-openshift.yaml` instead of `values.yaml`.
+
+**From a local chart (clone or tarball):**
+
 ```bash
 # 1. Update dependencies (only if using a local clone; skip when using OCI or a .tgz)
 helm dependency update
 
-# 2. Deploy with default values (deploys ClickHouse and Kafka, uses external PostgreSQL)
-helm upgrade --install neuraltrust-platform . \
-  --namespace neuraltrust \
-  --create-namespace \
-  -f values.yaml
-
-# 3. Or use a custom values file
+# 2. Deploy (use my-values.yaml after copying values.yaml from the repo and filling # Required)
 helm upgrade --install neuraltrust-platform . \
   --namespace neuraltrust \
   --create-namespace \
