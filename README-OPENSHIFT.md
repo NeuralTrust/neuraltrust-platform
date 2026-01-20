@@ -29,7 +29,7 @@ This guide provides step-by-step instructions for deploying the NeuralTrust Plat
 
 ## Quick Start
 
-**Values file (all methods):** Copy `values.yaml` or `values-openshift.yaml` from the [repository](https://github.com/NeuralTrust/neuraltrust-platform), save as `my-values.yaml`, **fill every value marked `# Required`** (and `global.openshiftDomain`), then run `helm upgrade --install` with `-f my-values.yaml`. Create the image pull secret (`gcr-secret`) and any pre-existing secrets if required; see [Required Secrets](#required-secrets).
+**Values file (all methods):** Copy `values-required.yaml` (minimal), `values.yaml`, or `values-openshift.yaml` from the [repository](https://github.com/NeuralTrust/neuraltrust-platform), save as `my-values.yaml`, **fill every value marked `# Required`** (and `global.openshiftDomain`), then run `helm upgrade --install` with `-f my-values.yaml`. Create the image pull secret (`gcr-secret`) and any pre-existing secrets if required; see [Required Secrets](#required-secrets).
 
 **From OCI (Artifact Registry) — no clone required:**
 
@@ -44,7 +44,7 @@ helm install neuraltrust-platform oci://europe-west1-docker.pkg.dev/neuraltrust-
   --set global.openshiftDomain="YOUR_DOMAIN"
 ```
 
-Replace `VERSION` with a [release version](https://github.com/NeuralTrust/neuraltrust-platform/releases) (e.g. `1.2.7`). For full OpenShift options, copy `values-openshift.yaml` instead of `values.yaml`.
+Replace `VERSION` with a [release version](https://github.com/NeuralTrust/neuraltrust-platform/releases) (e.g. `1.2.7`). For full OpenShift options, copy `values-openshift.yaml` instead of `values-required.yaml`.
 
 **From a local chart (clone or tarball):**
 
@@ -54,7 +54,7 @@ oc create namespace neuraltrust
 
 # 2. Create image pull secret and any pre-existing secrets (see Required Secrets) if not using Helm-managed secrets from values
 
-# 3. Copy values-openshift.yaml (or values.yaml) to my-values.yaml and fill every value marked # Required
+# 3. Copy values-openshift.yaml (or values-required.yaml) to my-values.yaml and fill every value marked # Required
 
 # 4. Update Helm dependencies (only if using a local clone; skip when using OCI or a .tgz)
 helm dependency update

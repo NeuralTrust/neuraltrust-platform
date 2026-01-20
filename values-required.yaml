@@ -1,0 +1,114 @@
+# NeuralTrust Platform Values (example)
+# Copy this file to my-values.yaml, fill every value marked # Required, then:
+#   helm upgrade --install neuraltrust-platform <chart> -f my-values.yaml
+# Only mandatory/required configuration - all other values use chart defaults
+
+global:
+  openshift: false
+  imageRegistry: ""
+  preserveExistingSecrets: false
+  storageClass: ""
+  security:
+    allowInsecureImages: true
+
+# Infrastructure Components
+infrastructure:
+  clickhouse:
+    deploy: true
+
+  kafka:
+    deploy: true
+
+  postgresql:
+    # Note: PostgreSQL deployment is controlled by neuraltrust-control-plane.infrastructure.postgresql.deploy below
+    # Set deploy: true/false in that section to enable/disable in-cluster PostgreSQL deployment
+
+# ClickHouse subchart (only if infrastructure.clickhouse.deploy=true)
+clickhouse:
+  auth:
+    username: "neuraltrust"
+    # Define ClickHouse password
+    # You can use openssl to generate a random value: openssl rand -hex 32
+    password: "" # Required
+  image:
+    repository: "bitnamilegacy/clickhouse"
+    tag: "25.3.2-debian-12-r3"
+  global:
+    imagePullSecrets: []
+
+# Kafka subchart (only if infrastructure.kafka.deploy=true)
+kafka:
+  image:
+    repository: "bitnamilegacy/kafka"
+    tag: "3.9.0-debian-12-r1"
+  global:
+    imagePullSecrets: []
+
+# TrustGate Configuration
+trustgate:
+  enabled: true
+  global:
+    version: "ee"
+    imageRegistry: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker"
+    image:
+      imagePullSecrets: ["gcr-secret"]
+    env:
+      # TrustGate secret key is used to encrypt the JWT token for the TrustGate API
+      # You can use openssl to generate a random value: openssl rand -hex 32
+      SERVER_SECRET_KEY: "" # Required
+      # Database host is the host of the PostgreSQL database
+      DATABASE_HOST: "control-plane-postgresql" # Required
+      # Database password is the password of the trustgate user in the PostgreSQL database
+      # You can use openssl to generate a random value: openssl rand -hex 32
+      DATABASE_PASSWORD: "" # Required
+  redis:
+    enabled: true
+    # Note: redis.auth.password is optional - only recommended when using external Redis (redis.enabled: false)
+
+# NeuralTrust Control Plane
+neuraltrust-control-plane:
+  infrastructure:
+    postgresql:
+      deploy: true
+  controlPlane:
+    enabled: true
+    imagePullSecrets: "gcr-secret"
+    secrets:
+      # ControlPlane JWT secret is used to encrypt the JWT token for the ControlPlane API
+      # You can use openssl to generate a random value: openssl rand -hex 32
+      controlPlaneJWTSecret: "" # Required
+      # TrustGate JWT secret is used to connect the ControlPlane to the TrustGate API
+      # You must use the same secret for the TrustGate JWT secret in the TrustGate configuration
+      trustgateJwtSecret: "" # Required
+    components:
+      scheduler:
+        enabled: true
+      api:
+        enabled: true
+      app:
+        enabled: true
+      postgresql:
+        secrets:
+          # Database password is the password of the PostgreSQL database
+          # You can use openssl to generate a random value: openssl rand -hex 32
+          password: "" # Required if infrastructure.postgresql.deploy=true
+        image:
+          repository: "postgres"
+          tag: "17.2-alpine"
+
+# NeuralTrust Data Plane
+neuraltrust-data-plane:
+  dataPlane:
+    enabled: true
+    imagePullSecrets: "gcr-secret"
+    secrets:
+      # DataPlane JWT secret is used to encrypt the JWT token for the DataPlane API
+      # You can use openssl to generate a random value: openssl rand -hex 32
+      dataPlaneJWTSecret: "" # Required
+    components:
+      api:
+        enabled: true
+      worker:
+        enabled: true
+      kafka:
+        connect: {}

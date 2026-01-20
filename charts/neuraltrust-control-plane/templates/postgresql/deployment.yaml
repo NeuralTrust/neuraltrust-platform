@@ -25,6 +25,7 @@ spec:
       {{- $pullSecrets := list }}
       {{- $componentLevelSet := false }}
       {{- /* Check component-level imagePullSecrets first */}}
+      {{- if .Values.controlPlane.components.postgresql.image }}
       {{- if .Values.controlPlane.components.postgresql.image.imagePullSecrets }}
         {{- $componentLevelSet = true }}
         {{- range .Values.controlPlane.components.postgresql.image.imagePullSecrets }}
@@ -39,6 +40,7 @@ spec:
             {{- $pullSecrets = append $pullSecrets $secretName }}
           {{- end }}
         {{- end }}
+      {{- end }}
       {{- end }}
       {{- /* Fall back to root-level controlPlane.imagePullSecrets only if component-level is not explicitly set */}}
       {{- if and (eq (len $pullSecrets) 0) (not $componentLevelSet) }}
@@ -83,7 +85,7 @@ spec:
           {{- end }}
           seccompProfile:
             type: RuntimeDefault
-        imagePullPolicy: {{ .Values.controlPlane.components.postgresql.image.pullPolicy }}
+        imagePullPolicy: {{ if .Values.controlPlane.components.postgresql.image }}{{ .Values.controlPlane.components.postgresql.image.pullPolicy | default "Always" }}{{ else }}Always{{ end }}
         ports:
         - containerPort: 5432
           name: postgresql
@@ -111,7 +113,16 @@ spec:
         - name: postgresql-data
           mountPath: /var/lib/postgresql/data
         resources:
+            {{- if .Values.controlPlane.components.postgresql.resources }}
             {{- toYaml .Values.controlPlane.components.postgresql.resources | nindent 12 }}
+            {{- else }}
+            requests:
+              memory: 512Mi
+              cpu: 250m
+            limits:
+              memory: 1Gi
+              cpu: 500m
+            {{- end }}
         livenessProbe:
           exec:
             command:
@@ -136,9 +147,14 @@ spec:
           failureThreshold: 3
       volumes:
       - name: postgresql-data
-        {{- if .Values.controlPlane.components.postgresql.persistence.enabled }}
+        {{- $p := index .Values.controlPlane.components.postgresql "persistence" }}
+        {{- if $p }}
+        {{- if index $p "enabled" }}
         persistentVolumeClaim:
           claimName: control-plane-postgresql-pvc
+        {{- else }}
+        emptyDir: {}
+        {{- end }}
         {{- else }}
         emptyDir: {}
         {{- end }}

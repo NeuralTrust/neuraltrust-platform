@@ -48,7 +48,7 @@ We recommend installing from a **GitHub Release** or **Artifact Registry**, not 
 
 For **any** installation method:
 
-1. **Copy** `values.yaml` from the [repository](https://github.com/NeuralTrust/neuraltrust-platform).
+1. **Copy** `values-required.yaml` (minimal) or `values.yaml` (full options) from the [repository](https://github.com/NeuralTrust/neuraltrust-platform).
 2. **Save** as `my-values.yaml` (or another name) and **fill every value marked `# Required`**.
 3. Run **`helm upgrade --install`** (or `helm install`) with `-f my-values.yaml`.
 
@@ -58,7 +58,7 @@ Replace `VERSION` with a release version (e.g. `1.2.0`). Prefer **OCI** or **tar
 
 **1. From OCI (Artifact Registry) — recommended**
 
-Copy `values.yaml` from the repo, fill `# Required`, then:
+Copy `values-required.yaml` from the repo, fill `# Required`, then:
 
 ```bash
 helm install neuraltrust-platform oci://europe-west1-docker.pkg.dev/neuraltrust-app-prod/helm-charts/neuraltrust-platform \
@@ -108,18 +108,18 @@ helm dependency update
 
 Copy a values file from the repo, then **fill every value marked `# Required`** before installing.
 
-**Quick Start (`values.yaml`):**
+**Quick Start (`values-required.yaml`):**
 ```bash
-cp values.yaml my-values.yaml
+cp values-required.yaml my-values.yaml
 # Edit my-values.yaml: set every value marked # Required
 ```
 
-**Comprehensive examples (more options and comments):**
-- **Kubernetes**: `values-detailed.yaml`
+**Full options (values.yaml or values-openshift.yaml):**
+- **Kubernetes**: `values.yaml`
 - **OpenShift**: `values-openshift.yaml`
 
 ```bash
-cp values-detailed.yaml my-values.yaml   # or values-openshift.yaml
+cp values.yaml my-values.yaml   # or values-openshift.yaml
 # Edit my-values.yaml: set every value marked # Required (and any optional overrides)
 ```
 
@@ -158,7 +158,7 @@ The Helm chart will automatically create all required Kubernetes secrets from yo
 
 The chart provides several values files for different use cases:
 
-### `values.yaml` - Quick Start (Default, Recommended for First-Time Users)
+### `values-required.yaml` - Quick Start (Minimal, Recommended for First-Time Users)
 
 **Best for:** Quick deployments with only required configuration
 
@@ -166,7 +166,7 @@ Minimal values file with placeholders. You must **fill every value marked `# Req
 
 **Usage:**
 ```bash
-cp values.yaml my-values.yaml
+cp values-required.yaml my-values.yaml
 # Edit my-values.yaml: set every value marked # Required
 helm upgrade --install neuraltrust-platform . \
   --namespace neuraltrust \
@@ -174,7 +174,7 @@ helm upgrade --install neuraltrust-platform . \
   -f my-values.yaml
 ```
 
-### `values-detailed.yaml` - Comprehensive Kubernetes Configuration
+### `values.yaml` - Full Kubernetes Configuration
 
 **Best for:** Production Kubernetes deployments with full customization options
 
@@ -182,7 +182,7 @@ All available options with comments. **Fill every value marked `# Required`**; c
 
 **Usage:**
 ```bash
-cp values-detailed.yaml my-values.yaml
+cp values.yaml my-values.yaml
 # Edit my-values.yaml: set every value marked # Required (and optional overrides)
 helm upgrade --install neuraltrust-platform . \
   --namespace neuraltrust \
@@ -573,7 +573,7 @@ helm upgrade --install neuraltrust-platform . \
 
 ## Example: Deploy Everything (Default)
 
-Deploy all infrastructure and services. Copy `values.yaml` or `values-detailed.yaml` to `my-values.yaml`, **fill every value marked `# Required`**, then:
+Deploy all infrastructure and services. Copy `values-required.yaml` or `values.yaml` to `my-values.yaml`, **fill every value marked `# Required`**, then:
 
 ```bash
 helm upgrade --install neuraltrust-platform . \
@@ -719,7 +719,7 @@ neuraltrust-control-plane:
 
 ## Configuration Reference
 
-See `values.yaml` for the default required configuration and `values-detailed.yaml` for all available options and comments. Key sections:
+See `values-required.yaml` for the minimal required configuration and `values.yaml` for all available options and comments. Key sections:
 
 - `infrastructure.*` - Infrastructure component configuration
 - `neuraltrust-data-plane.*` - NeuralTrust Data Plane service configuration

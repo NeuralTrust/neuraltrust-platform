@@ -376,4 +376,11 @@ spec:
         resources:
           {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.resources }}
           {{- toYaml .Values.controlPlane.components.app.resources | nindent 10 }}
+          {{- else }}
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: 500m
+            memory: 1Gi
           {{- end }}

@@ -1,5 +1,7 @@
 accounts
 
+my-values.yaml
+
 # Helm chart packages
 *.tgz
 *.tar.gz

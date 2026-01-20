@@ -89,7 +89,7 @@ jobs:
           echo "**Chart:** \`${{ env.CHART_NAME }}\` · **Version:** \`$V\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Install" >> $GITHUB_STEP_SUMMARY
-          echo "Copy \`values.yaml\` from the repo, save as \`my-values.yaml\`, fill every value marked \`# Required\`, then:" >> $GITHUB_STEP_SUMMARY
+          echo "Copy \`values-required.yaml\` from the repo, save as \`my-values.yaml\`, fill every value marked \`# Required\`, then:" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
           echo "helm install neuraltrust-platform $OCI_URL --version $V --namespace neuraltrust --create-namespace -f my-values.yaml" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

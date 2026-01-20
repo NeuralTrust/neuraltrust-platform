@@ -53,7 +53,7 @@ jobs:
           body: |
             ## Installation
 
-            **For any method:** Copy `values.yaml` from the [repository](https://github.com/${{ github.repository }}), save as `my-values.yaml`, **fill every value marked `# Required`**, then run `helm upgrade --install` with `-f my-values.yaml`.
+            **For any method:** Copy `values-required.yaml` from the [repository](https://github.com/${{ github.repository }}), save as `my-values.yaml`, **fill every value marked `# Required`**, then run `helm upgrade --install` with `-f my-values.yaml`.
 
             **Choose one of the following:**
 
@@ -61,7 +61,7 @@ jobs:
             ```bash
             git clone --branch ${{ steps.version.outputs.tag }} --depth 1 https://github.com/${{ github.repository }}.git
             cd neuraltrust-platform
-            cp values.yaml my-values.yaml
+            cp values-required.yaml my-values.yaml
             # Edit my-values.yaml: fill every value marked # Required
             helm dependency update
             helm upgrade --install neuraltrust-platform . --namespace neuraltrust --create-namespace -f my-values.yaml
@@ -73,13 +73,13 @@ jobs:
 
             ```bash
             curl -sL -O https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag }}/neuraltrust-platform-${{ steps.version.outputs.version }}.tgz
-            # Copy values.yaml from the repo, fill # Required, then:
+            # Copy values-required.yaml from the repo, fill # Required, then:
             helm upgrade --install neuraltrust-platform ./neuraltrust-platform-${{ steps.version.outputs.version }}.tgz --namespace neuraltrust --create-namespace -f my-values.yaml
             ```
 
             **3. Install from OCI (Artifact Registry)**
             ```bash
-            # Copy values.yaml from the repo, fill # Required, then:
+            # Copy values-required.yaml from the repo, fill # Required, then:
             helm install neuraltrust-platform oci://europe-west1-docker.pkg.dev/neuraltrust-app-prod/helm-charts/neuraltrust-platform --version ${{ steps.version.outputs.version }} --namespace neuraltrust --create-namespace -f my-values.yaml
             ```
             Or pull the chart first, then install:

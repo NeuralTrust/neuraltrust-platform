@@ -4,7 +4,7 @@ This document explains the different values files available and when to use each
 
 ## Available Values Files
 
-### 1. `values.yaml` - Default / Required-Only Configuration
+### 1. `values-required.yaml` - Minimal / Required-Only Configuration
 **Use case:** Minimal, working deployment with only required settings
 
 **Features:**
@@ -15,14 +15,14 @@ This document explains the different values files available and when to use each
 
 **Usage:** Copy from the repo, **fill every value marked `# Required`**, then:
 ```bash
-cp values.yaml my-values.yaml
+cp values-required.yaml my-values.yaml
 # Edit my-values.yaml: set every value marked # Required
 helm upgrade --install neuraltrust-platform . --namespace neuraltrust --create-namespace -f my-values.yaml
 ```
 
 ---
 
-### 2. `values-detailed.yaml` - Comprehensive Kubernetes Configuration
+### 2. `values.yaml` - Full Kubernetes Configuration
 **Use case:** Full customization with all options and inline comments
 
 **Features:**
@@ -31,7 +31,7 @@ helm upgrade --install neuraltrust-platform . --namespace neuraltrust --create-n
 
 **Usage:** Copy from the repo, **fill every value marked `# Required`** (and any overrides), then:
 ```bash
-cp values-detailed.yaml my-values.yaml
+cp values.yaml my-values.yaml
 # Edit my-values.yaml: set every value marked # Required
 helm upgrade --install neuraltrust-platform . --namespace neuraltrust --create-namespace -f my-values.yaml
 ```
@@ -137,7 +137,7 @@ helm install neuraltrust-platform . -f values-external-services.yaml.example
 ## Configuration Scenarios
 
 ### Scenario 1: Kubernetes with Ingress
-**File:** `values.yaml` (minimal) or `values-detailed.yaml` (full options)
+**File:** `values-required.yaml` (minimal) or `values.yaml` (full options)
 - Set `global.openshift: false` (default for Kubernetes)
 - Set `ingress.enabled: true` for all services
 - Set `preserveExistingSecrets: false` (Helm manages secrets)
@@ -166,7 +166,7 @@ helm install neuraltrust-platform . -f values-external-services.yaml.example
 - **Configure external PostgreSQL connection** in `neuraltrust-control-plane.controlPlane.components.postgresql.secrets` section with `host`, `port`, `user`, `password`, and `database` keys
 
 ### Scenario 5: Deploy Only NeuralTrust + Infrastructure (No TrustGate)
-**File:** Custom values file based on `values.yaml` or `values-detailed.yaml`
+**File:** Custom values file based on `values-required.yaml` or `values.yaml`
 - Set `trustgate.enabled: false`
 - Keep `infrastructure.*.deploy: true`
 - Keep `neuraltrust-control-plane.controlPlane.enabled: true`
@@ -298,7 +298,7 @@ trustgate:
 
 | Scenario | File | OpenShift | Ingress | Routes | Secrets |
 |----------|------|-----------|---------|--------|---------|
-| Kubernetes | `values.yaml` or `values-detailed.yaml` | No | Yes | No | Helm |
+| Kubernetes | `values-required.yaml` or `values.yaml` | No | Yes | No | Helm |
 | OpenShift Default | `values-openshift.yaml` | Yes | No | Yes | Helm |
 | OpenShift Ingress | `values-openshift-ingress.yaml.example` | Yes | Yes | No | Pre-gen |
 | All Deployed | `values-all-deployed.yaml.example` | Configurable | Yes | Configurable | Helm |

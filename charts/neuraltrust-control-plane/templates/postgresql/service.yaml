@@ -7,9 +7,9 @@ metadata:
   labels:
     app: control-plane-postgresql
 spec:
-  type: {{ if .service.type }}{{ .service.type }}{{ else }}ClusterIP{{ end }}
+  type: {{ if .service }}{{ .service.type | default "ClusterIP" }}{{ else }}ClusterIP{{ end }}
   ports:
-  - port: {{ if .service.port }}{{ .service.port }}{{ else }}5432{{ end }}
+  - port: {{ if .service }}{{ .service.port | default 5432 }}{{ else }}5432{{ end }}
     targetPort: postgresql
     protocol: TCP
     name: postgresql

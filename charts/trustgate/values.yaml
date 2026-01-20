@@ -240,11 +240,11 @@ ingress:
     nginx.ingress.kubernetes.io/x-frame-options: "DENY"
     nginx.ingress.kubernetes.io/x-xss-protection: "1; mode=block"
   controlPlane:
-    host: ${CONTROL_PLANE_HOST}
+    host: "trustgate-admin.local"  # Set to your domain (e.g. admin.yourdomain.com)
   dataPlane:
-    host: ${DATA_PLANE_HOST}
+    host: "trustgate-gateway.local"  # Set to your domain (e.g. gateway.yourdomain.com)
   actions:
-    host: ${ACTIONS_HOST}
+    host: "trustgate-actions.local"  # Set to your domain (e.g. actions.yourdomain.com)
 
 # Optional: Add cert-manager configuration
 certManager:
