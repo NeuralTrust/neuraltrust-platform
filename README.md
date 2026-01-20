@@ -31,7 +31,65 @@ This Helm chart provides a unified deployment for the complete NeuralTrust platf
 
 When running `helm lint`, you may see errors related to subchart templates accessing values. This is typically a false positive because Helm lint validates templates without the full values context. The chart will deploy correctly when using `helm upgrade --install` with proper values.
 
+## Releases and Installing the Chart
+
+We recommend installing from a **GitHub Release** or **Artifact Registry**, not from the `main` branch. Releases give you a pinned, tested version and changelog.
+
+### Why use releases instead of main?
+
+| Use releases (recommended) | Avoid main branch |
+|---------------------------|-------------------|
+| Pinned, immutable version | `main` changes over time |
+| Changelog and compare link | No guarantee of stability |
+| Chart available from OCI registry | Must clone repo to install |
+| Official published chart | Risk of drift from released chart |
+
+### Install the chart (choose one)
+
+Replace `VERSION` with a release version (e.g. `1.2.0`). Prefer **OCI** or **tarball** for production.
+
+**1. From OCI (Artifact Registry) — recommended**
+
+No clone required:
+
+```bash
+helm pull oci://europe-west1-docker.pkg.dev/neuraltrust-app-prod/helm-charts/neuraltrust-platform --version VERSION
+helm upgrade --install neuraltrust-platform ./neuraltrust-platform-VERSION.tgz \
+  --namespace neuraltrust --create-namespace -f my-values.yaml
+```
+
+Or install in one step:
+
+```bash
+helm install neuraltrust-platform oci://europe-west1-docker.pkg.dev/neuraltrust-app-prod/helm-charts/neuraltrust-platform \
+  --version VERSION --namespace neuraltrust --create-namespace -f my-values.yaml
+```
+
+**2. Download tarball from a GitHub Release**
+
+```bash
+curl -sL -O https://github.com/NeuralTrust/neuraltrust-platform/releases/download/vVERSION/neuraltrust-platform-VERSION.tgz
+helm upgrade --install neuraltrust-platform ./neuraltrust-platform-VERSION.tgz \
+  --namespace neuraltrust --create-namespace -f my-values.yaml
+```
+
+**3. Clone source at a release tag**
+
+Use only when you need to inspect or modify the chart:
+
+```bash
+git clone --branch vVERSION --depth 1 https://github.com/NeuralTrust/neuraltrust-platform.git
+cd neuraltrust-platform
+helm dependency update
+helm upgrade --install neuraltrust-platform . \
+  --namespace neuraltrust --create-namespace -f my-values.yaml
+```
+
+Available versions: [Releases](https://github.com/NeuralTrust/neuraltrust-platform/releases).
+
 ## Quick Start
+
+The steps below assume you have the chart locally (e.g. clone at a tag or extracted tarball). For a pinned release, prefer installing from **OCI** or the **release tarball** as in [Releases and Installing the Chart](#releases-and-installing-the-chart); then use the `.tgz` or OCI ref in place of `.` in the deploy command.
 
 ### 1. Install Dependencies
 

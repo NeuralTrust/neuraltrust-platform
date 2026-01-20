@@ -2,10 +2,12 @@
 
 This guide explains how to deploy the NeuralTrust Platform using the unified Helm chart.
 
+**Chart source:** Prefer a [GitHub Release](https://github.com/NeuralTrust/neuraltrust-platform/releases) or OCI (Artifact Registry) over cloning `main`. See [Releases and Installing the Chart](README.md#releases-and-installing-the-chart) in the main README for OCI and tarball installs. The examples below use `.` for a local chart (e.g. after `helm pull` or clone at a tag); replace with your chart path or OCI URL as needed.
+
 ## Quick Start
 
 ```bash
-# 1. Update dependencies
+# 1. Update dependencies (only if using a local clone; skip when using OCI or a .tgz)
 helm dependency update
 
 # 2. Deploy with default values (deploys ClickHouse and Kafka, uses external PostgreSQL)
@@ -307,5 +309,5 @@ After deployment:
 3. Configure TrustGate domains
 4. Set up monitoring and alerting
 
-See the main README.md for more details.
+See the main [README.md](README.md) for more details, including [releases and install options](README.md#releases-and-installing-the-chart).
 

@@ -21,19 +21,15 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Get chart version
+      - name: Chart version
         id: version
         run: |
           V=$(grep '^version:' Chart.yaml | awk '{print $2}' | tr -d '"' | tr -d "'")
-          if [ -z "$V" ]; then
-            echo "::error::Could not read version from Chart.yaml"
-            exit 1
-          fi
+          if [ -z "$V" ]; then echo "::error::Could not read version from Chart.yaml"; exit 1; fi
           echo "version=$V" >> $GITHUB_OUTPUT
           echo "tag=v${V}" >> $GITHUB_OUTPUT
-          echo "Chart version: $V → tag v${V}"
 
-      - name: Get previous tag
+      - name: Previous tag
         id: prev_tag
         run: |
           PREV=$(git tag -l 'v*' --sort=-v:refname | head -1)
@@ -44,19 +40,12 @@ jobs:
         with:
           version: 'latest'
 
-      - name: Package chart
-        run: |
-          helm dependency update
-          helm package . --dependency-update
-          CHART=$(ls neuraltrust-platform-*.tgz)
-          echo "CHART=$CHART" >> $GITHUB_ENV
-          echo "Packaged: $CHART"
+      - name: Package
+        run: helm package . --dependency-update
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         env:
-          # Use a PAT so the release event triggers the Publish Helm Chart workflow.
-          # The default GITHUB_TOKEN does not trigger other workflows (GitHub prevents recursive runs).
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ steps.version.outputs.tag }}
@@ -91,3 +80,9 @@ jobs:
           files: neuraltrust-platform-*.tgz
           generate_release_notes: false
           draft: false
+          overwrite_files: true
+
+      - name: Summary
+        run: |
+          echo "## Release ${{ steps.version.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "Chart and install options are in the [release](https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.tag }})." >> $GITHUB_STEP_SUMMARY
