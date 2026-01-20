@@ -245,8 +245,9 @@ spec:
           
           echo "PostgreSQL initialization completed successfully!"
         resources:
-          {{- if .Values.postgresqlInit.resources }}
-          {{- toYaml .Values.postgresqlInit.resources | nindent 10 }}
+          {{- $pgInit := index .Values "postgresqlInit" }}
+          {{- if and $pgInit (index $pgInit "resources") }}
+          {{- toYaml (index $pgInit "resources") | nindent 10 }}
           {{- else }}
           requests:
             cpu: 250m
