@@ -45,7 +45,7 @@ metadata:
   annotations:
     {{- /* post-install, post-upgrade: run after all other resources (pods) are deployed so the job does not block deployments */}}
     "helm.sh/hook": post-install,post-upgrade
-    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-weight": "5"
     "helm.sh/hook-delete-policy": before-hook-creation
     "helm.sh/hook-timeout": "600"
 spec:
