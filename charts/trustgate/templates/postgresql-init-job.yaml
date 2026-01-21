@@ -1,17 +1,16 @@
 {{- /*
 Job to initialize TrustGate PostgreSQL database and user.
-This job connects using postgresql-secrets (admin credentials) and creates
-the database and user specified in trustgate-secrets if they don't exist.
+1) First tries to connect using trustgate-secrets (DATABASE_HOST, DATABASE_USER, DATABASE_PASSWORD).
+   If successful, the user and database already exist – job exits successfully.
+2) If that fails, creates the user/database using postgresql-secrets (admin credentials), when
+   postgres is deployed in-cluster. postgresql-secrets is optional when using external PostgreSQL.
 */}}
 {{- $pgSecretName := "postgresql-secrets" }}
 {{- $tgSecretName := "trustgate-secrets" }}
-{{- /* Check if both secrets exist or will be created */}}
-{{- $pgSecret := (lookup "v1" "Secret" .Release.Namespace $pgSecretName) }}
-{{- $tgSecret := (lookup "v1" "Secret" .Release.Namespace $tgSecretName) }}
-{{- /* Get database values from trustgate.global.env */}}
+{{- /* Get database values from trustgate.global.env; defaults: port 5432, database/name trustgate, user trustgate */}}
 {{- $tgDbHost := "" }}
 {{- $tgDbPort := "5432" }}
-{{- $tgDbUser := "postgres" }}
+{{- $tgDbUser := "trustgate" }}
 {{- $tgDbPassword := "" }}
 {{- $tgDbName := "trustgate" }}
 {{- $tgDbSslMode := "require" }}
@@ -92,28 +91,22 @@ spec:
         - |
           set -e
           
-          # Get PostgreSQL admin credentials from postgresql-secrets
-          PG_HOST="${POSTGRES_HOST}"
-          PG_PORT="${POSTGRES_PORT:-5432}"
-          PG_ADMIN_USER="${POSTGRES_USER}"
-          PG_ADMIN_PASSWORD="${POSTGRES_PASSWORD}"
-          
-          # Get TrustGate database and user from trustgate-secrets
-          TG_DB_NAME="${TG_DATABASE_NAME}"
-          TG_DB_USER="${TG_DATABASE_USER}"
+          # Get TrustGate database and user from trustgate-secrets (defaults: name=trustgate, user=trustgate, port=5432)
+          TG_DB_NAME="${TG_DATABASE_NAME:-trustgate}"
+          TG_DB_USER="${TG_DATABASE_USER:-trustgate}"
+          TG_DB_PORT="${TG_DATABASE_PORT:-5432}"
           TG_DB_PASSWORD="${TG_DATABASE_PASSWORD}"
           
           # Determine SSL mode for connection
           PG_SSL_MODE="${POSTGRES_SSL_MODE:-disable}"
           
           # Wait for trustgate-secrets to exist and have required values
-          # The secret is created by Helm, but there may be a timing issue during upgrade
           echo "Waiting for trustgate-secrets to be available..."
           SECRET_MAX_ATTEMPTS=60
           SECRET_ATTEMPT=0
           
           while [ $SECRET_ATTEMPT -lt $SECRET_MAX_ATTEMPTS ]; do
-            if [ -n "${TG_DATABASE_NAME}" ] && [ -n "${TG_DATABASE_USER}" ] && [ -n "${TG_DATABASE_PASSWORD}" ]; then
+            if [ -n "${TG_DATABASE_PASSWORD}" ]; then
               echo "✓ trustgate-secrets values loaded successfully"
               break
             fi
@@ -122,16 +115,15 @@ spec:
             if [ $((SECRET_ATTEMPT % 5)) -eq 0 ]; then
               echo "Attempt $SECRET_ATTEMPT/$SECRET_MAX_ATTEMPTS: Waiting for trustgate-secrets..."
               echo "  Missing:"
-              [ -z "${TG_DATABASE_NAME}" ] && echo "    - TG_DATABASE_NAME (DATABASE_NAME)"
-              [ -z "${TG_DATABASE_USER}" ] && echo "    - TG_DATABASE_USER (DATABASE_USER)"
               [ -z "${TG_DATABASE_PASSWORD}" ] && echo "    - TG_DATABASE_PASSWORD (DATABASE_PASSWORD)"
             fi
             sleep 2
           done
           
-          if [ -z "${TG_DATABASE_NAME}" ] || [ -z "${TG_DATABASE_USER}" ] || [ -z "${TG_DATABASE_PASSWORD}" ]; then
+          if [ -z "${TG_DATABASE_PASSWORD}" ]; then
             echo "ERROR: trustgate-secrets not found or incomplete after $((SECRET_MAX_ATTEMPTS * 2)) seconds."
             echo "Missing values:"
+            [ -z "${TG_DATABASE_HOST}" ] && echo "  - TG_DATABASE_HOST (DATABASE_HOST)"
             [ -z "${TG_DATABASE_NAME}" ] && echo "  - TG_DATABASE_NAME (DATABASE_NAME)"
             [ -z "${TG_DATABASE_USER}" ] && echo "  - TG_DATABASE_USER (DATABASE_USER)"
             [ -z "${TG_DATABASE_PASSWORD}" ] && echo "  - TG_DATABASE_PASSWORD (DATABASE_PASSWORD)"
@@ -145,6 +137,44 @@ spec:
             echo "The trustgate-secrets will be created automatically if DATABASE_HOST and DATABASE_PASSWORD are set."
             exit 1
           fi
+          
+          # Export SSL mode for psql (used for both trustgate and admin connections)
+          if [ "${PG_SSL_MODE}" != "disable" ]; then
+            export PGSSLMODE="${PG_SSL_MODE}"
+          fi
+          
+          # First try to connect using TrustGate credentials (trustgate-secrets).
+          # If successful, the user and database already exist – we are done.
+          echo "Trying to connect using TrustGate credentials at ${TG_DATABASE_HOST}:${TG_DB_PORT}..."
+          TRY_MAX=10
+          TRY_N=0
+          while [ $TRY_N -lt $TRY_MAX ]; do
+            if PGPASSWORD="${TG_DATABASE_PASSWORD}" psql -h "${TG_DATABASE_HOST}" -p "${TG_DB_PORT}" -U "${TG_DB_USER}" -d "${TG_DB_NAME}" -c "SELECT 1" 2>/dev/null; then
+              echo "✓ Connected with TrustGate credentials; user and database already exist."
+              exit 0
+            fi
+            TRY_N=$((TRY_N + 1))
+            if [ $((TRY_N % 10)) -eq 0 ] && [ $TRY_N -gt 0 ]; then
+              echo "Attempt $TRY_N/$TRY_MAX: TrustGate connection not successful yet, retrying..."
+            fi
+            sleep 2
+          done
+          
+          echo "Could not connect with TrustGate credentials after $TRY_MAX attempts. Will try to create user/database using admin credentials if available."
+          
+          # Admin credentials (postgresql-secrets) are required to create user/database.
+          # They are optional when using external PostgreSQL – in that case create the trustgate user and database beforehand.
+          if [ -z "${POSTGRES_HOST}" ] || [ -z "${POSTGRES_USER}" ] || [ -z "${POSTGRES_PASSWORD}" ]; then
+            echo "ERROR: Could not connect with TrustGate credentials and admin credentials (postgresql-secrets) are not available."
+            echo "When using external PostgreSQL, create the trustgate user and database beforehand."
+            exit 1
+          fi
+          
+          # Get PostgreSQL admin credentials from postgresql-secrets (for create path)
+          PG_HOST="${POSTGRES_HOST}"
+          PG_PORT="${POSTGRES_PORT:-5432}"
+          PG_ADMIN_USER="${POSTGRES_USER}"
+          PG_ADMIN_PASSWORD="${POSTGRES_PASSWORD}"
           
           # Wait for PostgreSQL to be ready before attempting initialization
           echo "Waiting for PostgreSQL to be ready at ${PG_HOST}:${PG_PORT}..."
@@ -184,13 +214,8 @@ spec:
             exit 1
           fi
           
-          # Build psql connection options
+          # Build psql connection options (PGSSLMODE already exported above if not disable)
           PSQL_OPTS="-h ${PG_HOST} -p ${PG_PORT} -U ${PG_ADMIN_USER}"
-          
-          # Set SSL mode via environment variable (psql reads PGSSLMODE)
-          if [ "${PG_SSL_MODE}" != "disable" ]; then
-            export PGSSLMODE="${PG_SSL_MODE}"
-          fi
           
           echo "Connecting to PostgreSQL at ${PG_HOST}:${PG_PORT} as ${PG_ADMIN_USER} (SSL mode: ${PG_SSL_MODE})"
           echo "Creating database '${TG_DB_NAME}' and user '${TG_DB_USER}' if they don't exist..."
@@ -257,38 +282,56 @@ spec:
             memory: 128Mi
           {{- end }}
         env:
-        # PostgreSQL admin credentials from postgresql-secrets
+        # PostgreSQL admin credentials from postgresql-secrets (optional when using external PostgreSQL)
         - name: POSTGRES_HOST
           valueFrom:
             secretKeyRef:
               name: {{ $pgSecretName }}
               key: POSTGRES_HOST
+              optional: true
         - name: POSTGRES_PORT
           valueFrom:
             secretKeyRef:
               name: {{ $pgSecretName }}
               key: POSTGRES_PORT
+              optional: true
         - name: POSTGRES_USER
           valueFrom:
             secretKeyRef:
               name: {{ $pgSecretName }}
               key: POSTGRES_USER
+              optional: true
         - name: POSTGRES_PASSWORD
           valueFrom:
             secretKeyRef:
               name: {{ $pgSecretName }}
               key: POSTGRES_PASSWORD
-        # TrustGate database and user from trustgate-secrets
+              optional: true
+        # TrustGate database and user from trustgate-secrets (used for "try trustgate first" and for create)
+        - name: TG_DATABASE_HOST
+          valueFrom:
+            secretKeyRef:
+              name: {{ $tgSecretName }}
+              key: DATABASE_HOST
+              optional: true
+        - name: TG_DATABASE_PORT
+          valueFrom:
+            secretKeyRef:
+              name: {{ $tgSecretName }}
+              key: DATABASE_PORT
+              optional: true
         - name: TG_DATABASE_NAME
           valueFrom:
             secretKeyRef:
               name: {{ $tgSecretName }}
               key: DATABASE_NAME
+              optional: true
         - name: TG_DATABASE_USER
           valueFrom:
             secretKeyRef:
               name: {{ $tgSecretName }}
               key: DATABASE_USER
+              optional: true
         - name: TG_DATABASE_PASSWORD
           valueFrom:
             secretKeyRef:

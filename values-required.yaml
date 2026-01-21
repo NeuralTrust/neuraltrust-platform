@@ -8,8 +8,6 @@ global:
   imageRegistry: ""
   preserveExistingSecrets: false
   storageClass: ""
-  security:
-    allowInsecureImages: true
 
 # Infrastructure Components
 infrastructure:
