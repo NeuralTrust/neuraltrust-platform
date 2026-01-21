@@ -13,6 +13,6 @@ dependencies:
   version: 1.1.8
 - name: trustgate
   repository: file://./charts/trustgate
-  version: 1.1.10
-digest: sha256:2334cf9cf992aa43325c524a7a6431ed7e8a996308c3f4022dc9e06e8a859047
-generated: "2026-01-21T12:48:51.917175+01:00"
+  version: 1.1.11
+digest: sha256:b649ba71978cf765641a9f6945b7847c27db1fec1b90976397a819d666c153fc
+generated: "2026-01-21T16:04:48.226467+01:00"

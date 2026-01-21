@@ -103,6 +103,12 @@ spec:
             secretKeyRef:
               name: trustgate-secrets
               key: DATABASE_URL
+        - name: DATABASE_SSL_MODE
+          valueFrom:
+            secretKeyRef:
+              name: trustgate-secrets
+              key: DATABASE_SSL_MODE
+              optional: true
         # REDIS_PASSWORD is optional - can come from ConfigMap (trustgate-env-vars) or secret
         # If provided in secret, it will override ConfigMap value
         - name: REDIS_PASSWORD
