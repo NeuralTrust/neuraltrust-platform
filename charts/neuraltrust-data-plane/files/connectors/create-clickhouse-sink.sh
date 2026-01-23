@@ -202,6 +202,38 @@ create_or_update_connector "clickhouse-metrics-sink" '{
   }
 }'
 
+echo "Creating ClickHouse Topics Classified sink connector..."
+create_or_update_connector "clickhouse-topics-sink" '{
+  "name": "clickhouse-topics-sink",
+  "config": {
+    "connector.class": "com.clickhouse.kafka.connect.ClickHouseSinkConnector",
+    "tasks.max": "1",
+    "topics": "topics_classified",
+    "hostname": "'${CLICKHOUSE_HOST}'",
+    "port": "'${CLICKHOUSE_PORT}'",
+    "database": "'${CLICKHOUSE_DATABASE}'",
+    "username": "'${CLICKHOUSE_USER}'",
+    "password": "'${CLICKHOUSE_PASSWORD}'",
+    "ssl": "false",
+    "exactlyOnce": "false",
+    "state.provider.class": "com.clickhouse.kafka.connect.sink.state.provider.FileStateProvider",
+    "state.provider.working.dir": "/tmp/clickhouse-sink",
+    "queue.max.wait.ms": "5000",
+    "retry.max.count": "5",
+    "errors.retry.timeout": "60",
+    "errors.tolerance": "all",
+    "errors.log.enable": "true",
+    "errors.log.include.messages": "true",
+    "table.name": "topics_classified",
+    "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false",
+    "transforms": "flattenJson",
+    "transforms.flattenJson.type": "org.apache.kafka.connect.transforms.Flatten$Value",
+    "transforms.flattenJson.delimiter": "_"
+  }
+}'
+
 echo "Creating ClickHouse Traces Processed sink connector..."
 create_or_update_connector "clickhouse-traces-processed-sink" '{
   "name": "clickhouse-traces-processed-sink",
@@ -283,7 +315,7 @@ connector_exists() {
 }
 
 # Verify all expected connectors exist
-EXPECTED_CONNECTORS="clickhouse-audit-logs-ingest-sink clickhouse-discover-events-sink clickhouse-gpt-usage-sink clickhouse-metrics-sink clickhouse-traces-processed-sink clickhouse-traces-sink"
+EXPECTED_CONNECTORS="clickhouse-audit-logs-ingest-sink clickhouse-discover-events-sink clickhouse-gpt-usage-sink clickhouse-metrics-sink clickhouse-topics-sink clickhouse-traces-processed-sink clickhouse-traces-sink"
 MISSING_CONNECTORS=""
 
 for connector in ${EXPECTED_CONNECTORS}; do
