@@ -233,9 +233,6 @@ trustgate:
       REDIS_HOST: ""  # Will be auto-configured if redis.enabled
       REDIS_PORT: "6379"
       REDIS_DB: "0"
-      CONTROL_PLANE_HOST: "admin.yourdomain.com"  # Set to your domain
-      DATA_PLANE_HOST: "gateway.yourdomain.com"  # Set to your domain
-      ACTIONS_HOST: "actions.yourdomain.com"  # Set to your domain
 
   # Service Account configuration
   serviceAccount:
