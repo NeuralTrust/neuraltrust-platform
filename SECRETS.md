@@ -4,9 +4,44 @@ This guide explains how to manage secrets for the NeuralTrust Platform deploymen
 
 ## Quick Start
 
-### Option 1: Use the Secrets Script (Recommended)
+### Option 1: Auto-Generated Secrets (Default -- Recommended)
 
-The easiest way to configure all secrets is using the provided script:
+**No action required.** With `global.autoGenerateSecrets: true` (the default), the chart automatically generates all required secrets on first install and preserves them across upgrades:
+
+```bash
+# Deploy with auto-generated secrets -- no values file needed
+helm upgrade --install neuraltrust-platform . --namespace neuraltrust --create-namespace
+```
+
+**Auto-generated secrets include:**
+
+| Secret | Kubernetes Secret Name | Key(s) |
+|--------|----------------------|--------|
+| TrustGate server key | `trustgate-secrets` | `SERVER_SECRET_KEY` |
+| TrustGate DB password | `trustgate-secrets` | `DATABASE_PASSWORD` |
+| Control Plane JWT | `control-plane-secrets` | `CONTROL_PLANE_JWT_SECRET` |
+| TrustGate JWT (synced with SERVER_SECRET_KEY) | `control-plane-secrets` | `TRUSTGATE_JWT_SECRET` |
+| Data Plane JWT | `data-plane-jwt-secret` | `DATA_PLANE_JWT_SECRET` |
+| PostgreSQL password | `postgresql-secrets` | `POSTGRES_PASSWORD` |
+
+> **Important:** `SERVER_SECRET_KEY` (TrustGate) and `TRUSTGATE_JWT_SECRET` (Control Plane) are always synchronized to the same value.
+
+**How auto-generation works:**
+1. On first install, random 64-character alphanumeric values are generated
+2. On `helm upgrade`, existing values are read from the cluster via `lookup` and reused
+3. If you provide an explicit (non-empty) value in your values file, it takes priority
+
+**To override a specific secret:**
+```yaml
+trustgate:
+  global:
+    env:
+      SERVER_SECRET_KEY: "my-explicit-key"  # Overrides auto-generation
+```
+
+### Option 2: Use the Secrets Script
+
+For environments where you want to pre-create secrets before deploying:
 
 ```bash
 # Run the script interactively
@@ -22,11 +57,11 @@ export OPENAI_API_KEY="sk-..."
 ./create-secrets.sh --namespace neuraltrust --replace-existing
 ```
 
-### Option 2: Use Pre-defined Secrets
+### Option 3: Use Pre-defined Secrets
 
 If you already have secrets in your cluster, the Helm chart will automatically use them. Just ensure the secret names match what the chart expects (see Secret Names section below).
 
-### Option 3: Use Environment Variables in Values
+### Option 4: Use Environment Variables in Values
 
 You can also pass secrets directly via Helm values, though this is less secure:
 
@@ -165,11 +200,12 @@ Options:
 
 ## Security Best Practices
 
-1. **Use Pre-defined Secrets**: Create secrets before deployment using the script or kubectl
-2. **Avoid Values Files**: Don't store secrets in your values file (e.g. my-values.yaml) if it is committed to git
-3. **Use Secret Management**: Consider using external secret management systems (Sealed Secrets, External Secrets Operator, etc.)
-4. **Rotate Secrets**: Regularly rotate secrets, especially JWT secrets
-5. **Limit Access**: Use RBAC to limit who can read secrets
+1. **Use Auto-Generated Secrets (Default)**: Let the chart auto-generate secrets for the simplest and safest setup
+2. **Use Pre-defined Secrets for Production**: For production, consider creating secrets before deployment using the script, kubectl, or an external secret manager
+3. **Avoid Values Files for Secrets**: Don't store secrets in your values file (e.g. my-values.yaml) if it is committed to git
+4. **Use Secret Management**: Consider using external secret management systems (Sealed Secrets, External Secrets Operator, etc.)
+5. **Rotate Secrets**: Regularly rotate secrets, especially JWT secrets
+6. **Limit Access**: Use RBAC to limit who can read secrets
 
 ## Troubleshooting
 
@@ -251,10 +287,20 @@ spec:
         key: neuraltrust/data-plane/jwt-secret
 ```
 
+## Auto-Generation vs Pre-Generated Secrets
+
+| Feature | Auto-Generated (`autoGenerateSecrets: true`) | Pre-Generated (`preserveExistingSecrets: true`) |
+|---------|----------------------------------------------|--------------------------------------------------|
+| Setup effort | None -- just deploy | Must create all secrets first |
+| Secret creation | Helm creates secrets automatically | User/CI creates secrets before deploy |
+| Upgrade behavior | Existing values preserved via `lookup` | Helm never touches secrets |
+| Secret synchronization | `SERVER_SECRET_KEY` = `TRUSTGATE_JWT_SECRET` automatic | Manual -- user must ensure consistency |
+| Best for | Dev, staging, quick starts | Production with Vault/Sealed Secrets/compliance |
+
 ## Next Steps
 
-After creating secrets:
+After deployment:
 1. Verify secrets are created: `kubectl get secrets -n neuraltrust`
-2. Deploy the Helm chart: `helm upgrade --install neuraltrust-platform . -n neuraltrust -f my-values.yaml`
+2. If using auto-generation, secrets are already created by Helm
 3. Check pod logs if issues occur: `kubectl logs -n neuraltrust <pod-name>`
 

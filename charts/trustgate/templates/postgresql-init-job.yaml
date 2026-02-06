@@ -32,8 +32,14 @@ Job to initialize TrustGate PostgreSQL database and user.
 {{- if and .Values.global.env .Values.global.env.DATABASE_SSL_MODE (ne .Values.global.env.DATABASE_SSL_MODE "") }}
   {{- $tgDbSslMode = .Values.global.env.DATABASE_SSL_MODE }}
 {{- end }}
-{{- /* Only create job if we have the required values */}}
-{{- if and $tgDbHost $tgDbPassword $tgDbName $tgDbUser }}
+{{- /* Check if parent chart handles secret auto-generation */}}
+{{- $autoGenerate := false }}
+{{- if and .Values.global (hasKey .Values.global "autoGenerateSecrets") .Values.global.autoGenerateSecrets }}
+  {{- $autoGenerate = true }}
+{{- end }}
+{{- /* Create job if we have the required values OR if autoGenerateSecrets is enabled */}}
+{{- /* When autoGenerate is true, the parent chart creates trustgate-secrets with the password */}}
+{{- if or (and $tgDbHost $tgDbPassword $tgDbName $tgDbUser) (and $autoGenerate $tgDbHost) }}
 apiVersion: batch/v1
 kind: Job
 metadata:

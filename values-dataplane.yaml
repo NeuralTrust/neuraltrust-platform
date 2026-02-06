@@ -6,6 +6,7 @@
 global:
   openshift: false
   imageRegistry: ""
+  autoGenerateSecrets: true  # Auto-generate required secrets if not explicitly provided
   preserveExistingSecrets: false
   storageClass: ""
 
@@ -25,9 +26,8 @@ infrastructure:
 clickhouse:
   auth:
     username: "neuraltrust"
-    # Define ClickHouse password
-    # You can use openssl to generate a random value: openssl rand -hex 32
-    password: "" # Required
+    # ClickHouse password - auto-generated if empty and autoGenerateSecrets: true
+    password: "" # Auto-generated if empty
   image:
     repository: "bitnamilegacy/clickhouse"
     tag: "25.3.2-debian-12-r3"
@@ -51,14 +51,13 @@ trustgate:
     image:
       imagePullSecrets: ["gcr-secret"]
     env:
-      # TrustGate secret key is used to encrypt the JWT token for the TrustGate API
-      # You can use openssl to generate a random value: openssl rand -hex 32
-      SERVER_SECRET_KEY: "" # Required
+      # TrustGate secret key - auto-generated if empty and autoGenerateSecrets: true
+      # Shared with neuraltrust-control-plane.controlPlane.secrets.trustgateJwtSecret
+      SERVER_SECRET_KEY: "" # Auto-generated if empty
       # Database host is the host of the PostgreSQL database
       DATABASE_HOST: "control-plane-postgresql" # Required
-      # Database password is the password of the trustgate user in the PostgreSQL database
-      # You can use openssl to generate a random value: openssl rand -hex 32
-      DATABASE_PASSWORD: "" # Required
+      # TrustGate database password - auto-generated if empty and autoGenerateSecrets: true
+      DATABASE_PASSWORD: "" # Auto-generated if empty
   redis:
     enabled: true
     # Note: redis.auth.password is optional - only recommended when using external Redis (redis.enabled: false)
@@ -72,12 +71,11 @@ neuraltrust-control-plane:
     enabled: false
     imagePullSecrets: "gcr-secret"
     secrets:
-      # ControlPlane JWT secret is used to encrypt the JWT token for the ControlPlane API
-      # You can use openssl to generate a random value: openssl rand -hex 32
-      controlPlaneJWTSecret: "" # Required
-      # TrustGate JWT secret is used to connect the ControlPlane to the TrustGate API
-      # You must use the same secret for the TrustGate JWT secret in the TrustGate configuration
-      trustgateJwtSecret: "" # Required
+      # ControlPlane JWT secret - auto-generated if empty and autoGenerateSecrets: true
+      controlPlaneJWTSecret: "" # Auto-generated if empty
+      # TrustGate JWT secret - auto-generated if empty and autoGenerateSecrets: true
+      # Automatically synchronized with trustgate.global.env.SERVER_SECRET_KEY
+      trustgateJwtSecret: "" # Auto-generated if empty (= SERVER_SECRET_KEY)
     components:
       scheduler:
         enabled: true
@@ -87,9 +85,8 @@ neuraltrust-control-plane:
         enabled: true
       postgresql:
         secrets:
-          # Database password is the password of the PostgreSQL database
-          # You can use openssl to generate a random value: openssl rand -hex 32
-          password: "" # Required if infrastructure.postgresql.deploy=true
+          # PostgreSQL password - auto-generated if empty and autoGenerateSecrets: true
+          password: "" # Auto-generated if empty
         image:
           repository: "postgres"
           tag: "17.2-alpine"
@@ -100,9 +97,8 @@ neuraltrust-data-plane:
     enabled: true
     imagePullSecrets: "gcr-secret"
     secrets:
-      # DataPlane JWT secret is used to encrypt the JWT token for the DataPlane API
-      # You can use openssl to generate a random value: openssl rand -hex 32
-      dataPlaneJWTSecret: "" # Required
+      # DataPlane JWT secret - auto-generated if empty and autoGenerateSecrets: true
+      dataPlaneJWTSecret: "" # Auto-generated if empty
     components:
       api:
         enabled: true

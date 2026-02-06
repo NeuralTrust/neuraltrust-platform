@@ -166,3 +166,54 @@ Uses neuraltrust-control-plane.controlPlane.components.postgresql.secrets for ex
 {{- end }}
 {{- end }}
 
+{{/*
+Resolve a secret value with auto-generation support.
+Priority: explicit value > existing value in cluster > generate random.
+
+Usage:
+  {{ include "neuraltrust-platform.resolveSecret" (dict "value" $myValue "existingSecret" $existingSecretObj "secretKey" "MY_KEY" "length" 64) }}
+
+Parameters:
+  - value:          The explicit value from helm values (string). Empty or nil means "not provided".
+  - existingSecret: The result of (lookup "v1" "Secret" .Release.Namespace "secret-name"). Can be nil.
+  - secretKey:      The key to look up in the existing secret's data.
+  - length:         (Optional) Length of the generated random string. Default: 64.
+*/}}
+{{- define "neuraltrust-platform.resolveSecret" -}}
+{{- $value := .value }}
+{{- $existingSecret := .existingSecret }}
+{{- $secretKey := .secretKey }}
+{{- $length := 64 }}
+{{- if .length }}
+  {{- $length = .length | int }}
+{{- end }}
+{{- /* Priority 1: Use explicitly provided value (non-empty string) */}}
+{{- if and $value (ne ($value | toString) "") }}
+  {{- $value }}
+{{- /* Priority 2: Reuse existing value from cluster secret */}}
+{{- else if and $existingSecret (kindIs "map" $existingSecret) }}
+  {{- if and (index $existingSecret "data") (hasKey (index $existingSecret "data") $secretKey) }}
+    {{- index $existingSecret.data $secretKey | b64dec }}
+  {{- else }}
+    {{- /* Existing secret doesn't have this key - generate */}}
+    {{- randAlphaNum $length }}
+  {{- end }}
+{{- /* Priority 3: Generate new random value */}}
+{{- else }}
+  {{- randAlphaNum $length }}
+{{- end }}
+{{- end }}
+
+{{/*
+Check if autoGenerateSecrets is enabled.
+Returns "true" (non-empty string) if enabled, empty string if disabled.
+Usage: {{- if include "neuraltrust-platform.autoGenerateSecrets" . }}
+*/}}
+{{- define "neuraltrust-platform.autoGenerateSecrets" -}}
+{{- $autoGenerate := true }}
+{{- if and .Values.global (hasKey .Values.global "autoGenerateSecrets") }}
+  {{- $autoGenerate = .Values.global.autoGenerateSecrets }}
+{{- end }}
+{{- if $autoGenerate }}true{{- end }}
+{{- end }}
+

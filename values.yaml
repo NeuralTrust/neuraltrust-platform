@@ -8,6 +8,7 @@ global:
   openshift: false # set to true if you are using openshift
   openshiftDomain: "" # OpenShift wildcard DNS domain (e.g., *.apps.YOUR_DOMAIN)
   imageRegistry: "" # Global image registry prefix (e.g., "europe-west1-docker.pkg.dev/project/repo"). If set, will be prepended to image repositories.
+  autoGenerateSecrets: true  # Auto-generate required secrets (JWT keys, passwords) if not explicitly provided. Uses lookup to preserve existing values on upgrades. Set to false to let subcharts manage their own secrets (required when using secret references).
   preserveExistingSecrets: false  # Set to true to prevent Helm from creating/updating secrets (secrets are pre-generated). When true, secret templates are NOT rendered.
   security:
     allowInsecureImages: true # Allow Bitnami charts to use their container images
@@ -26,7 +27,7 @@ infrastructure:
       host: "clickhouse.clickhouse.svc.cluster.local" # e.g., "clickhouse.clickhouse.svc.cluster.local"
       port: "8123"
       user: "neuraltrust"
-      password: "" # Define this value
+      password: "" # Auto-generated if empty (only used when deploy: false)
       database: "neuraltrust"
       # Secret reference for external ClickHouse credentials
       secretName: "clickhouse" # Optional: secret containing CLICKHOUSE_PASSWORD
@@ -59,7 +60,7 @@ infrastructure:
       host: "postgresql.postgresql.svc.cluster.local" # e.g., "postgresql.postgresql.svc.cluster.local"
       port: "5432"
       user: "postgres" # Default: "postgres" for external, "neuraltrust" for in-cluster
-      password: "" # Define this value
+      password: "" # Auto-generated if empty (only used when deploy: false)
       database: "neuraltrust"
       # Secret reference for external PostgreSQL credentials
       secretName: "" # Optional: secret containing POSTGRES_PASSWORD
@@ -89,7 +90,7 @@ clickhouse:
     imagePullSecrets: []
   auth:
     username: "neuraltrust"
-    password: "" # Define this value
+    password: "" # Auto-generated if empty
     # Use existing secret if it already exists (prevents Helm from trying to manage it)
     # Set to "clickhouse" to use the pre-existing secret named "clickhouse"
     existingSecret: ""  # Set to "" if you want Helm to create/manage the secret
@@ -222,7 +223,7 @@ trustgate:
         repository: "postgres"  # PostgreSQL image repository
         tag: "17.2-alpine"  # PostgreSQL image tag
     env:
-      SERVER_SECRET_KEY: ""  # Define this value
+      SERVER_SECRET_KEY: ""  # Auto-generated if empty (shared with trustgateJwtSecret)
       SERVER_BASE_DOMAIN: "yourdomain.com"  # Set to your domain
       SERVER_ADMIN_PORT: "8080"
       SERVER_METRICS_PORT: "9090"
@@ -236,7 +237,7 @@ trustgate:
       DATABASE_HOST: "control-plane-postgresql"  # Use control-plane PostgreSQL service name when infrastructure.postgresql.deploy=true
       DATABASE_PORT: "5432"
       DATABASE_USER: "trustgate"
-      DATABASE_PASSWORD: "" #define this value
+      DATABASE_PASSWORD: "" # Auto-generated if empty
       DATABASE_NAME: "trustgate"
       # PostgreSQL SSL mode (disable, require, verify-ca, verify-full)
       # Use "disable" when infrastructure.postgresql.deploy=true, "require" for external PostgreSQL
@@ -442,12 +443,12 @@ neuraltrust-control-plane:
     enabled: true
     imagePullSecrets: "gcr-secret"  # Set imagePullSecrets for all control-plane components (scheduler, api, app, postgresql)
     secrets:
-      controlPlaneJWTSecret: "" #define this value
+      controlPlaneJWTSecret: "" # Auto-generated if empty
       openaiApiKey: ""
       resendApiKey: ""
       resendAlertSender: ""
       resendInviteSender: ""
-      trustgateJwtSecret: "" #define this value
+      trustgateJwtSecret: "" # Auto-generated if empty (= SERVER_SECRET_KEY)
       firewallJwtSecret: ""
       modelScannerSecret: ""
     components:
@@ -592,7 +593,7 @@ neuraltrust-control-plane:
         secrets:
           name: "postgresql-secrets"
           user: "neuraltrust"  # PostgreSQL user (default: "neuraltrust" for in-cluster, "postgres" for external)
-          password: ""  # PostgreSQL password (required when infrastructure.postgresql.deploy=true or using external PostgreSQL)
+          password: ""  # Auto-generated if empty
           database: "neuraltrust"  # PostgreSQL database name
           host: "control-plane-postgresql"  # PostgreSQL host (set to "control-plane-postgresql" when infrastructure.postgresql.deploy=true, or external host when using external PostgreSQL)
           port: "5432"  # PostgreSQL port
@@ -632,7 +633,7 @@ neuraltrust-data-plane:
       resendApiKeySecretName: "resend-secrets"
       resendApiKey: ""
       dataPlaneJWTSecretName: "data-plane-jwt-secret"
-      dataPlaneJWTSecret: "" #define this value
+      dataPlaneJWTSecret: "" # Auto-generated if empty
       huggingFaceTokenSecretName: "huggingface-secrets"
       huggingFaceToken: ""
     components:

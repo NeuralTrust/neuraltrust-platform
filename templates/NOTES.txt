@@ -1,5 +1,12 @@
 NeuralTrust Platform has been deployed!
 
+{{- if .Values.global.autoGenerateSecrets }}
+Secrets have been auto-generated for this deployment.
+  - SERVER_SECRET_KEY and TRUSTGATE_JWT_SECRET are synchronized.
+  - Existing secrets are preserved on upgrades.
+  - To view generated secrets: kubectl get secrets -n {{ .Release.Namespace }}
+{{- end }}
+
 {{- if .Values.infrastructure.clickhouse.deploy }}
 ClickHouse has been deployed in this release.
 {{- else }}
