@@ -39,14 +39,14 @@ oc create namespace neuraltrust
 # See "Docker Registry Secret" section below
 
 # Minimal install (secrets auto-generated):
-helm install neuraltrust-platform oci://europe-west1-docker.pkg.dev/neuraltrust-app-prod/helm-charts/neuraltrust-platform \
+helm upgrade --install neuraltrust-platform oci://europe-west1-docker.pkg.dev/neuraltrust-app-prod/helm-charts/neuraltrust-platform \
   --version VERSION \
   --namespace neuraltrust \
   --set global.openshift=true \
   --set global.openshiftDomain="YOUR_DOMAIN"
 
 # Or with custom values:
-helm install neuraltrust-platform oci://europe-west1-docker.pkg.dev/neuraltrust-app-prod/helm-charts/neuraltrust-platform \
+helm upgrade --install neuraltrust-platform oci://europe-west1-docker.pkg.dev/neuraltrust-app-prod/helm-charts/neuraltrust-platform \
   --version VERSION -f my-values.yaml \
   --namespace neuraltrust \
   --set global.openshift=true \

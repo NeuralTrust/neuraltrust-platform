@@ -81,12 +81,12 @@ jobs:
 
             **3. Install from OCI (Artifact Registry)**
             ```bash
-            helm install neuraltrust-platform oci://europe-west1-docker.pkg.dev/neuraltrust-app-prod/helm-charts/neuraltrust-platform --version ${{ steps.version.outputs.version }} --namespace neuraltrust --create-namespace
+            helm upgrade --install neuraltrust-platform oci://europe-west1-docker.pkg.dev/neuraltrust-app-prod/helm-charts/neuraltrust-platform --version ${{ steps.version.outputs.version }} --namespace neuraltrust --create-namespace
             ```
             Or pull the chart first, then install:
             ```bash
             helm pull oci://europe-west1-docker.pkg.dev/neuraltrust-app-prod/helm-charts/neuraltrust-platform --version ${{ steps.version.outputs.version }}
-            helm install neuraltrust-platform ./neuraltrust-platform-${{ steps.version.outputs.version }}.tgz --namespace neuraltrust --create-namespace
+            helm upgrade --install neuraltrust-platform ./neuraltrust-platform-${{ steps.version.outputs.version }}.tgz --namespace neuraltrust --create-namespace
             ```
 
             > **Secrets:** All required secrets (JWT keys, database passwords) are auto-generated on first install and preserved on upgrades. To provide explicit values, set them in a custom values file. See [SECRETS.md](https://github.com/${{ github.repository }}/blob/${{ steps.version.outputs.tag }}/SECRETS.md) for details.

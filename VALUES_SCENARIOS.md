@@ -67,7 +67,7 @@ global:
 
 **Usage:**
 ```bash
-helm install neuraltrust-platform . -f values-openshift.yaml
+helm upgrade --install neuraltrust-platform . -f values-openshift.yaml
 ```
 
 ---
@@ -100,7 +100,7 @@ cp values-openshift-ingress.yaml.example values-openshift-ingress.yaml
 # - Update image registries and pull secrets
 # - Pre-generate all required secrets
 
-helm install neuraltrust-platform . -f values-openshift-ingress.yaml
+helm upgrade --install neuraltrust-platform . -f values-openshift-ingress.yaml
 ```
 
 ---
@@ -117,7 +117,7 @@ helm install neuraltrust-platform . -f values-openshift-ingress.yaml
 
 **Usage:**
 ```bash
-helm install neuraltrust-platform . -f values-all-deployed.yaml.example
+helm upgrade --install neuraltrust-platform . -f values-all-deployed.yaml.example
 ```
 
 ---
@@ -134,7 +134,7 @@ helm install neuraltrust-platform . -f values-all-deployed.yaml.example
 
 **Usage:**
 ```bash
-helm install neuraltrust-platform . -f values-external-services.yaml.example
+helm upgrade --install neuraltrust-platform . -f values-external-services.yaml.example
 ```
 
 ---

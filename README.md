@@ -64,11 +64,11 @@ Optionally copy `values-required.yaml` from the repo and customize, then:
 
 ```bash
 # Minimal install (secrets auto-generated, default settings):
-helm install neuraltrust-platform oci://europe-west1-docker.pkg.dev/neuraltrust-app-prod/helm-charts/neuraltrust-platform \
+helm upgrade --install neuraltrust-platform oci://europe-west1-docker.pkg.dev/neuraltrust-app-prod/helm-charts/neuraltrust-platform \
   --version VERSION --namespace neuraltrust --create-namespace
 
 # Or with custom values:
-helm install neuraltrust-platform oci://europe-west1-docker.pkg.dev/neuraltrust-app-prod/helm-charts/neuraltrust-platform \
+helm upgrade --install neuraltrust-platform oci://europe-west1-docker.pkg.dev/neuraltrust-app-prod/helm-charts/neuraltrust-platform \
   --version VERSION --namespace neuraltrust --create-namespace -f my-values.yaml
 ```
 
@@ -76,7 +76,7 @@ Or pull the chart, then install:
 
 ```bash
 helm pull oci://europe-west1-docker.pkg.dev/neuraltrust-app-prod/helm-charts/neuraltrust-platform --version VERSION
-helm install neuraltrust-platform ./neuraltrust-platform-VERSION.tgz --namespace neuraltrust --create-namespace -f my-values.yaml
+helm upgrade --install neuraltrust-platform ./neuraltrust-platform-VERSION.tgz --namespace neuraltrust --create-namespace -f my-values.yaml
 ```
 
 **2. Download tarball from a GitHub Release**

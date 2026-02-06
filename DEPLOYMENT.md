@@ -12,11 +12,11 @@ This guide explains how to deploy the NeuralTrust Platform using the unified Hel
 
 ```bash
 # Minimal install (secrets auto-generated):
-helm install neuraltrust-platform oci://europe-west1-docker.pkg.dev/neuraltrust-app-prod/helm-charts/neuraltrust-platform \
+helm upgrade --install neuraltrust-platform oci://europe-west1-docker.pkg.dev/neuraltrust-app-prod/helm-charts/neuraltrust-platform \
   --version VERSION --namespace neuraltrust --create-namespace
 
 # Or with custom values:
-helm install neuraltrust-platform oci://europe-west1-docker.pkg.dev/neuraltrust-app-prod/helm-charts/neuraltrust-platform \
+helm upgrade --install neuraltrust-platform oci://europe-west1-docker.pkg.dev/neuraltrust-app-prod/helm-charts/neuraltrust-platform \
   --version VERSION --namespace neuraltrust --create-namespace -f my-values.yaml
 ```
 
