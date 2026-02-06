@@ -65,17 +65,6 @@ jobs:
         run: |
           helm push ${{ env.CHART_FILE }} oci://${{ env.AR_REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}
 
-      - name: Make chart public
-        continue-on-error: true
-        run: |
-          if gcloud artifacts repositories add-iam-policy-binding ${{ env.AR_REPO }} \
-            --location=${{ env.AR_LOCATION }} \
-            --project=${{ env.PROJECT_ID }} \
-            --member=allUsers \
-            --role=roles/artifactregistry.reader 2>/dev/null; then
-            echo "Chart is publicly accessible."
-          fi
-
       - name: Verify
         run: |
           helm show chart oci://${{ env.AR_REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.CHART_NAME }} --version ${{ steps.chart_version.outputs.version }}
