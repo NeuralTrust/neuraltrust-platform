@@ -70,6 +70,7 @@ trustgate:
     # Note: redis.auth.password is optional - only recommended when using external Redis (redis.enabled: false)
 
 # NeuralTrust Control Plane
+# Note: Control Plane is NOT deployed by default. Set controlPlane.enabled: true to deploy it.
 neuraltrust-control-plane:
   infrastructure:
     postgresql:

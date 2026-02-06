@@ -1,3 +1,4 @@
+{{- if and .Values.controlPlane .Values.controlPlane.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -259,3 +260,4 @@ spec:
           timeoutSeconds: 5
           successThreshold: 1
           failureThreshold: 30
+{{- end }}

@@ -1,3 +1,4 @@
+{{- if and .Values.controlPlane .Values.controlPlane.enabled }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -135,4 +136,5 @@ spec:
   port:
     targetPort: http
   path: "/"
+{{- end }}
 {{- end }}

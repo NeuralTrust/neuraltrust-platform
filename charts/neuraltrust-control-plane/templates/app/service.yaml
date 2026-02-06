@@ -1,3 +1,4 @@
+{{- if and .Values.controlPlane .Values.controlPlane.enabled }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -189,4 +190,5 @@ spec:
     {{- end }}
     insecureEdgeTerminationPolicy: {{ if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.ingress .Values.controlPlane.components.app.ingress.tls .Values.controlPlane.components.app.ingress.tls.insecureEdgeTerminationPolicy }}{{ .Values.controlPlane.components.app.ingress.tls.insecureEdgeTerminationPolicy }}{{ else }}Redirect{{ end }}
     {{- end }}
+{{- end }}
 {{- end }}

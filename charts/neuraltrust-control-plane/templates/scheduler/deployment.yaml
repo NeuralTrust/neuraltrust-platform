@@ -1,3 +1,4 @@
+{{- if and .Values.controlPlane .Values.controlPlane.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -238,3 +239,4 @@ spec:
               name: control-plane-secrets
               key: resend-alert-sender
               optional: true
+{{- end }}

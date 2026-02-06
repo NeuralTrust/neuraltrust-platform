@@ -440,7 +440,7 @@ neuraltrust-control-plane:
     postgresql:
       deploy: true  # Deploy PostgreSQL in-cluster (set to false to use external PostgreSQL)
   controlPlane:
-    enabled: true
+    enabled: false
     imagePullSecrets: "gcr-secret"  # Set imagePullSecrets for all control-plane components (scheduler, api, app, postgresql)
     secrets:
       controlPlaneJWTSecret: "" # Auto-generated if empty
