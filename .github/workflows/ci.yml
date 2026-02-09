@@ -1,0 +1,33 @@
+# CI pipeline for PRs targeting main
+# Runs: AI code review → SAST (Trivy IaC/config + Gitleaks) → auto-approve
+# Existing create-release.yml and publish-chart.yml handle releases separately
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: read
+  security-events: write
+
+jobs:
+  code-review:
+    uses: NeuralTrust/workflows/.github/workflows/ai-code-review.yml@main
+    secrets:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+
+  security:
+    uses: NeuralTrust/workflows/.github/workflows/sast.yml@main
+    with:
+      scan_type: config
+
+  auto-approve:
+    needs: [code-review, security]
+    uses: NeuralTrust/workflows/.github/workflows/auto-approve.yml@main
+    secrets:
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
