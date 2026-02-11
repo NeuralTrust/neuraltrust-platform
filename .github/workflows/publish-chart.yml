@@ -63,13 +63,13 @@ jobs:
 
       - name: Push
         run: |
-          helm push ${{ env.CHART_FILE }} oci://${{ env.AR_REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}
+          helm push "$CHART_FILE" oci://${{ env.AR_REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}
 
       - name: Upload chart to GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload "${{ github.event.release.tag_name }}" "${{ env.CHART_FILE }}" --clobber
+          gh release upload "${{ github.event.release.tag_name }}" "$CHART_FILE" --clobber
 
       - name: Update release with installation instructions
         env:
