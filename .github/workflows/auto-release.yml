@@ -1,0 +1,24 @@
+# Auto-release pipeline for main branch
+# Uses AI to determine semver bump (major/minor/patch) and creates a GitHub Release.
+# The release event then triggers publish-chart.yml for packaging and pushing to OCI.
+# Also updates Chart.yaml with the new version before creating the release.
+# See: https://semver.org/
+
+name: Auto Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    uses: NeuralTrust/workflows/.github/workflows/ai-release-bump.yml@main
+    with:
+      version_update_script: |
+        sed -i 's/^version: .*/version: '"$VERSION"'/' Chart.yaml
+    secrets:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
