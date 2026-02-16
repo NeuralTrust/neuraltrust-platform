@@ -1,0 +1,5 @@
+- f56d395 Refactor platform configuration in Helm charts
+- 8680a8a Refactor publish-chart workflow to use variable syntax for Helm commands
+- 267721c Add auto-release workflow and remove deprecated create-release workflow
+- 1ad2e42 Add CI workflow and Dependabot configuration
+- 0b545e0 Remove public access configuration for Helm chart in publish workflow

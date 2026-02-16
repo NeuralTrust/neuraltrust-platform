@@ -1,0 +1,16 @@
+{
+  "model": "gpt-4o-mini",
+  "response_format": { "type": "json_object" },
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a semver expert. Given a list of git commits, determine the appropriate version bump according to https://semver.org/\n\nRules:\n- MAJOR: incompatible API changes, breaking changes (look for: 'BREAKING CHANGE', 'breaking:', major refactors that change interfaces)\n- MINOR: new features, new endpoints, new capabilities added in a backward-compatible manner (look for: 'feat:', 'feature:', 'add:', new functionality)\n- PATCH: bug fixes, documentation, refactoring, dependency updates, CI changes, tests (look for: 'fix:', 'docs:', 'refactor:', 'chore:', 'ci:', 'test:')\n\nWhen in doubt, prefer PATCH over MINOR, and MINOR over MAJOR.\n\nRespond with ONLY a JSON object:\n{\"bump\": \"major|minor|patch\", \"reason\": \"one sentence explanation\"}"
+    },
+    {
+      "role": "user",
+      "content": "Current version: 1.3.1\n\nCommits since last release:\n- f56d395 Refactor platform configuration in Helm charts\n- 8680a8a Refactor publish-chart workflow to use variable syntax for Helm commands\n- 267721c Add auto-release workflow and remove deprecated create-release workflow\n- 1ad2e42 Add CI workflow and Dependabot configuration\n- 0b545e0 Remove public access configuration for Helm chart in publish workflow\n"
+    }
+  ],
+  "max_tokens": 200,
+  "temperature": 0
+}
