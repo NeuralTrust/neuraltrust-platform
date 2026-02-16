@@ -8,7 +8,7 @@
     },
     {
       "role": "user",
-      "content": "Current version: 1.3.1\n\nCommits since last release:\n- f56d395 Refactor platform configuration in Helm charts\n- 8680a8a Refactor publish-chart workflow to use variable syntax for Helm commands\n- 267721c Add auto-release workflow and remove deprecated create-release workflow\n- 1ad2e42 Add CI workflow and Dependabot configuration\n- 0b545e0 Remove public access configuration for Helm chart in publish workflow\n"
+      "content": "Current version: 1.3.2\n\nCommits since last release:\n- ef91451 Enhance bump-images workflow for NeuralTrust\n"
     }
   ],
   "max_tokens": 200,
