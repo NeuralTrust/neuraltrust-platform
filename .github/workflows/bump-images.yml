@@ -303,17 +303,24 @@ jobs:
           echo ""
           echo "=== Chart Version Bumps ==="
 
-          # Bump subchart versions (patch) — root Chart.yaml is handled by auto-release.yml on merge
+          # Bump subchart versions (patch) and sync dependency refs in root Chart.yaml
+          # Note: root chart VERSION is handled by auto-release.yml on merge
           if [[ "$BUMP_CONTROL_PLANE" == "true" ]]; then
-            bump_chart_version "charts/neuraltrust-control-plane/Chart.yaml"
+            NEW_VER=$(bump_chart_version "charts/neuraltrust-control-plane/Chart.yaml")
+            yq eval -i "(.dependencies[] | select(.name == \"neuraltrust-control-plane\")).version = \"${NEW_VER}\"" Chart.yaml
+            echo "  Updated root Chart.yaml dep: neuraltrust-control-plane → ${NEW_VER}"
           fi
 
           if [[ "$BUMP_DATA_PLANE" == "true" ]]; then
-            bump_chart_version "charts/neuraltrust-data-plane/Chart.yaml"
+            NEW_VER=$(bump_chart_version "charts/neuraltrust-data-plane/Chart.yaml")
+            yq eval -i "(.dependencies[] | select(.name == \"neuraltrust-data-plane\")).version = \"${NEW_VER}\"" Chart.yaml
+            echo "  Updated root Chart.yaml dep: neuraltrust-data-plane → ${NEW_VER}"
           fi
 
           if [[ "$BUMP_TRUSTGATE" == "true" ]]; then
-            bump_chart_version "charts/trustgate/Chart.yaml"
+            NEW_VER=$(bump_chart_version "charts/trustgate/Chart.yaml")
+            yq eval -i "(.dependencies[] | select(.name == \"trustgate\")).version = \"${NEW_VER}\"" Chart.yaml
+            echo "  Updated root Chart.yaml dep: trustgate → ${NEW_VER}"
           fi
 
           # Save changes summary
