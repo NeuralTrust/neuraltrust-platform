@@ -8,7 +8,7 @@
     },
     {
       "role": "user",
-      "content": "Current version: 1.3.3\n\nCommits since last release:\n- 62c2ecb chore: Update init-db.sql from data-plane-api (#6)\n"
+      "content": "Current version: 1.3.4\n\nCommits since last release:\n- 9749930 Merge pull request #7 from NeuralTrust/chore/bump-images-20260216-145817\n- 7ed80ee chore: bump image versions\n- f5ad21d Update bump-images workflow to specify tracked files for version bumps\n- d2cbbe2 Update error output in bump-images workflow to stderr\n- 23553f1 Enhance bump-images workflow to sync subchart versions in root Chart.yaml\n- 912c6dc Update auto-release and bump-images workflows\n"
     }
   ],
   "max_tokens": 200,
