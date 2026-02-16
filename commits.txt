@@ -1,1 +1,1 @@
-- ef91451 Enhance bump-images workflow for NeuralTrust
+- 62c2ecb chore: Update init-db.sql from data-plane-api (#6)

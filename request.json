@@ -8,7 +8,7 @@
     },
     {
       "role": "user",
-      "content": "Current version: 1.3.2\n\nCommits since last release:\n- ef91451 Enhance bump-images workflow for NeuralTrust\n"
+      "content": "Current version: 1.3.3\n\nCommits since last release:\n- 62c2ecb chore: Update init-db.sql from data-plane-api (#6)\n"
     }
   ],
   "max_tokens": 200,
