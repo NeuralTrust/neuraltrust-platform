@@ -35,7 +35,7 @@ spec:
         - name: kafka-connect
           {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect .Values.dataPlane.components.kafka.connect.image }}
           {{- $kafkaConnectRepo := .Values.dataPlane.components.kafka.connect.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect" }}
-          {{- $kafkaConnectTag := .Values.dataPlane.components.kafka.connect.image.tag | default "0.0.1" }}
+          {{- $kafkaConnectTag := .Values.dataPlane.components.kafka.connect.image.tag | default "v0.0.1" }}
           image: {{ include "data-plane.image" (dict "repository" $kafkaConnectRepo "tag" $kafkaConnectTag "global" .Values.global) | quote }}
           imagePullPolicy: {{ .Values.dataPlane.components.kafka.connect.image.pullPolicy | default "Always" }}
           {{- else }}

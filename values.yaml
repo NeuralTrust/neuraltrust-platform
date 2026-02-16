@@ -261,7 +261,7 @@ trustgate:
     image:
       pullPolicy: Always
       image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee"
-      tag: "v1.17.19"
+      tag: "v1.12.1"
       # imagePullSecrets: if not set, will fall back to parent chart's global.imagePullSecrets
       imagePullSecrets: ["gcr-secret"] # Set to array of secret names, e.g., ["secret-name"] or leave empty to use parent global.imagePullSecrets
     postgresql:
@@ -589,7 +589,7 @@ neuraltrust-control-plane:
         replicaCount: 1
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.15.1"
+          tag: "v1.16.0"
           pullPolicy: "Always"
         config:
           nodeEnv: production
@@ -703,7 +703,7 @@ neuraltrust-data-plane:
           replicas: 1
           image:
             repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect
-            tag: 0.0.1
+            tag: v0.0.1
             pullPolicy: Always
           resources:
             limits:

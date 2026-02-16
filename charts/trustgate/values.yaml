@@ -14,7 +14,7 @@ global:
     pullPolicy: Always
     image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee"
     repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee"
-    tag: "v1.17.19"
+    tag: "v1.12.1"
   env:
     SERVER_SECRET_KEY: ${SERVER_SECRET_KEY}
     SERVER_BASE_DOMAIN: ${SERVER_BASE_DOMAIN:-neuraltrust.ai}
