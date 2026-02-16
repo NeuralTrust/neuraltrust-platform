@@ -9,6 +9,8 @@ name: Auto Release
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '.github/workflows/**'
 
 permissions:
   contents: write
