@@ -366,7 +366,16 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
-          git add -A
+          git add \
+            values.yaml \
+            Chart.yaml \
+            Chart.lock \
+            charts/trustgate/values.yaml \
+            charts/trustgate/Chart.yaml \
+            charts/neuraltrust-control-plane/Chart.yaml \
+            charts/neuraltrust-control-plane/templates/ \
+            charts/neuraltrust-data-plane/Chart.yaml \
+            charts/neuraltrust-data-plane/templates/
           git commit -m "$(cat <<'COMMIT'
           chore: bump image versions
 
