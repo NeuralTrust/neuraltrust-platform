@@ -1,6 +1,9 @@
-# Manually triggered pipeline to bump NeuralTrust image versions in values.yaml.
-# For each image, you can either provide a specific tag or leave empty to fetch
-# the latest release tag from Google Artifact Registry.
+# Manually triggered pipeline to bump NeuralTrust image versions.
+# Updates: values.yaml, template hardcoded fallbacks, subchart defaults,
+# and bumps chart versions (patch).
+#
+# For each image, provide a specific tag or leave empty to auto-detect
+# the latest release from Google Artifact Registry.
 #
 # Usage:
 #   1. Go to Actions → "Bump Image Versions" → Run workflow
@@ -75,6 +78,11 @@ jobs:
         with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
 
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+
       - name: Install yq
         run: |
           sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
@@ -87,8 +95,6 @@ jobs:
           AR_BASE="${{ env.AR_REGISTRY }}/${{ env.AR_PROJECT }}/${{ env.AR_REPO }}"
           FETCH_LATEST="${{ inputs.fetch_latest }}"
 
-          # Resolves a tag: uses manual input if provided, otherwise queries
-          # Artifact Registry for the latest semver tag (v*).
           resolve_tag() {
             local image="$1"
             local manual_tag="$2"
@@ -105,7 +111,6 @@ jobs:
 
             echo "Fetching latest tag for ${image}..." >&2
 
-            # List tags sorted by update time, filter for semver-like (v*)
             local latest
             latest=$(gcloud artifacts docker tags list \
               "${AR_BASE}/${image}" \
@@ -152,85 +157,161 @@ jobs:
           echo "| workers | \`${WORKERS:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| kafka-connect | \`${KAFKA_CONNECT:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Update values.yaml
+      - name: Update values.yaml and template defaults
+        id: update
         run: |
           CHANGES=()
+          BUMP_CONTROL_PLANE=false
+          BUMP_DATA_PLANE=false
+          BUMP_TRUSTGATE=false
 
-          update_tag() {
+          # --- Helper: update a tag in values.yaml via yq ---
+          update_values_tag() {
             local yq_path="$1"
             local new_tag="$2"
             local image_name="$3"
+            local file="${4:-values.yaml}"
 
             if [[ -z "$new_tag" ]]; then
-              echo "Skipping ${image_name} (no tag provided)"
-              return
+              return 1
             fi
 
             local current_tag
-            current_tag=$(yq eval "${yq_path}" values.yaml)
+            current_tag=$(yq eval "${yq_path}" "$file")
 
             if [[ "$current_tag" == "$new_tag" ]]; then
-              echo "No change for ${image_name} (already ${current_tag})"
+              echo "No change for ${image_name} in ${file} (already ${current_tag})"
+              return 1
+            fi
+
+            echo "Updating ${image_name} in ${file}: ${current_tag} → ${new_tag}"
+            yq eval -i "${yq_path} = \"${new_tag}\"" "$file"
+            CHANGES+=("${image_name}: ${current_tag} → ${new_tag}")
+            return 0
+          }
+
+          # --- Helper: update hardcoded fallback tag in a Go template file ---
+          # Handles both patterns:
+          #   {{- $var := "TAG" }}                        (control-plane style)
+          #   {{- $var := .Values.path | default "TAG" }} (data-plane style)
+          update_template_tag() {
+            local file="$1"
+            local var_name="$2"
+            local new_tag="$3"
+
+            if [[ -z "$new_tag" ]]; then
               return
             fi
 
-            echo "Updating ${image_name}: ${current_tag} → ${new_tag}"
-            yq eval -i "${yq_path} = \"${new_tag}\"" values.yaml
-            CHANGES+=("${image_name}: ${current_tag} → ${new_tag}")
+            if grep -q "\$${var_name} :=" "$file" 2>/dev/null; then
+              # Pattern: {{- $var := "OLD" }}
+              sed -i "s/\(\$${var_name} := \)\"[^\"]*\"/\1\"${new_tag}\"/" "$file"
+              # Pattern: {{- $var := .Values.xxx | default "OLD" }}
+              sed -i "s/\(\$${var_name} := .*| default \)\"[^\"]*\"/\1\"${new_tag}\"/" "$file"
+              echo "  Updated fallback \$${var_name} → ${new_tag} in ${file}"
+            fi
           }
 
-          # TrustGate EE
-          update_tag \
-            '.trustgate.global.image.tag' \
-            "${{ steps.tags.outputs.trustgate }}" \
-            "trustgate-ee"
+          # --- Helper: bump patch version in a Chart.yaml ---
+          bump_chart_version() {
+            local chart_file="$1"
+            local current
+            current=$(yq eval '.version' "$chart_file")
+            local major minor patch
+            IFS='.' read -r major minor patch <<< "$current"
+            patch=$((patch + 1))
+            local new_version="${major}.${minor}.${patch}"
+            yq eval -i ".version = \"${new_version}\"" "$chart_file"
+            echo "  Bumped ${chart_file}: ${current} → ${new_version}"
+            echo "${new_version}"
+          }
 
-          # Control Plane API
-          update_tag \
-            '.["neuraltrust-control-plane"].controlPlane.components.api.image.tag' \
-            "${{ steps.tags.outputs.control_plane_api }}" \
-            "control-plane-api"
-
-          # Scheduler
-          update_tag \
-            '.["neuraltrust-control-plane"].controlPlane.components.scheduler.image.tag' \
-            "${{ steps.tags.outputs.scheduler }}" \
-            "scheduler"
-
-          # App (frontend)
-          update_tag \
-            '.["neuraltrust-control-plane"].controlPlane.components.app.image.tag' \
-            "${{ steps.tags.outputs.app }}" \
-            "app"
-
-          # Data Plane API
-          update_tag \
-            '.["neuraltrust-data-plane"].dataPlane.components.api.image.tag' \
-            "${{ steps.tags.outputs.data_plane_api }}" \
-            "data-plane-api"
-
-          # Workers
-          update_tag \
-            '.["neuraltrust-data-plane"].dataPlane.components.worker.image.tag' \
-            "${{ steps.tags.outputs.workers }}" \
-            "workers"
-
-          # Kafka Connect
-          update_tag \
-            '.["neuraltrust-data-plane"].dataPlane.components.kafka.connect.image.tag' \
-            "${{ steps.tags.outputs.kafka_connect }}" \
-            "kafka-connect"
-
-          # Also sync trustgate subchart default values
-          if [[ -n "${{ steps.tags.outputs.trustgate }}" ]]; then
-            TRUSTGATE_SUBCHART="charts/trustgate/values.yaml"
-            if [[ -f "$TRUSTGATE_SUBCHART" ]]; then
-              echo "Syncing trustgate subchart values..."
-              yq eval -i '.global.image.tag = "${{ steps.tags.outputs.trustgate }}"' "$TRUSTGATE_SUBCHART"
-            fi
+          # =============================================
+          # 1. TrustGate EE
+          # =============================================
+          TAG="${{ steps.tags.outputs.trustgate }}"
+          if update_values_tag '.trustgate.global.image.tag' "$TAG" "trustgate-ee"; then
+            BUMP_TRUSTGATE=true
+            # Sync trustgate subchart default values
+            yq eval -i ".global.image.tag = \"${TAG}\"" charts/trustgate/values.yaml
+            echo "  Synced charts/trustgate/values.yaml"
           fi
 
-          # Save changes summary for PR body
+          # =============================================
+          # 2. Control Plane API
+          # =============================================
+          TAG="${{ steps.tags.outputs.control_plane_api }}"
+          if update_values_tag '.["neuraltrust-control-plane"].controlPlane.components.api.image.tag' "$TAG" "control-plane-api"; then
+            BUMP_CONTROL_PLANE=true
+            update_template_tag "charts/neuraltrust-control-plane/templates/api/deployment.yaml" "apiImageTag" "$TAG"
+          fi
+
+          # =============================================
+          # 3. Scheduler
+          # =============================================
+          TAG="${{ steps.tags.outputs.scheduler }}"
+          if update_values_tag '.["neuraltrust-control-plane"].controlPlane.components.scheduler.image.tag' "$TAG" "scheduler"; then
+            BUMP_CONTROL_PLANE=true
+            update_template_tag "charts/neuraltrust-control-plane/templates/scheduler/deployment.yaml" "imageTag" "$TAG"
+          fi
+
+          # =============================================
+          # 4. App (frontend) — updates both initContainer and main container
+          # =============================================
+          TAG="${{ steps.tags.outputs.app }}"
+          if update_values_tag '.["neuraltrust-control-plane"].controlPlane.components.app.image.tag' "$TAG" "app"; then
+            BUMP_CONTROL_PLANE=true
+            update_template_tag "charts/neuraltrust-control-plane/templates/app/deployment.yaml" "initImageTag" "$TAG"
+            update_template_tag "charts/neuraltrust-control-plane/templates/app/deployment.yaml" "appImageTag" "$TAG"
+          fi
+
+          # =============================================
+          # 5. Data Plane API
+          # =============================================
+          TAG="${{ steps.tags.outputs.data_plane_api }}"
+          if update_values_tag '.["neuraltrust-data-plane"].dataPlane.components.api.image.tag' "$TAG" "data-plane-api"; then
+            BUMP_DATA_PLANE=true
+            update_template_tag "charts/neuraltrust-data-plane/templates/api/deployment.yaml" "apiTag" "$TAG"
+          fi
+
+          # =============================================
+          # 6. Workers
+          # =============================================
+          TAG="${{ steps.tags.outputs.workers }}"
+          if update_values_tag '.["neuraltrust-data-plane"].dataPlane.components.worker.image.tag' "$TAG" "workers"; then
+            BUMP_DATA_PLANE=true
+            update_template_tag "charts/neuraltrust-data-plane/templates/worker/deployment.yaml" "workerTag" "$TAG"
+          fi
+
+          # =============================================
+          # 7. Kafka Connect
+          # =============================================
+          TAG="${{ steps.tags.outputs.kafka_connect }}"
+          if update_values_tag '.["neuraltrust-data-plane"].dataPlane.components.kafka.connect.image.tag' "$TAG" "kafka-connect"; then
+            BUMP_DATA_PLANE=true
+            update_template_tag "charts/neuraltrust-data-plane/templates/kafka-components/deployment.yaml" "kafkaConnectTag" "$TAG"
+          fi
+
+          # =============================================
+          # Bump chart versions (patch) for changed subcharts
+          # =============================================
+          echo ""
+          echo "=== Chart Version Bumps ==="
+
+          # Bump subchart versions (patch) — root Chart.yaml is handled by auto-release.yml on merge
+          if [[ "$BUMP_CONTROL_PLANE" == "true" ]]; then
+            bump_chart_version "charts/neuraltrust-control-plane/Chart.yaml"
+          fi
+
+          if [[ "$BUMP_DATA_PLANE" == "true" ]]; then
+            bump_chart_version "charts/neuraltrust-data-plane/Chart.yaml"
+          fi
+
+          if [[ "$BUMP_TRUSTGATE" == "true" ]]; then
+            bump_chart_version "charts/trustgate/Chart.yaml"
+          fi
+
+          # Save changes summary
           if [[ ${#CHANGES[@]} -eq 0 ]]; then
             echo "NO_CHANGES=true" >> "$GITHUB_ENV"
             echo "No version changes needed."
@@ -242,6 +323,12 @@ jobs:
               echo "EOF"
             } >> "$GITHUB_ENV"
           fi
+
+      - name: Regenerate Chart.lock
+        if: env.NO_CHANGES != 'true'
+        run: |
+          helm dependency update .
+          echo "Chart.lock regenerated"
 
       - name: Check for changes
         if: env.NO_CHANGES != 'true'
@@ -267,7 +354,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
-          git add values.yaml charts/trustgate/values.yaml
+          git add -A
           git commit -m "$(cat <<'COMMIT'
           chore: bump image versions
 
