@@ -589,7 +589,7 @@ neuraltrust-control-plane:
         replicaCount: 1
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.15.1"
+          tag: "v1.16.0"
           pullPolicy: "Always"
         config:
           nodeEnv: production
@@ -703,7 +703,7 @@ neuraltrust-data-plane:
           replicas: 1
           image:
             repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect
-            tag: 0.0.1
+            tag: v0.0.1
             pullPolicy: Always
           resources:
             limits:
