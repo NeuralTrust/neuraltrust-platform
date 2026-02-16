@@ -161,7 +161,7 @@ spec:
     {{- include "trustgate.controlPlane.labels" . | nindent 4 }}
     component: control-plane
 {{- $useRoutes := false }}
-{{- if or .Values.global.openshift $.Values.global.openshift }}
+{{- if include "neuraltrust-platform.isOpenshift" . }}
   {{- $ingressEnabled := false }}
   {{- if and .Values.ingress (hasKey .Values.ingress "enabled") }}
     {{- if .Values.ingress.enabled }}
@@ -182,7 +182,8 @@ metadata:
     {{- include "trustgate.controlPlane.labels" . | nindent 4 }}
     component: control-plane
 spec:
-  host: {{ if or .Values.global.openshiftDomain $.Values.global.openshiftDomain }}{{ printf "trustgate-admin.%s" (.Values.global.openshiftDomain | default $.Values.global.openshiftDomain) | quote }}{{ else }}"admin.neuraltrust.ai"{{ end }}
+  {{- $domain := include "neuraltrust-platform.domain" . }}
+  host: {{ if $domain }}{{ printf "trustgate-admin.%s" $domain | quote }}{{ else }}"admin.neuraltrust.ai"{{ end }}
   to:
     kind: Service
     name: trustgate-control-plane

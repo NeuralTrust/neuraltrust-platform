@@ -32,15 +32,17 @@ kind: Ingress
 metadata:
   name: "control-plane-api-ingress"
   {{- with .Values.controlPlane.components.api }}
-    {{- if .ingress.annotations }}
+  {{- $annotations := include "neuraltrust-platform.ingress.annotations" (dict "global" $.Values.global "local" .ingress.annotations) }}
+  {{- if $annotations }}
   annotations:
-    {{- toYaml .ingress.annotations | nindent 4 }}
-    {{- end }}
+    {{- $annotations | nindent 4 }}
+  {{- end }}
 spec:
-    {{- if .ingress.className }}
-  ingressClassName: {{ .ingress.className }}
-    {{- end }}
-    {{- if .ingress.tls.enabled }}
+  {{- $className := include "neuraltrust-platform.ingress.className" (dict "global" $.Values.global "local" .ingress.className) }}
+  {{- if $className }}
+  ingressClassName: {{ $className }}
+  {{- end }}
+  {{- if and .ingress.tls.enabled (include "neuraltrust-platform.ingress.renderTLS" (dict "global" $.Values.global "tlsEnabled" .ingress.tls.enabled)) }}
   tls:
     - hosts:
         - {{ .host | default "api.neuraltrust.ai" | quote }}
@@ -49,9 +51,11 @@ spec:
       {{- else }}
       secretName: "control-plane-api-tls"
       {{- end }}
-    {{- end }}
+  {{- end }}
   rules:
-    - host: {{ .host | default "api.neuraltrust.ai" | quote }}
+    - {{- if .host }}
+      host: {{ .host | quote }}
+      {{- end }}
       http:
         paths:
           - path: /
@@ -64,7 +68,7 @@ spec:
   {{- end }}
 {{- end }}
 {{- $useRoutes := false }}
-{{- if .Values.global.openshift }}
+{{- if include "neuraltrust-platform.isOpenshift" . }}
   {{- $ingressEnabled := false }}
   {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.api .Values.controlPlane.components.api.ingress (hasKey .Values.controlPlane.components.api.ingress "enabled") }}
     {{- if .Values.controlPlane.components.api.ingress.enabled }}
@@ -77,8 +81,9 @@ spec:
 {{- end }}
 {{- if $useRoutes }}
   {{- $host := "" }}
-  {{- if .Values.global.openshiftDomain }}
-    {{- $host = printf "control-plane-api.%s" .Values.global.openshiftDomain }}
+  {{- $domain := include "neuraltrust-platform.domain" . }}
+  {{- if $domain }}
+    {{- $host = printf "control-plane-api.%s" $domain }}
   {{- else if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.api .Values.controlPlane.components.api.host }}
     {{- $host = .Values.controlPlane.components.api.host }}
   {{- else }}

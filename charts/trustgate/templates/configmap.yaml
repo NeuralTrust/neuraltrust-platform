@@ -13,13 +13,13 @@ data:
       metrics_port: 9090
       {{- /* Use the same logic as env-configmap for consistency */}}
       {{- $baseDomain := "" }}
-      {{- $openshiftDomain := .Values.global.openshiftDomain | default $.Values.global.openshiftDomain }}
+      {{- $platformDomain := include "neuraltrust-platform.domain" . }}
       {{- if .Values.global.env.SERVER_BASE_DOMAIN }}
         {{- $baseDomain = .Values.global.env.SERVER_BASE_DOMAIN }}
       {{- else if .Values.config.baseDomain }}
         {{- $baseDomain = .Values.config.baseDomain }}
-      {{- else if and (or .Values.global.openshift $.Values.global.openshift) $openshiftDomain }}
-        {{- $baseDomain = $openshiftDomain }}
+      {{- else if $platformDomain }}
+        {{- $baseDomain = $platformDomain }}
       {{- else }}
         {{- $baseDomain = "neuraltrust.ai" }}
       {{- end }}

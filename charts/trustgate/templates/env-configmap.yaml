@@ -5,15 +5,15 @@ metadata:
   labels:
     {{- include "trustgate.labels" . | nindent 4 }}
 data:
-  {{- /* SERVER_BASE_DOMAIN: Use global.env.SERVER_BASE_DOMAIN, config.baseDomain, OpenShift domain, or default */}}
+  {{- /* SERVER_BASE_DOMAIN: Use global.env.SERVER_BASE_DOMAIN, config.baseDomain, platform domain, or default */}}
   {{- $baseDomain := "" }}
-  {{- $openshiftDomain := .Values.global.openshiftDomain | default $.Values.global.openshiftDomain }}
+  {{- $platformDomain := include "neuraltrust-platform.domain" . }}
   {{- if .Values.global.env.SERVER_BASE_DOMAIN }}
     {{- $baseDomain = .Values.global.env.SERVER_BASE_DOMAIN }}
   {{- else if .Values.config.baseDomain }}
     {{- $baseDomain = .Values.config.baseDomain }}
-  {{- else if and (or .Values.global.openshift $.Values.global.openshift) $openshiftDomain }}
-    {{- $baseDomain = $openshiftDomain }}
+  {{- else if $platformDomain }}
+    {{- $baseDomain = $platformDomain }}
   {{- else }}
     {{- $baseDomain = "neuraltrust.ai" }}
   {{- end }}

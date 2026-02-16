@@ -161,7 +161,7 @@ spec:
     {{- include "trustgate.actions.labels" . | nindent 4 }}
     component: actions
 {{- $useRoutes := false }}
-{{- if or .Values.global.openshift $.Values.global.openshift }}
+{{- if include "neuraltrust-platform.isOpenshift" . }}
   {{- $ingressEnabled := false }}
   {{- if and .Values.ingress (hasKey .Values.ingress "enabled") }}
     {{- if .Values.ingress.enabled }}
@@ -182,7 +182,8 @@ metadata:
     {{- include "trustgate.actions.labels" . | nindent 4 }}
     component: actions
 spec:
-  host: {{ if or .Values.global.openshiftDomain $.Values.global.openshiftDomain }}{{ printf "trustgate-actions.%s" (.Values.global.openshiftDomain | default $.Values.global.openshiftDomain) | quote }}{{ else }}"trustgate-actions.neuraltrust.ai"{{ end }}
+  {{- $domain := include "neuraltrust-platform.domain" . }}
+  host: {{ if $domain }}{{ printf "trustgate-actions.%s" $domain | quote }}{{ else }}"trustgate-actions.neuraltrust.ai"{{ end }}
   to:
     kind: Service
     name: trustgate-actions

@@ -5,14 +5,76 @@
 
 # Global settings
 global:
-  openshift: false # set to true if you are using openshift
-  openshiftDomain: "" # OpenShift wildcard DNS domain (e.g., *.apps.YOUR_DOMAIN)
+  # Platform/cloud provider. Auto-configures ingress, security contexts, and routing.
+  # Supported: "aws" | "gcp" | "azure" | "openshift" | "kubernetes"
+  #   aws       → Ingress: ALB (requires AWS LB Controller), standard security contexts
+  #   gcp       → Ingress: GCE (built-in on GKE), standard security contexts
+  #   azure     → Ingress: AGIC (requires AGIC add-on), standard security contexts
+  #   openshift → Routes (when ingress disabled) or Ingress, relaxed security contexts (SCC)
+  #   kubernetes → Generic Kubernetes, no cloud-specific annotations
+  # Switch platform: --set global.platform=gcp
+  platform: "gcp"
+
+  # Base domain for auto-generating service URLs and hostnames.
+  # Used across all platforms for URL generation (e.g., "control-plane-api.{domain}").
+  # Examples: "aws.neuraltrust.ai", "apps.mycluster.openshiftapps.com", "gcp.neuraltrust.ai"
+  domain: "neuraltrust.ai"
+
+  # DEPRECATED: Use platform: "openshift" and domain instead.
+  openshift: false
+  openshiftDomain: ""
+
   imageRegistry: "" # Global image registry prefix (e.g., "europe-west1-docker.pkg.dev/project/repo"). If set, will be prepended to image repositories.
   autoGenerateSecrets: true  # Auto-generate required secrets (JWT keys, passwords) if not explicitly provided. Uses lookup to preserve existing values on upgrades. Set to false to let subcharts manage their own secrets (required when using secret references).
   preserveExistingSecrets: false  # Set to true to prevent Helm from creating/updating secrets (secrets are pre-generated). When true, secret templates are NOT rendered.
   security:
     allowInsecureImages: true # Allow Bitnami charts to use their container images
   storageClass: "" # Global storage class for persistent volumes
+
+  # Global Ingress Configuration
+  # These settings are applied to ALL Ingress resources across all subcharts.
+  # Per-service ingress settings (className, annotations) override these globals when set.
+  ingress:
+    # Ingress provider — auto-detected from global.platform if empty.
+    # Override to decouple ingress from platform (e.g., OpenShift with a custom ingress controller).
+    # Values: "aws" | "gcp" | "azure" | "openshift" | "none" | "" (auto-detect)
+    provider: ""
+
+    className: ""  # Override auto-detected className (leave empty to use provider default)
+    annotations: {}  # Global annotations applied to all Ingress resources (merged with provider annotations)
+
+    # AWS ALB Ingress Controller settings (used when provider=aws)
+    # Requires: AWS Load Balancer Controller installed in the EKS cluster
+    # Install: https://kubernetes-sigs.github.io/aws-load-balancer-controller/
+    aws:
+      scheme: "internet-facing"  # "internet-facing" (public) or "internal" (private VPC only)
+      targetType: "ip"  # "ip" (recommended, required for Fargate) or "instance"
+      groupName: "neuraltrust"  # Share a single ALB across all ingresses. Empty = one ALB per Ingress.
+      certificateArn: ""  # ACM certificate ARN for TLS termination (e.g., "arn:aws:acm:us-east-1:123456789:certificate/abc-123")
+      sslRedirect: "443"  # Redirect HTTP to HTTPS port (set to "" to disable)
+      wafAclArn: ""  # Optional: WAF v2 Web ACL ARN for additional security
+      additionalAnnotations: {}  # Any additional ALB annotations as key-value pairs
+
+    # GCP GCE Ingress Controller settings (used when provider=gcp)
+    # Built-in on GKE — no extra installation needed.
+    # Creates a Google Cloud Load Balancer (GCLB) per Ingress.
+    gcp:
+      staticIpName: ""  # Optional: pre-reserved static IP name (gcloud compute addresses create ...). Empty = ephemeral IP.
+      managedCertificates: ""  # Optional: comma-separated Google-managed certificate names (e.g., "neuraltrust-cert")
+      backendConfig: ""  # Optional: BackendConfig name for health checks, CDN, IAP, etc.
+      sslRedirect: false  # Set to true to redirect HTTP→HTTPS (requires managedCertificates or pre-provisioned cert)
+      additionalAnnotations: {}  # Any additional GCE annotations as key-value pairs
+
+    # Azure Application Gateway Ingress Controller settings (used when provider=azure)
+    # Requires: AGIC add-on enabled on AKS cluster
+    # Docs: https://learn.microsoft.com/en-us/azure/application-gateway/ingress-controller-overview
+    azure:
+      appGatewayName: ""  # Optional: Application Gateway name (if multiple gateways)
+      sslCertificate: ""  # Optional: name of SSL certificate configured on Application Gateway
+      sslRedirect: false  # Set to true to redirect HTTP→HTTPS
+      wafPolicyId: ""  # Optional: WAF policy resource ID
+      requestTimeout: ""  # Optional: backend request timeout in seconds (e.g., "30")
+      additionalAnnotations: {}  # Any additional AGIC annotations as key-value pairs
 
 # Infrastructure Components
 # These can be deployed or configured to use pre-installed instances
@@ -416,14 +478,14 @@ trustgate:
 
   ingress:
     enabled: true  # Enable Ingress (Ingress supports TLS secrets via secretName)
-    className: "nginx"  # Ingress class name (e.g., "nginx", "traefik")
-    annotations: {}
+    className: ""  # Per-service override for ingress class (leave empty to use global.ingress.className)
+    annotations: {}  # Per-service annotations (merged with global and AWS auto-generated annotations)
     controlPlane:
-      host: "admin.yourdomain.com"  # Set to your domain
+      host: ""  # Optional: set to your domain (e.g., "admin.yourdomain.com"). Empty = use ALB auto-generated URL.
     dataPlane:
-      host: "gateway.yourdomain.com"  # Set to your domain
+      host: ""  # Optional: set to your domain (e.g., "gateway.yourdomain.com"). Empty = use ALB auto-generated URL.
     actions:
-      host: "actions.yourdomain.com"  # Set to your domain
+      host: ""  # Optional: set to your domain (e.g., "actions.yourdomain.com"). Empty = use ALB auto-generated URL.
     # TLS configuration for Ingress
     # When using an existing wildcard TLS secret (type: kubernetes.io/tls) in the namespace,
     # set tls.enabled: true and tls.secretName to the name of that secret
@@ -454,12 +516,12 @@ neuraltrust-control-plane:
     components:
       scheduler:
         enabled: true
-        host: "control-plane-scheduler.yourdomain.com"  # Set to your domain
+        host: ""  # Optional: set to your domain (e.g., "control-plane-scheduler.yourdomain.com"). Empty = use ALB auto-generated URL.
         service:
           type: ClusterIP
         ingress:
           enabled: true  # Enable Ingress (Ingress supports TLS secrets)
-          className: "nginx"  # Ingress class name (e.g., "nginx", "traefik")
+          className: ""  # Per-service override (leave empty to use global.ingress.className)
           annotations: {}
           # TLS configuration for Ingress
           # When using an existing wildcard TLS secret (type: kubernetes.io/tls) in the namespace,
@@ -491,12 +553,12 @@ neuraltrust-control-plane:
             cpu: 200m
       api:
         enabled: true
-        host: "control-plane-api.yourdomain.com"  # Set to your domain
+        host: ""  # Optional: set to your domain (e.g., "control-plane-api.yourdomain.com"). Empty = use ALB auto-generated URL.
         service:
           type: ClusterIP
         ingress:
           enabled: true  # Enable Ingress (Ingress supports TLS secrets)
-          className: "nginx"  # Ingress class name (e.g., "nginx", "traefik")
+          className: ""  # Per-service override (leave empty to use global.ingress.className)
           annotations: {}
           # TLS configuration for Ingress
           # When using an existing wildcard TLS secret (type: kubernetes.io/tls) in the namespace,
@@ -533,13 +595,13 @@ neuraltrust-control-plane:
             tag: "8.13.0"
       app:
         enabled: true
-        host: "control-plane-app.yourdomain.com"  # Set to your domain
+        host: ""  # Optional: set to your domain (e.g., "control-plane-app.yourdomain.com"). Empty = use ALB auto-generated URL.
         secondaryHost: ""
         service:
           type: ClusterIP
         ingress:
           enabled: true  # Enable Ingress (Ingress supports TLS secrets)
-          className: "nginx"  # Ingress class name (e.g., "nginx", "traefik")
+          className: ""  # Per-service override (leave empty to use global.ingress.className)
           annotations: {}
           # TLS configuration for Ingress
           # When using an existing wildcard TLS secret (type: kubernetes.io/tls) in the namespace,
@@ -677,12 +739,12 @@ neuraltrust-data-plane:
               memory: 2Gi
       api:
         enabled: true
-        host: "data-plane-api.yourdomain.com"  # Set to your domain
+        host: ""  # Optional: set to your domain (e.g., "data-plane-api.yourdomain.com"). Empty = use ALB auto-generated URL.
         service:
           type: ClusterIP
         ingress:
           enabled: true  # Enable Ingress (Ingress supports TLS secrets)
-          className: "nginx"  # Ingress class name (e.g., "nginx", "traefik")
+          className: ""  # Per-service override (leave empty to use global.ingress.className)
           annotations: {}
           # TLS configuration for Ingress
           # When using an existing wildcard TLS secret (type: kubernetes.io/tls) in the namespace,

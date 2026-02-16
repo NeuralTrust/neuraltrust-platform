@@ -62,6 +62,64 @@ NeuralTrust Control Plane is enabled.
 TrustGate is enabled.
 {{- end }}
 
+Ingress endpoints:
+  kubectl get ingress -n {{ .Release.Namespace }}
+{{- if .Values.trustgate.enabled }}
+{{- if .Values.trustgate.ingress.enabled }}
+  {{- if .Values.trustgate.ingress.controlPlane.host }}
+  - TrustGate Admin:   https://{{ .Values.trustgate.ingress.controlPlane.host }}
+  {{- else }}
+  - TrustGate Admin:   kubectl get ingress trustgate-admin -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+  {{- end }}
+  {{- if .Values.trustgate.ingress.dataPlane.host }}
+  - TrustGate Gateway: https://{{ .Values.trustgate.ingress.dataPlane.host }}
+  {{- else }}
+  - TrustGate Gateway: kubectl get ingress trustgate-gateway -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+  {{- end }}
+  {{- if .Values.trustgate.ingress.actions.host }}
+  - TrustGate Actions: https://{{ .Values.trustgate.ingress.actions.host }}
+  {{- else }}
+  - TrustGate Actions: kubectl get ingress trustgate-actions -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+  {{- end }}
+{{- end }}
+{{- end }}
+{{- $cpValues := index .Values "neuraltrust-control-plane" }}
+{{- if and $cpValues $cpValues.controlPlane $cpValues.controlPlane.enabled }}
+{{- if and $cpValues.controlPlane.components $cpValues.controlPlane.components.api $cpValues.controlPlane.components.api.ingress $cpValues.controlPlane.components.api.ingress.enabled }}
+  {{- if $cpValues.controlPlane.components.api.host }}
+  - Control Plane API: https://{{ $cpValues.controlPlane.components.api.host }}
+  {{- else }}
+  - Control Plane API: kubectl get ingress control-plane-api-ingress -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+  {{- end }}
+{{- end }}
+{{- if and $cpValues.controlPlane.components $cpValues.controlPlane.components.app $cpValues.controlPlane.components.app.ingress $cpValues.controlPlane.components.app.ingress.enabled }}
+  {{- if $cpValues.controlPlane.components.app.host }}
+  - Control Plane App: https://{{ $cpValues.controlPlane.components.app.host }}
+  {{- else }}
+  - Control Plane App: kubectl get ingress control-plane-app-ingress -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+  {{- end }}
+{{- end }}
+{{- if and $cpValues.controlPlane.components $cpValues.controlPlane.components.scheduler $cpValues.controlPlane.components.scheduler.ingress $cpValues.controlPlane.components.scheduler.ingress.enabled }}
+  {{- if $cpValues.controlPlane.components.scheduler.host }}
+  - Scheduler:         https://{{ $cpValues.controlPlane.components.scheduler.host }}
+  {{- else }}
+  - Scheduler:         kubectl get ingress control-plane-scheduler-ingress -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+  {{- end }}
+{{- end }}
+{{- end }}
+{{- $dpValues := index .Values "neuraltrust-data-plane" }}
+{{- if and $dpValues $dpValues.dataPlane $dpValues.dataPlane.enabled }}
+{{- if and $dpValues.dataPlane.components $dpValues.dataPlane.components.api $dpValues.dataPlane.components.api.ingress $dpValues.dataPlane.components.api.ingress.enabled }}
+  {{- if $dpValues.dataPlane.components.api.host }}
+  - Data Plane API:    https://{{ $dpValues.dataPlane.components.api.host }}
+  {{- else }}
+  - Data Plane API:    kubectl get ingress data-plane-api-ingress -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+  {{- end }}
+{{- end }}
+{{- end }}
+
+  Note: It may take a few minutes for ALB URLs to be provisioned by the AWS Load Balancer Controller.
+
 To get the status of your deployment, run:
   kubectl get pods -n {{ .Release.Namespace }}
 

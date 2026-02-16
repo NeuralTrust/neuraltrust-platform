@@ -13,31 +13,41 @@ spec:
   selector:
     app: api
 {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.ingress .Values.dataPlane.components.api.ingress.enabled }}
+  {{- $apiIngress := .Values.dataPlane.components.api.ingress }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: "data-plane-api-ingress"
-  {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.ingress .Values.dataPlane.components.api.ingress.annotations }}
+  {{- $annotations := include "neuraltrust-platform.ingress.annotations" (dict "global" .Values.global "local" $apiIngress.annotations) }}
+  {{- if $annotations }}
   annotations:
-    {{- toYaml .Values.dataPlane.components.api.ingress.annotations | nindent 4 }}
+    {{- $annotations | nindent 4 }}
   {{- end }}
 spec:
-  {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.ingress .Values.dataPlane.components.api.ingress.className }}
-  ingressClassName: {{ .Values.dataPlane.components.api.ingress.className }}
+  {{- $className := include "neuraltrust-platform.ingress.className" (dict "global" .Values.global "local" $apiIngress.className) }}
+  {{- if $className }}
+  ingressClassName: {{ $className }}
   {{- end }}
-  {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.ingress .Values.dataPlane.components.api.ingress.tls .Values.dataPlane.components.api.ingress.tls.enabled }}
+  {{- $tlsEnabled := and $apiIngress.tls $apiIngress.tls.enabled }}
+  {{- if and $tlsEnabled (include "neuraltrust-platform.ingress.renderTLS" (dict "global" .Values.global "tlsEnabled" $tlsEnabled)) }}
   tls:
     - hosts:
         - "{{ .Values.dataPlane.components.api.host }}"
-      {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.ingress .Values.dataPlane.components.api.ingress.tls .Values.dataPlane.components.api.ingress.tls.secretName }}
-      secretName: {{ .Values.dataPlane.components.api.ingress.tls.secretName }}
+      {{- if and $apiIngress.tls $apiIngress.tls.secretName }}
+      secretName: {{ $apiIngress.tls.secretName }}
       {{- else }}
       secretName: "data-plane-api-tls"
       {{- end }}
   {{- end }}
+  {{- $apiHost := "" }}
+  {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api }}
+    {{- $apiHost = .Values.dataPlane.components.api.host }}
+  {{- end }}
   rules:
-    - host: "{{ if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api }}{{ .Values.dataPlane.components.api.host }}{{ else }}data-plane-api.neuraltrust.ai{{ end }}"
+    - {{- if $apiHost }}
+      host: {{ $apiHost | quote }}
+      {{- end }}
       http:
         paths:
           - path: /
@@ -49,7 +59,7 @@ spec:
                   name: http
 {{- end }}
 {{- $useRoutes := false }}
-{{- if .Values.global.openshift }}
+{{- if include "neuraltrust-platform.isOpenshift" . }}
   {{- $ingressEnabled := false }}
   {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.ingress (hasKey .Values.dataPlane.components.api.ingress "enabled") }}
     {{- if .Values.dataPlane.components.api.ingress.enabled }}
@@ -62,8 +72,9 @@ spec:
 {{- end }}
 {{- if $useRoutes }}
   {{- $host := "" }}
-  {{- if .Values.global.openshiftDomain }}
-    {{- $host = printf "data-plane-api.%s" .Values.global.openshiftDomain }}
+  {{- $domain := include "neuraltrust-platform.domain" . }}
+  {{- if $domain }}
+    {{- $host = printf "data-plane-api.%s" $domain }}
   {{- else if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.host }}
     {{- $host = .Values.dataPlane.components.api.host }}
   {{- else }}

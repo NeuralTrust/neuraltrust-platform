@@ -205,6 +205,227 @@ Parameters:
 {{- end }}
 
 {{/*
+Check if the current platform is OpenShift.
+Returns "true" (non-empty) if OpenShift, empty string otherwise.
+Supports both new (global.platform) and deprecated (global.openshift) values.
+Usage: {{- if include "neuraltrust-platform.isOpenshift" . }}
+*/}}
+{{- define "neuraltrust-platform.isOpenshift" -}}
+{{- $global := default dict .Values.global }}
+{{- if or (eq ($global.platform | default "") "openshift") $global.openshift }}true{{- end }}
+{{- end }}
+
+{{/*
+Resolve the base domain for URL generation.
+Priority: global.domain > global.openshiftDomain (deprecated).
+Usage: {{ include "neuraltrust-platform.domain" . }}
+*/}}
+{{- define "neuraltrust-platform.domain" -}}
+{{- $global := default dict .Values.global }}
+{{- $global.domain | default $global.openshiftDomain | default "" }}
+{{- end }}
+
+{{/*
+Resolve the effective ingress provider.
+Priority: global.ingress.provider (explicit) > auto-detect from global.platform.
+Platform mapping: aws→aws, gcp→gcp, azure→azure, openshift→openshift, kubernetes→none.
+Usage: {{ include "neuraltrust-platform.ingress.provider" . }}
+*/}}
+{{- define "neuraltrust-platform.ingress.provider" -}}
+{{- $global := default dict .Values.global }}
+{{- $globalIngress := default dict $global.ingress }}
+{{- $platform := $global.platform | default "kubernetes" }}
+{{- if $globalIngress.provider }}
+  {{- $globalIngress.provider }}
+{{- else if eq $platform "aws" }}
+  {{- "aws" }}
+{{- else if eq $platform "gcp" }}
+  {{- "gcp" }}
+{{- else if eq $platform "azure" }}
+  {{- "azure" }}
+{{- else if eq $platform "openshift" }}
+  {{- "openshift" }}
+{{- else }}
+  {{- "none" }}
+{{- end }}
+{{- end }}
+
+{{/*
+Resolve the ingress class name.
+Priority: local (per-service) > global.ingress.className > auto-detect from provider.
+Provider defaults: aws→"alb", azure→"azure-application-gateway", openshift→"openshift-default".
+GCP uses annotation (kubernetes.io/ingress.class) instead of spec.ingressClassName because
+GKE (especially Autopilot) does not register an IngressClass resource.
+Usage: {{ include "neuraltrust-platform.ingress.className" (dict "global" .Values.global "local" .Values.ingress.className) }}
+*/}}
+{{- define "neuraltrust-platform.ingress.className" -}}
+{{- $local := .local }}
+{{- $globalIngress := default dict (default dict .global).ingress }}
+{{- $global := default dict .global }}
+{{- $platform := $global.platform | default "kubernetes" }}
+{{- $provider := $globalIngress.provider | default "" }}
+{{- if not $provider }}
+  {{- if eq $platform "aws" }}{{ $provider = "aws" }}
+  {{- else if eq $platform "gcp" }}{{ $provider = "gcp" }}
+  {{- else if eq $platform "azure" }}{{ $provider = "azure" }}
+  {{- else if eq $platform "openshift" }}{{ $provider = "openshift" }}
+  {{- else }}{{ $provider = "none" }}
+  {{- end }}
+{{- end }}
+{{- if $local }}
+  {{- $local }}
+{{- else if $globalIngress.className }}
+  {{- $globalIngress.className }}
+{{- else if eq $provider "aws" }}
+  {{- "alb" }}
+{{- else if eq $provider "azure" }}
+  {{- "azure-application-gateway" }}
+{{- else if eq $provider "openshift" }}
+  {{- "openshift-default" }}
+{{- end }}
+{{- /* GCP: no ingressClassName — uses annotation kubernetes.io/ingress.class instead */}}
+{{- end }}
+
+{{/*
+Generate merged ingress annotations.
+Merges (in priority order, highest wins):
+  1. Cloud provider auto-generated annotations based on global.ingress.provider (lowest)
+  2. Global ingress annotations
+  3. Local (per-service) annotations (highest)
+Usage: {{ include "neuraltrust-platform.ingress.annotations" (dict "global" .Values.global "local" .Values.ingress.annotations) }}
+*/}}
+{{- define "neuraltrust-platform.ingress.annotations" -}}
+{{- $merged := dict }}
+{{- $globalIngress := default dict (default dict .global).ingress }}
+{{- $global := default dict .global }}
+{{- $platform := $global.platform | default "kubernetes" }}
+{{- $provider := $globalIngress.provider | default "" }}
+{{- if not $provider }}
+  {{- if eq $platform "aws" }}{{ $provider = "aws" }}
+  {{- else if eq $platform "gcp" }}{{ $provider = "gcp" }}
+  {{- else if eq $platform "azure" }}{{ $provider = "azure" }}
+  {{- else if eq $platform "openshift" }}{{ $provider = "openshift" }}
+  {{- else }}{{ $provider = "none" }}
+  {{- end }}
+{{- end }}
+{{- /* 1a. AWS ALB annotations (provider=aws) */}}
+{{- if eq $provider "aws" }}
+  {{- $aws := default dict $globalIngress.aws }}
+  {{- $_ := set $merged "alb.ingress.kubernetes.io/scheme" ($aws.scheme | default "internet-facing") }}
+  {{- $_ := set $merged "alb.ingress.kubernetes.io/target-type" ($aws.targetType | default "ip") }}
+  {{- if $aws.groupName }}
+    {{- $_ := set $merged "alb.ingress.kubernetes.io/group.name" $aws.groupName }}
+  {{- end }}
+  {{- if $aws.certificateArn }}
+    {{- $_ := set $merged "alb.ingress.kubernetes.io/certificate-arn" $aws.certificateArn }}
+    {{- $_ := set $merged "alb.ingress.kubernetes.io/listen-ports" `[{"HTTPS":443}]` }}
+    {{- if $aws.sslRedirect }}
+      {{- $_ := set $merged "alb.ingress.kubernetes.io/ssl-redirect" ($aws.sslRedirect | toString) }}
+    {{- end }}
+  {{- end }}
+  {{- if $aws.wafAclArn }}
+    {{- $_ := set $merged "alb.ingress.kubernetes.io/wafv2-acl-arn" $aws.wafAclArn }}
+  {{- end }}
+  {{- range $k, $v := (default dict $aws.additionalAnnotations) }}
+    {{- $_ := set $merged $k ($v | toString) }}
+  {{- end }}
+{{- end }}
+{{- /* 1b. GCP GCE annotations (provider=gcp) */}}
+{{- /* GKE Autopilot does not register an IngressClass resource, so we use the annotation */}}
+{{- if eq $provider "gcp" }}
+  {{- $gcp := default dict $globalIngress.gcp }}
+  {{- $_ := set $merged "kubernetes.io/ingress.class" "gce" }}
+  {{- if $gcp.staticIpName }}
+    {{- $_ := set $merged "kubernetes.io/ingress.global-static-ip-name" $gcp.staticIpName }}
+  {{- end }}
+  {{- if $gcp.managedCertificates }}
+    {{- $_ := set $merged "networking.gke.io/managed-certificates" $gcp.managedCertificates }}
+  {{- end }}
+  {{- if $gcp.backendConfig }}
+    {{- $_ := set $merged "cloud.google.com/backend-config" (printf `{"default":"%s"}` $gcp.backendConfig) }}
+  {{- end }}
+  {{- if $gcp.sslRedirect }}
+    {{- $_ := set $merged "networking.gke.io/v1beta1.FrontendConfig" "ssl-redirect" }}
+  {{- end }}
+  {{- range $k, $v := (default dict $gcp.additionalAnnotations) }}
+    {{- $_ := set $merged $k ($v | toString) }}
+  {{- end }}
+{{- end }}
+{{- /* 1c. Azure AGIC annotations (provider=azure) */}}
+{{- if eq $provider "azure" }}
+  {{- $azure := default dict $globalIngress.azure }}
+  {{- if $azure.appGatewayName }}
+    {{- $_ := set $merged "appgw.ingress.kubernetes.io/appgw-name" $azure.appGatewayName }}
+  {{- end }}
+  {{- if $azure.sslCertificate }}
+    {{- $_ := set $merged "appgw.ingress.kubernetes.io/appgw-ssl-certificate" $azure.sslCertificate }}
+    {{- $_ := set $merged "appgw.ingress.kubernetes.io/appgw-ssl-profile" $azure.sslCertificate }}
+  {{- end }}
+  {{- if $azure.sslRedirect }}
+    {{- $_ := set $merged "appgw.ingress.kubernetes.io/ssl-redirect" "true" }}
+  {{- end }}
+  {{- if $azure.wafPolicyId }}
+    {{- $_ := set $merged "appgw.ingress.kubernetes.io/waf-policy-for-path" $azure.wafPolicyId }}
+  {{- end }}
+  {{- if $azure.requestTimeout }}
+    {{- $_ := set $merged "appgw.ingress.kubernetes.io/request-timeout" ($azure.requestTimeout | toString) }}
+  {{- end }}
+  {{- range $k, $v := (default dict $azure.additionalAnnotations) }}
+    {{- $_ := set $merged $k ($v | toString) }}
+  {{- end }}
+{{- end }}
+{{- /* 1d. OpenShift annotations (provider=openshift) */}}
+{{- if eq $provider "openshift" }}
+  {{- $_ := set $merged "route.openshift.io/termination" "edge" }}
+  {{- $_ := set $merged "route.openshift.io/insecure-edge-termination-policy" "Redirect" }}
+{{- end }}
+{{- /* 2. Global ingress annotations */}}
+{{- range $k, $v := (default dict $globalIngress.annotations) }}
+  {{- $_ := set $merged $k ($v | toString) }}
+{{- end }}
+{{- /* 3. Local (per-service) annotations - highest priority */}}
+{{- range $k, $v := (default dict .local) }}
+  {{- $_ := set $merged $k ($v | toString) }}
+{{- end }}
+{{- /* Output merged annotations as YAML */}}
+{{- if $merged }}
+{{- toYaml $merged }}
+{{- end }}
+{{- end }}
+
+{{/*
+Check if TLS section should be rendered for Ingress.
+When a cloud provider handles TLS via annotations (ACM, Google-managed certs, AGIC SSL),
+TLS is NOT rendered in the Ingress spec. Returns "true" if Ingress TLS spec should be rendered.
+Usage: {{- if include "neuraltrust-platform.ingress.renderTLS" (dict "global" .Values.global "tlsEnabled" .Values.ingress.tls.enabled) }}
+*/}}
+{{- define "neuraltrust-platform.ingress.renderTLS" -}}
+{{- $globalIngress := default dict (default dict .global).ingress }}
+{{- $global := default dict .global }}
+{{- $platform := $global.platform | default "kubernetes" }}
+{{- $provider := $globalIngress.provider | default "" }}
+{{- if not $provider }}
+  {{- if eq $platform "aws" }}{{ $provider = "aws" }}
+  {{- else if eq $platform "gcp" }}{{ $provider = "gcp" }}
+  {{- else if eq $platform "azure" }}{{ $provider = "azure" }}
+  {{- else }}{{ $provider = "none" }}
+  {{- end }}
+{{- end }}
+{{- $cloudTLS := false }}
+{{- if eq $provider "aws" }}
+  {{- $aws := default dict $globalIngress.aws }}
+  {{- if $aws.certificateArn }}{{ $cloudTLS = true }}{{- end }}
+{{- else if eq $provider "gcp" }}
+  {{- $gcp := default dict $globalIngress.gcp }}
+  {{- if $gcp.managedCertificates }}{{ $cloudTLS = true }}{{- end }}
+{{- else if eq $provider "azure" }}
+  {{- $azure := default dict $globalIngress.azure }}
+  {{- if $azure.sslCertificate }}{{ $cloudTLS = true }}{{- end }}
+{{- end }}
+{{- if and .tlsEnabled (not $cloudTLS) }}true{{- end }}
+{{- end }}
+
+{{/*
 Check if autoGenerateSecrets is enabled.
 Returns "true" (non-empty string) if enabled, empty string if disabled.
 Usage: {{- if include "neuraltrust-platform.autoGenerateSecrets" . }}

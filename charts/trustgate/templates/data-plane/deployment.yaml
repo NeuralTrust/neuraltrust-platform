@@ -172,7 +172,7 @@ spec:
     {{- include "trustgate.dataPlane.labels" . | nindent 4 }}
     component: data-plane
 {{- $useRoutes := false }}
-{{- if or .Values.global.openshift $.Values.global.openshift }}
+{{- if include "neuraltrust-platform.isOpenshift" . }}
   {{- $ingressEnabled := false }}
   {{- if and .Values.ingress (hasKey .Values.ingress "enabled") }}
     {{- if .Values.ingress.enabled }}
@@ -193,7 +193,8 @@ metadata:
     {{- include "trustgate.dataPlane.labels" . | nindent 4 }}
     component: data-plane
 spec:
-  host: {{ if or .Values.global.openshiftDomain $.Values.global.openshiftDomain }}{{ printf "trustgate-gateway.%s" (.Values.global.openshiftDomain | default $.Values.global.openshiftDomain) | quote }}{{ else }}"gateway.neuraltrust.ai"{{ end }}
+  {{- $domain := include "neuraltrust-platform.domain" . }}
+  host: {{ if $domain }}{{ printf "trustgate-gateway.%s" $domain | quote }}{{ else }}"gateway.neuraltrust.ai"{{ end }}
   to:
     kind: Service
     name: trustgate-data-plane

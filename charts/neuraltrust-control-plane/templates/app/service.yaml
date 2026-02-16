@@ -41,15 +41,17 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: "control-plane-app-ingress"
-  {{- if .Values.controlPlane.components.app.ingress.annotations }}
+  {{- $annotations := include "neuraltrust-platform.ingress.annotations" (dict "global" .Values.global "local" .Values.controlPlane.components.app.ingress.annotations) }}
+  {{- if $annotations }}
   annotations:
-    {{- toYaml .Values.controlPlane.components.app.ingress.annotations | nindent 4 }}
+    {{- $annotations | nindent 4 }}
   {{- end }}
 spec:
-  {{- if .Values.controlPlane.components.app.ingress.className }}
-  ingressClassName: {{ .Values.controlPlane.components.app.ingress.className }}
+  {{- $className := include "neuraltrust-platform.ingress.className" (dict "global" .Values.global "local" .Values.controlPlane.components.app.ingress.className) }}
+  {{- if $className }}
+  ingressClassName: {{ $className }}
   {{- end }}
-  {{- if .Values.controlPlane.components.app.ingress.tls.enabled }}
+  {{- if and .Values.controlPlane.components.app.ingress.tls.enabled (include "neuraltrust-platform.ingress.renderTLS" (dict "global" .Values.global "tlsEnabled" .Values.controlPlane.components.app.ingress.tls.enabled)) }}
   tls:
     - hosts:
         - {{ .Values.controlPlane.components.app.host | quote }}
@@ -63,7 +65,9 @@ spec:
       {{- end }}
   {{- end }}
   rules:
-    - host: {{ .Values.controlPlane.components.app.host | quote }}
+    - {{- if .Values.controlPlane.components.app.host }}
+      host: {{ .Values.controlPlane.components.app.host | quote }}
+      {{- end }}
       http:
         paths:
           - path: /
@@ -87,7 +91,7 @@ spec:
     {{- end }}
 {{- end }}
 {{- $useRoutes := false }}
-{{- if .Values.global.openshift }}
+{{- if include "neuraltrust-platform.isOpenshift" . }}
   {{- $ingressEnabled := false }}
   {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.ingress (hasKey .Values.controlPlane.components.app.ingress "enabled") }}
     {{- if .Values.controlPlane.components.app.ingress.enabled }}
@@ -100,8 +104,9 @@ spec:
 {{- end }}
 {{- if $useRoutes }}
   {{- $host := "" }}
-  {{- if .Values.global.openshiftDomain }}
-    {{- $host = printf "control-plane-app.%s" .Values.global.openshiftDomain }}
+  {{- $domain := include "neuraltrust-platform.domain" . }}
+  {{- if $domain }}
+    {{- $host = printf "control-plane-app.%s" $domain }}
   {{- else if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.host }}
     {{- $host = .Values.controlPlane.components.app.host }}
   {{- else }}

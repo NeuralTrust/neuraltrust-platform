@@ -1,0 +1,301 @@
+# Manually triggered pipeline to bump NeuralTrust image versions in values.yaml.
+# For each image, you can either provide a specific tag or leave empty to fetch
+# the latest release tag from Google Artifact Registry.
+#
+# Usage:
+#   1. Go to Actions → "Bump Image Versions" → Run workflow
+#   2. Fill in specific tags or leave empty for auto-detection
+#   3. The workflow creates a PR with the version changes
+
+name: Bump Image Versions
+
+on:
+  workflow_dispatch:
+    inputs:
+      trustgate_tag:
+        description: "trustgate-ee tag (e.g. v1.9.51). Empty = latest from AR."
+        required: false
+        default: ""
+      control_plane_api_tag:
+        description: "control-plane-api tag (e.g. v1.8.3). Empty = latest from AR."
+        required: false
+        default: ""
+      scheduler_tag:
+        description: "scheduler tag (e.g. v1.8.1). Empty = latest from AR."
+        required: false
+        default: ""
+      app_tag:
+        description: "app (frontend) tag (e.g. v1.8.1). Empty = latest from AR."
+        required: false
+        default: ""
+      data_plane_api_tag:
+        description: "data-plane-api tag (e.g. v1.8.4). Empty = latest from AR."
+        required: false
+        default: ""
+      workers_tag:
+        description: "workers tag (e.g. v1.5.0). Empty = latest from AR."
+        required: false
+        default: ""
+      kafka_connect_tag:
+        description: "kafka-connect tag (e.g. v0.0.2). Empty = latest from AR."
+        required: false
+        default: ""
+      fetch_latest:
+        description: "Fetch latest from Artifact Registry for empty inputs"
+        required: false
+        type: boolean
+        default: true
+
+env:
+  AR_REGISTRY: europe-west1-docker.pkg.dev
+  AR_PROJECT: neuraltrust-app-prod
+  AR_REPO: nt-docker
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+          yq --version
+
+      - name: Resolve image tags
+        id: tags
+        run: |
+          AR_BASE="${{ env.AR_REGISTRY }}/${{ env.AR_PROJECT }}/${{ env.AR_REPO }}"
+          FETCH_LATEST="${{ inputs.fetch_latest }}"
+
+          # Resolves a tag: uses manual input if provided, otherwise queries
+          # Artifact Registry for the latest semver tag (v*).
+          resolve_tag() {
+            local image="$1"
+            local manual_tag="$2"
+
+            if [[ -n "$manual_tag" ]]; then
+              echo "$manual_tag"
+              return
+            fi
+
+            if [[ "$FETCH_LATEST" != "true" ]]; then
+              echo ""
+              return
+            fi
+
+            echo "Fetching latest tag for ${image}..." >&2
+
+            # List tags sorted by update time, filter for semver-like (v*)
+            local latest
+            latest=$(gcloud artifacts docker tags list \
+              "${AR_BASE}/${image}" \
+              --format='value(tag)' \
+              --sort-by='~UPDATE_TIME' \
+              --filter='tag~"^v[0-9]"' \
+              --limit=10 2>/dev/null \
+              | head -1)
+
+            if [[ -z "$latest" ]]; then
+              echo "WARNING: Could not find latest tag for ${image}" >&2
+              echo ""
+              return
+            fi
+
+            echo "  → ${image}: ${latest}" >&2
+            echo "$latest"
+          }
+
+          TRUSTGATE=$(resolve_tag "trustgate-ee" "${{ inputs.trustgate_tag }}")
+          CONTROL_PLANE_API=$(resolve_tag "control-plane-api" "${{ inputs.control_plane_api_tag }}")
+          SCHEDULER=$(resolve_tag "scheduler" "${{ inputs.scheduler_tag }}")
+          APP=$(resolve_tag "app" "${{ inputs.app_tag }}")
+          DATA_PLANE_API=$(resolve_tag "data-plane-api" "${{ inputs.data_plane_api_tag }}")
+          WORKERS=$(resolve_tag "workers" "${{ inputs.workers_tag }}")
+          KAFKA_CONNECT=$(resolve_tag "kafka-connect" "${{ inputs.kafka_connect_tag }}")
+
+          echo "trustgate=${TRUSTGATE}" >> "$GITHUB_OUTPUT"
+          echo "control_plane_api=${CONTROL_PLANE_API}" >> "$GITHUB_OUTPUT"
+          echo "scheduler=${SCHEDULER}" >> "$GITHUB_OUTPUT"
+          echo "app=${APP}" >> "$GITHUB_OUTPUT"
+          echo "data_plane_api=${DATA_PLANE_API}" >> "$GITHUB_OUTPUT"
+          echo "workers=${WORKERS}" >> "$GITHUB_OUTPUT"
+          echo "kafka_connect=${KAFKA_CONNECT}" >> "$GITHUB_OUTPUT"
+
+          echo "### Resolved Tags" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Image | Tag |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|-----|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| trustgate-ee | \`${TRUSTGATE:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| control-plane-api | \`${CONTROL_PLANE_API:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| scheduler | \`${SCHEDULER:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| app | \`${APP:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| data-plane-api | \`${DATA_PLANE_API:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| workers | \`${WORKERS:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| kafka-connect | \`${KAFKA_CONNECT:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Update values.yaml
+        run: |
+          CHANGES=()
+
+          update_tag() {
+            local yq_path="$1"
+            local new_tag="$2"
+            local image_name="$3"
+
+            if [[ -z "$new_tag" ]]; then
+              echo "Skipping ${image_name} (no tag provided)"
+              return
+            fi
+
+            local current_tag
+            current_tag=$(yq eval "${yq_path}" values.yaml)
+
+            if [[ "$current_tag" == "$new_tag" ]]; then
+              echo "No change for ${image_name} (already ${current_tag})"
+              return
+            fi
+
+            echo "Updating ${image_name}: ${current_tag} → ${new_tag}"
+            yq eval -i "${yq_path} = \"${new_tag}\"" values.yaml
+            CHANGES+=("${image_name}: ${current_tag} → ${new_tag}")
+          }
+
+          # TrustGate EE
+          update_tag \
+            '.trustgate.global.image.tag' \
+            "${{ steps.tags.outputs.trustgate }}" \
+            "trustgate-ee"
+
+          # Control Plane API
+          update_tag \
+            '.["neuraltrust-control-plane"].controlPlane.components.api.image.tag' \
+            "${{ steps.tags.outputs.control_plane_api }}" \
+            "control-plane-api"
+
+          # Scheduler
+          update_tag \
+            '.["neuraltrust-control-plane"].controlPlane.components.scheduler.image.tag' \
+            "${{ steps.tags.outputs.scheduler }}" \
+            "scheduler"
+
+          # App (frontend)
+          update_tag \
+            '.["neuraltrust-control-plane"].controlPlane.components.app.image.tag' \
+            "${{ steps.tags.outputs.app }}" \
+            "app"
+
+          # Data Plane API
+          update_tag \
+            '.["neuraltrust-data-plane"].dataPlane.components.api.image.tag' \
+            "${{ steps.tags.outputs.data_plane_api }}" \
+            "data-plane-api"
+
+          # Workers
+          update_tag \
+            '.["neuraltrust-data-plane"].dataPlane.components.worker.image.tag' \
+            "${{ steps.tags.outputs.workers }}" \
+            "workers"
+
+          # Kafka Connect
+          update_tag \
+            '.["neuraltrust-data-plane"].dataPlane.components.kafka.connect.image.tag' \
+            "${{ steps.tags.outputs.kafka_connect }}" \
+            "kafka-connect"
+
+          # Also sync trustgate subchart default values
+          if [[ -n "${{ steps.tags.outputs.trustgate }}" ]]; then
+            TRUSTGATE_SUBCHART="charts/trustgate/values.yaml"
+            if [[ -f "$TRUSTGATE_SUBCHART" ]]; then
+              echo "Syncing trustgate subchart values..."
+              yq eval -i '.global.image.tag = "${{ steps.tags.outputs.trustgate }}"' "$TRUSTGATE_SUBCHART"
+            fi
+          fi
+
+          # Save changes summary for PR body
+          if [[ ${#CHANGES[@]} -eq 0 ]]; then
+            echo "NO_CHANGES=true" >> "$GITHUB_ENV"
+            echo "No version changes needed."
+          else
+            echo "NO_CHANGES=false" >> "$GITHUB_ENV"
+            {
+              echo "CHANGES_SUMMARY<<EOF"
+              for c in "${CHANGES[@]}"; do echo "- ${c}"; done
+              echo "EOF"
+            } >> "$GITHUB_ENV"
+          fi
+
+      - name: Check for changes
+        if: env.NO_CHANGES != 'true'
+        id: diff
+        run: |
+          if git diff --quiet; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            echo "### Changes" >> "$GITHUB_STEP_SUMMARY"
+            echo '```diff' >> "$GITHUB_STEP_SUMMARY"
+            git diff >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Create Pull Request
+        if: env.NO_CHANGES != 'true' && steps.diff.outputs.has_changes == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="chore/bump-images-$(date +%Y%m%d-%H%M%S)"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add values.yaml charts/trustgate/values.yaml
+          git commit -m "$(cat <<'COMMIT'
+          chore: bump image versions
+
+          ${{ env.CHANGES_SUMMARY }}
+          COMMIT
+          )"
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --title "chore: bump image versions" \
+            --body "$(cat <<PR_BODY
+          ## Image Version Bump
+
+          Triggered by: @${{ github.actor }}
+          Mode: ${{ inputs.fetch_latest == true && 'auto-detect latest from Artifact Registry' || 'manual input' }}
+
+          ### Changes
+          ${{ env.CHANGES_SUMMARY }}
+
+          ---
+          *Auto-generated by [Bump Image Versions](/${{ github.repository }}/actions/workflows/bump-images.yml) workflow*
+          PR_BODY
+          )" \
+            --base main \
+            --head "$BRANCH"
+
+      - name: No changes summary
+        if: env.NO_CHANGES == 'true' || steps.diff.outputs.has_changes == 'false'
+        run: |
+          echo "### No Changes" >> "$GITHUB_STEP_SUMMARY"
+          echo "All images are already at the requested versions." >> "$GITHUB_STEP_SUMMARY"

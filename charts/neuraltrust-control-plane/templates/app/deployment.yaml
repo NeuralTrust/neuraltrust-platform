@@ -166,7 +166,7 @@ spec:
         {{- $modelScannerApiUrl := "" }}
         {{- $kafkaHost := "kafka" }}
         {{- $kafkaPort := "9092" }}
-        {{- $openshiftDomain := .Values.global.openshiftDomain | default $.Values.global.openshiftDomain }}
+        {{- $openshiftDomain := include "neuraltrust-platform.domain" . }}
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.config }}
           {{- if .Values.controlPlane.components.app.config.port }}{{- $appPort = .Values.controlPlane.components.app.config.port }}{{- end }}
           {{- if .Values.controlPlane.components.app.config.nodeEnv }}{{- $nodeEnv = .Values.controlPlane.components.app.config.nodeEnv }}{{- end }}
@@ -271,8 +271,8 @@ spec:
               optional: true
         - name: APP_URL
           {{- $appHost := "" }}
-          {{- /* Prioritize OpenShift domain when OpenShift is enabled */}}
-          {{- if and (or .Values.global.openshift $.Values.global.openshift) $openshiftDomain }}
+          {{- /* Prioritize domain when platform provides one */}}
+          {{- if $openshiftDomain }}
             {{- $appHost = printf "control-plane-app.%s" $openshiftDomain }}
           {{- else if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.host }}
             {{- $appHost = .Values.controlPlane.components.app.host }}
@@ -324,8 +324,8 @@ spec:
           value: "{{ $nextAuthUrl }}"
           {{- else }}
           {{- $appHost := "" }}
-          {{- /* Prioritize OpenShift domain when OpenShift is enabled */}}
-          {{- if and (or .Values.global.openshift $.Values.global.openshift) $openshiftDomain }}
+          {{- /* Prioritize domain when platform provides one */}}
+          {{- if $openshiftDomain }}
             {{- $appHost = printf "control-plane-app.%s" $openshiftDomain }}
           {{- else if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.host }}
             {{- $appHost = .Values.controlPlane.components.app.host }}

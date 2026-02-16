@@ -10,7 +10,8 @@
 #   SERVER_SECRET_KEY and trustgateJwtSecret are automatically synchronized.
 
 global:
-  openshift: false
+  platform: "gcp"  # "aws" | "gcp" | "azure" | "openshift" | "kubernetes"
+  domain: ""  # Base domain for service URLs (e.g., "aws.neuraltrust.ai")
   imageRegistry: ""
   autoGenerateSecrets: true  # Auto-generate required secrets if not explicitly provided. Preserves existing values on upgrades.
   preserveExistingSecrets: false

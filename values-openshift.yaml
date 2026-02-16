@@ -5,8 +5,11 @@
 
 # Global settings
 global:
-  openshift: true # set to true if you are using openshift
-  openshiftDomain: "YOUR_DOMAIN" # OpenShift wildcard DNS domain (e.g., *.apps.neuraltrust-dev.c4u5.p2.openshiftapps.com)
+  platform: "openshift"
+  domain: "YOUR_DOMAIN"  # OpenShift wildcard DNS domain (e.g., apps.neuraltrust-dev.c4u5.p2.openshiftapps.com)
+  # DEPRECATED aliases (kept for backward compatibility):
+  openshift: true
+  openshiftDomain: "YOUR_DOMAIN"
   imageRegistry: "" # Global image registry prefix (e.g., "europe-west1-docker.pkg.dev/project/repo"). If set, will be prepended to image repositories.
   preserveExistingSecrets: false  # Set to true to prevent Helm from creating/updating secrets (secrets are pre-generated). When true, secret templates are NOT rendered.
   security:

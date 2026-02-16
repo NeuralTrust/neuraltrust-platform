@@ -15,7 +15,7 @@ spec:
       labels:
         app: control-plane-postgresql
     spec:
-      {{- if not .Values.global.openshift }}
+      {{- if not (include "neuraltrust-platform.isOpenshift" .) }}
       securityContext:
         fsGroup: 999
         runAsUser: 999
@@ -79,7 +79,7 @@ spec:
             drop:
               - ALL
           runAsNonRoot: true
-          {{- if not .Values.global.openshift }}
+          {{- if not (include "neuraltrust-platform.isOpenshift" .) }}
           runAsUser: 999
           runAsGroup: 999
           {{- end }}

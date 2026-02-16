@@ -32,15 +32,17 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: "control-plane-scheduler-ingress"
-  {{- if .ingress.annotations }}
+  {{- $annotations := include "neuraltrust-platform.ingress.annotations" (dict "global" $.Values.global "local" .ingress.annotations) }}
+  {{- if $annotations }}
   annotations:
-    {{- toYaml .ingress.annotations | nindent 4 }}
+    {{- $annotations | nindent 4 }}
   {{- end }}
 spec:
-  {{- if .ingress.className }}
-  ingressClassName: {{ .ingress.className }}
+  {{- $className := include "neuraltrust-platform.ingress.className" (dict "global" $.Values.global "local" .ingress.className) }}
+  {{- if $className }}
+  ingressClassName: {{ $className }}
   {{- end }}
-  {{- if .ingress.tls.enabled }}
+  {{- if and .ingress.tls.enabled (include "neuraltrust-platform.ingress.renderTLS" (dict "global" $.Values.global "tlsEnabled" .ingress.tls.enabled)) }}
   tls:
     - hosts:
         - {{ .host | default "scheduler.neuraltrust.ai" | quote }}
@@ -51,7 +53,9 @@ spec:
       {{- end }}
   {{- end }}
   rules:
-    - host: {{ .host | default "scheduler.neuraltrust.ai" | quote }}
+    - {{- if .host }}
+      host: {{ .host | quote }}
+      {{- end }}
       http:
         paths:
           - path: /
@@ -64,7 +68,7 @@ spec:
   {{- end }}
 {{- end }}
 {{- $useRoutes := false }}
-{{- if .Values.global.openshift }}
+{{- if include "neuraltrust-platform.isOpenshift" . }}
   {{- $ingressEnabled := false }}
   {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.scheduler .Values.controlPlane.components.scheduler.ingress (hasKey .Values.controlPlane.components.scheduler.ingress "enabled") }}
     {{- if .Values.controlPlane.components.scheduler.ingress.enabled }}
@@ -80,8 +84,9 @@ spec:
     {{- with .components }}
       {{- with .scheduler }}
   {{- $host := "" }}
-  {{- if $.Values.global.openshiftDomain }}
-    {{- $host = printf "control-plane-scheduler.%s" $.Values.global.openshiftDomain }}
+  {{- $domain := include "neuraltrust-platform.domain" $ }}
+  {{- if $domain }}
+    {{- $host = printf "control-plane-scheduler.%s" $domain }}
   {{- else if .host }}
     {{- $host = .host }}
   {{- else }}

@@ -7,15 +7,17 @@ metadata:
   labels:
     {{- include "trustgate.labels" . | nindent 4 }}
     component: control-plane
+  {{- $annotations := include "neuraltrust-platform.ingress.annotations" (dict "global" .Values.global "local" .Values.ingress.annotations) }}
+  {{- if $annotations }}
   annotations:
-    {{- with .Values.ingress.annotations }}
-    {{- toYaml . | nindent 4 }}
-    {{- end }}
-spec:
-  {{- if .Values.ingress.className }}
-  ingressClassName: {{ .Values.ingress.className }}
+    {{- $annotations | nindent 4 }}
   {{- end }}
-  {{- if and .Values.ingress.tls .Values.ingress.tls.enabled }}
+spec:
+  {{- $className := include "neuraltrust-platform.ingress.className" (dict "global" .Values.global "local" .Values.ingress.className) }}
+  {{- if $className }}
+  ingressClassName: {{ $className }}
+  {{- end }}
+  {{- if and .Values.ingress.tls .Values.ingress.tls.enabled (include "neuraltrust-platform.ingress.renderTLS" (dict "global" .Values.global "tlsEnabled" .Values.ingress.tls.enabled)) }}
   tls:
     - hosts:
         - {{ .Values.ingress.controlPlane.host }}
@@ -24,7 +26,9 @@ spec:
       {{- end }}
   {{- end }}
   rules:
-    - host: {{ .Values.ingress.controlPlane.host }}
+    - {{- if .Values.ingress.controlPlane.host }}
+      host: {{ .Values.ingress.controlPlane.host }}
+      {{- end }}
       http:
         paths:
           - path: /
@@ -43,15 +47,17 @@ metadata:
   labels:
     {{- include "trustgate.labels" . | nindent 4 }}
     component: data-plane
+  {{- $annotations := include "neuraltrust-platform.ingress.annotations" (dict "global" .Values.global "local" .Values.ingress.annotations) }}
+  {{- if $annotations }}
   annotations:
-    {{- with .Values.ingress.annotations }}
-    {{- toYaml . | nindent 4 }}
-    {{- end }}
-spec:
-  {{- if .Values.ingress.className }}
-  ingressClassName: {{ .Values.ingress.className }}
+    {{- $annotations | nindent 4 }}
   {{- end }}
-  {{- if and .Values.ingress.tls .Values.ingress.tls.enabled }}
+spec:
+  {{- $className := include "neuraltrust-platform.ingress.className" (dict "global" .Values.global "local" .Values.ingress.className) }}
+  {{- if $className }}
+  ingressClassName: {{ $className }}
+  {{- end }}
+  {{- if and .Values.ingress.tls .Values.ingress.tls.enabled (include "neuraltrust-platform.ingress.renderTLS" (dict "global" .Values.global "tlsEnabled" .Values.ingress.tls.enabled)) }}
   tls:
     - hosts:
         - {{ .Values.ingress.dataPlane.host }}
@@ -60,7 +66,9 @@ spec:
       {{- end }}
   {{- end }}
   rules:
-    - host: {{ .Values.ingress.dataPlane.host }}
+    - {{- if .Values.ingress.dataPlane.host }}
+      host: {{ .Values.ingress.dataPlane.host }}
+      {{- end }}
       http:
         paths:
           - path: /
@@ -80,15 +88,17 @@ metadata:
   labels:
     {{- include "trustgate.labels" . | nindent 4 }}
     component: actions
+  {{- $annotations := include "neuraltrust-platform.ingress.annotations" (dict "global" .Values.global "local" .Values.ingress.annotations) }}
+  {{- if $annotations }}
   annotations:
-    {{- with .Values.ingress.annotations }}
-    {{- toYaml . | nindent 4 }}
-    {{- end }}
-spec:
-  {{- if .Values.ingress.className }}
-  ingressClassName: {{ .Values.ingress.className }}
+    {{- $annotations | nindent 4 }}
   {{- end }}
-  {{- if and .Values.ingress.tls .Values.ingress.tls.enabled }}
+spec:
+  {{- $className := include "neuraltrust-platform.ingress.className" (dict "global" .Values.global "local" .Values.ingress.className) }}
+  {{- if $className }}
+  ingressClassName: {{ $className }}
+  {{- end }}
+  {{- if and .Values.ingress.tls .Values.ingress.tls.enabled (include "neuraltrust-platform.ingress.renderTLS" (dict "global" .Values.global "tlsEnabled" .Values.ingress.tls.enabled)) }}
   tls:
     - hosts:
         - {{ .Values.ingress.actions.host }}
@@ -97,7 +107,9 @@ spec:
       {{- end }}
   {{- end }}
   rules:
-    - host: {{ .Values.ingress.actions.host }}
+    - {{- if .Values.ingress.actions.host }}
+      host: {{ .Values.ingress.actions.host }}
+      {{- end }}
       http:
         paths:
           - path: /
