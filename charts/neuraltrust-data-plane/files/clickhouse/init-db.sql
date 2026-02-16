@@ -339,6 +339,29 @@ SETTINGS index_granularity = 8192;
 
 
 -- ============================================================================
+-- ALTER metrics TABLE - Add columns if they don't exist (for existing tables)
+-- ============================================================================
+ALTER TABLE metrics ADD COLUMN IF NOT EXISTS team_id String DEFAULT '';
+ALTER TABLE metrics ADD COLUMN IF NOT EXISTS gateway_id String DEFAULT '';
+ALTER TABLE metrics ADD COLUMN IF NOT EXISTS engine_id String DEFAULT '';
+ALTER TABLE metrics ADD COLUMN IF NOT EXISTS rule_id String DEFAULT '';
+ALTER TABLE metrics ADD COLUMN IF NOT EXISTS policy_id String DEFAULT '';
+ALTER TABLE metrics ADD COLUMN IF NOT EXISTS user_id String DEFAULT '';
+ALTER TABLE metrics ADD COLUMN IF NOT EXISTS browser String DEFAULT '';
+ALTER TABLE metrics ADD COLUMN IF NOT EXISTS device String DEFAULT '';
+ALTER TABLE metrics ADD COLUMN IF NOT EXISTS os String DEFAULT '';
+ALTER TABLE metrics ADD COLUMN IF NOT EXISTS locale String DEFAULT '';
+ALTER TABLE metrics ADD COLUMN IF NOT EXISTS location String DEFAULT '';
+
+-- Add indexes for metrics table
+ALTER TABLE metrics ADD INDEX IF NOT EXISTS idx_team_id (team_id) TYPE bloom_filter(0.01) GRANULARITY 1;
+ALTER TABLE metrics ADD INDEX IF NOT EXISTS idx_gateway_id (gateway_id) TYPE bloom_filter(0.01) GRANULARITY 1;
+ALTER TABLE metrics ADD INDEX IF NOT EXISTS idx_engine_id (engine_id) TYPE bloom_filter(0.01) GRANULARITY 1;
+ALTER TABLE metrics ADD INDEX IF NOT EXISTS idx_rule_id (rule_id) TYPE bloom_filter(0.01) GRANULARITY 1;
+ALTER TABLE metrics ADD INDEX IF NOT EXISTS idx_user_id (user_id) TYPE bloom_filter(0.01) GRANULARITY 1;
+
+
+-- ============================================================================
 -- MATERIALIZED VIEWS FOR DASHBOARD CHARTS
 -- All views read from the metrics table directly
 -- ============================================================================
