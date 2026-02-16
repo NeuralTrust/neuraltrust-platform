@@ -1,20 +1,20 @@
 # Additional global settings
 global:
-  version: "ee"  # can be "ce" or "ee"
+  version: "ee" # can be "ce" or "ee"
   imageRegistry: "docker.io"
   imagePullSecrets:
     - name: gcr-secret
   # -- Storage class to use for persistent volumes
   # If not set, will use the cluster's default StorageClass
   storageClass: ""
-  deploymentType: shared  # shared or dedicated
+  deploymentType: shared # shared or dedicated
   huggingface:
     apiKeySecret: "hf-api-key"
   image:
     pullPolicy: Always
     image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee"
     repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee"
-    tag: "v1.9.50"
+    tag: "v1.17.19"
   env:
     SERVER_SECRET_KEY: ${SERVER_SECRET_KEY}
     SERVER_BASE_DOMAIN: ${SERVER_BASE_DOMAIN:-neuraltrust.ai}
@@ -34,19 +34,16 @@ global:
     CONTROL_PLANE_HOST: ${CONTROL_PLANE_HOST}
     DATA_PLANE_HOST: ${DATA_PLANE_HOST}
     ACTIONS_HOST: ${ACTIONS_HOST}
-
 # Service Account configuration
 serviceAccount:
   create: true
   name: ""
-  annotations: { }
-
+  annotations: {}
 # Common configurations
 config:
   logLevel: "info"
   baseDomain: "neuraltrust.ai"
-  providers: { }
-
+  providers: {}
 # postgresqlInit.resources: optional override for postgresql-init Job container (default: requests 250m/64Mi, limits 500m/128Mi)
 # postgresqlInit:
 #   resources:
@@ -68,20 +65,17 @@ controlPlane:
     limits:
       cpu: 500m
       memory: 2Gi
-
   podDisruptionBudget:
     enabled: true
     minAvailable: 1
-
   autoscaling:
     enabled: true
     minReplicas: 1
     maxReplicas: 10
     targetCPUUtilizationPercentage: 80
     targetMemoryUtilizationPercentage: 80
-
-  nodeSelector: { }
-  tolerations: [ ]
+  nodeSelector: {}
+  tolerations: []
   affinity:
     podAntiAffinity:
       preferredDuringSchedulingIgnoredDuringExecution:
@@ -94,11 +88,9 @@ controlPlane:
                   values:
                     - trustgate-control-plane
             topologyKey: kubernetes.io/hostname
-
   service:
     type: ClusterIP
     port: 8080
-
 # Data Plane settings
 dataPlane:
   name: trustgate-data-plane
@@ -116,16 +108,14 @@ dataPlane:
   podDisruptionBudget:
     enabled: true
     minAvailable: 2
-
   autoscaling:
     enabled: true
     minReplicas: 1
     maxReplicas: 20
     targetCPUUtilizationPercentage: 75
     targetMemoryUtilizationPercentage: 75
-
-  nodeSelector: { }
-  tolerations: [ ]
+  nodeSelector: {}
+  tolerations: []
   affinity:
     podAntiAffinity:
       requiredDuringSchedulingIgnoredDuringExecution:
@@ -136,11 +126,9 @@ dataPlane:
                 values:
                   - trustgate-data-plane
           topologyKey: kubernetes.io/hostname
-
   service:
     type: ClusterIP
     port: 8081
-
 # Actions settings
 actions:
   name: trustgate-actions
@@ -156,20 +144,17 @@ actions:
     limits:
       cpu: 500m
       memory: 2Gi
-
   podDisruptionBudget:
     enabled: true
     minAvailable: 1
-
   autoscaling:
     enabled: true
     minReplicas: 1
     maxReplicas: 5
     targetCPUUtilizationPercentage: 80
     targetMemoryUtilizationPercentage: 80
-
-  nodeSelector: { }
-  tolerations: [ ]
+  nodeSelector: {}
+  tolerations: []
   affinity:
     podAntiAffinity:
       preferredDuringSchedulingIgnoredDuringExecution:
@@ -182,11 +167,9 @@ actions:
                   values:
                     - trustgate-actions
             topologyKey: kubernetes.io/hostname
-
   service:
     type: ClusterIP
     port: 8084
-
 # Redis configuration
 redis:
   enabled: true
@@ -197,9 +180,9 @@ redis:
   # External Redis configuration if redis.enabled is false
   # When using external Redis, set trustgate.global.env.REDIS_HOST, REDIS_PORT, and REDIS_PASSWORD
   external:
-    host: ""  # External Redis host (set via trustgate.global.env.REDIS_HOST when redis.enabled=false)
-    port: 6379  # External Redis port (set via trustgate.global.env.REDIS_PORT when redis.enabled=false)
-    password: ""  # External Redis password (set via trustgate.global.env.REDIS_PASSWORD when redis.enabled=false)
+    host: "" # External Redis host (set via trustgate.global.env.REDIS_HOST when redis.enabled=false)
+    port: 6379 # External Redis port (set via trustgate.global.env.REDIS_PORT when redis.enabled=false)
+    password: "" # External Redis password (set via trustgate.global.env.REDIS_PASSWORD when redis.enabled=false)
   master:
     service:
       port: 6379
@@ -217,30 +200,26 @@ redis:
     replicaCount: 1
     service:
       port: 6379
-
-
 # Default values for TrustGate
 ingress:
   enabled: true
-  className: ""  # Leave empty to use global.ingress.className
-  annotations: {}  # Per-service annotations (merged with global.ingress.annotations and AWS auto-generated annotations)
+  className: "" # Leave empty to use global.ingress.className
+  annotations: {} # Per-service annotations (merged with global.ingress.annotations and AWS auto-generated annotations)
   controlPlane:
-    host: ""  # Optional: set to your domain (e.g., "admin.yourdomain.com"). Empty = use ALB auto-generated URL.
+    host: "" # Optional: set to your domain (e.g., "admin.yourdomain.com"). Empty = use ALB auto-generated URL.
   dataPlane:
-    host: ""  # Optional: set to your domain (e.g., "gateway.yourdomain.com"). Empty = use ALB auto-generated URL.
+    host: "" # Optional: set to your domain (e.g., "gateway.yourdomain.com"). Empty = use ALB auto-generated URL.
   actions:
-    host: ""  # Optional: set to your domain (e.g., "actions.yourdomain.com"). Empty = use ALB auto-generated URL.
-
+    host: "" # Optional: set to your domain (e.g., "actions.yourdomain.com"). Empty = use ALB auto-generated URL.
 # Optional: Add cert-manager configuration
 certManager:
   enabled: true
   issuerName: "letsencrypt-prod"
-  issuerKind: "ClusterIssuer"  # Can be "Issuer" or "ClusterIssuer"
+  issuerKind: "ClusterIssuer" # Can be "Issuer" or "ClusterIssuer"
   email: "admin@neuraltrust.ai"
-  
   # Custom certificate support for both planes
   customCertificates:
-    enabled: false  # Set to true when using custom certs
+    enabled: false # Set to true when using custom certs
     controlPlane:
       cert: |
         -----BEGIN CERTIFICATE-----
