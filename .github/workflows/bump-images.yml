@@ -227,7 +227,7 @@ jobs:
             patch=$((patch + 1))
             local new_version="${major}.${minor}.${patch}"
             yq eval -i ".version = \"${new_version}\"" "$chart_file"
-            echo "  Bumped ${chart_file}: ${current} → ${new_version}"
+            echo "  Bumped ${chart_file}: ${current} → ${new_version}" >&2
             echo "${new_version}"
           }
 
