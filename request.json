@@ -8,7 +8,7 @@
     },
     {
       "role": "user",
-      "content": "Current version: 1.3.5\n\nCommits since last release:\n- 49c936e chore: bump image versions (#11)\n"
+      "content": "Current version: 1.3.6\n\nCommits since last release:\n- 5fb438b Merge pull request #13 from NeuralTrust/chore/bump-images-20260216-165558\n- 00f3013 feat: update metrics table schema and indexing\n- 1f90c0d chore: bump image versions\n"
     }
   ],
   "max_tokens": 200,
