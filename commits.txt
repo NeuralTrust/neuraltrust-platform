@@ -1,3 +1,1 @@
-- 5fb438b Merge pull request #13 from NeuralTrust/chore/bump-images-20260216-165558
-- 00f3013 feat: update metrics table schema and indexing
-- 1f90c0d chore: bump image versions
+- d1ac96e feat: add support for GCP NEG annotations and PostgreSQL init job resource overrides
