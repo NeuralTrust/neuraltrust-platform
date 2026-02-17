@@ -3,6 +3,11 @@ apiVersion: v1
 kind: Service
 metadata:
   name: control-plane-app-service
+  {{- $negAnnotations := include "neuraltrust-platform.service.negAnnotations" (dict "global" .Values.global) }}
+  {{- if $negAnnotations }}
+  annotations:
+    {{- $negAnnotations | nindent 4 }}
+  {{- end }}
 spec:
   {{- $serviceType := "ClusterIP" }}
   {{- if .Values.controlPlane }}

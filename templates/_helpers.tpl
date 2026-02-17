@@ -426,6 +426,35 @@ Usage: {{- if include "neuraltrust-platform.ingress.renderTLS" (dict "global" .V
 {{- end }}
 
 {{/*
+Generate service annotations for GCP NEG (Network Endpoint Groups) support.
+On non-autopilot GKE clusters, the GCE ingress controller requires either NodePort/LoadBalancer
+services OR the cloud.google.com/neg annotation on ClusterIP services for container-native
+load balancing. This helper adds the NEG annotation when the platform is GCP.
+Controlled by: global.ingress.gcp.neg.enabled (default: true when provider=gcp)
+Usage: {{ include "neuraltrust-platform.service.negAnnotations" (dict "global" .Values.global) }}
+*/}}
+{{- define "neuraltrust-platform.service.negAnnotations" -}}
+{{- $global := default dict .global }}
+{{- $globalIngress := default dict $global.ingress }}
+{{- $platform := $global.platform | default "kubernetes" }}
+{{- $provider := $globalIngress.provider | default "" }}
+{{- if not $provider }}
+  {{- if eq $platform "gcp" }}{{ $provider = "gcp" }}{{- end }}
+{{- end }}
+{{- if eq $provider "gcp" }}
+  {{- $gcp := default dict $globalIngress.gcp }}
+  {{- $neg := default dict $gcp.neg }}
+  {{- $negEnabled := true }}
+  {{- if hasKey $neg "enabled" }}
+    {{- $negEnabled = $neg.enabled }}
+  {{- end }}
+  {{- if $negEnabled }}
+cloud.google.com/neg: '{"ingress": true}'
+  {{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
 Check if autoGenerateSecrets is enabled.
 Returns "true" (non-empty string) if enabled, empty string if disabled.
 Usage: {{- if include "neuraltrust-platform.autoGenerateSecrets" . }}

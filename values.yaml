@@ -56,6 +56,11 @@ global:
       managedCertificates: "" # Optional: comma-separated Google-managed certificate names (e.g., "neuraltrust-cert")
       backendConfig: "" # Optional: BackendConfig name for health checks, CDN, IAP, etc.
       sslRedirect: false # Set to true to redirect HTTP→HTTPS (requires managedCertificates or pre-provisioned cert)
+      neg:
+        enabled: true # Enable NEG (Network Endpoint Groups) annotations on services backing Ingress resources.
+                       # Required on non-autopilot GKE clusters when services are ClusterIP (default).
+                       # Adds cloud.google.com/neg: '{"ingress": true}' to service metadata.
+                       # On autopilot clusters this is a safe no-op.
       additionalAnnotations: {} # Any additional GCE annotations as key-value pairs
     # Azure Application Gateway Ingress Controller settings (used when provider=azure)
     # Requires: AGIC add-on enabled on AKS cluster
@@ -293,6 +298,9 @@ trustgate:
       REDIS_HOST: "" # Will be auto-configured if redis.enabled
       REDIS_PORT: "6379"
       REDIS_DB: "0"
+  # PostgreSQL initialization job resource overrides
+  postgresqlInit:
+    resources: {}      # Override init job container resources (default: requests 250m/64Mi, limits 500m/128Mi)
   # Service Account configuration
   serviceAccount:
     create: true
