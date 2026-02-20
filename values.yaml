@@ -155,11 +155,11 @@ clickhouse:
     storageClass: ""
   resources:
     requests:
-      memory: 1Gi
-      cpu: 1
+      memory: 10Gi
+      cpu: 4
     limits:
-      memory: 2Gi
-      cpu: 2
+      memory: 16Gi
+      cpu: 8
   logLevel: "fatal"
 # Kafka subchart values (passed directly to kafka subchart)
 # These values are used when infrastructure.kafka.deploy=true
@@ -314,24 +314,24 @@ trustgate:
   # Control Plane settings
   controlPlane:
     name: trustgate-control-plane
-    replicas: 1
+    replicas: 2
     ports:
       http: 8080
     podSecurityContext:
       fsGroup: 1001
     resources:
       requests:
-        cpu: 250m
-        memory: 1Gi
-      limits:
         cpu: 500m
         memory: 2Gi
+      limits:
+        cpu: 1000m
+        memory: 4Gi
     podDisruptionBudget:
       enabled: true
       minAvailable: 1
     autoscaling:
       enabled: true
-      minReplicas: 1
+      minReplicas: 2
       maxReplicas: 10
       targetCPUUtilizationPercentage: 80
       targetMemoryUtilizationPercentage: 80
@@ -355,22 +355,22 @@ trustgate:
   # Data Plane settings
   dataPlane:
     name: trustgate-data-plane
-    replicas: 1
+    replicas: 2
     resources:
       requests:
-        cpu: 1000m
-        memory: 2Gi
-      limits:
         cpu: 2000m
         memory: 4Gi
+      limits:
+        cpu: 4000m
+        memory: 8Gi
     ports:
       http: 8081
     podDisruptionBudget:
       enabled: true
-      minAvailable: 2
+      minAvailable: 1
     autoscaling:
       enabled: true
-      minReplicas: 1
+      minReplicas: 2
       maxReplicas: 20
       targetCPUUtilizationPercentage: 75
       targetMemoryUtilizationPercentage: 75
@@ -392,24 +392,24 @@ trustgate:
   # Actions settings
   actions:
     name: trustgate-actions
-    replicas: 1
+    replicas: 2
     ports:
       http: 8084
     podSecurityContext:
       fsGroup: 1001
     resources:
       requests:
-        cpu: 250m
-        memory: 1Gi
-      limits:
         cpu: 500m
         memory: 2Gi
+      limits:
+        cpu: 1000m
+        memory: 4Gi
     podDisruptionBudget:
       enabled: true
       minAvailable: 1
     autoscaling:
       enabled: true
-      minReplicas: 1
+      minReplicas: 2
       maxReplicas: 5
       targetCPUUtilizationPercentage: 80
       targetMemoryUtilizationPercentage: 80
@@ -567,11 +567,11 @@ neuraltrust-control-plane:
         #   limits: { cpu: 500m, memory: 128Mi }
         resources:
           requests:
-            memory: 512Mi
-            cpu: 250m
-          limits:
             memory: 1Gi
-            cpu: 500m
+            cpu: 1000m
+          limits:
+            memory: 2Gi
+            cpu: 2000m
         healthCheck:
           # Health check job image (used for post-install/post-upgrade health checks)
           image:
@@ -594,7 +594,7 @@ neuraltrust-control-plane:
           tls:
             enabled: false
             secretName: "" # Name of existing kubernetes.io/tls secret in namespace
-        replicaCount: 1
+        replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
           tag: "v1.16.0"
@@ -656,11 +656,11 @@ neuraltrust-control-plane:
           preserveOnDelete: true
         resources:
           requests:
-            memory: 512Mi
-            cpu: 250m
+            memory: 2Gi
+            cpu: 1000m
           limits:
-            memory: 1Gi
-            cpu: 500m
+            memory: 4Gi
+            cpu: 2000m
         service:
           type: ClusterIP
           port: 5432
@@ -754,11 +754,11 @@ neuraltrust-data-plane:
         #   limits: { cpu: 500m, memory: 512Mi }
         resources:
           requests:
-            cpu: 1
-            memory: 2Gi
-          limits:
             cpu: 2
-            memory: 3Gi
+            memory: 4Gi
+          limits:
+            cpu: 4
+            memory: 6Gi
       worker:
         enabled: true
         replicas: 1

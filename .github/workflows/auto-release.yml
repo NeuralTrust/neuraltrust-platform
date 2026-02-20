@@ -10,7 +10,8 @@ on:
   push:
     branches: [main]
     paths-ignore:
-      - '.github/workflows/**'
+      - 'k8s/**'
+      - '.github/**'
 
 permissions:
   contents: write
