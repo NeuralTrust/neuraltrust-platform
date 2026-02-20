@@ -1,1 +1,1 @@
-- d1ac96e feat: add support for GCP NEG annotations and PostgreSQL init job resource overrides
+- 65f056b feat: update resource requests and limits for trustgate and neuraltrust components

@@ -8,7 +8,7 @@
     },
     {
       "role": "user",
-      "content": "Current version: 1.4.0\n\nCommits since last release:\n- d1ac96e feat: add support for GCP NEG annotations and PostgreSQL init job resource overrides\n"
+      "content": "Current version: 1.5.0\n\nCommits since last release:\n- 65f056b feat: update resource requests and limits for trustgate and neuraltrust components\n"
     }
   ],
   "max_tokens": 200,
