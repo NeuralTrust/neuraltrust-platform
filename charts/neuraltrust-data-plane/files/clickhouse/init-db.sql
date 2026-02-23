@@ -126,7 +126,7 @@ CREATE TABLE IF NOT EXISTS tests (
     updatedAt DateTime DEFAULT now(),
     sign Int8
 ) ENGINE = CollapsingMergeTree(sign)
-ORDER BY (id, scenarioId, targetId);
+ORDER BY (scenarioId, targetId, id);
 
 -- Tests Runs table
 CREATE TABLE IF NOT EXISTS test_runs (
@@ -144,10 +144,9 @@ CREATE TABLE IF NOT EXISTS test_runs (
     score String,    -- JSON stored as String
     executionTimeSeconds Int32 NULL,
     runAt DateTime DEFAULT now(),
-    sign Int8,
-    PRIMARY KEY (id)
+    sign Int8
 ) ENGINE = CollapsingMergeTree(sign)
-ORDER BY (id);
+ORDER BY (scenarioId, targetId, testId, id);
 
 -- GPT Usage table
 CREATE TABLE IF NOT EXISTS gpt_usage
