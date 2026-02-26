@@ -8,7 +8,7 @@
     },
     {
       "role": "user",
-      "content": "Current version: 1.6.1\n\nCommits since last release:\n- 7ecb7bf Merge pull request #15 from NeuralTrust/chore/bump-images-20260226-193558\n- 473090b chore: bump image versions\n"
+      "content": "Current version: 1.6.2\n\nCommits since last release:\n- fef18ef Update .gitignore to include CI-generated files and remove commits.txt\n"
     }
   ],
   "max_tokens": 200,
