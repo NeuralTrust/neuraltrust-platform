@@ -8,7 +8,7 @@
     },
     {
       "role": "user",
-      "content": "Current version: 1.5.0\n\nCommits since last release:\n- 65f056b feat: update resource requests and limits for trustgate and neuraltrust components\n"
+      "content": "Current version: 1.6.0\n\nCommits since last release:\n- c009676 Merge pull request #14 from NeuralTrust/update-init-db-sql\n- 63902a0 chore: Update init-db.sql from data-plane-api\n"
     }
   ],
   "max_tokens": 200,

@@ -1,1 +1,2 @@
-- 65f056b feat: update resource requests and limits for trustgate and neuraltrust components
+- c009676 Merge pull request #14 from NeuralTrust/update-init-db-sql
+- 63902a0 chore: Update init-db.sql from data-plane-api
