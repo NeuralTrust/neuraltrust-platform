@@ -8,7 +8,7 @@
     },
     {
       "role": "user",
-      "content": "Current version: 1.6.0\n\nCommits since last release:\n- c009676 Merge pull request #14 from NeuralTrust/update-init-db-sql\n- 63902a0 chore: Update init-db.sql from data-plane-api\n"
+      "content": "Current version: 1.6.1\n\nCommits since last release:\n- 7ecb7bf Merge pull request #15 from NeuralTrust/chore/bump-images-20260226-193558\n- 473090b chore: bump image versions\n"
     }
   ],
   "max_tokens": 200,

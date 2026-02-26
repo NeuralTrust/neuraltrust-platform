@@ -1,2 +1,2 @@
-- c009676 Merge pull request #14 from NeuralTrust/update-init-db-sql
-- 63902a0 chore: Update init-db.sql from data-plane-api
+- 7ecb7bf Merge pull request #15 from NeuralTrust/chore/bump-images-20260226-193558
+- 473090b chore: bump image versions
