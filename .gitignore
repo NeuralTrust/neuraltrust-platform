@@ -49,3 +49,6 @@ rendered-charts/
 # !values-*.yaml.example
 gcr-keys.json
 key.json
+
+# CI-generated files
+commits.txt
