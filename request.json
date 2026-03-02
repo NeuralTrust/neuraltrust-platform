@@ -8,7 +8,7 @@
     },
     {
       "role": "user",
-      "content": "Current version: 1.6.2\n\nCommits since last release:\n- fef18ef Update .gitignore to include CI-generated files and remove commits.txt\n"
+      "content": "Current version: 1.6.3\n\nCommits since last release:\n- 8aafb1b chore: update resource requests and limits for clickhouse component\n"
     }
   ],
   "max_tokens": 200,
