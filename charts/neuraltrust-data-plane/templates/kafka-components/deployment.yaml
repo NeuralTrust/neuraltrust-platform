@@ -90,7 +90,7 @@ spec:
             - name: CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE
               value: "false"
             - name: CONNECT_PLUGIN_PATH
-              value: "/usr/share/java,/usr/share/confluent-hub-components"
+              value: "/opt/kafka/plugins"
             - name: CONNECT_REST_ADVERTISED_HOST_NAME
               valueFrom:
                 fieldRef:
