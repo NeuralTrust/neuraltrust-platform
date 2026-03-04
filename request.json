@@ -8,7 +8,7 @@
     },
     {
       "role": "user",
-      "content": "Current version: 1.6.3\n\nCommits since last release:\n- 8aafb1b chore: update resource requests and limits for clickhouse component\n"
+      "content": "Current version: 1.6.4\n\nCommits since last release:\n- 430a953 fix: refine tag filtering in bump-images workflow and update Kafka CONNECT_PLUGIN_PATH\n"
     }
   ],
   "max_tokens": 200,
