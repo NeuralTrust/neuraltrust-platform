@@ -8,7 +8,7 @@
     },
     {
       "role": "user",
-      "content": "Current version: 1.6.5\n\nCommits since last release:\n- 40ded5a Merge pull request #18 from NeuralTrust/chore/bump-images-20260305-104344\n- 2bce29c chore: bump image versions\n"
+      "content": "Current version: 1.6.6\n\nCommits since last release:\n- a9356f3 Merge pull request #20 from NeuralTrust/chore/bump-images-20260305-120112\n- 7e9d2bc chore: bump image versions\n"
     }
   ],
   "max_tokens": 200,
