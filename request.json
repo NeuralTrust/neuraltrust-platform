@@ -8,7 +8,7 @@
     },
     {
       "role": "user",
-      "content": "Current version: 1.6.4\n\nCommits since last release:\n- 430a953 fix: refine tag filtering in bump-images workflow and update Kafka CONNECT_PLUGIN_PATH\n"
+      "content": "Current version: 1.6.5\n\nCommits since last release:\n- 40ded5a Merge pull request #18 from NeuralTrust/chore/bump-images-20260305-104344\n- 2bce29c chore: bump image versions\n"
     }
   ],
   "max_tokens": 200,
