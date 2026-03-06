@@ -20,24 +20,20 @@ global:
 # These values are used when infrastructure.clickhouse.deploy=true
 clickhouse:
   fullnameOverride: "clickhouse"
-  shards: 1
   replicaCount: 1
-  zookeeper:
-    enabled: false
+  imagePullSecrets: "gcr-secret"
   image:
-    registry: docker.io
-    repository: bitnamilegacy/clickhouse  # Set via --set clickhouse.image.repository="your-repo/clickhouse"
-    tag: 25.3.2-debian-12-r3
-    pullPolicy: Always
+    repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickhouse-server
+    tag: "25.8"
+    pullPolicy: IfNotPresent
   global:
-    imagePullSecrets: []  # Empty for public Docker Hub images, or ["user-registry"] for private images
+    imagePullSecrets: []
   auth:
     username: "neuraltrust"
     password: "" # Define this value
-    # Use existing secret if it already exists (prevents Helm from trying to manage it)
-    # Set to "clickhouse" to use the pre-existing secret named "clickhouse"
-    existingSecret: ""  # Set to "" if you want Helm to create/manage the secret
-    existingSecretKey: "admin-password"  # Key name in the existing secret
+    existingSecret: ""
+    existingSecretKey: "admin-password"
+    database: "neuraltrust"
   persistence:
     enabled: true
     size: 50Gi
@@ -54,88 +50,32 @@ clickhouse:
 # Kafka subchart values (passed directly to kafka subchart)
 # These values are used when infrastructure.kafka.deploy=true
 kafka:
-  # Small deployment configuration (1 broker, 1 zookeeper)
   fullnameOverride: "kafka"
-  kraft:
-    enabled: false
-  extraConfigYaml:
-    default.replication.factor: 1
-    offsets.topic.replication.factor: 1
-    transaction.state.log.replication.factor: 1
-    transaction.state.log.min.isr: 1
-    min.insync.replicas: 1
-  extraEnvVars:
-    - name: KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR
-      value: "1"
-    - name: KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
-      value: "1"
-    - name: KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR
-      value: "1"
-    - name: KAFKA_CFG_DEFAULT_REPLICATION_FACTOR
-      value: "1"
-    - name: KAFKA_CFG_MIN_INSYNC_REPLICAS
-      value: "1"
-  auth:
-    interBrokerProtocol: PLAINTEXT
-    clientProtocol: PLAINTEXT
-  listeners:
-    client:
-      containerPort: 9092
-      protocol: PLAINTEXT
-      name: CLIENT
-      sslClientAuth: ""
-    interbroker:
-      containerPort: 9094
-      protocol: PLAINTEXT
-      name: INTERNAL
-      sslClientAuth: ""
-    controller:
-      name: CONTROLLER
-      containerPort: 9093
-      protocol: PLAINTEXT
-      sslClientAuth: ""
-  broker:
-    replicaCount: 1
-    podAntiAffinityPreset: hard
-    resources:
-      requests:
-        memory: 1Gi
-        cpu: 500m
-      limits:
-        memory: 2Gi
-        cpu: 1
-  zookeeper:
-    enabled: true
-    fullnameOverride: "zookeeper"
-    replicaCount: 1
-    podAntiAffinityPreset: hard
-    auth:
-      client:
-        enabled: false
-    image:
-      registry: docker.io
-      repository: bitnamilegacy/zookeeper
-      tag: 3.9.3-debian-12-r0
-    resources:
-      requests:
-        cpu: 500m
-        memory: 512Mi
-      limits:
-        cpu: 1000m
-        memory: 1Gi
-  controller:
-    replicaCount: 0
+  replicaCount: 1
+  imagePullSecrets: "gcr-secret"
   image:
-    registry: docker.io
-    repository: bitnamilegacy/kafka
-    tag: 3.9.0-debian-12-r1
-    pullPolicy: Always
+    repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka
+    tag: "4.1.1"
+    pullPolicy: IfNotPresent
   global:
-    imagePullSecrets: []  # Empty for public Docker Hub images, or ["user-registry"] for private images
+    imagePullSecrets: []
+  config:
+    defaultReplicationFactor: 1
+    offsetsTopicReplicationFactor: 1
+    transactionStateLogReplicationFactor: 1
+    transactionStateLogMinIsr: 1
+    minInsyncReplicas: 1
   persistence:
     enabled: true
     size: 10Gi
     storageClass: ""
+  resources:
+    requests:
+      memory: 1Gi
+      cpu: 500m
+    limits:
+      memory: 2Gi
+      cpu: 1
 
 # Infrastructure Components
 # These can be deployed or configured to use pre-installed instances
@@ -209,7 +149,7 @@ trustgate:
     image:
       pullPolicy: Always
       image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee"
-      tag: "v1.9.50"
+      tag: "v1.20.4"
       # imagePullSecrets: if not set, will fall back to parent chart's global.imagePullSecrets
       imagePullSecrets: ["user-registry"]  # Set to array of secret names, e.g., ["secret-name"] or leave empty to use parent global.imagePullSecrets
     env:
@@ -491,7 +431,7 @@ neuraltrust-control-plane:
         replicaCount: 1
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/scheduler"
-          tag: "v1.8.0"
+          tag: "v1.9.0"
           pullPolicy: "Always"
         config:
           # URLs will be auto-generated from OpenShift Routes if global.openshift=true and global.openshiftDomain is set
@@ -526,7 +466,7 @@ neuraltrust-control-plane:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api"
-          tag: "v1.8.2"
+          tag: "v1.12.7"
           pullPolicy: "Always"
         secrets:
           controlPlaneJWTSecret: "" #define this value
@@ -564,7 +504,7 @@ neuraltrust-control-plane:
         replicaCount: 1
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.8.0"
+          tag: "v1.35.0"
           pullPolicy: "Always"
         config:
           nodeEnv: production
@@ -652,30 +592,20 @@ neuraltrust-data-plane:
         port: "8123"
         user: "neuraltrust"
         database: "neuraltrust"
-        image:
-          repository: "clickhouse/clickhouse-server"
-          tag: "25.3.2"
-          pullPolicy: "Always"
         auth:
           username: "neuraltrust"
         secrets:
           name: "clickhouse-secrets"
         configmap:
           name: "clickhouse-init-job"
-        resources:
-          requests:
-            memory: 512Mi
-            cpu: 250m
-          limits:
-            memory: 1Gi
-            cpu: 500m
       kafka:
         enabled: true
         connect:
           replicas: 1
+          bootstrapServers: "kafka:9092"
           image:
             repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect
-            tag: v0.0.1
+            tag: v0.1.2
             pullPolicy: Always
           resources:
             limits:
@@ -705,7 +635,7 @@ neuraltrust-data-plane:
         classifierModel: "gpt"
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.8.3
+          tag: v1.13.0
           pullPolicy: Always
         accessMode: ReadWriteOnce
         huggingfaceToken: ""
@@ -726,7 +656,7 @@ neuraltrust-data-plane:
         replicas: 1
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/workers
-          tag: v1.4.0-with-models
+          tag: v1.6.3
           pullPolicy: Always
         resources:
           requests:

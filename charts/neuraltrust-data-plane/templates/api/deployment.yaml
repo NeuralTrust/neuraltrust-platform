@@ -36,15 +36,8 @@ spec:
       {{- end }}
       initContainers:
         - name: clickhouse-migrations
-          {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.clickhouse .Values.dataPlane.components.clickhouse.image }}
-          {{- $clickhouseRepo := .Values.dataPlane.components.clickhouse.image.repository | default "clickhouse/clickhouse-server" }}
-          {{- $clickhouseTag := .Values.dataPlane.components.clickhouse.image.tag | default "25.3.2" }}
-          image: {{ include "data-plane.image" (dict "repository" $clickhouseRepo "tag" $clickhouseTag "global" .Values.global) | quote }}
-          imagePullPolicy: {{ .Values.dataPlane.components.clickhouse.image.pullPolicy | default "IfNotPresent" }}
-          {{- else }}
-          image: {{ include "data-plane.image" (dict "repository" "clickhouse/clickhouse-server" "tag" "25.3.2" "global" .Values.global) | quote }}
+          image: {{ include "data-plane.image" (dict "repository" "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickhouse-server" "tag" "25.8" "global" .Values.global) | quote }}
           imagePullPolicy: IfNotPresent
-          {{- end }}
           command:
           - /bin/sh
           - -c
@@ -183,7 +176,7 @@ spec:
         image: {{ include "data-plane.image" (dict "repository" $apiRepo "tag" $apiTag "global" .Values.global) | quote }}
         imagePullPolicy: {{ .Values.dataPlane.components.api.image.pullPolicy | default "Always" }}
         {{- else }}
-        image: {{ include "data-plane.image" (dict "repository" "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api" "tag" "v1.8.3" "global" .Values.global) | quote }}
+        image: {{ include "data-plane.image" (dict "repository" "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api" "tag" "v1.13.0" "global" .Values.global) | quote }}
         imagePullPolicy: Always
         {{- end }}
         ports:
