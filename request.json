@@ -8,7 +8,7 @@
     },
     {
       "role": "user",
-      "content": "Current version: 1.6.6\n\nCommits since last release:\n- a9356f3 Merge pull request #20 from NeuralTrust/chore/bump-images-20260305-120112\n- 7e9d2bc chore: bump image versions\n"
+      "content": "Current version: 1.6.7\n\nCommits since last release:\n- 412b7a3 Merge pull request #21 from NeuralTrust/chore/update-kafka\n- ec6e222 chore: bump image versions for various components\n- 55da9e2 Merge branch 'main' into chore/update-kafka\n- 64faf1e chore: update ClickHouse and Kafka versions to 25.8 and 4.1.1 respectively, and adjust image repository paths\n"
     }
   ],
   "max_tokens": 200,
