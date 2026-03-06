@@ -154,6 +154,19 @@ spec:
       {{- end }} 
 
 ---
+{{- $gkeBackendConfigName := include "neuraltrust-platform.service.gkeBackendConfigName" (dict "global" .Values.global "localName" "trustgate-data-plane-backendconfig") }}
+{{- $gcp := default dict (default dict .Values.global.ingress).gcp }}
+{{- if and .Values.ingress.enabled $gkeBackendConfigName (not $gcp.backendConfig) }}
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: {{ $gkeBackendConfigName }}
+spec:
+  healthCheck:
+    type: HTTP
+    requestPath: /health
+---
+{{- end }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -161,7 +174,7 @@ metadata:
   labels:
     {{- include "trustgate.dataPlane.labels" . | nindent 4 }}
     component: data-plane
-  {{- $negAnnotations := include "neuraltrust-platform.service.negAnnotations" (dict "global" .Values.global) }}
+  {{- $negAnnotations := include "neuraltrust-platform.service.negAnnotations" (dict "global" .Values.global "backendConfigName" "trustgate-data-plane-backendconfig") }}
   {{- if $negAnnotations }}
   annotations:
     {{- $negAnnotations | nindent 4 }}

@@ -1,11 +1,24 @@
 {{- if and .Values.controlPlane .Values.controlPlane.enabled }}
+{{- $gkeBackendConfigName := include "neuraltrust-platform.service.gkeBackendConfigName" (dict "global" .Values.global "localName" "control-plane-scheduler-backendconfig") }}
+{{- $gcp := default dict (default dict .Values.global.ingress).gcp }}
+{{- if and .Values.controlPlane.components .Values.controlPlane.components.scheduler .Values.controlPlane.components.scheduler.ingress .Values.controlPlane.components.scheduler.ingress.enabled $gkeBackendConfigName (not $gcp.backendConfig) }}
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: {{ $gkeBackendConfigName }}
+spec:
+  healthCheck:
+    type: HTTP
+    requestPath: /v1/health
+---
+{{- end }}
 apiVersion: v1
 kind: Service
 metadata:
   name: "control-plane-scheduler-service"
   labels:
     app: control-plane-scheduler
-  {{- $negAnnotations := include "neuraltrust-platform.service.negAnnotations" (dict "global" .Values.global) }}
+  {{- $negAnnotations := include "neuraltrust-platform.service.negAnnotations" (dict "global" .Values.global "backendConfigName" "control-plane-scheduler-backendconfig") }}
   {{- if $negAnnotations }}
   annotations:
     {{- $negAnnotations | nindent 4 }}
@@ -49,13 +62,11 @@ spec:
   {{- end }}
   {{- if and .ingress.tls.enabled (include "neuraltrust-platform.ingress.renderTLS" (dict "global" $.Values.global "tlsEnabled" .ingress.tls.enabled)) }}
   tls:
-    - hosts:
-        - {{ .host | default "scheduler.neuraltrust.ai" | quote }}
-      {{- if .ingress.tls.secretName }}
-      secretName: {{ .ingress.tls.secretName }}
-      {{- else }}
-      secretName: "control-plane-scheduler-tls"
+    - {{- if .host }}
+      hosts:
+        - {{ .host | quote }}
       {{- end }}
+      secretName: {{ include "neuraltrust-platform.ingress.effectiveTLSSecretName" (dict "global" $.Values.global "localSecretName" .ingress.tls.secretName) }}
   {{- end }}
   rules:
     - {{- if .host }}

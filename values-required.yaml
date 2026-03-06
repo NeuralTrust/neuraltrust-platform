@@ -12,10 +12,15 @@
 global:
   platform: "gcp"  # "aws" | "gcp" | "azure" | "openshift" | "kubernetes"
   domain: ""  # Base domain for service URLs (e.g., "aws.neuraltrust.ai")
-  imageRegistry: ""
+  imageRegistry: ""  # Optional global registry prefix. Leave empty when repositories are already fully qualified.
   autoGenerateSecrets: true  # Auto-generate required secrets if not explicitly provided. Preserves existing values on upgrades.
-  preserveExistingSecrets: false
-  storageClass: ""
+  preserveExistingSecrets: false  # Set to true only when every required secret already exists in the namespace.
+  storageClass: ""  # Optional default storage class used by in-cluster stateful components.
+  # Ingress TLS defaults:
+  #   The chart creates one shared self-signed kubernetes.io/tls secret by default.
+  #   The bundled ingress defaults also enable HTTPS by default.
+  #   If you leave per-ingress tls.secretName empty, those ingresses use the shared secret automatically.
+  #   Configure this behavior in values.yaml under global.ingress.tls when needed.
 
 # Infrastructure Components
 infrastructure:
@@ -48,6 +53,7 @@ kafka:
     tag: "4.1.1"
   global:
     imagePullSecrets: []
+  # Kafka runs in KRaft mode by default in the bundled subchart.
 
 # TrustGate Configuration
 trustgate:
@@ -77,7 +83,7 @@ neuraltrust-control-plane:
       deploy: true
   controlPlane:
     enabled: true
-    imagePullSecrets: "gcr-secret"
+    imagePullSecrets: "gcr-secret"  # Secret name used by control-plane Deployments to pull private images.
     secrets:
       # ControlPlane JWT secret - auto-generated if empty and autoGenerateSecrets: true
       controlPlaneJWTSecret: "" # Auto-generated if empty
@@ -103,7 +109,7 @@ neuraltrust-control-plane:
 neuraltrust-data-plane:
   dataPlane:
     enabled: true
-    imagePullSecrets: "gcr-secret"
+    imagePullSecrets: "gcr-secret"  # Secret name used by data-plane Deployments to pull private images.
     secrets:
       # DataPlane JWT secret - auto-generated if empty and autoGenerateSecrets: true
       dataPlaneJWTSecret: "" # Auto-generated if empty

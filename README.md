@@ -25,7 +25,7 @@ This Helm chart provides a unified deployment for the complete NeuralTrust platf
 - (Optional) cert-manager - **Not included in this chart**. Install separately if you want automatic TLS certificate management:
   - Install cert-manager: `helm install cert-manager jetstack/cert-manager --namespace cert-manager --create-namespace --set installCRDs=true`
   - See [cert-manager documentation](https://cert-manager.io/docs/installation/) for details
-  - If not using cert-manager, provide pre-existing `kubernetes.io/tls` secrets
+  - If not using cert-manager, the chart can create a shared self-signed `kubernetes.io/tls` secret by default
 
 ## Note on Helm Lint
 
@@ -664,11 +664,44 @@ helm uninstall neuraltrust-platform --namespace neuraltrust
 
 ## TLS Certificate Management
 
-The chart supports TLS certificates in two ways:
+The chart supports TLS certificates in three ways:
 
-### Option 1: Pre-existing TLS Secrets (Default)
+### Option 1: Shared Self-Signed TLS Secret (Default Fallback)
 
-Create `kubernetes.io/tls` secrets manually and reference them in your values:
+By default, the chart creates one shared self-signed `kubernetes.io/tls` secret named by
+`global.ingress.tls.secretName` (default: `neuraltrust-ingress-tls`) whenever:
+
+- `global.ingress.tls.autoGenerate=true`
+- `global.preserveExistingSecrets=false`
+
+The bundled ingress defaults enable `tls.enabled: true`, so any ingress with an empty `tls.secretName` automatically uses that shared secret:
+
+```yaml
+global:
+  ingress:
+    tls:
+      autoGenerate: true
+      secretName: "neuraltrust-ingress-tls"
+
+trustgate:
+  ingress:
+    tls:
+      enabled: true
+      secretName: ""  # Uses the shared self-signed secret
+
+neuraltrust-control-plane:
+  controlPlane:
+    components:
+      api:
+        ingress:
+          tls:
+            enabled: true
+            secretName: ""  # Uses the shared self-signed secret
+```
+
+### Option 2: Pre-existing TLS Secrets (Explicit Override)
+
+Create `kubernetes.io/tls` secrets manually and reference them in your values when you want to override the shared fallback:
 
 ```yaml
 trustgate:
@@ -687,7 +720,9 @@ neuraltrust-control-plane:
             secretName: "api-tls-secret"  # Pre-existing secret
 ```
 
-### Option 2: cert-manager (Automatic Certificate Management)
+When `tls.secretName` is set explicitly, that ingress uses the provided secret instead of the shared self-signed one.
+
+### Option 3: cert-manager (Automatic Certificate Management)
 
 **Note:** cert-manager is not included in this chart. You must install it separately before using this option.
 

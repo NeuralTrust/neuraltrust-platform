@@ -341,9 +341,6 @@ Usage: {{ include "neuraltrust-platform.ingress.annotations" (dict "global" .Val
   {{- if $gcp.managedCertificates }}
     {{- $_ := set $merged "networking.gke.io/managed-certificates" $gcp.managedCertificates }}
   {{- end }}
-  {{- if $gcp.backendConfig }}
-    {{- $_ := set $merged "cloud.google.com/backend-config" (printf `{"default":"%s"}` $gcp.backendConfig) }}
-  {{- end }}
   {{- if $gcp.sslRedirect }}
     {{- $_ := set $merged "networking.gke.io/v1beta1.FrontendConfig" "ssl-redirect" }}
   {{- end }}
@@ -390,6 +387,48 @@ Usage: {{ include "neuraltrust-platform.ingress.annotations" (dict "global" .Val
 {{- /* Output merged annotations as YAML */}}
 {{- if $merged }}
 {{- toYaml $merged }}
+{{- end }}
+{{- end }}
+
+{{/*
+Return the shared fallback TLS secret name for ingress resources.
+Usage: {{ include "neuraltrust-platform.ingress.defaultTLSSecretName" (dict "global" .Values.global) }}
+*/}}
+{{- define "neuraltrust-platform.ingress.defaultTLSSecretName" -}}
+{{- $globalIngress := default dict (default dict .global).ingress }}
+{{- $tls := default dict $globalIngress.tls }}
+{{- if $tls.secretName }}
+{{- $tls.secretName -}}
+{{- else -}}
+neuraltrust-ingress-tls
+{{- end }}
+{{- end }}
+
+{{/*
+Check if shared ingress TLS secret auto-generation is enabled.
+Usage: {{ include "neuraltrust-platform.ingress.autoGenerateTLSSecret" (dict "global" .Values.global) }}
+*/}}
+{{- define "neuraltrust-platform.ingress.autoGenerateTLSSecret" -}}
+{{- $globalIngress := default dict (default dict .global).ingress }}
+{{- $tls := default dict $globalIngress.tls }}
+{{- $enabled := true }}
+{{- if hasKey $tls "autoGenerate" }}
+  {{- $enabled = $tls.autoGenerate }}
+{{- end }}
+{{- if $enabled }}true{{- end }}
+{{- end }}
+
+{{/*
+Resolve the effective TLS secret name for an ingress.
+Priority: local secretName > shared global secretName > default fallback name.
+Usage: {{ include "neuraltrust-platform.ingress.effectiveTLSSecretName" (dict "global" .Values.global "localSecretName" .Values.ingress.tls.secretName) }}
+*/}}
+{{- define "neuraltrust-platform.ingress.effectiveTLSSecretName" -}}
+{{- $localSecretName := .localSecretName | default "" }}
+{{- if $localSecretName }}
+{{- $localSecretName -}}
+{{- else -}}
+{{- include "neuraltrust-platform.ingress.defaultTLSSecretName" (dict "global" .global) -}}
 {{- end }}
 {{- end }}
 
@@ -445,11 +484,40 @@ Usage: {{ include "neuraltrust-platform.service.negAnnotations" (dict "global" .
   {{- $gcp := default dict $globalIngress.gcp }}
   {{- $neg := default dict $gcp.neg }}
   {{- $negEnabled := true }}
+  {{- $backendConfigName := include "neuraltrust-platform.service.gkeBackendConfigName" (dict "global" $global "localName" (.backendConfigName | default "")) }}
   {{- if hasKey $neg "enabled" }}
     {{- $negEnabled = $neg.enabled }}
   {{- end }}
   {{- if $negEnabled }}
 cloud.google.com/neg: '{"ingress": true}'
+  {{- end }}
+  {{- if $backendConfigName }}
+cloud.google.com/backend-config: {{ printf "{\"default\":\"%s\"}" $backendConfigName | squote }}
+  {{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
+Return the BackendConfig name for a GKE service.
+- If global.ingress.gcp.backendConfig is set, reuse that existing BackendConfig.
+- Otherwise, use the local generated name passed by the caller.
+Returns empty for non-GKE providers.
+Usage: {{ include "neuraltrust-platform.service.gkeBackendConfigName" (dict "global" .Values.global "localName" "data-plane-api-backendconfig") }}
+*/}}
+{{- define "neuraltrust-platform.service.gkeBackendConfigName" -}}
+{{- $global := default dict .global }}
+{{- $globalIngress := default dict $global.ingress }}
+{{- $platform := $global.platform | default "kubernetes" }}
+{{- $provider := $globalIngress.provider | default "" }}
+{{- if not $provider }}
+  {{- if eq $platform "gcp" }}{{ $provider = "gcp" }}{{- end }}
+{{- end }}
+{{- if eq $provider "gcp" }}
+  {{- $gcp := default dict $globalIngress.gcp }}
+  {{- if $gcp.backendConfig }}
+    {{- $gcp.backendConfig -}}
+  {{- else if .localName }}
+    {{- .localName -}}
   {{- end }}
 {{- end }}
 {{- end }}
