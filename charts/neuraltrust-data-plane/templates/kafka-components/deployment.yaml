@@ -39,7 +39,7 @@ spec:
           image: {{ include "data-plane.image" (dict "repository" $kafkaConnectRepo "tag" $kafkaConnectTag "global" .Values.global) | quote }}
           imagePullPolicy: {{ .Values.dataPlane.components.kafka.connect.image.pullPolicy | default "Always" }}
           {{- else }}
-          image: {{ include "data-plane.image" (dict "repository" "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect" "tag" "v0.0.1" "global" .Values.global) | quote }}
+          image: {{ include "data-plane.image" (dict "repository" "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect" "tag" "v0.1.2" "global" .Values.global) | quote }}
           imagePullPolicy: Always
           {{- end }}
           ports:

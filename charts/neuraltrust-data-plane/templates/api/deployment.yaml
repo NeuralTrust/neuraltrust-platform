@@ -176,7 +176,7 @@ spec:
         image: {{ include "data-plane.image" (dict "repository" $apiRepo "tag" $apiTag "global" .Values.global) | quote }}
         imagePullPolicy: {{ .Values.dataPlane.components.api.image.pullPolicy | default "Always" }}
         {{- else }}
-        image: {{ include "data-plane.image" (dict "repository" "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api" "tag" "v1.8.3" "global" .Values.global) | quote }}
+        image: {{ include "data-plane.image" (dict "repository" "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api" "tag" "v1.13.0" "global" .Values.global) | quote }}
         imagePullPolicy: Always
         {{- end }}
         ports:

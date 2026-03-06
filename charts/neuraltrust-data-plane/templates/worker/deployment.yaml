@@ -38,7 +38,7 @@ spec:
         image: {{ include "data-plane.image" (dict "repository" $workerRepo "tag" $workerTag "global" .Values.global) | quote }}
         imagePullPolicy: "{{ .Values.dataPlane.components.worker.image.pullPolicy | default "Always" }}"
         {{- else }}
-        image: {{ include "data-plane.image" (dict "repository" "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/workers" "tag" "v1.4.0-with-models" "global" .Values.global) | quote }}
+        image: {{ include "data-plane.image" (dict "repository" "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/workers" "tag" "v1.6.3" "global" .Values.global) | quote }}
         imagePullPolicy: "Always"
         {{- end }}
         env:
