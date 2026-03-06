@@ -12,6 +12,14 @@ on:
     paths-ignore:
       - 'k8s/**'
       - '.github/**'
+      - '.gitignore'
+      - 'helmignore'
+      - 'README.md'
+      - 'values-all-deployed.yaml.example'
+      - 'values-required.yaml.example'
+      - 'values.yaml.example'
+      - 'values-all-deployed.yaml'
+      - 'values-required.yaml'
 
 permissions:
   contents: write
