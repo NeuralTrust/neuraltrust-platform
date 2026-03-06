@@ -487,7 +487,7 @@ neuraltrust-control-plane:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api"
-          tag: "v1.12.6"
+          tag: "v1.12.7"
           pullPolicy: "Always"
         config:
           # URLs will be auto-generated from OpenShift Routes if global.openshift=true and global.openshiftDomain is set
@@ -634,7 +634,7 @@ neuraltrust-data-plane:
           bootstrapServers: "kafka:9092"
           image:
             repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect
-            tag: v0.1.1
+            tag: v0.1.2
             pullPolicy: Always
           resources:
             limits:
@@ -687,7 +687,7 @@ neuraltrust-data-plane:
         replicas: 1
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/workers
-          tag: v1.6.1
+          tag: v1.6.3
           pullPolicy: Always
         resources:
           requests:
