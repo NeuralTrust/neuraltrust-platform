@@ -1,10 +1,10 @@
 dependencies:
 - name: clickhouse
   repository: file://./charts/clickhouse
-  version: 8.0.10
+  version: 1.0.0
 - name: kafka
   repository: file://./charts/kafka
-  version: 31.0.0
+  version: 1.0.0
 - name: neuraltrust-data-plane
   repository: file://./charts/neuraltrust-data-plane
   version: 1.2.5
@@ -14,5 +14,5 @@ dependencies:
 - name: trustgate
   repository: file://./charts/trustgate
   version: 1.2.4
-digest: sha256:03fdf603047e33669f36741e0aa79ecd0c24cfb1887564cec46ad52a39221ade
-generated: "2026-03-05T10:43:44.571428767Z"
+digest: sha256:1a940212f5b7033150aae8b78ee330afb93c60c4faf4071ac2268da63f42ba0c
+generated: "2026-03-05T11:55:40.466268+01:00"

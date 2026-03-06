@@ -63,14 +63,20 @@ spec:
             timeoutSeconds: 10
             failureThreshold: 5 # Increased from 3
           env:
-            - name: CONNECT_ERRORS_TOLERANCE
-              value: "all"
-            - name: CONNECT_ERRORS_RETRY_TIMEOUT
-              value: "60"
+            # --- Required Kafka Connect worker configs ---
             - name: CONNECT_BOOTSTRAP_SERVERS
               value: {{ .Values.dataPlane.components.kafka.connect.bootstrapServers | default "kafka:9092" | quote }}
             - name: CONNECT_GROUP_ID
               value: "connect-cluster"
+            - name: CONNECT_KEY_CONVERTER
+              value: "org.apache.kafka.connect.storage.StringConverter"
+            - name: CONNECT_VALUE_CONVERTER
+              value: "org.apache.kafka.connect.json.JsonConverter"
+            - name: CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE
+              value: "false"
+            - name: CONNECT_PLUGIN_PATH
+              value: "/opt/kafka/plugins"
+            # --- Internal topic configs ---
             - name: CONNECT_CONFIG_STORAGE_TOPIC
               value: "connect-configs"
             - name: CONNECT_OFFSET_STORAGE_TOPIC
@@ -83,38 +89,16 @@ spec:
               value: "{{ $kafkaConnectReplicas }}"
             - name: CONNECT_STATUS_STORAGE_REPLICATION_FACTOR
               value: "{{ $kafkaConnectReplicas }}"
-            - name: CONNECT_KEY_CONVERTER
-              value: "org.apache.kafka.connect.storage.StringConverter"
-            - name: CONNECT_VALUE_CONVERTER
-              value: "org.apache.kafka.connect.json.JsonConverter"
-            - name: CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE
-              value: "false"
-            - name: CONNECT_PLUGIN_PATH
-              value: "/opt/kafka/plugins"
+            # --- REST / networking ---
             - name: CONNECT_REST_ADVERTISED_HOST_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
-            - name: CONNECT_LOG4J_ROOT_LOGLEVEL
-              value: "ERROR"
-            - name: CONNECT_LOG4J_LOGGERS
-              value: "org.apache.zookeeper=INFO,org.I0Itec.zkclient=INFO,org.reflections=ERROR"
-            - name: CONNECT_CONSUMER_OFFSETS_TOPIC_REPLICATION_FACTOR
-              value: "{{ $kafkaConnectReplicas }}"
-            - name: CONNECT_CONSUMER_OFFSETS_TOPIC_NUM_PARTITIONS
-              value: "{{ $kafkaConnectReplicas }}"
-            - name: CONNECT_INTERNAL_REPLICATION_FACTOR
-              value: "{{ $kafkaConnectReplicas }}"
-            - name: KAFKA_NUM_PARTITIONS
-              value: "3"
-            - name: CONNECT_PRODUCER_DEFAULT_PARTITIONS
-              value: "3"
-            - name: CONNECT_CONSUMER_DEFAULT_PARTITIONS
-              value: "3"
-          {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect .Values.dataPlane.components.kafka.connect.image }}
-          {{- else }}
-          imagePullPolicy: Always
-          {{- end }}
+            # --- Error handling defaults (KIP-298, applied to all connectors) ---
+            - name: CONNECT_ERRORS_TOLERANCE
+              value: "all"
+            - name: CONNECT_ERRORS_RETRY_TIMEOUT
+              value: "60"
           resources:
             {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect .Values.dataPlane.components.kafka.connect.resources }}
             {{- toYaml .Values.dataPlane.components.kafka.connect.resources | nindent 12 }}
