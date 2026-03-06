@@ -1,10 +1,23 @@
+{{- $gkeBackendConfigName := include "neuraltrust-platform.service.gkeBackendConfigName" (dict "global" .Values.global "localName" "data-plane-api-backendconfig") }}
+{{- $gcp := default dict (default dict .Values.global.ingress).gcp }}
+{{- if and $gkeBackendConfigName (not $gcp.backendConfig) }}
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: {{ $gkeBackendConfigName }}
+spec:
+  healthCheck:
+    type: HTTP
+    requestPath: /health
+---
+{{- end }}
 apiVersion: v1
 kind: Service
 metadata:
   name: "data-plane-api-service"
   labels:
     app: api
-  {{- $negAnnotations := include "neuraltrust-platform.service.negAnnotations" (dict "global" .Values.global) }}
+  {{- $negAnnotations := include "neuraltrust-platform.service.negAnnotations" (dict "global" .Values.global "backendConfigName" "data-plane-api-backendconfig") }}
   {{- if $negAnnotations }}
   annotations:
     {{- $negAnnotations | nindent 4 }}
@@ -23,7 +36,8 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: "data-plane-api-ingress"
+  # Name kept distinct to force GKE to create a new BackendService/NEG attachments (avoids stale zone 404s)
+  name: "data-plane-api"
   {{- $annotations := include "neuraltrust-platform.ingress.annotations" (dict "global" .Values.global "local" $apiIngress.annotations) }}
   {{- if $annotations }}
   annotations:
@@ -37,13 +51,11 @@ spec:
   {{- $tlsEnabled := and $apiIngress.tls $apiIngress.tls.enabled }}
   {{- if and $tlsEnabled (include "neuraltrust-platform.ingress.renderTLS" (dict "global" .Values.global "tlsEnabled" $tlsEnabled)) }}
   tls:
-    - hosts:
+    - {{- if .Values.dataPlane.components.api.host }}
+      hosts:
         - "{{ .Values.dataPlane.components.api.host }}"
-      {{- if and $apiIngress.tls $apiIngress.tls.secretName }}
-      secretName: {{ $apiIngress.tls.secretName }}
-      {{- else }}
-      secretName: "data-plane-api-tls"
       {{- end }}
+      secretName: {{ include "neuraltrust-platform.ingress.effectiveTLSSecretName" (dict "global" .Values.global "localSecretName" $apiIngress.tls.secretName) }}
   {{- end }}
   {{- $apiHost := "" }}
   {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api }}

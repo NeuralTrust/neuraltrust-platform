@@ -5,6 +5,7 @@
 #
 # This example shows OpenShift deployment using Ingress instead of Routes,
 # with pre-generated secrets (CICD-friendly configuration).
+# It is the explicit-cert override path, not the default self-signed fallback path.
 #
 # Usage:
 #   helm install neuraltrust-platform . -f values-openshift-ingress.yaml.example
@@ -23,6 +24,10 @@ global:
   security:
     allowInsecureImages: true # Allow Bitnami charts to use their container images
   storageClass: "" # Global storage class for persistent volumes
+  ingress:
+    tls:
+      autoGenerate: false # Disable the default shared self-signed fallback because certificates are supplied ahead of time.
+      secretName: "wildcard-tls-secret" # Shared explicit cert used when a service ingress omits tls.secretName.
 
 # ClickHouse subchart values (passed directly to clickhouse subchart)
 # These values are used when infrastructure.clickhouse.deploy=true
@@ -477,12 +482,11 @@ trustgate:
     actions:
       host: "actions.YOUR_DOMAIN"  # Set to your domain
     # TLS configuration for Ingress
-    # When using an existing wildcard TLS secret (type: kubernetes.io/tls) in the namespace,
-    # set tls.enabled: true and tls.secretName to the name of that secret
-    # The secret should contain tls.crt and tls.key keys
+    # This example points to a pre-created wildcard TLS secret instead of the chart's default
+    # shared self-signed fallback. Leave secretName empty only if you enable auto-generation.
     tls:
       enabled: true
-      secretName: "wildcard-tls-secret"  # Name of existing kubernetes.io/tls secret in namespace
+      secretName: "wildcard-tls-secret"  # Existing kubernetes.io/tls secret in the namespace
 
 
 # NeuralTrust Control Plane subchart values
@@ -519,12 +523,11 @@ neuraltrust-control-plane:
             route.openshift.io/termination: "edge"
             route.openshift.io/insecure-edge-termination-policy: "Redirect"
           # TLS configuration for Ingress
-          # When using an existing wildcard TLS secret (type: kubernetes.io/tls) in the namespace,
-          # set tls.secretName to the name of that secret
-          # The secret should contain tls.crt and tls.key keys
+          # Set secretName to a service-specific secret, or leave it empty to reuse
+          # the globally configured explicit wildcard cert from global.ingress.tls.secretName.
           tls:
             enabled: true
-            secretName: "wildcard-tls-secret"  # Name of existing kubernetes.io/tls secret in namespace
+            secretName: "wildcard-tls-secret"  # Existing kubernetes.io/tls secret in the namespace
         replicaCount: 1
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/scheduler"  # Set to your image
@@ -554,12 +557,11 @@ neuraltrust-control-plane:
             route.openshift.io/termination: "edge"
             route.openshift.io/insecure-edge-termination-policy: "Redirect"
           # TLS configuration for Ingress
-          # When using an existing wildcard TLS secret (type: kubernetes.io/tls) in the namespace,
-          # set tls.secretName to the name of that secret
-          # The secret should contain tls.crt and tls.key keys
+          # Set secretName to a service-specific secret, or leave it empty to reuse
+          # the globally configured explicit wildcard cert from global.ingress.tls.secretName.
           tls:
             enabled: true
-            secretName: "wildcard-tls-secret"  # Name of existing kubernetes.io/tls secret in namespace
+            secretName: "wildcard-tls-secret"  # Existing kubernetes.io/tls secret in the namespace
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api"  # Set to your image
@@ -591,9 +593,12 @@ neuraltrust-control-plane:
           annotations:
             route.openshift.io/termination: "edge"
             route.openshift.io/insecure-edge-termination-policy: "Redirect"
+          # TLS configuration for Ingress
+          # Set secretName to a service-specific secret, or leave it empty to reuse
+          # the globally configured explicit wildcard cert from global.ingress.tls.secretName.
           tls:
             enabled: true
-            secretName: "wildcard-tls-secret"  # Name of existing kubernetes.io/tls secret in namespace
+            secretName: "wildcard-tls-secret"  # Existing kubernetes.io/tls secret in the namespace
         replicaCount: 1
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"  # Set to your image
@@ -734,12 +739,11 @@ neuraltrust-data-plane:
             route.openshift.io/termination: "edge"
             route.openshift.io/insecure-edge-termination-policy: "Redirect"
           # TLS configuration for Ingress
-          # When using an existing wildcard TLS secret (type: kubernetes.io/tls) in the namespace,
-          # set tls.secretName to the name of that secret
-          # The secret should contain tls.crt and tls.key keys
+          # Set secretName to a service-specific secret, or leave it empty to reuse
+          # the globally configured explicit wildcard cert from global.ingress.tls.secretName.
           tls:
             enabled: true
-            secretName: "wildcard-tls-secret"  # Name of existing kubernetes.io/tls secret in namespace
+            secretName: "wildcard-tls-secret"  # Existing kubernetes.io/tls secret in the namespace
         classifierModel: "gpt"
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api  # Set to your image

@@ -19,10 +19,10 @@ spec:
   {{- end }}
   {{- if and .Values.ingress.tls .Values.ingress.tls.enabled (include "neuraltrust-platform.ingress.renderTLS" (dict "global" .Values.global "tlsEnabled" .Values.ingress.tls.enabled)) }}
   tls:
-    - hosts:
+    - secretName: {{ include "neuraltrust-platform.ingress.effectiveTLSSecretName" (dict "global" .Values.global "localSecretName" .Values.ingress.tls.secretName) }}
+      {{- if .Values.ingress.controlPlane.host }}
+      hosts:
         - {{ .Values.ingress.controlPlane.host }}
-      {{- if .Values.ingress.tls.secretName }}
-      secretName: {{ .Values.ingress.tls.secretName }}
       {{- end }}
   {{- end }}
   rules:
@@ -59,10 +59,10 @@ spec:
   {{- end }}
   {{- if and .Values.ingress.tls .Values.ingress.tls.enabled (include "neuraltrust-platform.ingress.renderTLS" (dict "global" .Values.global "tlsEnabled" .Values.ingress.tls.enabled)) }}
   tls:
-    - hosts:
+    - secretName: {{ include "neuraltrust-platform.ingress.effectiveTLSSecretName" (dict "global" .Values.global "localSecretName" .Values.ingress.tls.secretName) }}
+      {{- if .Values.ingress.dataPlane.host }}
+      hosts:
         - {{ .Values.ingress.dataPlane.host }}
-      {{- if .Values.ingress.tls.secretName }}
-      secretName: {{ .Values.ingress.tls.secretName }}
       {{- end }}
   {{- end }}
   rules:
@@ -100,10 +100,10 @@ spec:
   {{- end }}
   {{- if and .Values.ingress.tls .Values.ingress.tls.enabled (include "neuraltrust-platform.ingress.renderTLS" (dict "global" .Values.global "tlsEnabled" .Values.ingress.tls.enabled)) }}
   tls:
-    - hosts:
+    - secretName: {{ include "neuraltrust-platform.ingress.effectiveTLSSecretName" (dict "global" .Values.global "localSecretName" .Values.ingress.tls.secretName) }}
+      {{- if .Values.ingress.actions.host }}
+      hosts:
         - {{ .Values.ingress.actions.host }}
-      {{- if .Values.ingress.tls.secretName }}
-      secretName: {{ .Values.ingress.tls.secretName }}
       {{- end }}
   {{- end }}
   rules:

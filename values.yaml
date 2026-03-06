@@ -37,6 +37,17 @@ global:
     provider: ""
     className: "" # Override auto-detected className (leave empty to use provider default)
     annotations: {} # Global annotations applied to all Ingress resources (merged with provider annotations)
+    tls:
+      autoGenerate: true # Create one shared self-signed kubernetes.io/tls secret by default on install/upgrade (unless preserveExistingSecrets=true).
+      secretName: "neuraltrust-ingress-tls" # Shared fallback TLS secret used whenever an ingress enables TLS without a per-ingress secretName.
+      commonName: "neuraltrust.local" # Fallback CN/SAN for the generated certificate when ingress hosts are empty.
+      durationDays: 3650 # Validity period for the generated self-signed certificate.
+      # Notes:
+      # - This shared secret is created by default even before any ingress references it.
+      # - This is only used for controllers that terminate TLS from Kubernetes TLS secrets.
+      # - Cloud-managed TLS paths (AWS ACM, GKE managed certificates, Azure Application Gateway certs)
+      #   do NOT render spec.tls and therefore do not use this secret.
+      # - Set per-ingress tls.secretName to reuse an existing secret instead of the generated one.
     # AWS ALB Ingress Controller settings (used when provider=aws)
     # Requires: AWS Load Balancer Controller installed in the EKS cluster
     # Install: https://kubernetes-sigs.github.io/aws-load-balancer-controller/
@@ -54,7 +65,7 @@ global:
     gcp:
       staticIpName: "" # Optional: pre-reserved static IP name (gcloud compute addresses create ...). Empty = ephemeral IP.
       managedCertificates: "" # Optional: comma-separated Google-managed certificate names (e.g., "neuraltrust-cert")
-      backendConfig: "" # Optional: BackendConfig name for health checks, CDN, IAP, etc.
+      backendConfig: "" # Optional GKE-only BackendConfig name to reuse on ingress-backed Services. Empty = chart creates per-service /health BackendConfigs where supported.
       sslRedirect: false # Set to true to redirect HTTP→HTTPS (requires managedCertificates or pre-provisioned cert)
       neg:
         enabled: true # Enable NEG (Network Endpoint Groups) annotations on services backing Ingress resources.
@@ -199,7 +210,7 @@ trustgate:
     image:
       pullPolicy: Always
       image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee"
-      tag: "v1.20.4"
+      tag: "v1.21.1"
       # imagePullSecrets: if not set, will fall back to parent chart's global.imagePullSecrets
       imagePullSecrets: ["gcr-secret"] # Set to array of secret names, e.g., ["secret-name"] or leave empty to use parent global.imagePullSecrets
     postgresql:
@@ -406,12 +417,14 @@ trustgate:
     actions:
       host: "" # Optional: set to your domain (e.g., "actions.yourdomain.com"). Empty = use ALB auto-generated URL.
     # TLS configuration for Ingress
-    # When using an existing wildcard TLS secret (type: kubernetes.io/tls) in the namespace,
-    # set tls.enabled: true and tls.secretName to the name of that secret
-    # The secret should contain tls.crt and tls.key keys
+    # HTTPS is enabled by default for bundled ingresses.
+    # The shared secret from global.ingress.tls.secretName is created by default.
+    # If secretName is empty, this ingress uses that shared self-signed secret.
+    # To use an existing wildcard TLS secret instead, set tls.secretName to that secret name.
+    # The secret must be type kubernetes.io/tls and contain tls.crt and tls.key.
     tls:
-      enabled: false
-      secretName: "" # Name of existing kubernetes.io/tls secret in namespace
+      enabled: true
+      secretName: "" # Optional override for this ingress; empty = use shared generated/global secret
 # NeuralTrust Control Plane subchart values
 # Helm requires values to be passed to subcharts using the subchart name as a prefix
 neuraltrust-control-plane:
@@ -441,12 +454,13 @@ neuraltrust-control-plane:
           className: "" # Per-service override (leave empty to use global.ingress.className)
           annotations: {}
           # TLS configuration for Ingress
-          # When using an existing wildcard TLS secret (type: kubernetes.io/tls) in the namespace,
-          # set tls.secretName to the name of that secret
-          # The secret should contain tls.crt and tls.key keys
+          # HTTPS is enabled by default for bundled ingresses.
+          # The shared secret from global.ingress.tls.secretName is created by default.
+          # If secretName is empty, this ingress uses that shared self-signed secret.
+          # Set secretName to use a pre-created kubernetes.io/tls secret instead.
           tls:
-            enabled: false
-            secretName: "" # Name of existing kubernetes.io/tls secret in namespace
+            enabled: true
+            secretName: "" # Optional override for this ingress; empty = use shared generated/global secret
         replicaCount: 1
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/scheduler"
@@ -478,12 +492,13 @@ neuraltrust-control-plane:
           className: "" # Per-service override (leave empty to use global.ingress.className)
           annotations: {}
           # TLS configuration for Ingress
-          # When using an existing wildcard TLS secret (type: kubernetes.io/tls) in the namespace,
-          # set tls.secretName to the name of that secret
-          # The secret should contain tls.crt and tls.key keys
+          # HTTPS is enabled by default for bundled ingresses.
+          # The shared secret from global.ingress.tls.secretName is created by default.
+          # If secretName is empty, this ingress uses that shared self-signed secret.
+          # Set secretName to use a pre-created kubernetes.io/tls secret instead.
           tls:
-            enabled: false
-            secretName: "" # Name of existing kubernetes.io/tls secret in namespace
+            enabled: true
+            secretName: "" # Optional override for this ingress; empty = use shared generated/global secret
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api"
@@ -521,16 +536,17 @@ neuraltrust-control-plane:
           className: "" # Per-service override (leave empty to use global.ingress.className)
           annotations: {}
           # TLS configuration for Ingress
-          # When using an existing wildcard TLS secret (type: kubernetes.io/tls) in the namespace,
-          # set tls.secretName to the name of that secret
-          # The secret should contain tls.crt and tls.key keys
+          # HTTPS is enabled by default for bundled ingresses.
+          # The shared secret from global.ingress.tls.secretName is created by default.
+          # If secretName is empty, this ingress uses that shared self-signed secret.
+          # Set secretName to use a pre-created kubernetes.io/tls secret instead.
           tls:
-            enabled: false
-            secretName: "" # Name of existing kubernetes.io/tls secret in namespace
+            enabled: true
+            secretName: "" # Optional override for this ingress; empty = use shared generated/global secret
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.35.0"
+          tag: "v1.36.0"
           pullPolicy: "Always"
         config:
           nodeEnv: production
@@ -653,12 +669,13 @@ neuraltrust-data-plane:
           className: "" # Per-service override (leave empty to use global.ingress.className)
           annotations: {}
           # TLS configuration for Ingress
-          # When using an existing wildcard TLS secret (type: kubernetes.io/tls) in the namespace,
-          # set tls.secretName to the name of that secret
-          # The secret should contain tls.crt and tls.key keys
+          # HTTPS is enabled by default for bundled ingresses.
+          # The shared secret from global.ingress.tls.secretName is created by default.
+          # If secretName is empty, this ingress uses that shared self-signed secret.
+          # Set secretName to use a pre-created kubernetes.io/tls secret instead.
           tls:
-            enabled: false
-            secretName: "" # Name of existing kubernetes.io/tls secret in namespace
+            enabled: true
+            secretName: "" # Optional override for this ingress; empty = use shared generated/global secret
         classifierModel: "gpt"
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api

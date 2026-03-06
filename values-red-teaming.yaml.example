@@ -11,6 +11,8 @@
 # - TrustGate is disabled (trustgate.enabled: false)
 # - Using Helm-managed secrets (preserveExistingSecrets: false)
 # - Using Ingress for external access (Kubernetes) or Routes (OpenShift)
+# - Creating the chart's shared self-signed TLS secret by default
+# - Using that shared secret automatically whenever an ingress enables TLS without a secretName
 
 # Global settings
 global:
@@ -19,6 +21,10 @@ global:
   imageRegistry: ""  # Global image registry prefix
   preserveExistingSecrets: false  # Set to true if secrets are pre-generated
   storageClass: ""  # Global storage class for persistent volumes
+  ingress:
+    tls:
+      autoGenerate: true  # Create the shared self-signed TLS secret by default.
+      secretName: "neuraltrust-ingress-tls"  # Shared secret used whenever a TLS-enabled ingress omits tls.secretName.
 
 # Infrastructure Components - Deploy all
 infrastructure:
@@ -57,6 +63,9 @@ neuraltrust-control-plane:
         host: "control-plane-api.yourdomain.com"  # Set to your domain
         ingress:
           enabled: true  # Use Ingress for external access
+          # tls:
+          #   enabled: true
+          #   secretName: ""  # Empty = use the default shared self-signed secret
       app:
         enabled: true
         host: "control-plane-app.yourdomain.com"  # Set to your domain
@@ -86,6 +95,9 @@ neuraltrust-data-plane:
         host: "data-plane-api.yourdomain.com"  # Set to your domain
         ingress:
           enabled: true  # Use Ingress for external access
+          # tls:
+          #   enabled: true
+          #   secretName: ""  # Empty = use the default shared self-signed secret
       worker:
         enabled: true
 

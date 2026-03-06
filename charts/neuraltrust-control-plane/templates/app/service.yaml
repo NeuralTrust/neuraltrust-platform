@@ -1,9 +1,22 @@
 {{- if and .Values.controlPlane .Values.controlPlane.enabled }}
+{{- $gkeBackendConfigName := include "neuraltrust-platform.service.gkeBackendConfigName" (dict "global" .Values.global "localName" "control-plane-app-backendconfig") }}
+{{- $gcp := default dict (default dict .Values.global.ingress).gcp }}
+{{- if and .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.ingress .Values.controlPlane.components.app.ingress.enabled $gkeBackendConfigName (not $gcp.backendConfig) }}
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: {{ $gkeBackendConfigName }}
+spec:
+  healthCheck:
+    type: HTTP
+    requestPath: /api/health
+---
+{{- end }}
 apiVersion: v1
 kind: Service
 metadata:
   name: control-plane-app-service
-  {{- $negAnnotations := include "neuraltrust-platform.service.negAnnotations" (dict "global" .Values.global) }}
+  {{- $negAnnotations := include "neuraltrust-platform.service.negAnnotations" (dict "global" .Values.global "backendConfigName" "control-plane-app-backendconfig") }}
   {{- if $negAnnotations }}
   annotations:
     {{- $negAnnotations | nindent 4 }}
@@ -58,16 +71,16 @@ spec:
   {{- end }}
   {{- if and .Values.controlPlane.components.app.ingress.tls.enabled (include "neuraltrust-platform.ingress.renderTLS" (dict "global" .Values.global "tlsEnabled" .Values.controlPlane.components.app.ingress.tls.enabled)) }}
   tls:
-    - hosts:
+    - {{- if or .Values.controlPlane.components.app.host .Values.controlPlane.components.app.secondaryHost }}
+      hosts:
+        {{- if .Values.controlPlane.components.app.host }}
         - {{ .Values.controlPlane.components.app.host | quote }}
+        {{- end }}
         {{- if .Values.controlPlane.components.app.secondaryHost }}
         - {{ .Values.controlPlane.components.app.secondaryHost | quote }}
         {{- end }}
-      {{- if .Values.controlPlane.components.app.ingress.tls.secretName }}
-      secretName: {{ .Values.controlPlane.components.app.ingress.tls.secretName }}
-      {{- else }}
-      secretName: "control-plane-app-tls"
       {{- end }}
+      secretName: {{ include "neuraltrust-platform.ingress.effectiveTLSSecretName" (dict "global" .Values.global "localSecretName" .Values.controlPlane.components.app.ingress.tls.secretName) }}
   {{- end }}
   rules:
     - {{- if .Values.controlPlane.components.app.host }}
