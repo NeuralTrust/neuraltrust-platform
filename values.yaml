@@ -176,7 +176,7 @@ kafka:
   imagePullSecrets: "gcr-secret"
   image:
     repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka
-    tag: "4.1.1"
+    tag: "4.2.0"
     pullPolicy: IfNotPresent
   global:
     imagePullSecrets: []
@@ -502,7 +502,7 @@ neuraltrust-control-plane:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api"
-          tag: "v1.12.7"
+          tag: "v1.13.0"
           pullPolicy: "Always"
         config:
           # URLs will be auto-generated from OpenShift Routes if global.openshift=true and global.openshiftDomain is set
@@ -546,7 +546,7 @@ neuraltrust-control-plane:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.36.0"
+          tag: "v1.41.0"
           pullPolicy: "Always"
         config:
           nodeEnv: production
@@ -650,7 +650,7 @@ neuraltrust-data-plane:
           bootstrapServers: "kafka:9092"
           image:
             repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect
-            tag: v0.1.2
+            tag: v0.1.3
             pullPolicy: Always
           resources:
             limits:
@@ -679,7 +679,7 @@ neuraltrust-data-plane:
         classifierModel: "gpt"
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.13.0
+          tag: v1.13.1
           pullPolicy: Always
         accessMode: ReadWriteOnce
         huggingfaceToken: ""
