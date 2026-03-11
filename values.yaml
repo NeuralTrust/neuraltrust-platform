@@ -176,7 +176,7 @@ kafka:
   imagePullSecrets: "gcr-secret"
   image:
     repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka
-    tag: "4.1.1"
+    tag: "4.2.0"
     pullPolicy: IfNotPresent
   global:
     imagePullSecrets: []

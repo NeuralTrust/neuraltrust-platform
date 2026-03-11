@@ -50,7 +50,7 @@ clickhouse:
 kafka:
   image:
     repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka"
-    tag: "4.1.1"
+    tag: "4.2.0"
   global:
     imagePullSecrets: []
   # Kafka runs in KRaft mode by default in the bundled subchart.
