@@ -10,9 +10,9 @@ dependencies:
   version: 1.2.7
 - name: neuraltrust-control-plane
   repository: file://./charts/neuraltrust-control-plane
-  version: 1.2.8
+  version: 1.2.9
 - name: trustgate
   repository: file://./charts/trustgate
-  version: 1.2.4
-digest: sha256:6e0c8f302bea0ab5dba1242516e26d3f2a620f006c5d2e4140bd8afe77b870b8
-generated: "2026-03-11T16:42:45.776716498Z"
+  version: 1.2.5
+digest: sha256:ed13b1f9add165080c53dc2bb63cefec7bc4562418ffa2d2f37f43fb5d014ffc
+generated: "2026-03-12T10:13:03.059925443Z"
