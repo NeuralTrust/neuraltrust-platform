@@ -469,8 +469,11 @@ Generate service annotations for GCP NEG (Network Endpoint Groups) support.
 On non-autopilot GKE clusters, the GCE ingress controller requires either NodePort/LoadBalancer
 services OR the cloud.google.com/neg annotation on ClusterIP services for container-native
 load balancing. This helper adds the NEG annotation when the platform is GCP.
+If global.psc.negNames contains a key matching pscServiceKey, the service gets a standalone
+NEG annotation (PSC-only, no "ingress": true). This works on any GCP platform regardless of
+ingress provider. Services without a negName get {"ingress": true} when provider=gcp.
 Controlled by: global.ingress.gcp.neg.enabled (default: true when provider=gcp)
-Usage: {{ include "neuraltrust-platform.service.negAnnotations" (dict "global" .Values.global) }}
+Usage: {{ include "neuraltrust-platform.service.negAnnotations" (dict "global" .Values.global "pscServiceKey" "trustgate-data-plane") }}
 */}}
 {{- define "neuraltrust-platform.service.negAnnotations" -}}
 {{- $global := default dict .global }}
@@ -480,17 +483,28 @@ Usage: {{ include "neuraltrust-platform.service.negAnnotations" (dict "global" .
 {{- if not $provider }}
   {{- if eq $platform "gcp" }}{{ $provider = "gcp" }}{{- end }}
 {{- end }}
-{{- if eq $provider "gcp" }}
+{{- $pscNegName := "" }}
+{{- if and (eq $platform "gcp") .pscServiceKey }}
+  {{- $negNames := default dict (default dict $global.psc).negNames }}
+  {{- if hasKey $negNames .pscServiceKey }}
+    {{- $pscNegName = index $negNames .pscServiceKey }}
+  {{- end }}
+{{- end }}
+{{- if $pscNegName }}
+cloud.google.com/neg: '{"exposed_ports":{"80":{"name":"{{ $pscNegName }}"}}}'
+{{- else if eq $provider "gcp" }}
   {{- $gcp := default dict $globalIngress.gcp }}
   {{- $neg := default dict $gcp.neg }}
   {{- $negEnabled := true }}
-  {{- $backendConfigName := include "neuraltrust-platform.service.gkeBackendConfigName" (dict "global" $global "localName" (.backendConfigName | default "")) }}
   {{- if hasKey $neg "enabled" }}
     {{- $negEnabled = $neg.enabled }}
   {{- end }}
   {{- if $negEnabled }}
 cloud.google.com/neg: '{"ingress": true}'
   {{- end }}
+{{- end }}
+{{- if eq $provider "gcp" }}
+  {{- $backendConfigName := include "neuraltrust-platform.service.gkeBackendConfigName" (dict "global" $global "localName" (.backendConfigName | default "")) }}
   {{- if $backendConfigName }}
 cloud.google.com/backend-config: {{ printf "{\"default\":\"%s\"}" $backendConfigName | squote }}
   {{- end }}

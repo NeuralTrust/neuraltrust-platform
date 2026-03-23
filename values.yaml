@@ -27,6 +27,19 @@ global:
   security:
     allowInsecureImages: true # Allow Bitnami charts to use their container images
   storageClass: "" # Global storage class for persistent volumes
+  # Private Service Connect (PSC) -- GCP only
+  # Services listed in negNames get a standalone NEG (PSC-only, no public Ingress).
+  # Services NOT listed keep their regular {"ingress": true} annotation.
+  psc:
+    negNames: {}
+    #   trustgate-data-plane: "trustgate-data-plane-psc-neg"
+    #   trustgate-control-plane: "trustgate-control-plane-psc-neg"
+    #   trustgate-actions: "trustgate-actions-psc-neg"
+    #   control-plane-api: "control-plane-api-psc-neg"
+    #   control-plane-app: "control-plane-app-psc-neg"
+    #   control-plane-scheduler: "control-plane-scheduler-psc-neg"
+    #   data-plane-api: "data-plane-api-psc-neg"
+    #   firewall: "firewall-psc-neg"
   # Global Ingress Configuration
   # These settings are applied to ALL Ingress resources across all subcharts.
   # Per-service ingress settings (className, annotations) override these globals when set.
@@ -715,3 +728,62 @@ neuraltrust-data-plane:
             cpu: 2000m
       connectorsJob:
         image: curlimages/curl:8.13.0
+
+# NeuralTrust Firewall subchart values
+neuraltrust-firewall:
+  firewall:
+    enabled: false
+    imagePullSecrets: "gcr-secret"
+    replicas: 1
+    image:
+      repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall
+      tag: "gpu-v2.2.10"
+      pullPolicy: IfNotPresent
+    config:
+      pythonUnbuffered: "1"
+      pythonDontWriteBytecode: "1"
+      pythonPath: "/app"
+      hfHome: "/root/.cache/huggingface"
+      cudaMpsActiveThreadPercentage: "25"
+      cudaMpsPinnedDeviceMemLimit: "6000M"
+      otelEnabled: "false"
+    secrets:
+      jwtSecret: ""
+      huggingFaceToken: ""
+    resources:
+      requests:
+        cpu: "1"
+        memory: 4Gi
+        nvidia.com/gpu: "1"
+      limits:
+        cpu: "1.5"
+        memory: 6Gi
+        nvidia.com/gpu: "1"
+    hostIPC: true
+    nodeSelector:
+      cloud.google.com/gke-nodepool:
+        - gpu-pool
+        - gpu-pool-2
+    tolerations:
+      - effect: NoSchedule
+        key: nvidia.com/gpu
+        operator: Equal
+        value: present
+    podSecurityContext:
+      fsGroup: 2000
+    securityContext:
+      capabilities:
+        drop:
+          - ALL
+      readOnlyRootFilesystem: false
+      runAsNonRoot: false
+      runAsUser: 0
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 6
+      targetCPUUtilizationPercentage: 80
+      targetMemoryUtilizationPercentage: 85
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: 0

@@ -18,7 +18,7 @@ metadata:
   name: "control-plane-api-service"
   labels:
     app: control-plane-api
-  {{- $negAnnotations := include "neuraltrust-platform.service.negAnnotations" (dict "global" .Values.global "backendConfigName" "control-plane-api-backendconfig") }}
+  {{- $negAnnotations := include "neuraltrust-platform.service.negAnnotations" (dict "global" .Values.global "backendConfigName" "control-plane-api-backendconfig" "pscServiceKey" "control-plane-api") }}
   {{- if $negAnnotations }}
   annotations:
     {{- $negAnnotations | nindent 4 }}

@@ -174,7 +174,7 @@ metadata:
   labels:
     {{- include "trustgate.dataPlane.labels" . | nindent 4 }}
     component: data-plane
-  {{- $negAnnotations := include "neuraltrust-platform.service.negAnnotations" (dict "global" .Values.global "backendConfigName" "trustgate-data-plane-backendconfig") }}
+  {{- $negAnnotations := include "neuraltrust-platform.service.negAnnotations" (dict "global" .Values.global "backendConfigName" "trustgate-data-plane-backendconfig" "pscServiceKey" "trustgate-data-plane") }}
   {{- if $negAnnotations }}
   annotations:
     {{- $negAnnotations | nindent 4 }}

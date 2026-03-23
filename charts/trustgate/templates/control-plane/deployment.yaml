@@ -163,7 +163,7 @@ metadata:
   labels:
     {{- include "trustgate.controlPlane.labels" . | nindent 4 }}
     component: control-plane
-  {{- $negAnnotations := include "neuraltrust-platform.service.negAnnotations" (dict "global" .Values.global "backendConfigName" "trustgate-control-plane-backendconfig") }}
+  {{- $negAnnotations := include "neuraltrust-platform.service.negAnnotations" (dict "global" .Values.global "backendConfigName" "trustgate-control-plane-backendconfig" "pscServiceKey" "trustgate-control-plane") }}
   {{- if $negAnnotations }}
   annotations:
     {{- $negAnnotations | nindent 4 }}

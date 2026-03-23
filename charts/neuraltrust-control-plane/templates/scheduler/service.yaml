@@ -18,7 +18,7 @@ metadata:
   name: "control-plane-scheduler-service"
   labels:
     app: control-plane-scheduler
-  {{- $negAnnotations := include "neuraltrust-platform.service.negAnnotations" (dict "global" .Values.global "backendConfigName" "control-plane-scheduler-backendconfig") }}
+  {{- $negAnnotations := include "neuraltrust-platform.service.negAnnotations" (dict "global" .Values.global "backendConfigName" "control-plane-scheduler-backendconfig" "pscServiceKey" "control-plane-scheduler") }}
   {{- if $negAnnotations }}
   annotations:
     {{- $negAnnotations | nindent 4 }}

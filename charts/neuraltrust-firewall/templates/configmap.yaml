@@ -1,0 +1,19 @@
+{{- if .Values.firewall.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: firewall-config
+  labels:
+    {{- include "firewall.labels" . | nindent 4 }}
+data:
+  PYTHONUNBUFFERED: {{ .Values.firewall.config.pythonUnbuffered | quote }}
+  PYTHONDONTWRITEBYTECODE: {{ .Values.firewall.config.pythonDontWriteBytecode | quote }}
+  PYTHONPATH: {{ .Values.firewall.config.pythonPath | quote }}
+  HF_HOME: {{ .Values.firewall.config.hfHome | quote }}
+  CUDA_MPS_ACTIVE_THREAD_PERCENTAGE: {{ .Values.firewall.config.cudaMpsActiveThreadPercentage | quote }}
+  CUDA_MPS_PINNED_DEVICE_MEM_LIMIT: {{ .Values.firewall.config.cudaMpsPinnedDeviceMemLimit | quote }}
+  OTEL_ENABLED: {{ .Values.firewall.config.otelEnabled | quote }}
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.firewall.config.otelExporterOtlpEndpoint | quote }}
+  OTEL_SERVICE_NAME: {{ .Values.firewall.config.otelServiceName | quote }}
+  OTEL_ENVIRONMENT: {{ .Values.firewall.config.otelEnvironment | quote }}
+{{- end }}

@@ -163,7 +163,7 @@ metadata:
   labels:
     {{- include "trustgate.actions.labels" . | nindent 4 }}
     component: actions
-  {{- $negAnnotations := include "neuraltrust-platform.service.negAnnotations" (dict "global" .Values.global "backendConfigName" "trustgate-actions-backendconfig") }}
+  {{- $negAnnotations := include "neuraltrust-platform.service.negAnnotations" (dict "global" .Values.global "backendConfigName" "trustgate-actions-backendconfig" "pscServiceKey" "trustgate-actions") }}
   {{- if $negAnnotations }}
   annotations:
     {{- $negAnnotations | nindent 4 }}
