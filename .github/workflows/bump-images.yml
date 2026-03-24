@@ -43,6 +43,10 @@ on:
         description: "kafka-connect tag (e.g. v0.0.2). Empty = latest from AR."
         required: false
         default: ""
+      firewall_tag:
+        description: "firewall-cpu / firewall-gpu tag (e.g. v2.4.3). Empty = latest from firewall-cpu in AR (same tag as firewall-gpu)."
+        required: false
+        default: ""
       fetch_latest:
         description: "Fetch latest from Artifact Registry for empty inputs"
         required: false
@@ -98,6 +102,8 @@ jobs:
           resolve_tag() {
             local image="$1"
             local manual_tag="$2"
+            # Default: bare semver (v1.2.3). Optional third arg overrides the grep -E pattern.
+            local tag_pattern="${3:-^v[0-9]+\.[0-9]+\.[0-9]+$}"
 
             if [[ -n "$manual_tag" ]]; then
               echo "$manual_tag"
@@ -122,8 +128,8 @@ jobs:
               return
             fi
 
-            # Match only bare semver tags (v1.2.3), skip suffixed ones (v1.2.3-strimzi)
-            latest=$(echo "$latest" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+            # Filter tags by pattern (default: bare v1.2.3 semver)
+            latest=$(echo "$latest" | grep -E "$tag_pattern" | sort -V | tail -1)
 
             if [[ -z "$latest" ]]; then
               echo "WARNING: Could not find latest tag for ${image}" >&2
@@ -142,6 +148,7 @@ jobs:
           DATA_PLANE_API=$(resolve_tag "data-plane-api" "${{ inputs.data_plane_api_tag }}")
           WORKERS=$(resolve_tag "workers" "${{ inputs.workers_tag }}")
           KAFKA_CONNECT=$(resolve_tag "kafka-connect" "${{ inputs.kafka_connect_tag }}")
+          FIREWALL=$(resolve_tag "firewall-cpu" "${{ inputs.firewall_tag }}")
 
           echo "trustgate=${TRUSTGATE}" >> "$GITHUB_OUTPUT"
           echo "control_plane_api=${CONTROL_PLANE_API}" >> "$GITHUB_OUTPUT"
@@ -150,6 +157,7 @@ jobs:
           echo "data_plane_api=${DATA_PLANE_API}" >> "$GITHUB_OUTPUT"
           echo "workers=${WORKERS}" >> "$GITHUB_OUTPUT"
           echo "kafka_connect=${KAFKA_CONNECT}" >> "$GITHUB_OUTPUT"
+          echo "firewall=${FIREWALL}" >> "$GITHUB_OUTPUT"
 
           echo "### Resolved Tags" >> "$GITHUB_STEP_SUMMARY"
           echo "| Image | Tag |" >> "$GITHUB_STEP_SUMMARY"
@@ -161,6 +169,7 @@ jobs:
           echo "| data-plane-api | \`${DATA_PLANE_API:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| workers | \`${WORKERS:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| kafka-connect | \`${KAFKA_CONNECT:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| firewall-cpu (tag shared with firewall-gpu) | \`${FIREWALL:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Update values.yaml and template defaults
         id: update
@@ -169,6 +178,7 @@ jobs:
           BUMP_CONTROL_PLANE=false
           BUMP_DATA_PLANE=false
           BUMP_TRUSTGATE=false
+          BUMP_FIREWALL=false
 
           # --- Helper: update a tag in values.yaml via yq ---
           update_values_tag() {
@@ -298,6 +308,15 @@ jobs:
           fi
 
           # =============================================
+          # 8. Firewall
+          # =============================================
+          TAG="${{ steps.tags.outputs.firewall }}"
+          if update_values_tag '.["neuraltrust-firewall"].firewall.image.tag' "$TAG" "firewall-cpu"; then
+            BUMP_FIREWALL=true
+            update_template_tag "charts/neuraltrust-firewall/templates/deployment.yaml" "firewallTag" "$TAG"
+          fi
+
+          # =============================================
           # Bump chart versions (patch) for changed subcharts
           # =============================================
           echo ""
@@ -321,6 +340,12 @@ jobs:
             NEW_VER=$(bump_chart_version "charts/trustgate/Chart.yaml")
             yq eval -i "(.dependencies[] | select(.name == \"trustgate\")).version = \"${NEW_VER}\"" Chart.yaml
             echo "  Updated root Chart.yaml dep: trustgate → ${NEW_VER}"
+          fi
+
+          if [[ "$BUMP_FIREWALL" == "true" ]]; then
+            NEW_VER=$(bump_chart_version "charts/neuraltrust-firewall/Chart.yaml")
+            yq eval -i "(.dependencies[] | select(.name == \"neuraltrust-firewall\")).version = \"${NEW_VER}\"" Chart.yaml
+            echo "  Updated root Chart.yaml dep: neuraltrust-firewall → ${NEW_VER}"
           fi
 
           # Save changes summary
@@ -375,7 +400,9 @@ jobs:
             charts/neuraltrust-control-plane/Chart.yaml \
             charts/neuraltrust-control-plane/templates/ \
             charts/neuraltrust-data-plane/Chart.yaml \
-            charts/neuraltrust-data-plane/templates/
+            charts/neuraltrust-data-plane/templates/ \
+            charts/neuraltrust-firewall/Chart.yaml \
+            charts/neuraltrust-firewall/templates/
           git commit -m "$(cat <<'COMMIT'
           chore: bump image versions
 

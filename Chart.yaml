@@ -35,7 +35,7 @@ dependencies:
       - neuraltrust
   # TrustGate components
   - name: trustgate
-    version: 1.2.6
+    version: 1.2.7
     condition: trustgate.enabled
     repository: file://./charts/trustgate
     tags:

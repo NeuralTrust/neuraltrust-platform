@@ -121,6 +121,18 @@ spec:
               name: trustgate-secrets
               key: redis-password
               optional: true
+        - name: NEURAL_TRUST_FIREWALL_URL
+          valueFrom:
+            secretKeyRef:
+              name: trustgate-secrets
+              key: NEURAL_TRUST_FIREWALL_URL
+              optional: true
+        - name: NEURAL_TRUST_FIREWALL_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: trustgate-secrets
+              key: NEURAL_TRUST_FIREWALL_SECRET_KEY
+              optional: true
         imagePullPolicy: {{ .Values.global.image.pullPolicy }}
         ports:
         - containerPort: {{ .Values.controlPlane.ports.http }}

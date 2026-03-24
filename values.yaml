@@ -223,7 +223,7 @@ trustgate:
     image:
       pullPolicy: Always
       image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee"
-      tag: "v1.23.0"
+      tag: "v1.24.1"
       # imagePullSecrets: if not set, will fall back to parent chart's global.imagePullSecrets
       imagePullSecrets: ["gcr-secret"] # Set to array of secret names, e.g., ["secret-name"] or leave empty to use parent global.imagePullSecrets
     postgresql:
@@ -729,14 +729,16 @@ neuraltrust-data-plane:
       connectorsJob:
         image: curlimages/curl:8.13.0
 # NeuralTrust Firewall subchart values
+# Images: firewall-cpu (default) and firewall-gpu share the same tag in Artifact Registry (built from neuraltrust/firewall).
+# For GPU: set image.repository to .../firewall-gpu and add resources (nvidia.com/gpu), nodeSelector, tolerations, hostIPC in your values.
 neuraltrust-firewall:
   firewall:
     enabled: false
     imagePullSecrets: "gcr-secret"
     replicas: 1
     image:
-      repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall
-      tag: "gpu-v2.2.10"
+      repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
+      tag: "v2.4.3"
       pullPolicy: IfNotPresent
     config:
       pythonUnbuffered: "1"
@@ -753,21 +755,10 @@ neuraltrust-firewall:
       requests:
         cpu: "1"
         memory: 4Gi
-        nvidia.com/gpu: "1"
       limits:
         cpu: "1.5"
         memory: 6Gi
-        nvidia.com/gpu: "1"
-    hostIPC: true
-    nodeSelector:
-      cloud.google.com/gke-nodepool:
-        - gpu-pool
-        - gpu-pool-2
-    tolerations:
-      - effect: NoSchedule
-        key: nvidia.com/gpu
-        operator: Equal
-        value: present
+    hostIPC: false
     podSecurityContext:
       fsGroup: 2000
     securityContext:

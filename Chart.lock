@@ -13,9 +13,9 @@ dependencies:
   version: 1.2.10
 - name: trustgate
   repository: file://./charts/trustgate
-  version: 1.2.6
+  version: 1.2.7
 - name: neuraltrust-firewall
   repository: file://./charts/neuraltrust-firewall
   version: 1.0.0
-digest: sha256:478e97891ebca81b6256a1c9910a9d077a75478e1d73bd82809e06d86b7fb1c1
-generated: "2026-03-23T14:12:14.131591828Z"
+digest: sha256:3db9d2b366a714326eeb9e589a9a4e72b72875e8e79781ac24c0f2e933f6ff6a
+generated: "2026-03-23T15:22:37.025799+01:00"
