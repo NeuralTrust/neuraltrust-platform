@@ -559,7 +559,7 @@ neuraltrust-control-plane:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.48.0"
+          tag: "v1.48.1"
           pullPolicy: "Always"
         config:
           nodeEnv: production
@@ -738,7 +738,7 @@ neuraltrust-firewall:
     replicas: 1
     image:
       repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-      tag: "v2.4.3"
+      tag: "v2.4.5"
       pullPolicy: IfNotPresent
     config:
       pythonUnbuffered: "1"
