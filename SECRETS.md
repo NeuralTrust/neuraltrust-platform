@@ -24,6 +24,8 @@ helm upgrade --install neuraltrust-platform . --namespace neuraltrust --create-n
 | Data Plane JWT | `data-plane-jwt-secret` | `DATA_PLANE_JWT_SECRET` |
 | PostgreSQL password | `postgresql-secrets` | `POSTGRES_PASSWORD` |
 
+Optional **TrustGate → NeuralTrust Firewall** keys in `trustgate-secrets` (only present when set in values or already in the cluster): `NEURAL_TRUST_FIREWALL_URL`, `NEURAL_TRUST_FIREWALL_API_KEY`. See [TrustGate firewall integration](#trustgate-firewall-integration-neural_trust).
+
 > **Important:** `SERVER_SECRET_KEY` (TrustGate) and `TRUSTGATE_JWT_SECRET` (Control Plane) are always synchronized to the same value.
 
 **How auto-generation works:**
@@ -38,6 +40,8 @@ trustgate:
     env:
       SERVER_SECRET_KEY: "my-explicit-key"  # Overrides auto-generation
 ```
+
+**TrustGate firewall integration (`NEURAL_TRUST_*`):** Control-plane, data-plane, and actions pods read the firewall base URL and API key from **`trustgate-secrets`**. With `global.autoGenerateSecrets: true` (default), the parent chart writes these keys when you set non-empty values under `trustgate.global.env`. Non-empty values in your values file **take priority** on every `helm upgrade`; if omitted, existing cluster keys are reused when present. After changing them, **roll out TrustGate** so containers reload env (`kubectl rollout restart deployment/...` for `trustgate-control-plane`, `trustgate-data-plane`, `trustgate-actions`).
 
 ### Option 2: Use the Secrets Script
 
@@ -93,8 +97,39 @@ The chart expects the following secret names in your namespace:
 - `postgresql-secrets` - PostgreSQL connection (shared with control plane)
 
 ### TrustGate Secrets
-- `trustgate-secrets` - TrustGate server secret and database connection details (keys: `SERVER_SECRET_KEY` and database connection details)
-- `hf-api-key` - Hugging Face API key for firewall (key: `HUGGINGFACE_TOKEN`)
+- `trustgate-secrets` — TrustGate server key, PostgreSQL connection, optional LLM provider keys from `trustgate.config.providers`, and optional NeuralTrust Firewall integration:
+  - **Required / usual:** `SERVER_SECRET_KEY`, `DATABASE_HOST`, `DATABASE_PORT`, `DATABASE_USER`, `DATABASE_PASSWORD`, `DATABASE_NAME`, `DATABASE_SSL_MODE` (optional depending on TLS), `DATABASE_URL`
+  - **Optional (firewall HTTP integration):** `NEURAL_TRUST_FIREWALL_URL`, `NEURAL_TRUST_FIREWALL_API_KEY` — set via `trustgate.global.env`; stored in this secret when `global.autoGenerateSecrets: true`, or create them manually when using `preserveExistingSecrets: true`
+
+### Firewall secrets
+
+When **`neuraltrust-firewall.firewall.enabled`** is true, the chart can create **`firewall-secrets`** (unless `global.preserveExistingSecrets` prevents it):
+
+| Key | Required | Notes |
+|-----|----------|--------|
+| `JWT_SECRET` | Yes | Shared with services that call the firewall; align **`controlPlane.secrets.firewallJwtSecret`** (`FIREWALL_JWT_SECRET`) with this value when the Control Plane validates firewall tokens |
+| `HUGGINGFACE_TOKEN` | No | HF token for model weights; can match `huggingface-secrets` or inline `neuraltrust-firewall.firewall.secrets.huggingFaceToken` |
+
+The firewall container reads these from **`firewall-secrets`**. TrustGate reads **`NEURAL_TRUST_FIREWALL_URL`** and **`NEURAL_TRUST_FIREWALL_API_KEY`** from **`trustgate-secrets`** (not from the ConfigMap). For deployment modes (CPU vs GPU images), see [VALUES_SCENARIOS.md](VALUES_SCENARIOS.md#neuraltrust-firewall-cpu-and-gpu) and [DEPLOYMENT.md](DEPLOYMENT.md#neuraltrust-firewall-cpu-vs-gpu).
+
+## TrustGate firewall integration (NEURAL_TRUST_*)
+
+Configure the public firewall endpoint and shared API key TrustGate uses to call the NeuralTrust Firewall:
+
+```yaml
+trustgate:
+  global:
+    env:
+      NEURAL_TRUST_FIREWALL_URL: "https://firewall.example.com"
+      NEURAL_TRUST_FIREWALL_API_KEY: "your-api-key"
+```
+
+| Kubernetes secret | Key | Required |
+|-------------------|-----|----------|
+| `trustgate-secrets` | `NEURAL_TRUST_FIREWALL_URL` | No — omit if TrustGate must not call the firewall |
+| `trustgate-secrets` | `NEURAL_TRUST_FIREWALL_API_KEY` | No — omit if not using API key auth toward the firewall |
+
+When **`global.autoGenerateSecrets: true`**, the platform template merges these into `trustgate-secrets` from `trustgate.global.env`. When **`global.preserveExistingSecrets: true`**, add the same keys to a pre-created `trustgate-secrets` (or manage them with External Secrets). Align **`FIREWALL_JWT_SECRET`** / **`firewall-secrets`** `JWT_SECRET` with the Control Plane when validating firewall-issued JWTs; see [Firewall secrets](#firewall-secrets) above.
 
 ### Docker Registry
 - `gcr-secret` - Docker registry credentials (type: `docker-registry`)
@@ -208,6 +243,10 @@ Options:
 6. **Limit Access**: Use RBAC to limit who can read secrets
 
 ## Troubleshooting
+
+### TrustGate firewall env vars not updating
+
+TrustGate loads **`NEURAL_TRUST_FIREWALL_URL`** and **`NEURAL_TRUST_FIREWALL_API_KEY`** from **`trustgate-secrets`**, not from plain `env` on the pod template unless the chart has merged your `trustgate.global.env` values into that secret. After `helm upgrade` changes the Secret, **restart** the TrustGate deployments so new values appear in the process environment.
 
 ### Secret Not Found
 

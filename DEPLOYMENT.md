@@ -155,6 +155,32 @@ neuraltrust-control-plane:
           database: "neuraltrust"
 ```
 
+## NeuralTrust Firewall (CPU vs GPU)
+
+The **`neuraltrust-firewall`** subchart is **off** by default (`neuraltrust-firewall.firewall.enabled: false`). Enable it when Control Plane, Data Plane, or TrustGate need the in-cluster firewall service.
+
+### Images and versions
+
+Two images share the **same tag** in Artifact Registry (for example `v2.4.3`):
+
+| Image | When to use |
+|--------|-------------|
+| **`.../firewall-cpu`** | Default; runs on normal worker nodes—**no** GPU `nodeSelector`, **no** GPU tolerations, **no** `nvidia.com/gpu` in `resources` |
+| **`.../firewall-gpu`** | GPU inference; set **`neuraltrust-firewall.firewall.image.repository`** to the `firewall-gpu` path, add **`nvidia.com/gpu`** requests/limits, **`hostIPC: true`** (typical for CUDA MPS), **`nodeSelector` / `tolerations`** matching your GPU nodes, and **`firewall.config`** `cudaMpsActiveThreadPercentage` + `cudaMpsPinnedDeviceMemLimit` |
+
+Helm only writes CUDA MPS env vars to the firewall `ConfigMap` when **both** MPS keys are set (CPU-only installs omit them).
+
+### Examples in this repo
+
+- **GPU + no TrustGate:** `values-dataplane-gpu.yaml.example` (copy and customize hosts, secrets, node labels).
+- **Regional GPU production:** `regions/values-us-prod.yaml` (TrustGate enabled; firewall uses `firewall-gpu`).
+
+The [Bump Image Versions](.github/workflows/bump-images.yml) workflow resolves the tag from the **`firewall-cpu`** image name; **`firewall-gpu`** should be published with the same tags.
+
+### TrustGate and Control Plane integration
+
+TrustGate calls the firewall using **`NEURAL_TRUST_FIREWALL_URL`** and **`NEURAL_TRUST_FIREWALL_API_KEY`**, which Helm (when `global.autoGenerateSecrets: true`) merges into **`trustgate-secrets`** from **`trustgate.global.env`**. Pods read them via `secretKeyRef`; after changing values, restart TrustGate deployments. The Control Plane may use **`FIREWALL_JWT_SECRET`** so the app trusts the same JWT as **`firewall-secrets`** (`JWT_SECRET`). See [SECRETS.md](SECRETS.md#trustgate-firewall-integration-neural_trust) and [SECRETS.md](SECRETS.md#firewall-secrets).
+
 ## Value Mapping
 
 ### Infrastructure to Subchart Values
@@ -202,6 +228,9 @@ kubectl logs -n neuraltrust -l app=neuraltrust-control-plane-api
 
 # TrustGate Control Plane
 kubectl logs -n neuraltrust -l app=trustgate-control-plane
+
+# NeuralTrust Firewall (if enabled)
+kubectl logs -n neuraltrust -l app.kubernetes.io/name=firewall
 
 # View logs for a specific pod
 kubectl logs -n neuraltrust <pod-name>

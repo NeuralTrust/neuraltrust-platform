@@ -139,6 +139,38 @@ helm upgrade --install neuraltrust-platform . -f values-external-services.yaml.e
 
 ---
 
+### 7. `values-dataplane-gpu.yaml.example` — Data Plane + GPU firewall (no TrustGate)
+**Use case:** Full in-cluster stack (ClickHouse, Kafka, PostgreSQL, Control Plane, Data Plane) plus the **GPU** firewall image, with **TrustGate disabled**. Suitable for internal clusters, direct data-plane access, or security testing workflows where the gateway is not required.
+
+**Features:**
+- `trustgate.enabled: false`
+- `neuraltrust-firewall.firewall.enabled: true` with **`firewall-gpu`**, GPU resources, **`hostIPC`**, CUDA MPS under `firewall.config`, and **placeholder** `nodeSelector` / `tolerations` (must match your GPU nodes)
+- Uses the same firewall **tag** as **`firewall-cpu`** (bump workflow reads tags from `firewall-cpu`)
+
+**Usage:**
+```bash
+cp values-dataplane-gpu.yaml.example my-dataplane-gpu.yaml
+# Edit hosts, secrets, GPU node labels, and pool names
+helm upgrade --install neuraltrust-platform . --namespace neuraltrust --create-namespace -f my-dataplane-gpu.yaml
+```
+
+For **CPU-only** firewall, start from chart defaults (`firewall-cpu`, no GPU keys) or trim the GPU block from this example.
+
+---
+
+## NeuralTrust Firewall (CPU and GPU)
+
+The firewall is an **optional** subchart controlled by **`neuraltrust-firewall.firewall.enabled`** (root `Chart.yaml` condition: `neuraltrust-firewall.firewall.enabled`).
+
+| Mode | `image.repository` suffix | Scheduling defaults in chart | CUDA MPS in `firewall.config` |
+|------|----------------------------|------------------------------|------------------------------|
+| **CPU (default)** | `firewall-cpu` | No GPU `nodeSelector` / `tolerations`; CPU `resources` | Omit both MPS keys → not rendered in ConfigMap |
+| **GPU** | `firewall-gpu` | You must set `nodeSelector`, `tolerations`, `nvidia.com/gpu`, `hostIPC` as needed | Set both `cudaMpsActiveThreadPercentage` and `cudaMpsPinnedDeviceMemLimit` |
+
+**Reference values:** `values.yaml` (`neuraltrust-firewall`), `regions/values-us-prod.yaml` (GPU production), `values-dataplane-gpu.yaml.example` (GPU, no TrustGate).
+
+---
+
 ## Configuration Scenarios
 
 ### Scenario 1: Kubernetes with Ingress
@@ -171,11 +203,12 @@ helm upgrade --install neuraltrust-platform . -f values-external-services.yaml.e
 - **Configure external PostgreSQL connection** in `neuraltrust-control-plane.controlPlane.components.postgresql.secrets` section with `host`, `port`, `user`, `password`, and `database` keys
 
 ### Scenario 5: Deploy Only NeuralTrust + Infrastructure (No TrustGate)
-**File:** Custom values file based on `values-required.yaml` or `values.yaml`
+**File:** Custom values file based on `values-required.yaml` or `values.yaml`, or start from [`values-dataplane-gpu.yaml.example`](./values-dataplane-gpu.yaml.example) if you also need the **GPU firewall**
 - Set `trustgate.enabled: false`
 - Keep `infrastructure.*.deploy: true`
 - Keep `neuraltrust-control-plane.controlPlane.enabled: true`
 - Keep `neuraltrust-data-plane.dataPlane.enabled: true`
+- Optional: set `neuraltrust-firewall.firewall.enabled: true` and choose **`firewall-cpu`** (defaults) or **`firewall-gpu`** plus GPU scheduling (see [NeuralTrust Firewall (CPU and GPU)](#neuraltrust-firewall-cpu-and-gpu))
 
 ### Scenario 6: Use Pre-generated Secrets (CICD-friendly)
 **File:** Custom values file based on `values-openshift.yaml`
@@ -220,7 +253,7 @@ helm upgrade --install neuraltrust-platform . --namespace neuraltrust --create-n
 - `postgresql-secrets` (with keys: `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, etc.)
 - `control-plane-secrets` (with JWT secrets, API keys, etc.)
 - `data-plane-jwt-secret` (with JWT secret)
-- `trustgate-secrets` (with `SERVER_SECRET_KEY`, `DATABASE_PASSWORD`, etc.)
+- `trustgate-secrets` (with `SERVER_SECRET_KEY`, `DATABASE_PASSWORD`, database connection keys, and optionally `NEURAL_TRUST_FIREWALL_URL`, `NEURAL_TRUST_FIREWALL_API_KEY` for TrustGate → firewall)
 - Optional: `openai-secrets`, `google-secrets`, `resend-secrets`, `huggingface-secrets`
 
 ---
@@ -325,4 +358,5 @@ trustgate:
 | OpenShift Ingress | `values-openshift-ingress.yaml.example` | Yes | Yes | No | Pre-gen |
 | All Deployed | `values-all-deployed.yaml.example` | Configurable | Yes | Configurable | Auto-generated |
 | External Services | `values-external-services.yaml.example` | Configurable | Yes | Configurable | Auto-generated |
+| Data Plane + GPU firewall (no TrustGate) | `values-dataplane-gpu.yaml.example` | Configurable | Yes | Configurable | Helm-managed / explicit in file |
 

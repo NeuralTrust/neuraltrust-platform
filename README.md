@@ -5,6 +5,7 @@ This Helm chart provides a unified deployment for the complete NeuralTrust platf
 - **Infrastructure Components**: ClickHouse, Kafka, PostgreSQL (optional)
 - **NeuralTrust Services**: Data Plane and Control Plane
 - **TrustGate**: API Gateway
+- **NeuralTrust Firewall** (optional): ML inference for prompts; **CPU** (`firewall-cpu`) by default or **GPU** (`firewall-gpu`) via values—see [VALUES_SCENARIOS.md](VALUES_SCENARIOS.md#neuraltrust-firewall-cpu-and-gpu) and [DEPLOYMENT.md](DEPLOYMENT.md#neuraltrust-firewall-cpu-vs-gpu)
 
 ## Features
 
@@ -12,6 +13,7 @@ This Helm chart provides a unified deployment for the complete NeuralTrust platf
 - **Flexible Infrastructure**: Choose to deploy infrastructure components or use pre-installed instances
 - **Conditional Deployment**: Enable/disable components as needed
 - **External Service Support**: Configure external ClickHouse, Kafka, and PostgreSQL instances
+- **Firewall variants**: Default chart values use **`firewall-cpu`** without GPU taints; GPU clusters set **`firewall-gpu`**, GPU resources, **`hostIPC`**, and CUDA MPS config in values (see `values-dataplane-gpu.yaml.example` and `regions/values-us-prod.yaml`)
 
 ## Prerequisites
 
@@ -219,7 +221,7 @@ helm upgrade --install neuraltrust-platform . \
 
 - `values-external-services.yaml.example` - Example for using external infrastructure
 - `values-openshift-ingress.yaml.example` - Example for OpenShift with Ingress instead of Routes
-- `values-red-teaming.yaml.example` - Example for deploying without TrustGate (for red teaming only)
+- `values-dataplane-gpu.yaml.example` - Data Plane + infrastructure + **GPU firewall**, TrustGate disabled (adjust for CPU firewall using `firewall-cpu` and omit GPU settings; see [VALUES_SCENARIOS.md](VALUES_SCENARIOS.md#neuraltrust-firewall-cpu-and-gpu))
 
 ## Secrets Management
 
@@ -239,6 +241,7 @@ global:
 - `DATABASE_PASSWORD` (TrustGate PostgreSQL)
 - `controlPlaneJWTSecret` and `dataPlaneJWTSecret`
 - PostgreSQL `POSTGRES_PASSWORD`
+- **Optional:** `NEURAL_TRUST_FIREWALL_URL` and `NEURAL_TRUST_FIREWALL_API_KEY` in `trustgate-secrets` when you set `trustgate.global.env` (TrustGate → NeuralTrust Firewall). See [SECRETS.md](./SECRETS.md#trustgate-firewall-integration-neural_trust).
 
 **Benefits:**
 - **Zero-config**: Deploy without providing any secrets -- just `helm install`

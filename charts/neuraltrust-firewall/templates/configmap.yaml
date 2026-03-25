@@ -10,8 +10,10 @@ data:
   PYTHONDONTWRITEBYTECODE: {{ .Values.firewall.config.pythonDontWriteBytecode | quote }}
   PYTHONPATH: {{ .Values.firewall.config.pythonPath | quote }}
   HF_HOME: {{ .Values.firewall.config.hfHome | quote }}
+  {{- if and .Values.firewall.config.cudaMpsActiveThreadPercentage .Values.firewall.config.cudaMpsPinnedDeviceMemLimit }}
   CUDA_MPS_ACTIVE_THREAD_PERCENTAGE: {{ .Values.firewall.config.cudaMpsActiveThreadPercentage | quote }}
   CUDA_MPS_PINNED_DEVICE_MEM_LIMIT: {{ .Values.firewall.config.cudaMpsPinnedDeviceMemLimit | quote }}
+  {{- end }}
   OTEL_ENABLED: {{ .Values.firewall.config.otelEnabled | quote }}
   OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.firewall.config.otelExporterOtlpEndpoint | quote }}
   OTEL_SERVICE_NAME: {{ .Values.firewall.config.otelServiceName | quote }}

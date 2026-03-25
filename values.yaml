@@ -730,7 +730,7 @@ neuraltrust-data-plane:
         image: curlimages/curl:8.13.0
 # NeuralTrust Firewall subchart values
 # Images: firewall-cpu (default) and firewall-gpu share the same tag in Artifact Registry (built from neuraltrust/firewall).
-# For GPU: set image.repository to .../firewall-gpu and add resources (nvidia.com/gpu), nodeSelector, tolerations, hostIPC in your values.
+# For GPU: set image.repository to .../firewall-gpu, resources (nvidia.com/gpu), nodeSelector, tolerations, hostIPC, and CUDA MPS under firewall.config.
 neuraltrust-firewall:
   firewall:
     enabled: false
@@ -745,8 +745,6 @@ neuraltrust-firewall:
       pythonDontWriteBytecode: "1"
       pythonPath: "/app"
       hfHome: "/root/.cache/huggingface"
-      cudaMpsActiveThreadPercentage: "25"
-      cudaMpsPinnedDeviceMemLimit: "6000M"
       otelEnabled: "false"
     secrets:
       jwtSecret: ""

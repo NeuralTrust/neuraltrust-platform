@@ -24,8 +24,9 @@ This guide provides step-by-step instructions for deploying the NeuralTrust Plat
 3. [Creating Secrets](#creating-secrets)
 4. [OpenShift-Specific Configuration](#openshift-specific-configuration)
 5. [Deployment Steps](#deployment-steps)
-6. [Verification](#verification)
-7. [Troubleshooting](#troubleshooting)
+6. [Firewall deployment (CPU and GPU)](#firewall-deployment-cpu-and-gpu)
+7. [Verification](#verification)
+8. [Troubleshooting](#troubleshooting)
 
 ## Quick Start
 
@@ -89,6 +90,8 @@ With `global.autoGenerateSecrets: true` (the default), the following secrets are
 |------------|-----|:--------------:|-------------|
 | `trustgate-secrets` | `SERVER_SECRET_KEY` | Yes | TrustGate server secret key |
 | `trustgate-secrets` | `DATABASE_PASSWORD` | Yes | TrustGate PostgreSQL password |
+| `trustgate-secrets` | `NEURAL_TRUST_FIREWALL_URL` | No | TrustGate → NeuralTrust Firewall base URL (from values or pre-created secret) |
+| `trustgate-secrets` | `NEURAL_TRUST_FIREWALL_API_KEY` | No | TrustGate → NeuralTrust Firewall API key (from values or pre-created secret) |
 | `control-plane-secrets` | `CONTROL_PLANE_JWT_SECRET` | Yes | JWT secret for Control Plane API |
 | `control-plane-secrets` | `TRUSTGATE_JWT_SECRET` | Yes | Synced with `SERVER_SECRET_KEY` |
 | `data-plane-jwt-secret` | `DATA_PLANE_JWT_SECRET` | Yes | JWT secret for Data Plane API |
@@ -154,6 +157,8 @@ When using pre-generated secrets (`global.autoGenerateSecrets: false`, `global.p
 | `trustgate-secrets` | `DATABASE_PASSWORD` | **Auto-generated** | Database password for TrustGate |
 | `trustgate-secrets` | `DATABASE_NAME` | No | Database name for TrustGate (if using external database) |
 | `trustgate-secrets` | `DATABASE_URL` | No | Database connection URL for TrustGate (if using external database) |
+| `trustgate-secrets` | `NEURAL_TRUST_FIREWALL_URL` | No | TrustGate → NeuralTrust Firewall base URL (set `trustgate.global.env` or add to secret when using pre-generated secrets) |
+| `trustgate-secrets` | `NEURAL_TRUST_FIREWALL_API_KEY` | No | TrustGate → NeuralTrust Firewall API key (set `trustgate.global.env` or add to secret when using pre-generated secrets) |
 | `hf-api-key` | `HUGGINGFACE_TOKEN` | No | Hugging Face API key for firewall service. **Note:** Can reuse the same token value from `huggingface-secrets` |
 
 ### Docker Registry Secret
@@ -273,8 +278,21 @@ oc create secret generic huggingface-secrets \
 # TrustGate Secrets
 oc create secret generic trustgate-secrets \
   --from-literal=SERVER_SECRET_KEY="$(openssl rand -hex 32)" \
+  --from-literal=NEURAL_TRUST_FIREWALL_URL="https://firewall.example.com" \
+  --from-literal=NEURAL_TRUST_FIREWALL_API_KEY="your-firewall-api-key" \
   -n neuraltrust
+```
 
+Omit the `NEURAL_TRUST_*` literals if TrustGate must not call the NeuralTrust Firewall. Add database literals (`DATABASE_HOST`, `DATABASE_PASSWORD`, etc.) as required for your environment.
+
+```bash
+# Minimal example (server key only — extend with DB + firewall keys as needed)
+oc create secret generic trustgate-secrets \
+  --from-literal=SERVER_SECRET_KEY="$(openssl rand -hex 32)" \
+  -n neuraltrust
+```
+
+```bash
 # Hugging Face API Key for Firewall
 # Note: You can reuse the same token from huggingface-secrets if already created
 # Option 1: Use the same token value
@@ -500,6 +518,21 @@ oc get svc -n neuraltrust
 # Check routes
 oc get routes -n neuraltrust
 ```
+
+## Firewall deployment (CPU and GPU)
+
+The optional **neuraltrust-firewall** subchart (`neuraltrust-firewall.firewall.enabled`) runs the NeuralTrust Firewall inference service. Images are published as **`firewall-cpu`** and **`firewall-gpu`** in Artifact Registry with the **same version tags** (for example `v2.4.3`).
+
+| Scenario | Image (`firewall.image.repository`) | Scheduling | CUDA MPS (`firewall.config`) |
+|----------|-------------------------------------|------------|-------------------------------|
+| **Default (chart values)** | `.../firewall-cpu` | No GPU nodeSelector or tolerations; CPU-sized resources | Omitted (not added to the firewall `ConfigMap`) |
+| **GPU** | `.../firewall-gpu` | Set `resources` with `nvidia.com/gpu`, `nodeSelector`, `tolerations`, and usually `hostIPC: true` for MPS-style stacks | Set `cudaMpsActiveThreadPercentage` and `cudaMpsPinnedDeviceMemLimit` |
+
+On OpenShift, GPU workers often use taints and specific node labels: align **`nodeSelector`** and **`tolerations`** with your `MachineSet` / node pool (the chart does not assume GPU nodes by default). The firewall container may require **`anyuid`** (or a compatible SCC) depending on your image; see [Security Context Constraints (SCC)](#security-context-constraints-scc).
+
+**Example values** merging Data Plane + GPU firewall without TrustGate: copy [`values-dataplane-gpu.yaml.example`](./values-dataplane-gpu.yaml.example) and replace hosts, secrets, and GPU node labels for your cluster. Production-style GPU overrides are also shown under `regions/` in this repo.
+
+**Secrets:** Helm can create **`firewall-secrets`** (`JWT_SECRET`, optional `HUGGINGFACE_TOKEN`). TrustGate may use **`hf-api-key`** for the same Hugging Face token when TrustGate is enabled; see [SECRETS.md](./SECRETS.md). The Control Plane **`FIREWALL_JWT_SECRET`** must match the firewall JWT when the UI or API validates requests to the firewall—set both explicitly in values or wire them from your secret manager.
 
 ## Verification
 

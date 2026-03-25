@@ -1,0 +1,121 @@
+# Example: NeuralTrust Platform — Data Plane + infrastructure + GPU firewall (no TrustGate)
+#
+# Use this when you want Control Plane + Data Plane + infrastructure and the NeuralTrust Firewall
+# on GPU nodes, without the TrustGate API gateway. Typical cases: internal environments,
+# constrained ingress, red-teaming style setups, or workloads that talk to the data plane directly.
+#
+# Firewall:
+# - Image `firewall-gpu` shares version tags with `firewall-cpu` (see values.yaml / bump workflow).
+# - You must set nodeSelector and tolerations to match your cluster's GPU pool (edit below).
+# - Set `firewall.config` CUDA MPS keys for GPU; omit them for CPU image (see VALUES_SCENARIOS.md).
+#
+# Usage:
+#   cp values-dataplane-gpu.yaml.example my-dataplane-gpu.yaml
+#   # Edit hosts, secrets, and GPU node labels/tolerations
+#   helm upgrade --install neuraltrust-platform . \
+#     --namespace neuraltrust --create-namespace -f my-dataplane-gpu.yaml
+
+# Global settings
+global:
+  openshift: false
+  openshiftDomain: ""
+  imageRegistry: ""
+  preserveExistingSecrets: false
+  storageClass: ""
+  ingress:
+    tls:
+      autoGenerate: true
+      secretName: "neuraltrust-ingress-tls"
+
+# Infrastructure
+infrastructure:
+  clickhouse:
+    deploy: true
+  kafka:
+    deploy: true
+
+neuraltrust-control-plane:
+  infrastructure:
+    postgresql:
+      deploy: true
+  controlPlane:
+    enabled: true
+    imagePullSecrets: "gcr-secret"
+    secrets:
+      controlPlaneJWTSecret: "your-control-plane-jwt-secret"
+      trustgateJwtSecret: "dummy-trustgate-jwt-secret"
+    components:
+      postgresql:
+        secrets:
+          password: "your-postgres-password"
+          database: "neuraltrust"
+      api:
+        enabled: true
+        host: "control-plane-api.yourdomain.com"
+        ingress:
+          enabled: true
+      app:
+        enabled: true
+        host: "control-plane-app.yourdomain.com"
+        ingress:
+          enabled: true
+      scheduler:
+        enabled: true
+        host: "control-plane-scheduler.yourdomain.com"
+        ingress:
+          enabled: true
+
+neuraltrust-data-plane:
+  dataPlane:
+    enabled: true
+    imagePullSecrets: "gcr-secret"
+    secrets:
+      dataPlaneJWTSecret: "your-data-plane-jwt-secret"
+    components:
+      clickhouse:
+        enabled: true
+        host: "clickhouse"
+      kafka:
+        enabled: true
+      api:
+        enabled: true
+        host: "data-plane-api.yourdomain.com"
+        ingress:
+          enabled: true
+      worker:
+        enabled: true
+
+# GPU firewall (subchart `neuraltrust-firewall`; enable with `neuraltrust-firewall.firewall.enabled`)
+neuraltrust-firewall:
+  firewall:
+    enabled: true
+    imagePullSecrets: "gcr-secret"
+    image:
+      repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-gpu
+      tag: "v2.4.3"
+    config:
+      cudaMpsActiveThreadPercentage: "25"
+      cudaMpsPinnedDeviceMemLimit: "6000M"
+    resources:
+      requests:
+        cpu: "1"
+        memory: 4Gi
+        nvidia.com/gpu: "1"
+      limits:
+        cpu: "1.5"
+        memory: 6Gi
+        nvidia.com/gpu: "1"
+    hostIPC: true
+    nodeSelector:
+      cloud.google.com/gke-nodepool:
+        - gpu-pool
+    tolerations:
+      - effect: NoSchedule
+        key: nvidia.com/gpu
+        operator: Equal
+        value: present
+    secrets:
+      huggingFaceToken: "your-huggingface-token"
+
+trustgate:
+  enabled: false
