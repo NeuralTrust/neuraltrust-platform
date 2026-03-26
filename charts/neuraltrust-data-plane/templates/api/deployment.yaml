@@ -9,7 +9,7 @@ spec:
   {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api (hasKey .Values.dataPlane.components.api "replicas") }}
   replicas: {{ .Values.dataPlane.components.api.replicas }}
   {{- else }}
-  replicas: 3
+  replicas: 2
   {{- end }}
   selector:
     matchLabels:

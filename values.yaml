@@ -735,7 +735,7 @@ neuraltrust-firewall:
   firewall:
     enabled: true
     imagePullSecrets: "gcr-secret"
-    replicas: 1
+    replicas: 2
     image:
       repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
       tag: "v2.4.5"

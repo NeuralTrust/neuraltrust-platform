@@ -9,7 +9,7 @@ spec:
   {{- if hasKey .Values.firewall "replicas" }}
   replicas: {{ .Values.firewall.replicas }}
   {{- else }}
-  replicas: 1
+  replicas: 2
   {{- end }}
   selector:
     matchLabels:
