@@ -71,10 +71,10 @@ trustgate:
       DATABASE_HOST: "control-plane-postgresql" # Required
       # TrustGate database password - auto-generated if empty and autoGenerateSecrets: true
       DATABASE_PASSWORD: "" # Auto-generated if empty
-      # Optional: NeuralTrust Firewall HTTP integration — written to trustgate-secrets keys
-      # NEURAL_TRUST_FIREWALL_URL / NEURAL_TRUST_FIREWALL_API_KEY when non-empty
-      # NEURAL_TRUST_FIREWALL_URL: ""
-      # NEURAL_TRUST_FIREWALL_API_KEY: ""
+      # NeuralTrust Firewall HTTP integration — written to trustgate-secrets keys
+      # Auto-populated when neuraltrust-firewall.firewall.enabled: true and autoGenerateSecrets: true
+      NEURAL_TRUST_FIREWALL_URL: "" # Auto-populated if firewall enabled
+      NEURAL_TRUST_FIREWALL_SECRET_KEY: "" # Auto-populated if firewall enabled (= firewall jwtSecret)
   redis:
     enabled: true
     # Note: redis.auth.password is optional - only recommended when using external Redis (redis.enabled: false)
@@ -94,6 +94,9 @@ neuraltrust-control-plane:
       # TrustGate JWT secret - auto-generated if empty and autoGenerateSecrets: true
       # Automatically synchronized with trustgate.global.env.SERVER_SECRET_KEY
       trustgateJwtSecret: "" # Auto-generated if empty (= SERVER_SECRET_KEY)
+      # Firewall JWT secret - auto-generated if empty and autoGenerateSecrets: true
+      # Shared with neuraltrust-firewall.firewall.secrets.jwtSecret
+      firewallJwtSecret: "" # Auto-generated if empty
     components:
       scheduler:
         enabled: true
@@ -124,3 +127,14 @@ neuraltrust-data-plane:
         enabled: true
       kafka:
         connect: {}
+
+# NeuralTrust Firewall
+neuraltrust-firewall:
+  firewall:
+    enabled: true
+    imagePullSecrets: "gcr-secret"
+    image:
+      repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu"
+      tag: "v2.4.5"
+    secrets:
+      jwtSecret: "" # Auto-generated if empty

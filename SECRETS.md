@@ -24,7 +24,7 @@ helm upgrade --install neuraltrust-platform . --namespace neuraltrust --create-n
 | Data Plane JWT | `data-plane-jwt-secret` | `DATA_PLANE_JWT_SECRET` |
 | PostgreSQL password | `postgresql-secrets` | `POSTGRES_PASSWORD` |
 
-Optional **TrustGate → NeuralTrust Firewall** keys in `trustgate-secrets` (only present when set in values or already in the cluster): `NEURAL_TRUST_FIREWALL_URL`, `NEURAL_TRUST_FIREWALL_API_KEY`. See [TrustGate firewall integration](#trustgate-firewall-integration-neural_trust).
+Optional **TrustGate → NeuralTrust Firewall** keys in `trustgate-secrets` (only present when set in values or already in the cluster): `NEURAL_TRUST_FIREWALL_URL`, `NEURAL_TRUST_FIREWALL_SECRET_KEY`. See [TrustGate firewall integration](#trustgate-firewall-integration-neural_trust).
 
 > **Important:** `SERVER_SECRET_KEY` (TrustGate) and `TRUSTGATE_JWT_SECRET` (Control Plane) are always synchronized to the same value.
 
@@ -99,7 +99,7 @@ The chart expects the following secret names in your namespace:
 ### TrustGate Secrets
 - `trustgate-secrets` — TrustGate server key, PostgreSQL connection, optional LLM provider keys from `trustgate.config.providers`, and optional NeuralTrust Firewall integration:
   - **Required / usual:** `SERVER_SECRET_KEY`, `DATABASE_HOST`, `DATABASE_PORT`, `DATABASE_USER`, `DATABASE_PASSWORD`, `DATABASE_NAME`, `DATABASE_SSL_MODE` (optional depending on TLS), `DATABASE_URL`
-  - **Optional (firewall HTTP integration):** `NEURAL_TRUST_FIREWALL_URL`, `NEURAL_TRUST_FIREWALL_API_KEY` — set via `trustgate.global.env`; stored in this secret when `global.autoGenerateSecrets: true`, or create them manually when using `preserveExistingSecrets: true`
+  - **Optional (firewall HTTP integration):** `NEURAL_TRUST_FIREWALL_URL`, `NEURAL_TRUST_FIREWALL_SECRET_KEY` — set via `trustgate.global.env`; stored in this secret when `global.autoGenerateSecrets: true`, or create them manually when using `preserveExistingSecrets: true`
 
 ### Firewall secrets
 
@@ -110,7 +110,7 @@ When **`neuraltrust-firewall.firewall.enabled`** is true, the chart can create *
 | `JWT_SECRET` | Yes | Shared with services that call the firewall; align **`controlPlane.secrets.firewallJwtSecret`** (`FIREWALL_JWT_SECRET`) with this value when the Control Plane validates firewall tokens |
 | `HUGGINGFACE_TOKEN` | No | HF token for model weights; can match `huggingface-secrets` or inline `neuraltrust-firewall.firewall.secrets.huggingFaceToken` |
 
-The firewall container reads these from **`firewall-secrets`**. TrustGate reads **`NEURAL_TRUST_FIREWALL_URL`** and **`NEURAL_TRUST_FIREWALL_API_KEY`** from **`trustgate-secrets`** (not from the ConfigMap). For deployment modes (CPU vs GPU images), see [VALUES_SCENARIOS.md](VALUES_SCENARIOS.md#neuraltrust-firewall-cpu-and-gpu) and [DEPLOYMENT.md](DEPLOYMENT.md#neuraltrust-firewall-cpu-vs-gpu).
+The firewall container reads these from **`firewall-secrets`**. TrustGate reads **`NEURAL_TRUST_FIREWALL_URL`** and **`NEURAL_TRUST_FIREWALL_SECRET_KEY`** from **`trustgate-secrets`** (not from the ConfigMap). For deployment modes (CPU vs GPU images), see [VALUES_SCENARIOS.md](VALUES_SCENARIOS.md#neuraltrust-firewall-cpu-and-gpu) and [DEPLOYMENT.md](DEPLOYMENT.md#neuraltrust-firewall-cpu-vs-gpu).
 
 ## TrustGate firewall integration (NEURAL_TRUST_*)
 
@@ -121,13 +121,13 @@ trustgate:
   global:
     env:
       NEURAL_TRUST_FIREWALL_URL: "https://firewall.example.com"
-      NEURAL_TRUST_FIREWALL_API_KEY: "your-api-key"
+      NEURAL_TRUST_FIREWALL_SECRET_KEY: "your-secret-key"
 ```
 
 | Kubernetes secret | Key | Required |
 |-------------------|-----|----------|
 | `trustgate-secrets` | `NEURAL_TRUST_FIREWALL_URL` | No — omit if TrustGate must not call the firewall |
-| `trustgate-secrets` | `NEURAL_TRUST_FIREWALL_API_KEY` | No — omit if not using API key auth toward the firewall |
+| `trustgate-secrets` | `NEURAL_TRUST_FIREWALL_SECRET_KEY` | No — omit if not using secret key auth toward the firewall |
 
 When **`global.autoGenerateSecrets: true`**, the platform template merges these into `trustgate-secrets` from `trustgate.global.env`. When **`global.preserveExistingSecrets: true`**, add the same keys to a pre-created `trustgate-secrets` (or manage them with External Secrets). Align **`FIREWALL_JWT_SECRET`** / **`firewall-secrets`** `JWT_SECRET` with the Control Plane when validating firewall-issued JWTs; see [Firewall secrets](#firewall-secrets) above.
 
@@ -246,7 +246,7 @@ Options:
 
 ### TrustGate firewall env vars not updating
 
-TrustGate loads **`NEURAL_TRUST_FIREWALL_URL`** and **`NEURAL_TRUST_FIREWALL_API_KEY`** from **`trustgate-secrets`**, not from plain `env` on the pod template unless the chart has merged your `trustgate.global.env` values into that secret. After `helm upgrade` changes the Secret, **restart** the TrustGate deployments so new values appear in the process environment.
+TrustGate loads **`NEURAL_TRUST_FIREWALL_URL`** and **`NEURAL_TRUST_FIREWALL_SECRET_KEY`** from **`trustgate-secrets`**, not from plain `env` on the pod template unless the chart has merged your `trustgate.global.env` values into that secret. After `helm upgrade` changes the Secret, **restart** the TrustGate deployments so new values appear in the process environment.
 
 ### Secret Not Found
 

@@ -241,7 +241,7 @@ global:
 - `DATABASE_PASSWORD` (TrustGate PostgreSQL)
 - `controlPlaneJWTSecret` and `dataPlaneJWTSecret`
 - PostgreSQL `POSTGRES_PASSWORD`
-- **Optional:** `NEURAL_TRUST_FIREWALL_URL` and `NEURAL_TRUST_FIREWALL_API_KEY` in `trustgate-secrets` when you set `trustgate.global.env` (TrustGate → NeuralTrust Firewall). See [SECRETS.md](./SECRETS.md#trustgate-firewall-integration-neural_trust).
+- **Optional:** `NEURAL_TRUST_FIREWALL_URL` and `NEURAL_TRUST_FIREWALL_SECRET_KEY` in `trustgate-secrets` when you set `trustgate.global.env` (TrustGate → NeuralTrust Firewall). See [SECRETS.md](./SECRETS.md#trustgate-firewall-integration-neural_trust).
 
 **Benefits:**
 - **Zero-config**: Deploy without providing any secrets -- just `helm install`

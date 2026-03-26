@@ -733,7 +733,7 @@ neuraltrust-data-plane:
 # For GPU: set image.repository to .../firewall-gpu, resources (nvidia.com/gpu), nodeSelector, tolerations, hostIPC, and CUDA MPS under firewall.config.
 neuraltrust-firewall:
   firewall:
-    enabled: false
+    enabled: true
     imagePullSecrets: "gcr-secret"
     replicas: 1
     image:

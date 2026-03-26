@@ -253,7 +253,7 @@ helm upgrade --install neuraltrust-platform . --namespace neuraltrust --create-n
 - `postgresql-secrets` (with keys: `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, etc.)
 - `control-plane-secrets` (with JWT secrets, API keys, etc.)
 - `data-plane-jwt-secret` (with JWT secret)
-- `trustgate-secrets` (with `SERVER_SECRET_KEY`, `DATABASE_PASSWORD`, database connection keys, and optionally `NEURAL_TRUST_FIREWALL_URL`, `NEURAL_TRUST_FIREWALL_API_KEY` for TrustGate → firewall)
+- `trustgate-secrets` (with `SERVER_SECRET_KEY`, `DATABASE_PASSWORD`, database connection keys, and optionally `NEURAL_TRUST_FIREWALL_URL`, `NEURAL_TRUST_FIREWALL_SECRET_KEY` for TrustGate → firewall)
 - Optional: `openai-secrets`, `google-secrets`, `resend-secrets`, `huggingface-secrets`
 
 ---

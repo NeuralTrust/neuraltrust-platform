@@ -179,7 +179,7 @@ The [Bump Image Versions](.github/workflows/bump-images.yml) workflow resolves t
 
 ### TrustGate and Control Plane integration
 
-TrustGate calls the firewall using **`NEURAL_TRUST_FIREWALL_URL`** and **`NEURAL_TRUST_FIREWALL_API_KEY`**, which Helm (when `global.autoGenerateSecrets: true`) merges into **`trustgate-secrets`** from **`trustgate.global.env`**. Pods read them via `secretKeyRef`; after changing values, restart TrustGate deployments. The Control Plane may use **`FIREWALL_JWT_SECRET`** so the app trusts the same JWT as **`firewall-secrets`** (`JWT_SECRET`). See [SECRETS.md](SECRETS.md#trustgate-firewall-integration-neural_trust) and [SECRETS.md](SECRETS.md#firewall-secrets).
+TrustGate calls the firewall using **`NEURAL_TRUST_FIREWALL_URL`** and **`NEURAL_TRUST_FIREWALL_SECRET_KEY`**, which Helm (when `global.autoGenerateSecrets: true`) merges into **`trustgate-secrets`** from **`trustgate.global.env`**. Pods read them via `secretKeyRef`; after changing values, restart TrustGate deployments. The Control Plane may use **`FIREWALL_JWT_SECRET`** so the app trusts the same JWT as **`firewall-secrets`** (`JWT_SECRET`). See [SECRETS.md](SECRETS.md#trustgate-firewall-integration-neural_trust) and [SECRETS.md](SECRETS.md#firewall-secrets).
 
 ## Value Mapping
 

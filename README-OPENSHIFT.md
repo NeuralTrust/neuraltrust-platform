@@ -91,7 +91,7 @@ With `global.autoGenerateSecrets: true` (the default), the following secrets are
 | `trustgate-secrets` | `SERVER_SECRET_KEY` | Yes | TrustGate server secret key |
 | `trustgate-secrets` | `DATABASE_PASSWORD` | Yes | TrustGate PostgreSQL password |
 | `trustgate-secrets` | `NEURAL_TRUST_FIREWALL_URL` | No | TrustGate → NeuralTrust Firewall base URL (from values or pre-created secret) |
-| `trustgate-secrets` | `NEURAL_TRUST_FIREWALL_API_KEY` | No | TrustGate → NeuralTrust Firewall API key (from values or pre-created secret) |
+| `trustgate-secrets` | `NEURAL_TRUST_FIREWALL_SECRET_KEY` | No | TrustGate → NeuralTrust Firewall secret key (from values or pre-created secret) |
 | `control-plane-secrets` | `CONTROL_PLANE_JWT_SECRET` | Yes | JWT secret for Control Plane API |
 | `control-plane-secrets` | `TRUSTGATE_JWT_SECRET` | Yes | Synced with `SERVER_SECRET_KEY` |
 | `data-plane-jwt-secret` | `DATA_PLANE_JWT_SECRET` | Yes | JWT secret for Data Plane API |
@@ -158,7 +158,7 @@ When using pre-generated secrets (`global.autoGenerateSecrets: false`, `global.p
 | `trustgate-secrets` | `DATABASE_NAME` | No | Database name for TrustGate (if using external database) |
 | `trustgate-secrets` | `DATABASE_URL` | No | Database connection URL for TrustGate (if using external database) |
 | `trustgate-secrets` | `NEURAL_TRUST_FIREWALL_URL` | No | TrustGate → NeuralTrust Firewall base URL (set `trustgate.global.env` or add to secret when using pre-generated secrets) |
-| `trustgate-secrets` | `NEURAL_TRUST_FIREWALL_API_KEY` | No | TrustGate → NeuralTrust Firewall API key (set `trustgate.global.env` or add to secret when using pre-generated secrets) |
+| `trustgate-secrets` | `NEURAL_TRUST_FIREWALL_SECRET_KEY` | No | TrustGate → NeuralTrust Firewall secret key (set `trustgate.global.env` or add to secret when using pre-generated secrets) |
 | `hf-api-key` | `HUGGINGFACE_TOKEN` | No | Hugging Face API key for firewall service. **Note:** Can reuse the same token value from `huggingface-secrets` |
 
 ### Docker Registry Secret
@@ -279,7 +279,7 @@ oc create secret generic huggingface-secrets \
 oc create secret generic trustgate-secrets \
   --from-literal=SERVER_SECRET_KEY="$(openssl rand -hex 32)" \
   --from-literal=NEURAL_TRUST_FIREWALL_URL="https://firewall.example.com" \
-  --from-literal=NEURAL_TRUST_FIREWALL_API_KEY="your-firewall-api-key" \
+  --from-literal=NEURAL_TRUST_FIREWALL_SECRET_KEY="your-firewall-secret-key" \
   -n neuraltrust
 ```
 
