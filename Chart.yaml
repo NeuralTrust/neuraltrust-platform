@@ -21,13 +21,13 @@ dependencies:
       - infrastructure
   # NeuralTrust components
   - name: neuraltrust-data-plane
-    version: 1.2.9
+    version: 1.2.10
     condition: neuraltrust-data-plane.dataPlane.enabled
     repository: file://./charts/neuraltrust-data-plane
     tags:
       - neuraltrust
   - name: neuraltrust-control-plane
-    version: 1.2.11
+    version: 1.2.12
     repository: file://./charts/neuraltrust-control-plane
     # No condition: subchart always loads so PostgreSQL can deploy independently.
     # Control Plane components are guarded by controlPlane.enabled inside templates.
@@ -35,14 +35,14 @@ dependencies:
       - neuraltrust
   # TrustGate components
   - name: trustgate
-    version: 1.2.7
+    version: 1.2.8
     condition: trustgate.enabled
     repository: file://./charts/trustgate
     tags:
       - trustgate
   # Firewall API
   - name: neuraltrust-firewall
-    version: 1.0.2
+    version: 1.0.3
     condition: neuraltrust-firewall.firewall.enabled
     repository: file://./charts/neuraltrust-firewall
     tags:
