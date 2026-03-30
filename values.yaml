@@ -223,7 +223,7 @@ trustgate:
     image:
       pullPolicy: Always
       image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee"
-      tag: "v1.24.1"
+      tag: "v1.24.5"
       # imagePullSecrets: if not set, will fall back to parent chart's global.imagePullSecrets
       imagePullSecrets: ["gcr-secret"] # Set to array of secret names, e.g., ["secret-name"] or leave empty to use parent global.imagePullSecrets
     postgresql:
@@ -515,7 +515,7 @@ neuraltrust-control-plane:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api"
-          tag: "v1.13.1"
+          tag: "v1.13.3"
           pullPolicy: "Always"
         config:
           # URLs will be auto-generated from OpenShift Routes if global.openshift=true and global.openshiftDomain is set
@@ -559,7 +559,7 @@ neuraltrust-control-plane:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.48.1"
+          tag: "v1.48.6"
           pullPolicy: "Always"
         config:
           nodeEnv: production
@@ -663,7 +663,7 @@ neuraltrust-data-plane:
           bootstrapServers: "kafka:9092"
           image:
             repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect
-            tag: v0.1.4
+            tag: v0.1.3
             pullPolicy: Always
           resources:
             limits:
@@ -692,7 +692,7 @@ neuraltrust-data-plane:
         classifierModel: "gpt"
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.14.0
+          tag: v1.15.4
           pullPolicy: Always
         accessMode: ReadWriteOnce
         huggingfaceToken: ""
@@ -736,7 +736,7 @@ neuraltrust-firewall:
     replicas: 2
     image:
       repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-      tag: "v2.4.5"
+      tag: "v2.5.4"
       pullPolicy: IfNotPresent
     config:
       pythonUnbuffered: "1"
