@@ -64,7 +64,7 @@ spec:
       containers:
       - name: firewall
         {{- $firewallRepo := .Values.firewall.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu" }}
-        {{- $firewallTag := .Values.firewall.image.tag | default "v2.4.5" }}
+        {{- $firewallTag := .Values.firewall.image.tag | default "v2.5.4" }}
         image: {{ include "firewall.image" (dict "repository" $firewallRepo "tag" $firewallTag "global" .Values.global) | quote }}
         imagePullPolicy: {{ .Values.firewall.image.pullPolicy | default "IfNotPresent" }}
         ports:
