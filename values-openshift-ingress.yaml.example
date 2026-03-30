@@ -718,7 +718,7 @@ neuraltrust-data-plane:
           replicas: 1
           image:
             repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect  # Set to your image
-            tag: v0.0.1
+            tag: v0.1.4
             pullPolicy: Always
           resources:
             limits:
@@ -777,6 +777,4 @@ neuraltrust-data-plane:
           limits:
             memory: 8Gi
             cpu: 2000m
-      connectorsJob:
-        image: curlimages/curl:8.13.0
 

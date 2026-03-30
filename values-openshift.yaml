@@ -618,7 +618,7 @@ neuraltrust-data-plane:
           bootstrapServers: "kafka:9092"
           image:
             repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect
-            tag: v0.1.2
+            tag: v0.1.4
             pullPolicy: Always
           resources:
             limits:
@@ -678,5 +678,3 @@ neuraltrust-data-plane:
           limits:
             memory: 8Gi
             cpu: 2000m
-      connectorsJob:
-        image: curlimages/curl:8.13.0
