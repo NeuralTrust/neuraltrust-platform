@@ -116,14 +116,6 @@ firewall:
 
   imagePullSecrets: ""
 
-  # --- HTTPRoute (Gateway API) ---
-  httproute:
-    enabled: true
-    parentRef:
-      name: external-gateway
-      namespace: gateway
-    hostname: "firewall.neuraltrust.ai"
-
   # --- GKE HealthCheckPolicy ---
   healthCheckPolicy:
     enabled: true

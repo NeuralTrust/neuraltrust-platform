@@ -9,6 +9,8 @@ spec:
     {{- $kafkaConnectReplicas = .Values.dataPlane.components.kafka.connect.replicas }}
   {{- end }}
   replicas: {{ $kafkaConnectReplicas }}
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: kafka-connect
@@ -31,6 +33,42 @@ spec:
       imagePullSecrets:
         - name: {{ $imagePullSecret }}
       {{- end }}
+      initContainers:
+        - name: fix-connect-topics
+          {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect .Values.dataPlane.components.kafka.connect.image }}
+          {{- $initRepo := .Values.dataPlane.components.kafka.connect.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect" }}
+          {{- $initTag := .Values.dataPlane.components.kafka.connect.image.tag | default "v0.1.5" }}
+          image: {{ include "data-plane.image" (dict "repository" $initRepo "tag" $initTag "global" .Values.global) | quote }}
+          {{- else }}
+          image: {{ include "data-plane.image" (dict "repository" "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect" "tag" "v0.1.4" "global" .Values.global) | quote }}
+          {{- end }}
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              BOOTSTRAP="{{ .Values.dataPlane.components.kafka.connect.bootstrapServers | default "kafka:9092" }}"
+              TOPICS="connect-configs connect-offsets connect-status"
+              echo "Waiting for Kafka broker at ${BOOTSTRAP}..."
+              until /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server "${BOOTSTRAP}" >/dev/null 2>&1; do
+                sleep 2
+              done
+              for topic in $TOPICS; do
+                if /opt/kafka/bin/kafka-topics.sh --bootstrap-server "${BOOTSTRAP}" --describe --topic "$topic" 2>/dev/null | grep -q "$topic"; then
+                  echo "Ensuring cleanup.policy=compact on '$topic'"
+                  /opt/kafka/bin/kafka-configs.sh --bootstrap-server "${BOOTSTRAP}" \
+                    --entity-type topics --entity-name "$topic" \
+                    --alter --add-config cleanup.policy=compact 2>&1 || true
+                else
+                  echo "Topic '$topic' does not exist yet — Connect will create it"
+                fi
+              done
+              echo "Init complete."
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 200m
+              memory: 512Mi
       containers:
         - name: kafka-connect
           {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect .Values.dataPlane.components.kafka.connect.image }}

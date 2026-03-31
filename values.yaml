@@ -832,8 +832,6 @@ neuraltrust-firewall:
       readOnlyRootFilesystem: false
       runAsNonRoot: false
       runAsUser: 0
-    httproute:
-      enabled: false
     healthCheckPolicy:
       enabled: false
     image:
