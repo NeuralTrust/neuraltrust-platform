@@ -559,7 +559,7 @@ neuraltrust-control-plane:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.48.6"
+          tag: "v1.50.1"
           pullPolicy: "Always"
         config:
           nodeEnv: production
@@ -663,7 +663,7 @@ neuraltrust-data-plane:
           bootstrapServers: "kafka:9092"
           image:
             repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect
-            tag: v0.1.4
+            tag: v0.1.5
             pullPolicy: Always
           resources:
             limits:
@@ -692,7 +692,7 @@ neuraltrust-data-plane:
         classifierModel: "gpt"
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.15.5
+          tag: v1.15.7
           pullPolicy: Always
         accessMode: ReadWriteOnce
         huggingfaceToken: ""
@@ -717,7 +717,7 @@ neuraltrust-data-plane:
         replicas: 1
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/workers
-          tag: v1.6.3
+          tag: v1.6.4
           pullPolicy: Always
         resources:
           requests:
@@ -836,3 +836,5 @@ neuraltrust-firewall:
       enabled: false
     healthCheckPolicy:
       enabled: false
+    image:
+      tag: v2.6.0
