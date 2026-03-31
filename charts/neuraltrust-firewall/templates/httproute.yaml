@@ -1,0 +1,22 @@
+{{- if and .Values.firewall.enabled .Values.firewall.httproute.enabled }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: firewall-route
+  labels:
+    {{- include "firewall.gateway.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    - name: {{ .Values.firewall.httproute.parentRef.name }}
+      namespace: {{ .Values.firewall.httproute.parentRef.namespace }}
+  hostnames:
+    - {{ .Values.firewall.httproute.hostname | quote }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: firewall
+          port: 80
+{{- end }}

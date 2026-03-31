@@ -42,7 +42,7 @@ dependencies:
       - trustgate
   # Firewall API
   - name: neuraltrust-firewall
-    version: 1.0.3
+    version: 2.0.0
     condition: neuraltrust-firewall.firewall.enabled
     repository: file://./charts/neuraltrust-firewall
     tags:

@@ -727,17 +727,89 @@ neuraltrust-data-plane:
             memory: 8Gi
             cpu: 2000m
 # NeuralTrust Firewall subchart values
-# Images: firewall-cpu (default) and firewall-gpu share the same tag in Artifact Registry (built from neuraltrust/firewall).
-# For GPU: set image.repository to .../firewall-gpu, resources (nvidia.com/gpu), nodeSelector, tolerations, hostIPC, and CUDA MPS under firewall.config.
+# Architecture: gateway (CPU, lightweight router) + 5 specialised workers (CPU by default, GPU-capable).
+# Images: firewall-cpu (default for both gateway and workers) and firewall-gpu share the same tag.
+# For GPU workers: set workerDefaults.image to firewall-gpu, add nvidia.com/gpu resources,
+# nodeSelector, tolerations, and hostIPC (see values-dataplane-gpu.yaml.example).
 neuraltrust-firewall:
   firewall:
     enabled: true
     imagePullSecrets: "gcr-secret"
-    replicas: 2
-    image:
-      repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-      tag: "v2.5.4"
-      pullPolicy: IfNotPresent
+    # --- Gateway ---
+    gateway:
+      replicas: 2
+      image:
+        repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
+        tag: "v2.6.0"
+        pullPolicy: IfNotPresent
+      resources:
+        requests:
+          cpu: "250m"
+          memory: 256Mi
+        limits:
+          cpu: "500m"
+          memory: 512Mi
+      startupProbe:
+        failureThreshold: 12
+      autoscaling:
+        enabled: false
+        minReplicas: 1
+        maxReplicas: 4
+        targetCPUUtilizationPercentage: 80
+        targetMemoryUtilizationPercentage: 85
+      podDisruptionBudget:
+        enabled: false
+        minAvailable: 0
+    # --- Worker defaults (shared by all workers) ---
+    # Default: CPU image, no GPU scheduling. For GPU, override with:
+    #   workerDefaults.image.repository: .../firewall-gpu
+    #   workerDefaults.resources.requests/limits: nvidia.com/gpu: "1"
+    #   workerDefaults.nodeSelector / tolerations / hostIPC: true
+    workerDefaults:
+      image:
+        repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
+        tag: "v2.6.0"
+        pullPolicy: IfNotPresent
+      replicas: 1
+      resources:
+        requests:
+          cpu: "1"
+          memory: 4Gi
+        limits:
+          cpu: "1.5"
+          memory: 6Gi
+      nodeSelector: {}
+      tolerations: []
+      hostIPC: false
+      startupProbe:
+        failureThreshold: 36
+      autoscaling:
+        enabled: false
+        minReplicas: 1
+        maxReplicas: 6
+        targetCPUUtilizationPercentage: 80
+        targetMemoryUtilizationPercentage: 85
+      podDisruptionBudget:
+        enabled: false
+        minAvailable: 0
+    # --- Workers ---
+    workers:
+      toxicity:
+        enabled: true
+        module: src.workers.toxicity.app:app
+      toolguard:
+        enabled: true
+        module: src.workers.toolguard.app:app
+      prompt-jailbreak:
+        enabled: true
+        module: src.workers.prompt_jailbreak.app:app
+      prompt-moderation:
+        enabled: true
+        module: src.workers.prompt_moderation.app:app
+      response-jailbreak:
+        enabled: true
+        module: src.workers.response_jailbreak.app:app
+    # --- Shared settings ---
     config:
       pythonUnbuffered: "1"
       pythonDontWriteBytecode: "1"
@@ -747,14 +819,10 @@ neuraltrust-firewall:
     secrets:
       jwtSecret: ""
       huggingFaceToken: ""
-    resources:
-      requests:
-        cpu: "1"
-        memory: 4Gi
-      limits:
-        cpu: "1.5"
-        memory: 6Gi
-    hostIPC: false
+    serviceAccount:
+      create: true
+      name: firewall
+      annotations: {}
     podSecurityContext:
       fsGroup: 2000
     securityContext:
@@ -764,12 +832,7 @@ neuraltrust-firewall:
       readOnlyRootFilesystem: false
       runAsNonRoot: false
       runAsUser: 0
-    autoscaling:
+    httproute:
       enabled: false
-      minReplicas: 1
-      maxReplicas: 6
-      targetCPUUtilizationPercentage: 80
-      targetMemoryUtilizationPercentage: 85
-    podDisruptionBudget:
+    healthCheckPolicy:
       enabled: false
-      minAvailable: 0

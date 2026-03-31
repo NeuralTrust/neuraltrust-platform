@@ -1,0 +1,107 @@
+{{- if .Values.firewall.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: firewall
+  labels:
+    {{- include "firewall.gateway.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.firewall.gateway.replicas | default 2 }}
+  selector:
+    matchLabels:
+      {{- include "firewall.gateway.selectorLabels" . | nindent 6 }}
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        {{- include "firewall.gateway.labels" . | nindent 8 }}
+    spec:
+      {{- if .Values.firewall.serviceAccount.create }}
+      serviceAccountName: {{ .Values.firewall.serviceAccount.name | default "firewall" }}
+      {{- end }}
+      {{- $imagePullSecret := .Values.firewall.imagePullSecrets | default "" }}
+      {{- if and $imagePullSecret (ne $imagePullSecret "") }}
+      imagePullSecrets:
+        - name: {{ $imagePullSecret }}
+      {{- end }}
+      {{- if .Values.firewall.podSecurityContext }}
+      securityContext:
+        {{- toYaml .Values.firewall.podSecurityContext | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: gateway
+          {{- $gwRepo := .Values.firewall.gateway.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu" }}
+          {{- $gwTag := .Values.firewall.gateway.image.tag | default "v2.6.0" }}
+          image: {{ include "firewall.image" (dict "repository" $gwRepo "tag" $gwTag "global" .Values.global) | quote }}
+          imagePullPolicy: {{ .Values.firewall.gateway.image.pullPolicy | default "IfNotPresent" }}
+          args:
+            - src.gateway.app:app
+            - --host
+            - "0.0.0.0"
+            - --port
+            - "8000"
+            - --loop
+            - uvloop
+            - --http
+            - httptools
+            - --backlog
+            - "2048"
+          ports:
+            - containerPort: 8000
+              name: http
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: firewall-config
+          env:
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: firewall-secrets
+                  key: JWT_SECRET
+            - name: HUGGINGFACE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: firewall-secrets
+                  key: HUGGINGFACE_TOKEN
+                  optional: true
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+              scheme: HTTP
+            periodSeconds: 5
+            failureThreshold: {{ (.Values.firewall.gateway.startupProbe).failureThreshold | default 12 }}
+            successThreshold: 1
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+              scheme: HTTP
+            periodSeconds: 10
+            failureThreshold: 3
+            successThreshold: 1
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+              scheme: HTTP
+            periodSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1
+            timeoutSeconds: 3
+          {{- if .Values.firewall.gateway.resources }}
+          resources:
+            {{- toYaml .Values.firewall.gateway.resources | nindent 12 }}
+          {{- end }}
+          {{- if .Values.firewall.securityContext }}
+          securityContext:
+            {{- toYaml .Values.firewall.securityContext | nindent 12 }}
+          {{- end }}
+{{- end }}

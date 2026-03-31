@@ -155,31 +155,44 @@ neuraltrust-control-plane:
           database: "neuraltrust"
 ```
 
-## NeuralTrust Firewall (CPU vs GPU)
+## NeuralTrust Firewall (Gateway + Workers)
 
 The **`neuraltrust-firewall`** subchart is **off** by default (`neuraltrust-firewall.firewall.enabled: false`). Enable it when Control Plane, Data Plane, or TrustGate need the in-cluster firewall service.
 
+### Architecture
+
+The firewall deploys a **gateway** (lightweight CPU router) plus **5 specialised workers** (inference):
+
+| Component | Purpose | Default image |
+|-----------|---------|---------------|
+| **Gateway** | Routes requests to the correct worker | `firewall-cpu` |
+| **toxicity** | Toxicity detection | `firewall-gpu` (or `firewall-cpu`) |
+| **toolguard** | Tool-use guardrails | `firewall-gpu` (or `firewall-cpu`) |
+| **prompt-jailbreak** | Prompt jailbreak detection | `firewall-gpu` (or `firewall-cpu`) |
+| **prompt-moderation** | Prompt moderation | `firewall-gpu` (or `firewall-cpu`) |
+| **response-jailbreak** | Response jailbreak detection | `firewall-gpu` (or `firewall-cpu`) |
+
 ### Images and versions
 
-Two images share the **same tag** in Artifact Registry (for example `v2.4.3`):
+Two images share the **same tag** in Artifact Registry (for example `v2.6.0`):
 
 | Image | When to use |
 |--------|-------------|
-| **`.../firewall-cpu`** | Default; runs on normal worker nodes—**no** GPU `nodeSelector`, **no** GPU tolerations, **no** `nvidia.com/gpu` in `resources` |
-| **`.../firewall-gpu`** | GPU inference; set **`neuraltrust-firewall.firewall.image.repository`** to the `firewall-gpu` path, add **`nvidia.com/gpu`** requests/limits, **`hostIPC: true`** (typical for CUDA MPS), **`nodeSelector` / `tolerations`** matching your GPU nodes, and **`firewall.config`** `cudaMpsActiveThreadPercentage` + `cudaMpsPinnedDeviceMemLimit` |
+| **`.../firewall-cpu`** | Default for both gateway and workers. Runs on normal CPU nodes with no GPU scheduling |
+| **`.../firewall-gpu`** | Workers with GPU inference. Override **`workerDefaults.image.repository`** to `firewall-gpu`, set **`workerDefaults.resources`** with `nvidia.com/gpu`, **`workerDefaults.nodeSelector`** / **`tolerations`** matching your GPU nodes, and **`workerDefaults.hostIPC: true`** for CUDA MPS. Optionally set `firewall.config` `cudaMpsActiveThreadPercentage` + `cudaMpsPinnedDeviceMemLimit` |
 
 Helm only writes CUDA MPS env vars to the firewall `ConfigMap` when **both** MPS keys are set (CPU-only installs omit them).
 
 ### Examples in this repo
 
 - **GPU + no TrustGate:** `values-dataplane-gpu.yaml.example` (copy and customize hosts, secrets, node labels).
-- **Regional GPU production:** `regions/values-us-prod.yaml` (TrustGate enabled; firewall uses `firewall-gpu`).
+- **Regional GPU production:** `regions/values-us-prod.yaml` (TrustGate enabled; workers use `firewall-gpu`).
 
 The [Bump Image Versions](.github/workflows/bump-images.yml) workflow resolves the tag from the **`firewall-cpu`** image name; **`firewall-gpu`** should be published with the same tags.
 
 ### TrustGate and Control Plane integration
 
-TrustGate calls the firewall using **`NEURAL_TRUST_FIREWALL_URL`** and **`NEURAL_TRUST_FIREWALL_SECRET_KEY`**, which Helm (when `global.autoGenerateSecrets: true`) merges into **`trustgate-secrets`** from **`trustgate.global.env`**. Pods read them via `secretKeyRef`; after changing values, restart TrustGate deployments. The Control Plane may use **`FIREWALL_JWT_SECRET`** so the app trusts the same JWT as **`firewall-secrets`** (`JWT_SECRET`). See [SECRETS.md](SECRETS.md#trustgate-firewall-integration-neural_trust) and [SECRETS.md](SECRETS.md#firewall-secrets).
+TrustGate calls the firewall gateway using **`NEURAL_TRUST_FIREWALL_URL`** and **`NEURAL_TRUST_FIREWALL_SECRET_KEY`**, which Helm (when `global.autoGenerateSecrets: true`) merges into **`trustgate-secrets`** from **`trustgate.global.env`**. Pods read them via `secretKeyRef`; after changing values, restart TrustGate deployments. The Control Plane may use **`FIREWALL_JWT_SECRET`** so the app trusts the same JWT as **`firewall-secrets`** (`JWT_SECRET`). See [SECRETS.md](SECRETS.md#trustgate-firewall-integration-neural_trust) and [SECRETS.md](SECRETS.md#firewall-secrets).
 
 ## Value Mapping
 
@@ -229,8 +242,11 @@ kubectl logs -n neuraltrust -l app=neuraltrust-control-plane-api
 # TrustGate Control Plane
 kubectl logs -n neuraltrust -l app=trustgate-control-plane
 
-# NeuralTrust Firewall (if enabled)
-kubectl logs -n neuraltrust -l app.kubernetes.io/name=firewall
+# NeuralTrust Firewall gateway (if enabled)
+kubectl logs -n neuraltrust -l app.kubernetes.io/name=firewall,app.kubernetes.io/component=gateway
+
+# NeuralTrust Firewall workers (e.g. toxicity)
+kubectl logs -n neuraltrust -l app.kubernetes.io/name=firewall,app.kubernetes.io/component=worker-toxicity
 
 # View logs for a specific pod
 kubectl logs -n neuraltrust <pod-name>

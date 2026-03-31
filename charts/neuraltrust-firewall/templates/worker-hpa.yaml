@@ -1,0 +1,41 @@
+{{- if .Values.firewall.enabled }}
+{{- $defaults := .Values.firewall.workerDefaults }}
+{{- range $workerName, $workerCfg := .Values.firewall.workers }}
+{{- if $workerCfg.enabled }}
+{{- $autoscaling := $workerCfg.autoscaling | default $defaults.autoscaling }}
+{{- if and $autoscaling $autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $workerName }}-worker
+  labels:
+    {{- include "firewall.worker.labels" (dict "name" $workerName "context" $) | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ $workerName }}-worker
+  minReplicas: {{ $autoscaling.minReplicas | default 1 }}
+  maxReplicas: {{ $autoscaling.maxReplicas | default 10 }}
+  metrics:
+    {{- if $autoscaling.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $autoscaling.targetCPUUtilizationPercentage }}
+    {{- end }}
+    {{- if $autoscaling.targetMemoryUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ $autoscaling.targetMemoryUtilizationPercentage }}
+    {{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,138 @@
+firewall:
+  enabled: true
+
+  # --- Gateway (CPU-only, lightweight API router) ---
+  gateway:
+    replicas: 2
+    image:
+      repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
+      tag: v2.6.0
+      pullPolicy: IfNotPresent
+    resources:
+      limits:
+        cpu: "500m"
+        memory: 512Mi
+      requests:
+        cpu: "250m"
+        memory: 256Mi
+    startupProbe:
+      failureThreshold: 12
+    autoscaling:
+      enabled: true
+      minReplicas: 1
+      maxReplicas: 4
+      targetCPUUtilizationPercentage: 80
+      targetMemoryUtilizationPercentage: 85
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 1
+
+  # --- Worker defaults (shared by all workers unless overridden) ---
+  # Default: CPU image. For GPU, override image to firewall-gpu, add nvidia.com/gpu
+  # resources, nodeSelector, tolerations, and hostIPC (see values-dataplane-gpu.yaml.example).
+  workerDefaults:
+    image:
+      repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
+      tag: v2.6.0
+      pullPolicy: IfNotPresent
+    replicas: 1
+    resources:
+      limits:
+        cpu: "1.5"
+        memory: 6Gi
+      requests:
+        cpu: "1"
+        memory: 4Gi
+    nodeSelector: {}
+    tolerations: []
+    hostIPC: false
+    startupProbe:
+      failureThreshold: 36
+    autoscaling:
+      enabled: true
+      minReplicas: 1
+      maxReplicas: 6
+      targetCPUUtilizationPercentage: 80
+      targetMemoryUtilizationPercentage: 85
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 1
+
+  # --- Workers (each gets Deployment, Service, HPA, PDB) ---
+  workers:
+    toxicity:
+      enabled: true
+      module: src.workers.toxicity.app:app
+    toolguard:
+      enabled: true
+      module: src.workers.toolguard.app:app
+    prompt-jailbreak:
+      enabled: true
+      module: src.workers.prompt_jailbreak.app:app
+    prompt-moderation:
+      enabled: true
+      module: src.workers.prompt_moderation.app:app
+    response-jailbreak:
+      enabled: true
+      module: src.workers.response_jailbreak.app:app
+
+  # --- ServiceAccount ---
+  serviceAccount:
+    create: true
+    name: firewall
+    annotations: {}
+
+  # --- Secrets (standard K8s Secret, same pattern as other charts) ---
+  secrets:
+    jwtSecret: ""
+    huggingFaceToken: ""
+
+  # --- ConfigMap ---
+  config:
+    pythonUnbuffered: "1"
+    pythonDontWriteBytecode: "1"
+    pythonPath: "/app"
+    hfHome: "/root/.cache/huggingface"
+    cudaMpsActiveThreadPercentage: "20"
+    cudaMpsPinnedDeviceMemLimit: "3500M"
+    applicationVersion: ""
+    otelEnabled: "false"
+    otelExporterOtlpEndpoint: "http://opentelemetry-collector.opentelemetry.svc.cluster.local:4318"
+    otelServiceName: ""
+    otelEnvironment: "prod"
+    extraEnv: {}
+
+  # --- Shared pod/container security ---
+  podSecurityContext:
+    fsGroup: 2000
+
+  securityContext:
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: false
+    runAsNonRoot: false
+    runAsUser: 0
+
+  imagePullSecrets: ""
+
+  # --- HTTPRoute (Gateway API) ---
+  httproute:
+    enabled: true
+    parentRef:
+      name: external-gateway
+      namespace: gateway
+    hostname: "firewall.neuraltrust.ai"
+
+  # --- GKE HealthCheckPolicy ---
+  healthCheckPolicy:
+    enabled: true
+    checkIntervalSec: 15
+    timeoutSec: 5
+    healthyThreshold: 1
+    unhealthyThreshold: 2
+
+global:
+  imageRegistry: ""
+  autoGenerateSecrets: false
+  preserveExistingSecrets: false

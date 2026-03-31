@@ -1,0 +1,21 @@
+{{- if .Values.firewall.enabled }}
+{{- range $workerName, $workerCfg := .Values.firewall.workers }}
+{{- if $workerCfg.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $workerName }}-worker
+  labels:
+    {{- include "firewall.worker.labels" (dict "name" $workerName "context" $) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "firewall.worker.selectorLabels" (dict "name" $workerName) | nindent 4 }}
+  ports:
+    - port: 80
+      targetPort: http
+      name: http
+{{- end }}
+{{- end }}
+{{- end }}

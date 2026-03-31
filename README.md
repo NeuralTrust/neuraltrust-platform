@@ -5,7 +5,7 @@ This Helm chart provides a unified deployment for the complete NeuralTrust platf
 - **Infrastructure Components**: ClickHouse, Kafka, PostgreSQL (optional)
 - **NeuralTrust Services**: Data Plane and Control Plane
 - **TrustGate**: API Gateway
-- **NeuralTrust Firewall** (optional): ML inference for prompts; **CPU** (`firewall-cpu`) by default or **GPU** (`firewall-gpu`) via values—see [VALUES_SCENARIOS.md](VALUES_SCENARIOS.md#neuraltrust-firewall-cpu-and-gpu) and [DEPLOYMENT.md](DEPLOYMENT.md#neuraltrust-firewall-cpu-vs-gpu)
+- **NeuralTrust Firewall** (optional): Gateway + worker architecture for ML inference; gateway uses **CPU** (`firewall-cpu`), workers use **GPU** (`firewall-gpu`) or CPU—see [VALUES_SCENARIOS.md](VALUES_SCENARIOS.md#neuraltrust-firewall-gateway--workers-cpu-and-gpu) and [DEPLOYMENT.md](DEPLOYMENT.md#neuraltrust-firewall-gateway--workers)
 
 ## Features
 
@@ -13,7 +13,7 @@ This Helm chart provides a unified deployment for the complete NeuralTrust platf
 - **Flexible Infrastructure**: Choose to deploy infrastructure components or use pre-installed instances
 - **Conditional Deployment**: Enable/disable components as needed
 - **External Service Support**: Configure external ClickHouse, Kafka, and PostgreSQL instances
-- **Firewall variants**: Default chart values use **`firewall-cpu`** without GPU taints; GPU clusters set **`firewall-gpu`**, GPU resources, **`hostIPC`**, and CUDA MPS config in values (see `values-dataplane-gpu.yaml.example` and `regions/values-us-prod.yaml`)
+- **Firewall variants**: The firewall deploys a **gateway** (`firewall-cpu`) plus **5 specialised workers** (default `firewall-cpu`). For GPU inference, override `workerDefaults.image` to `firewall-gpu` and add GPU resources/scheduling (see `values-dataplane-gpu.yaml.example` and `regions/values-us-prod.yaml`)
 
 ## Prerequisites
 
@@ -221,7 +221,7 @@ helm upgrade --install neuraltrust-platform . \
 
 - `values-external-services.yaml.example` - Example for using external infrastructure
 - `values-openshift-ingress.yaml.example` - Example for OpenShift with Ingress instead of Routes
-- `values-dataplane-gpu.yaml.example` - Data Plane + infrastructure + **GPU firewall**, TrustGate disabled (adjust for CPU firewall using `firewall-cpu` and omit GPU settings; see [VALUES_SCENARIOS.md](VALUES_SCENARIOS.md#neuraltrust-firewall-cpu-and-gpu))
+- `values-dataplane-gpu.yaml.example` - Data Plane + infrastructure + **GPU firewall** (gateway + workers), TrustGate disabled (adjust for CPU-only workers using `firewall-cpu` and omit GPU settings; see [VALUES_SCENARIOS.md](VALUES_SCENARIOS.md#neuraltrust-firewall-gateway--workers-cpu-and-gpu))
 
 ## Secrets Management
 

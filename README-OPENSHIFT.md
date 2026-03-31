@@ -521,14 +521,15 @@ oc get routes -n neuraltrust
 
 ## Firewall deployment (CPU and GPU)
 
-The optional **neuraltrust-firewall** subchart (`neuraltrust-firewall.firewall.enabled`) runs the NeuralTrust Firewall inference service. Images are published as **`firewall-cpu`** and **`firewall-gpu`** in Artifact Registry with the **same version tags** (for example `v2.4.3`).
+The optional **neuraltrust-firewall** subchart (`neuraltrust-firewall.firewall.enabled`) deploys a **gateway** (CPU router) plus **5 specialised workers** (inference). Images are published as **`firewall-cpu`** and **`firewall-gpu`** in Artifact Registry with the **same version tags** (for example `v2.6.0`).
 
-| Scenario | Image (`firewall.image.repository`) | Scheduling | CUDA MPS (`firewall.config`) |
-|----------|-------------------------------------|------------|-------------------------------|
-| **Default (chart values)** | `.../firewall-cpu` | No GPU nodeSelector or tolerations; CPU-sized resources | Omitted (not added to the firewall `ConfigMap`) |
-| **GPU** | `.../firewall-gpu` | Set `resources` with `nvidia.com/gpu`, `nodeSelector`, `tolerations`, and usually `hostIPC: true` for MPS-style stacks | Set `cudaMpsActiveThreadPercentage` and `cudaMpsPinnedDeviceMemLimit` |
+| Component | Image | Scheduling | CUDA MPS (`firewall.config`) |
+|-----------|-------|------------|-------------------------------|
+| **Gateway** | `.../firewall-cpu` | CPU resources, no GPU scheduling | N/A |
+| **Workers (CPU, default)** | `.../firewall-cpu` | CPU resources, no GPU scheduling | Omit both MPS keys |
+| **Workers (GPU override)** | `.../firewall-gpu` | Override `workerDefaults.image` to `firewall-gpu`; set `nvidia.com/gpu`, `nodeSelector`, `tolerations`, `hostIPC: true` | Set `cudaMpsActiveThreadPercentage` and `cudaMpsPinnedDeviceMemLimit` |
 
-On OpenShift, GPU workers often use taints and specific node labels: align **`nodeSelector`** and **`tolerations`** with your `MachineSet` / node pool (the chart does not assume GPU nodes by default). The firewall container may require **`anyuid`** (or a compatible SCC) depending on your image; see [Security Context Constraints (SCC)](#security-context-constraints-scc).
+On OpenShift, GPU workers often use taints and specific node labels: align **`workerDefaults.nodeSelector`** and **`workerDefaults.tolerations`** with your `MachineSet` / node pool (the chart does not assume GPU nodes by default). The firewall container may require **`anyuid`** (or a compatible SCC) depending on your image; see [Security Context Constraints (SCC)](#security-context-constraints-scc).
 
 **Example values** merging Data Plane + GPU firewall without TrustGate: copy [`values-dataplane-gpu.yaml.example`](./values-dataplane-gpu.yaml.example) and replace hosts, secrets, and GPU node labels for your cluster. Production-style GPU overrides are also shown under `regions/` in this repo.
 

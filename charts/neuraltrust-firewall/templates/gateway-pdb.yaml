@@ -1,0 +1,18 @@
+{{- if and .Values.firewall.enabled .Values.firewall.gateway.podDisruptionBudget .Values.firewall.gateway.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: firewall
+  labels:
+    {{- include "firewall.gateway.labels" . | nindent 4 }}
+spec:
+  {{- if hasKey .Values.firewall.gateway.podDisruptionBudget "minAvailable" }}
+  minAvailable: {{ .Values.firewall.gateway.podDisruptionBudget.minAvailable }}
+  {{- end }}
+  {{- if hasKey .Values.firewall.gateway.podDisruptionBudget "maxUnavailable" }}
+  maxUnavailable: {{ .Values.firewall.gateway.podDisruptionBudget.maxUnavailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "firewall.gateway.selectorLabels" . | nindent 6 }}
+{{- end }}

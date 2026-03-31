@@ -1,0 +1,142 @@
+{{- if .Values.firewall.enabled }}
+{{- $defaults := .Values.firewall.workerDefaults }}
+{{- range $workerName, $workerCfg := .Values.firewall.workers }}
+{{- if $workerCfg.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $workerName }}-worker
+  labels:
+    {{- include "firewall.worker.labels" (dict "name" $workerName "context" $) | nindent 4 }}
+spec:
+  replicas: {{ $workerCfg.replicas | default ($defaults.replicas | default 1) }}
+  selector:
+    matchLabels:
+      {{- include "firewall.worker.selectorLabels" (dict "name" $workerName) | nindent 6 }}
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        {{- include "firewall.worker.labels" (dict "name" $workerName "context" $) | nindent 8 }}
+    spec:
+      {{- if $.Values.firewall.serviceAccount.create }}
+      serviceAccountName: {{ $.Values.firewall.serviceAccount.name | default "firewall" }}
+      {{- end }}
+      {{- $imagePullSecret := $.Values.firewall.imagePullSecrets | default "" }}
+      {{- if and $imagePullSecret (ne $imagePullSecret "") }}
+      imagePullSecrets:
+        - name: {{ $imagePullSecret }}
+      {{- end }}
+      {{- $nodeSelector := $workerCfg.nodeSelector | default $defaults.nodeSelector }}
+      {{- if $nodeSelector }}
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                {{- range $key, $values := $nodeSelector }}
+                  - key: {{ $key }}
+                    operator: In
+                    values:
+                    {{- range $values }}
+                      - {{ . }}
+                    {{- end }}
+                {{- end }}
+      {{- end }}
+      {{- $tolerations := $workerCfg.tolerations | default $defaults.tolerations }}
+      {{- if $tolerations }}
+      tolerations:
+        {{- toYaml $tolerations | nindent 8 }}
+      {{- end }}
+      {{- $hostIPC := $workerCfg.hostIPC | default $defaults.hostIPC }}
+      {{- if $hostIPC }}
+      hostIPC: {{ $hostIPC }}
+      {{- end }}
+      {{- if $.Values.firewall.podSecurityContext }}
+      securityContext:
+        {{- toYaml $.Values.firewall.podSecurityContext | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: worker
+          {{- $wImage := $workerCfg.image | default $defaults.image }}
+          {{- $wRepo := $wImage.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu" }}
+          {{- $wTag := $wImage.tag | default "v2.6.0" }}
+          image: {{ include "firewall.image" (dict "repository" $wRepo "tag" $wTag "global" $.Values.global) | quote }}
+          imagePullPolicy: {{ $wImage.pullPolicy | default "IfNotPresent" }}
+          args:
+            - {{ $workerCfg.module }}
+            - --host
+            - "0.0.0.0"
+            - --port
+            - "8000"
+            - --loop
+            - uvloop
+            - --http
+            - httptools
+            - --backlog
+            - "2048"
+          ports:
+            - containerPort: 8000
+              name: http
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: firewall-config
+          env:
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: firewall-secrets
+                  key: JWT_SECRET
+            - name: HUGGINGFACE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: firewall-secrets
+                  key: HUGGINGFACE_TOKEN
+                  optional: true
+          {{- $startupFailure := ($workerCfg.startupProbe).failureThreshold | default ($defaults.startupProbe).failureThreshold | default 36 }}
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+              scheme: HTTP
+            periodSeconds: 5
+            failureThreshold: {{ $startupFailure }}
+            successThreshold: 1
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+              scheme: HTTP
+            periodSeconds: 10
+            failureThreshold: 3
+            successThreshold: 1
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+              scheme: HTTP
+            periodSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1
+            timeoutSeconds: 3
+          {{- $resources := $workerCfg.resources | default $defaults.resources }}
+          {{- if $resources }}
+          resources:
+            {{- toYaml $resources | nindent 12 }}
+          {{- end }}
+          {{- $secCtx := $workerCfg.securityContext | default $.Values.firewall.securityContext }}
+          {{- if $secCtx }}
+          securityContext:
+            {{- toYaml $secCtx | nindent 12 }}
+          {{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

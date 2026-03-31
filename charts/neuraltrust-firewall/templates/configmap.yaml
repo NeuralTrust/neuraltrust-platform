@@ -4,7 +4,7 @@ kind: ConfigMap
 metadata:
   name: firewall-config
   labels:
-    {{- include "firewall.labels" . | nindent 4 }}
+    {{- include "firewall.gateway.labels" . | nindent 4 }}
 data:
   PYTHONUNBUFFERED: {{ .Values.firewall.config.pythonUnbuffered | quote }}
   PYTHONDONTWRITEBYTECODE: {{ .Values.firewall.config.pythonDontWriteBytecode | quote }}
@@ -14,8 +14,22 @@ data:
   CUDA_MPS_ACTIVE_THREAD_PERCENTAGE: {{ .Values.firewall.config.cudaMpsActiveThreadPercentage | quote }}
   CUDA_MPS_PINNED_DEVICE_MEM_LIMIT: {{ .Values.firewall.config.cudaMpsPinnedDeviceMemLimit | quote }}
   {{- end }}
+  {{- if .Values.firewall.config.applicationVersion }}
+  APPLICATION_VERSION: {{ .Values.firewall.config.applicationVersion | quote }}
+  {{- end }}
   OTEL_ENABLED: {{ .Values.firewall.config.otelEnabled | quote }}
   OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.firewall.config.otelExporterOtlpEndpoint | quote }}
+  {{- if .Values.firewall.config.otelServiceName }}
   OTEL_SERVICE_NAME: {{ .Values.firewall.config.otelServiceName | quote }}
+  {{- end }}
   OTEL_ENVIRONMENT: {{ .Values.firewall.config.otelEnvironment | quote }}
+  {{- range $workerName, $workerCfg := .Values.firewall.workers }}
+  {{- if $workerCfg.enabled }}
+  {{- $envKey := printf "%s_WORKER_URL" ($workerName | upper | replace "-" "_") }}
+  {{ $envKey }}: {{ printf "http://%s-worker:80" $workerName | quote }}
+  {{- end }}
+  {{- end }}
+  {{- range $key, $value := .Values.firewall.config.extraEnv }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
 {{- end }}

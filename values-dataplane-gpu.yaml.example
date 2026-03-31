@@ -4,10 +4,10 @@
 # on GPU nodes, without the TrustGate API gateway. Typical cases: internal environments,
 # constrained ingress, red-teaming style setups, or workloads that talk to the data plane directly.
 #
-# Firewall:
-# - Image `firewall-gpu` shares version tags with `firewall-cpu` (see values.yaml / bump workflow).
-# - You must set nodeSelector and tolerations to match your cluster's GPU pool (edit below).
-# - Set `firewall.config` CUDA MPS keys for GPU; omit them for CPU image (see VALUES_SCENARIOS.md).
+# Firewall architecture: gateway (CPU) + 5 workers (GPU inference).
+# - Gateway uses `firewall-cpu`, workers use `firewall-gpu` (same tag).
+# - You must set nodeSelector and tolerations under workerDefaults to match your GPU pool.
+# - Set CUDA MPS keys under `firewall.config` for GPU; omit them for CPU-only (see VALUES_SCENARIOS.md).
 #
 # Usage:
 #   cp values-dataplane-gpu.yaml.example my-dataplane-gpu.yaml
@@ -85,35 +85,42 @@ neuraltrust-data-plane:
       worker:
         enabled: true
 
-# GPU firewall (subchart `neuraltrust-firewall`; enable with `neuraltrust-firewall.firewall.enabled`)
+# GPU firewall (subchart `neuraltrust-firewall`)
+# Architecture: 1 gateway (CPU) + 5 workers (GPU inference)
 neuraltrust-firewall:
   firewall:
     enabled: true
     imagePullSecrets: "gcr-secret"
-    image:
-      repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-gpu
-      tag: "v2.4.3"
+    gateway:
+      replicas: 1
+      image:
+        repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
+        tag: "v2.6.0"
+    workerDefaults:
+      image:
+        repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-gpu
+        tag: "v2.6.0"
+      resources:
+        requests:
+          cpu: "1"
+          memory: 4Gi
+          nvidia.com/gpu: "1"
+        limits:
+          cpu: "1.5"
+          memory: 6Gi
+          nvidia.com/gpu: "1"
+      hostIPC: true
+      nodeSelector:
+        cloud.google.com/gke-nodepool:
+          - gpu-pool
+      tolerations:
+        - effect: NoSchedule
+          key: nvidia.com/gpu
+          operator: Equal
+          value: present
     config:
       cudaMpsActiveThreadPercentage: "25"
       cudaMpsPinnedDeviceMemLimit: "6000M"
-    resources:
-      requests:
-        cpu: "1"
-        memory: 4Gi
-        nvidia.com/gpu: "1"
-      limits:
-        cpu: "1.5"
-        memory: 6Gi
-        nvidia.com/gpu: "1"
-    hostIPC: true
-    nodeSelector:
-      cloud.google.com/gke-nodepool:
-        - gpu-pool
-    tolerations:
-      - effect: NoSchedule
-        key: nvidia.com/gpu
-        operator: Equal
-        value: present
     secrets:
       huggingFaceToken: "your-huggingface-token"
 

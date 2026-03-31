@@ -1,0 +1,23 @@
+{{- if and .Values.firewall.enabled .Values.firewall.healthCheckPolicy.enabled }}
+apiVersion: networking.gke.io/v1
+kind: HealthCheckPolicy
+metadata:
+  name: firewall-healthcheck
+  labels:
+    {{- include "firewall.gateway.labels" . | nindent 4 }}
+spec:
+  default:
+    checkIntervalSec: {{ .Values.firewall.healthCheckPolicy.checkIntervalSec | default 15 }}
+    timeoutSec: {{ .Values.firewall.healthCheckPolicy.timeoutSec | default 5 }}
+    healthyThreshold: {{ .Values.firewall.healthCheckPolicy.healthyThreshold | default 1 }}
+    unhealthyThreshold: {{ .Values.firewall.healthCheckPolicy.unhealthyThreshold | default 2 }}
+    config:
+      type: HTTP
+      httpHealthCheck:
+        port: 8000
+        requestPath: /health
+  targetRef:
+    group: ""
+    kind: Service
+    name: firewall
+{{- end }}

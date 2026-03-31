@@ -110,7 +110,7 @@ When **`neuraltrust-firewall.firewall.enabled`** is true, the chart can create *
 | `JWT_SECRET` | Yes | Shared with services that call the firewall; align **`controlPlane.secrets.firewallJwtSecret`** (`FIREWALL_JWT_SECRET`) with this value when the Control Plane validates firewall tokens |
 | `HUGGINGFACE_TOKEN` | No | HF token for model weights; can match `huggingface-secrets` or inline `neuraltrust-firewall.firewall.secrets.huggingFaceToken` |
 
-The firewall container reads these from **`firewall-secrets`**. TrustGate reads **`NEURAL_TRUST_FIREWALL_URL`** and **`NEURAL_TRUST_FIREWALL_SECRET_KEY`** from **`trustgate-secrets`** (not from the ConfigMap). For deployment modes (CPU vs GPU images), see [VALUES_SCENARIOS.md](VALUES_SCENARIOS.md#neuraltrust-firewall-cpu-and-gpu) and [DEPLOYMENT.md](DEPLOYMENT.md#neuraltrust-firewall-cpu-vs-gpu).
+The firewall container (gateway and workers) reads these from **`firewall-secrets`**. TrustGate reads **`NEURAL_TRUST_FIREWALL_URL`** and **`NEURAL_TRUST_FIREWALL_SECRET_KEY`** from **`trustgate-secrets`** (not from the ConfigMap). For deployment modes (gateway + workers, CPU vs GPU images), see [VALUES_SCENARIOS.md](VALUES_SCENARIOS.md#neuraltrust-firewall-gateway--workers-cpu-and-gpu) and [DEPLOYMENT.md](DEPLOYMENT.md#neuraltrust-firewall-gateway--workers).
 
 ## TrustGate firewall integration (NEURAL_TRUST_*)
 

@@ -1,0 +1,27 @@
+{{- if .Values.firewall.enabled }}
+{{- $defaults := .Values.firewall.workerDefaults }}
+{{- range $workerName, $workerCfg := .Values.firewall.workers }}
+{{- if $workerCfg.enabled }}
+{{- $pdb := $workerCfg.podDisruptionBudget | default $defaults.podDisruptionBudget }}
+{{- if and $pdb $pdb.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $workerName }}-worker
+  labels:
+    {{- include "firewall.worker.labels" (dict "name" $workerName "context" $) | nindent 4 }}
+spec:
+  {{- if hasKey $pdb "minAvailable" }}
+  minAvailable: {{ $pdb.minAvailable }}
+  {{- end }}
+  {{- if hasKey $pdb "maxUnavailable" }}
+  maxUnavailable: {{ $pdb.maxUnavailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "firewall.worker.selectorLabels" (dict "name" $workerName) | nindent 6 }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

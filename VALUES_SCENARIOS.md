@@ -140,12 +140,12 @@ helm upgrade --install neuraltrust-platform . -f values-external-services.yaml.e
 ---
 
 ### 7. `values-dataplane-gpu.yaml.example` — Data Plane + GPU firewall (no TrustGate)
-**Use case:** Full in-cluster stack (ClickHouse, Kafka, PostgreSQL, Control Plane, Data Plane) plus the **GPU** firewall image, with **TrustGate disabled**. Suitable for internal clusters, direct data-plane access, or security testing workflows where the gateway is not required.
+**Use case:** Full in-cluster stack (ClickHouse, Kafka, PostgreSQL, Control Plane, Data Plane) plus the **GPU** firewall (gateway + workers), with **TrustGate disabled**. Suitable for internal clusters, direct data-plane access, or security testing workflows where the TrustGate API gateway is not required.
 
 **Features:**
 - `trustgate.enabled: false`
-- `neuraltrust-firewall.firewall.enabled: true` with **`firewall-gpu`**, GPU resources, **`hostIPC`**, CUDA MPS under `firewall.config`, and **placeholder** `nodeSelector` / `tolerations` (must match your GPU nodes)
-- Uses the same firewall **tag** as **`firewall-cpu`** (bump workflow reads tags from `firewall-cpu`)
+- `neuraltrust-firewall.firewall.enabled: true` with a CPU **gateway** (`firewall-cpu`) and GPU **workers** (`firewall-gpu`), GPU resources, **`hostIPC`**, CUDA MPS under `firewall.config`, and **placeholder** `workerDefaults.nodeSelector` / `tolerations` (must match your GPU nodes)
+- Uses the same firewall **tag** across `firewall-cpu` and `firewall-gpu` (bump workflow reads tags from `firewall-cpu`)
 
 **Usage:**
 ```bash
@@ -158,14 +158,15 @@ For **CPU-only** firewall, start from chart defaults (`firewall-cpu`, no GPU key
 
 ---
 
-## NeuralTrust Firewall (CPU and GPU)
+## NeuralTrust Firewall (Gateway + Workers, CPU and GPU)
 
-The firewall is an **optional** subchart controlled by **`neuraltrust-firewall.firewall.enabled`** (root `Chart.yaml` condition: `neuraltrust-firewall.firewall.enabled`).
+The firewall is an **optional** subchart controlled by **`neuraltrust-firewall.firewall.enabled`** (root `Chart.yaml` condition: `neuraltrust-firewall.firewall.enabled`). It deploys a **gateway** (CPU router) plus **5 specialised workers** (inference). Each worker can be individually enabled/disabled under `firewall.workers`.
 
-| Mode | `image.repository` suffix | Scheduling defaults in chart | CUDA MPS in `firewall.config` |
-|------|----------------------------|------------------------------|------------------------------|
-| **CPU (default)** | `firewall-cpu` | No GPU `nodeSelector` / `tolerations`; CPU `resources` | Omit both MPS keys → not rendered in ConfigMap |
-| **GPU** | `firewall-gpu` | You must set `nodeSelector`, `tolerations`, `nvidia.com/gpu`, `hostIPC` as needed | Set both `cudaMpsActiveThreadPercentage` and `cudaMpsPinnedDeviceMemLimit` |
+| Component | Image suffix | Scheduling / Resources | CUDA MPS in `firewall.config` |
+|-----------|--------------|----------------------|------------------------------|
+| **Gateway** | `firewall-cpu` | CPU resources, no GPU scheduling | N/A |
+| **Workers (CPU, default)** | `firewall-cpu` | CPU resources, no GPU scheduling | Omit both MPS keys → not rendered in ConfigMap |
+| **Workers (GPU override)** | `firewall-gpu` | Override `workerDefaults.image` to `firewall-gpu`; set `nodeSelector`, `tolerations`, `nvidia.com/gpu`, `hostIPC` | Set both `cudaMpsActiveThreadPercentage` and `cudaMpsPinnedDeviceMemLimit` |
 
 **Reference values:** `values.yaml` (`neuraltrust-firewall`), `regions/values-us-prod.yaml` (GPU production), `values-dataplane-gpu.yaml.example` (GPU, no TrustGate).
 
