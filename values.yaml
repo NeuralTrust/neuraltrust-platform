@@ -223,7 +223,7 @@ trustgate:
     image:
       pullPolicy: Always
       image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee"
-      tag: "v1.24.5"
+      tag: "v1.25.1"
       # imagePullSecrets: if not set, will fall back to parent chart's global.imagePullSecrets
       imagePullSecrets: ["gcr-secret"] # Set to array of secret names, e.g., ["secret-name"] or leave empty to use parent global.imagePullSecrets
     postgresql:
@@ -477,7 +477,7 @@ neuraltrust-control-plane:
         replicaCount: 1
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/scheduler"
-          tag: "v1.9.3"
+          tag: "v1.9.4"
           pullPolicy: "Always"
         config:
           # URLs will be auto-generated from OpenShift Routes if global.openshift=true and global.openshiftDomain is set
@@ -515,7 +515,7 @@ neuraltrust-control-plane:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api"
-          tag: "v1.13.4"
+          tag: "v1.13.7"
           pullPolicy: "Always"
         config:
           # URLs will be auto-generated from OpenShift Routes if global.openshift=true and global.openshiftDomain is set
@@ -692,7 +692,7 @@ neuraltrust-data-plane:
         classifierModel: "gpt"
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.15.7
+          tag: v1.16.4
           pullPolicy: Always
         accessMode: ReadWriteOnce
         huggingfaceToken: ""
@@ -835,4 +835,4 @@ neuraltrust-firewall:
     healthCheckPolicy:
       enabled: false
     image:
-      tag: v2.6.0
+      tag: v2.6.2
