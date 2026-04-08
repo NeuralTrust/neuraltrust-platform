@@ -27,7 +27,7 @@ dependencies:
     tags:
       - neuraltrust
   - name: neuraltrust-control-plane
-    version: 1.2.14
+    version: 1.2.15
     repository: file://./charts/neuraltrust-control-plane
     # No condition: subchart always loads so PostgreSQL can deploy independently.
     # Control Plane components are guarded by controlPlane.enabled inside templates.
@@ -35,7 +35,7 @@ dependencies:
       - neuraltrust
   # TrustGate components
   - name: trustgate
-    version: 1.2.9
+    version: 1.2.10
     condition: trustgate.enabled
     repository: file://./charts/trustgate
     tags:
