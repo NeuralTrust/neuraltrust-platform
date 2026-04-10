@@ -33,6 +33,8 @@ spec:
       imagePullSecrets:
         - name: {{ $imagePullSecret }}
       {{- end }}
+      # Runs before the main container. Often ~1–5m while the Kafka broker becomes reachable
+      # (e.g. same Helm upgrade starting kafka-0). Wall-clock to Ready = init + startupProbe window.
       initContainers:
         - name: fix-connect-topics
           {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect .Values.dataPlane.components.kafka.connect.image }}
@@ -48,18 +50,30 @@ spec:
               BOOTSTRAP="{{ .Values.dataPlane.components.kafka.connect.bootstrapServers | default "kafka:9092" }}"
               TOPICS="connect-configs connect-offsets connect-status"
               echo "Waiting for Kafka broker at ${BOOTSTRAP}..."
+              WAITED=0
               until /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server "${BOOTSTRAP}" >/dev/null 2>&1; do
                 sleep 2
-              done
-              for topic in $TOPICS; do
-                if /opt/kafka/bin/kafka-topics.sh --bootstrap-server "${BOOTSTRAP}" --describe --topic "$topic" 2>/dev/null | grep -q "$topic"; then
-                  echo "Ensuring cleanup.policy=compact on '$topic'"
-                  /opt/kafka/bin/kafka-configs.sh --bootstrap-server "${BOOTSTRAP}" \
-                    --entity-type topics --entity-name "$topic" \
-                    --alter --add-config cleanup.policy=compact 2>&1 || true
-                else
-                  echo "Topic '$topic' does not exist yet — Connect will create it"
+                WAITED=$((WAITED + 2))
+                if [ $((WAITED % 30)) -eq 0 ]; then
+                  echo "Still waiting for Kafka at ${BOOTSTRAP} (${WAITED}s elapsed)..."
                 fi
+              done
+              echo "Kafka broker reachable after ${WAITED}s"
+              for topic in $TOPICS; do
+                if ! /opt/kafka/bin/kafka-topics.sh --bootstrap-server "${BOOTSTRAP}" --describe --topic "$topic" 2>/dev/null | grep -q "$topic"; then
+                  echo "Topic '$topic' does not exist yet — Connect will create it"
+                  continue
+                fi
+                if /opt/kafka/bin/kafka-configs.sh --bootstrap-server "${BOOTSTRAP}" \
+                    --entity-type topics --entity-name "$topic" --describe 2>/dev/null \
+                    | grep -qE '^[[:space:]]*cleanup\.policy=.*compact'; then
+                  echo "Topic '$topic' already uses cleanup.policy compact — skipping alter"
+                  continue
+                fi
+                echo "Setting cleanup.policy=compact on '$topic'"
+                /opt/kafka/bin/kafka-configs.sh --bootstrap-server "${BOOTSTRAP}" \
+                  --entity-type topics --entity-name "$topic" \
+                  --alter --add-config cleanup.policy=compact 2>&1 || true
               done
               echo "Init complete."
           resources:
@@ -82,24 +96,30 @@ spec:
           {{- end }}
           ports:
             - containerPort: 8083
+          # Main container is slow while Connect scans plugins and starts the worker; this only prevents kubelet killing the pod during boot.
+          # Readiness still gates traffic on /connectors. failureThreshold * periodSeconds = max boot budget after init finishes.
+          startupProbe:
+            httpGet:
+              path: /connectors
+              port: 8083
+            periodSeconds: 5
+            timeoutSeconds: 10
+            failureThreshold: 120
           readinessProbe:
             httpGet:
               path: /connectors
               port: 8083
-            # Give the pod up to 5 minutes to become ready
-            initialDelaySeconds: 180 # Increased from 30
-            periodSeconds: 15 # Increased from 10
-            timeoutSeconds: 10 # Increased from 5
-            failureThreshold: 10 # Increased from 6
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
           livenessProbe:
             httpGet:
               path: /
               port: 8083
-            # Start checking for liveness only after it should be ready
-            initialDelaySeconds: 300 # Increased from 60
+            initialDelaySeconds: 60
             periodSeconds: 30
             timeoutSeconds: 10
-            failureThreshold: 5 # Increased from 3
+            failureThreshold: 5
           env:
             # --- Required Kafka Connect worker configs ---
             - name: CONNECT_BOOTSTRAP_SERVERS
@@ -114,6 +134,9 @@ spec:
               value: "false"
             - name: CONNECT_PLUGIN_PATH
               value: "/opt/kafka/plugins"
+            # Avoid ~10–20s ReflectionScanner on boot (Kafka 4.x); ClickHouse JAR has ServiceLoader manifests.
+            - name: CONNECT_PLUGIN_DISCOVERY
+              value: "service_load"
             # --- Internal topic configs ---
             - name: CONNECT_CONFIG_STORAGE_TOPIC
               value: "connect-configs"

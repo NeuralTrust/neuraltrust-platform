@@ -223,7 +223,7 @@ trustgate:
     image:
       pullPolicy: Always
       image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee"
-      tag: "v1.25.1"
+      tag: "v1.25.2"
       # imagePullSecrets: if not set, will fall back to parent chart's global.imagePullSecrets
       imagePullSecrets: ["gcr-secret"] # Set to array of secret names, e.g., ["secret-name"] or leave empty to use parent global.imagePullSecrets
     postgresql:
@@ -255,6 +255,11 @@ trustgate:
       REDIS_HOST: "" # Will be auto-configured if redis.enabled
       REDIS_PORT: "6379"
       REDIS_DB: "0"
+      # Optional upstream HTTP timeouts (e.g. "300s"). Omit or leave empty for TrustGate defaults.
+      UPSTREAM_READ_TIMEOUT: ""
+      UPSTREAM_WRITE_TIMEOUT: ""
+      UPSTREAM_STREAM_TIMEOUT: ""
+      UPSTREAM_PROVIDER_TIMEOUT: ""
   # PostgreSQL initialization job resource overrides
   postgresqlInit:
     resources: {} # Override init job container resources (default: requests 250m/64Mi, limits 500m/128Mi)
@@ -559,7 +564,7 @@ neuraltrust-control-plane:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.50.1"
+          tag: "v1.50.4"
           pullPolicy: "Always"
         config:
           nodeEnv: production
@@ -700,7 +705,7 @@ neuraltrust-data-plane:
         # TrustTest configuration: Set to {} to enable volume mounting of trusttest config
         # The ConfigMap content is generated from charts/neuraltrust-data-plane/files/.trusttest_config.json
         trustTestConfig: {}
-        replicas: 3
+        replicas: 2
         # initContainerResources: override for clickhouse-migrations initContainer (default: requests 250m/256Mi, limits 500m/512Mi)
         # initContainerResources:
         #   requests: { cpu: 250m, memory: 256Mi }
