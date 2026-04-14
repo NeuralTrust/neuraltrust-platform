@@ -374,6 +374,7 @@ spec:
           value: "{{ $kafkaHost }}"
         - name: KAFKA_PORT
           value: "{{ $kafkaPort }}"
+        {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
         resources:
           {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.resources }}
           {{- toYaml .Values.controlPlane.components.app.resources | nindent 10 }}

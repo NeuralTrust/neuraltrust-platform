@@ -244,6 +244,7 @@ spec:
               secretKeyRef:
                 name: clickhouse
                 key: admin-password
+          {{- include "neuraltrust-platform.proxy-env" . | nindent 10 }}
         volumeMounts:
           {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.trustTestConfig }}
           - name: trusttest-config-volume

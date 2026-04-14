@@ -27,6 +27,13 @@ global:
   security:
     allowInsecureImages: true # Allow Bitnami charts to use their container images
   storageClass: "" # Global storage class for persistent volumes
+  # Outbound HTTP proxy for corporate environments (e.g. Santander).
+  # When enabled, HTTP_PROXY/HTTPS_PROXY/NO_PROXY (upper+lowercase) are injected into every workload.
+  proxy:
+    enabled: false
+    httpProxy: ""   # e.g. "http://proxy.corp:3128"
+    httpsProxy: ""  # e.g. "http://proxy.corp:3128"
+    noProxy: "localhost,127.0.0.1,.cluster.local,.svc"
   # Private Service Connect (PSC) -- GCP only
   # Services listed in negNames get a standalone NEG (PSC-only, no public Ingress).
   # Services NOT listed keep their regular {"ingress": true} annotation.

@@ -133,6 +133,7 @@ spec:
               name: trustgate-secrets
               key: NEURAL_TRUST_FIREWALL_SECRET_KEY
               optional: true
+        {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
         imagePullPolicy: {{ .Values.global.image.pullPolicy }}
         ports:
         - containerPort: {{ .Values.controlPlane.ports.http }}

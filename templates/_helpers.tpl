@@ -537,6 +537,28 @@ Usage: {{ include "neuraltrust-platform.service.gkeBackendConfigName" (dict "glo
 {{- end }}
 
 {{/*
+Emit HTTP proxy environment variables when global.proxy.enabled is true.
+Outputs both uppercase (HTTP_PROXY) and lowercase (http_proxy) variants.
+Usage: {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
+*/}}
+{{- define "neuraltrust-platform.proxy-env" -}}
+{{- if and .Values.global .Values.global.proxy .Values.global.proxy.enabled }}
+- name: HTTP_PROXY
+  value: {{ .Values.global.proxy.httpProxy | quote }}
+- name: HTTPS_PROXY
+  value: {{ .Values.global.proxy.httpsProxy | quote }}
+- name: NO_PROXY
+  value: {{ .Values.global.proxy.noProxy | quote }}
+- name: http_proxy
+  value: {{ .Values.global.proxy.httpProxy | quote }}
+- name: https_proxy
+  value: {{ .Values.global.proxy.httpsProxy | quote }}
+- name: no_proxy
+  value: {{ .Values.global.proxy.noProxy | quote }}
+{{- end }}
+{{- end }}
+
+{{/*
 Check if autoGenerateSecrets is enabled.
 Returns "true" (non-empty string) if enabled, empty string if disabled.
 Usage: {{- if include "neuraltrust-platform.autoGenerateSecrets" . }}

@@ -66,6 +66,7 @@ spec:
               value: "1"
             - name: CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT
               value: "1"
+          {{- include "neuraltrust-platform.proxy-env" . | nindent 12 }}
           {{- if .Values.resources }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}

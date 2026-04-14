@@ -109,6 +109,7 @@ spec:
           value: /var/lib/postgresql/data/pgdata
         - name: POSTGRES_HOST_AUTH_METHOD
           value: "md5"
+        {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
         volumeMounts:
         - name: postgresql-data
           mountPath: /var/lib/postgresql/data

@@ -85,6 +85,7 @@ spec:
             secretKeyRef:
               name: clickhouse-secrets
               key: CLICKHOUSE_DATABASE
+        {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
         command: ["python", "-u", "src/listen.py"]
         resources:
           {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.worker .Values.dataPlane.components.worker.resources }}

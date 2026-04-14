@@ -224,6 +224,7 @@ spec:
               key: OPENAI_API_KEY
               optional: true
               {{- end }}
+        {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
         readinessProbe:
           httpGet:
             path: /health
