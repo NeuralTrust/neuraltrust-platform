@@ -16,6 +16,12 @@ global:
   autoGenerateSecrets: true  # Auto-generate required secrets if not explicitly provided. Preserves existing values on upgrades.
   preserveExistingSecrets: false  # Set to true only when every required secret already exists in the namespace.
   storageClass: ""  # Optional default storage class used by in-cluster stateful components.
+  # Outbound HTTP proxy (for corporate environments behind a forward proxy):
+  # proxy:
+  #   enabled: false
+  #   httpProxy: ""    # e.g. "http://proxy.corp:3128"
+  #   httpsProxy: ""   # e.g. "http://proxy.corp:3128"
+  #   noProxy: "localhost,127.0.0.1,.cluster.local,.svc"
   # Ingress TLS defaults:
   #   The chart creates one shared self-signed kubernetes.io/tls secret by default.
   #   The bundled ingress defaults also enable HTTPS by default.

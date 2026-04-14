@@ -239,4 +239,5 @@ spec:
               name: control-plane-secrets
               key: resend-alert-sender
               optional: true
+        {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
 {{- end }}

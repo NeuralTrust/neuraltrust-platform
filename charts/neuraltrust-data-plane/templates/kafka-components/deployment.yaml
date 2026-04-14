@@ -191,6 +191,7 @@ spec:
                   name: clickhouse
                   key: admin-password
                   optional: true
+            {{- include "neuraltrust-platform.proxy-env" . | nindent 12 }}
           resources:
             {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect .Values.dataPlane.components.kafka.connect.resources }}
             {{- toYaml .Values.dataPlane.components.kafka.connect.resources | nindent 12 }}
