@@ -1,363 +1,240 @@
-# Values Files Scenarios Guide
+# Values Files and Scenarios
 
-This document explains the different values files available and when to use each one.
+Side-by-side reference for all provided values files and common configuration scenarios.
 
-## Available Values Files
+## Values files
 
-### 1. `values-required.yaml` - Minimal / Required-Only Configuration
-**Use case:** Minimal, working deployment with only required settings
+### `values-required.yaml` — Minimal starting template
 
-**Features:**
-- Minimal configuration; all other options use chart defaults
-- All secrets auto-generated if left empty (`autoGenerateSecrets: true`)
-- Kubernetes cluster (set `global.openshift: true` for OpenShift)
-- Deploys all infrastructure and services by default
+Smallest possible configuration. All other options use chart defaults. Secrets are auto-generated.
 
-**Usage:** Deploy with defaults (zero-config) or customize:
 ```bash
-# Zero-config deploy (all secrets auto-generated):
+# Zero-config deploy
 helm upgrade --install neuraltrust-platform . --namespace neuraltrust --create-namespace
 
-# Or with custom overrides:
+# With overrides
 cp values-required.yaml my-values.yaml
-# Edit my-values.yaml: customize domains, resources, etc. (secrets auto-generated if empty)
 helm upgrade --install neuraltrust-platform . --namespace neuraltrust --create-namespace -f my-values.yaml
 ```
 
----
+### `values.yaml` — Full reference
 
-### 2. `values.yaml` - Full Kubernetes Configuration
-**Use case:** Full customization with all options and inline comments
+Every available option with inline comments. Use as a reference or copy to customize everything.
 
-**Features:**
-- All available keys with comments and examples
-- Auto-generated secrets by default; override any secret with an explicit value
-- Ingress, resources, autoscaling, TLS, and other advanced options
-
-**Usage:** Copy from the repo and customize as needed:
 ```bash
 cp values.yaml my-values.yaml
-# Edit my-values.yaml: customize as needed (secrets auto-generated if empty)
 helm upgrade --install neuraltrust-platform . --namespace neuraltrust --create-namespace -f my-values.yaml
 ```
 
----
+### `values-openshift.yaml` — OpenShift with Routes
 
-### 3. `values-openshift.yaml` - OpenShift with Routes (Default)
-**Use case:** OpenShift deployment using Routes for external access
+Pre-configured for OpenShift: Routes enabled, Ingress disabled, relaxed security contexts.
 
-**Features:**
-- OpenShift cluster (`openshift: true`)
-- Routes enabled by default (Ingress disabled)
-- Helm-managed secrets (`preserveExistingSecrets: false`)
-- Services use `ClusterIP` type (Routes handle external access)
-
-**Key settings:**
 ```yaml
 global:
-  openshift: true
-  openshiftDomain: "YOUR_DOMAIN"
-  preserveExistingSecrets: false
+  platform: "openshift"
+  domain: "apps.mycluster.example.com"
 ```
 
-**To use Ingress instead of Routes in OpenShift:**
-- Set `ingress.enabled: true` in TrustGate section
-- Set `ingress.enabled: true` for each NeuralTrust component
-- Routes will be automatically disabled when Ingress is enabled
-
-**Usage:**
 ```bash
-helm upgrade --install neuraltrust-platform . -f values-openshift.yaml
+helm upgrade --install neuraltrust-platform . -f values-openshift.yaml \
+  --set global.domain="apps.mycluster.example.com"
 ```
 
----
+> **Note:** The deprecated `global.openshift: true` / `global.openshiftDomain` fields still work. Prefer `global.platform` and `global.domain`.
 
-### 4. `values-openshift-ingress.yaml.example` - OpenShift with Ingress
-**Use case:** OpenShift deployment using Ingress instead of Routes (best working example)
+### `values-openshift-ingress.yaml.example` — OpenShift with Ingress
 
-**Features:**
-- OpenShift cluster (`openshift: true`)
-- Ingress enabled for all services
-- Pre-generated secrets (`preserveExistingSecrets: true`)
-- TLS configuration with existing wildcard certificates
-- Services use `ClusterIP` type
+OpenShift using Kubernetes Ingress instead of Routes. TLS via existing wildcard certificates.
 
-**Key settings:**
-```yaml
-global:
-  openshift: true
-  openshiftDomain: "your-domain.com"  # Your OpenShift wildcard domain
-  preserveExistingSecrets: true  # Secrets are pre-generated
-```
-
-**Usage:**
 ```bash
-# Copy and customize the example file
-cp values-openshift-ingress.yaml.example values-openshift-ingress.yaml
-
-# Edit values-openshift-ingress.yaml:
-# - Replace YOUR_DOMAIN with your actual domain
-# - Update image registries and pull secrets
-# - Pre-generate all required secrets
-
-helm upgrade --install neuraltrust-platform . -f values-openshift-ingress.yaml
+cp values-openshift-ingress.yaml.example my-values.yaml
+# Set domain, image pull secrets, and ingress class
+helm upgrade --install neuraltrust-platform . -f my-values.yaml
 ```
 
----
+### `values-all-deployed.yaml.example` — Everything enabled
 
-### 5. `values-all-deployed.yaml.example` - Example: Deploy Everything
-**Use case:** Example configuration showing how to deploy all components
+All infrastructure and services deployed. Use as a reference for what a complete deployment looks like.
 
-**Features:**
-- Deploys all infrastructure (ClickHouse, Kafka, PostgreSQL)
-- Deploys all NeuralTrust components
-- Deploys TrustGate
-- Helm-managed secrets
-- Ingress enabled
+### `values-external-services.yaml.example` — External infrastructure
 
-**Usage:**
+ClickHouse, Kafka, and PostgreSQL provided externally. Only NeuralTrust services and TrustGate are deployed in-cluster.
+
+### `values-dataplane-gpu.yaml.example` — Data Plane + GPU firewall
+
+Full stack with GPU firewall workers and TrustGate disabled. Includes GPU scheduling, CUDA MPS, and node selector placeholders.
+
 ```bash
-helm upgrade --install neuraltrust-platform . -f values-all-deployed.yaml.example
+cp values-dataplane-gpu.yaml.example my-values.yaml
+# Set hosts, secrets, GPU node labels, and pool names
+helm upgrade --install neuraltrust-platform . --namespace neuraltrust --create-namespace -f my-values.yaml
 ```
 
----
-
-### 6. `values-external-services.yaml.example` - Example: External Services
-**Use case:** Example configuration using external infrastructure services
-
-**Features:**
-- Uses external ClickHouse, Kafka, and PostgreSQL
-- Deploys NeuralTrust components only
-- Deploys TrustGate
-- Helm-managed secrets
-- Ingress enabled
-
-**Usage:**
-```bash
-helm upgrade --install neuraltrust-platform . -f values-external-services.yaml.example
-```
+For CPU-only firewall, use chart defaults (`firewall-cpu` image, no GPU keys).
 
 ---
 
-### 7. `values-dataplane-gpu.yaml.example` — Data Plane + GPU firewall (no TrustGate)
-**Use case:** Full in-cluster stack (ClickHouse, Kafka, PostgreSQL, Control Plane, Data Plane) plus the **GPU** firewall (gateway + workers), with **TrustGate disabled**. Suitable for internal clusters, direct data-plane access, or security testing workflows where the TrustGate API gateway is not required.
-
-**Features:**
-- `trustgate.enabled: false`
-- `neuraltrust-firewall.firewall.enabled: true` with a CPU **gateway** (`firewall-cpu`) and GPU **workers** (`firewall-gpu`), GPU resources, **`hostIPC`**, CUDA MPS under `firewall.config`, and **placeholder** `workerDefaults.nodeSelector` / `tolerations` (must match your GPU nodes)
-- Uses the same firewall **tag** across `firewall-cpu` and `firewall-gpu` (bump workflow reads tags from `firewall-cpu`)
-
-**Usage:**
-```bash
-cp values-dataplane-gpu.yaml.example my-dataplane-gpu.yaml
-# Edit hosts, secrets, GPU node labels, and pool names
-helm upgrade --install neuraltrust-platform . --namespace neuraltrust --create-namespace -f my-dataplane-gpu.yaml
-```
-
-For **CPU-only** firewall, start from chart defaults (`firewall-cpu`, no GPU keys) or trim the GPU block from this example.
-
----
-
-## NeuralTrust Firewall (Gateway + Workers, CPU and GPU)
-
-The firewall is an **optional** subchart controlled by **`neuraltrust-firewall.firewall.enabled`** (root `Chart.yaml` condition: `neuraltrust-firewall.firewall.enabled`). It deploys a **gateway** (CPU router) plus **5 specialised workers** (inference). Each worker can be individually enabled/disabled under `firewall.workers`.
-
-| Component | Image suffix | Scheduling / Resources | CUDA MPS in `firewall.config` |
-|-----------|--------------|----------------------|------------------------------|
-| **Gateway** | `firewall-cpu` | CPU resources, no GPU scheduling | N/A |
-| **Workers (CPU, default)** | `firewall-cpu` | CPU resources, no GPU scheduling | Omit both MPS keys → not rendered in ConfigMap |
-| **Workers (GPU override)** | `firewall-gpu` | Override `workerDefaults.image` to `firewall-gpu`; set `nodeSelector`, `tolerations`, `nvidia.com/gpu`, `hostIPC` | Set both `cudaMpsActiveThreadPercentage` and `cudaMpsPinnedDeviceMemLimit` |
-
-**Reference values:** `values.yaml` (`neuraltrust-firewall`), `regions/values-us-prod.yaml` (GPU production), `values-dataplane-gpu.yaml.example` (GPU, no TrustGate).
-
----
-
-## Configuration Scenarios
+## Configuration scenarios
 
 ### Scenario 1: Kubernetes with Ingress
-**File:** `values-required.yaml` (minimal) or `values.yaml` (full options)
-- Set `global.openshift: false` (default for Kubernetes)
-- Set `ingress.enabled: true` for all services
-- Secrets auto-generated by default (`autoGenerateSecrets: true`)
 
-### Scenario 2: OpenShift with Routes (Default)
+**File:** `values-required.yaml` or `values.yaml`
+
+```yaml
+global:
+  platform: "aws"  # or "gcp", "azure", "kubernetes"
+  domain: "platform.example.com"
+```
+
+### Scenario 2: OpenShift with Routes
+
 **File:** `values-openshift.yaml`
-- Set `global.openshift: true`
-- Set `global.openshiftDomain: "your-domain"`
-- Set `ingress.enabled: false` (Routes are used automatically)
-- Secrets auto-generated by default (`autoGenerateSecrets: true`)
+
+```yaml
+global:
+  platform: "openshift"
+  domain: "apps.mycluster.example.com"
+```
 
 ### Scenario 3: OpenShift with Ingress
-**File:** Custom values file based on `values-openshift.yaml`
-- Set `global.openshift: true`
-- Set `global.openshiftDomain: "your-domain"`
-- Set `ingress.enabled: true` for all services
-- Set `ingress.className: "openshift-default"` or your ingress class
-- Set `preserveExistingSecrets: true` if using pre-generated secrets
 
-### Scenario 4: Deploy Only NeuralTrust (No Infrastructure)
-**File:** Custom values file based on `values-external-services.yaml.example`
-- Set `infrastructure.clickhouse.deploy: false`
-- Set `infrastructure.kafka.deploy: false`
-- Configure external services in `infrastructure.*.external` sections
-- Set `neuraltrust-control-plane.infrastructure.postgresql.deploy: false` to use external PostgreSQL
-- **Configure external PostgreSQL connection** in `neuraltrust-control-plane.controlPlane.components.postgresql.secrets` section with `host`, `port`, `user`, `password`, and `database` keys
+**File:** Based on `values-openshift-ingress.yaml.example`
 
-### Scenario 5: Deploy Only NeuralTrust + Infrastructure (No TrustGate)
-**File:** Custom values file based on `values-required.yaml` or `values.yaml`, or start from [`values-dataplane-gpu.yaml.example`](./values-dataplane-gpu.yaml.example) if you also need the **GPU firewall**
-- Set `trustgate.enabled: false`
-- Keep `infrastructure.*.deploy: true`
-- Keep `neuraltrust-control-plane.controlPlane.enabled: true`
-- Keep `neuraltrust-data-plane.dataPlane.enabled: true`
-- Optional: set `neuraltrust-firewall.firewall.enabled: true` and choose **`firewall-cpu`** (defaults) or **`firewall-gpu`** plus GPU scheduling (see [NeuralTrust Firewall (CPU and GPU)](#neuraltrust-firewall-cpu-and-gpu))
+```yaml
+global:
+  platform: "openshift"
+  domain: "apps.mycluster.example.com"
+  ingress:
+    provider: "openshift"
 
-### Scenario 6: Use Pre-generated Secrets (CICD-friendly)
-**File:** Custom values file based on `values-openshift.yaml`
-- Set `global.autoGenerateSecrets: false` and `global.preserveExistingSecrets: true`
-- Pre-generate all required secrets before deployment
-- Secret templates will NOT be rendered (prevents conflicts)
+trustgate:
+  ingress:
+    enabled: true
+```
 
-### Scenario 7: Zero-Config Deploy (Auto-Generated Secrets)
-**File:** No values file needed (all defaults)
-- All secrets auto-generated on first install
-- Existing secrets preserved on upgrades
-- `SERVER_SECRET_KEY` and `TRUSTGATE_JWT_SECRET` automatically synchronized
+### Scenario 4: External infrastructure only
+
+**File:** Based on `values-external-services.yaml.example`
+
+```yaml
+infrastructure:
+  clickhouse:
+    deploy: false
+    external:
+      host: "clickhouse.example.com"
+  kafka:
+    deploy: false
+    external:
+      bootstrapServers: "kafka.example.com:9092"
+
+neuraltrust-control-plane:
+  infrastructure:
+    postgresql:
+      deploy: false
+  controlPlane:
+    components:
+      postgresql:
+        secrets:
+          host: "postgres.example.com"
+```
+
+### Scenario 5: No TrustGate
+
+**File:** Based on `values-required.yaml` or `values-dataplane-gpu.yaml.example`
+
+```yaml
+trustgate:
+  enabled: false
+
+neuraltrust-control-plane:
+  controlPlane:
+    enabled: true
+
+neuraltrust-data-plane:
+  dataPlane:
+    enabled: true
+```
+
+### Scenario 6: Pre-generated secrets (CI/CD)
+
+**File:** Custom values
+
+```yaml
+global:
+  autoGenerateSecrets: false
+  preserveExistingSecrets: true
+```
+
+All secrets must exist in the namespace before deployment. See [SECRETS.md](./SECRETS.md).
+
+### Scenario 7: Zero-config
+
+**File:** None required
+
 ```bash
 helm upgrade --install neuraltrust-platform . --namespace neuraltrust --create-namespace
 ```
 
 ---
 
-## Secret Management
+## Firewall: CPU and GPU
 
-### Auto-Generated Secrets (`autoGenerateSecrets: true`) -- Default
-- All required secrets (JWT keys, database passwords) are auto-generated on first install
-- Existing secrets are preserved on `helm upgrade` (never overwritten)
-- `SERVER_SECRET_KEY` and `TRUSTGATE_JWT_SECRET` are automatically synchronized
-- Explicit values in your values file override auto-generation
-- **Use when:** Quick starts, dev/staging, or any environment where auto-management is acceptable
+The firewall is controlled by `neuraltrust-firewall.firewall.enabled` (default: `false`). It deploys a **gateway** (CPU router) plus **5 specialized workers**.
 
-### Helm-Managed Secrets from Values
-- Provide explicit secret values in your values file
-- Helm creates and manages secrets from those values
-- Helm can update secrets on upgrades
-- **Use when:** You want full control over secret values but still want Helm to manage the Secret resources
+| Component | Image | Scheduling | CUDA MPS |
+|---|---|---|---|
+| Gateway | `firewall-cpu` | CPU only | N/A |
+| Workers (default) | `firewall-cpu` | CPU only | Omit MPS keys |
+| Workers (GPU) | `firewall-gpu` | Override image, add `nvidia.com/gpu`, `nodeSelector`, `tolerations`, `hostIPC` | Set `cudaMpsActiveThreadPercentage` + `cudaMpsPinnedDeviceMemLimit` |
 
-### Pre-generated Secrets (`preserveExistingSecrets: true`)
-- Secrets must be created before deployment
-- Secret templates are NOT rendered
-- CICD-friendly (no secret conflicts)
-- **Use when:** Using Vault or external secret management
+CUDA MPS env vars are only rendered in the ConfigMap when **both** keys are set.
 
-**Required secrets when `preserveExistingSecrets: true`:**
-- `clickhouse` (with key `admin-password`)
-- `postgresql-secrets` (with keys: `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, etc.)
-- `control-plane-secrets` (with JWT secrets, API keys, etc.)
-- `data-plane-jwt-secret` (with JWT secret)
-- `trustgate-secrets` (with `SERVER_SECRET_KEY`, `DATABASE_PASSWORD`, database connection keys, and optionally `NEURAL_TRUST_FIREWALL_URL`, `NEURAL_TRUST_FIREWALL_SECRET_KEY` for TrustGate → firewall)
-- Optional: `openai-secrets`, `google-secrets`, `resend-secrets`, `huggingface-secrets`
+**Reference files:** `values-dataplane-gpu.yaml.example` (GPU, no TrustGate), `values.yaml` (full options).
+
+---
+
+## Secret management modes
+
+| Mode | Flags | Behavior | Best for |
+|---|---|---|---|
+| Auto-generated (default) | `autoGenerateSecrets: true` | Helm creates and preserves secrets | Dev, staging, quick starts |
+| Explicit values | `autoGenerateSecrets: true` + values set | Your values override auto-generation | Controlled environments |
+| Pre-generated | `preserveExistingSecrets: true` | Helm never touches secrets | Vault, Sealed Secrets, compliance |
+
+When `preserveExistingSecrets: true`, these secrets must exist:
+
+- `clickhouse` — `admin-password`
+- `postgresql-secrets` — `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `DATABASE_URL`, etc.
+- `control-plane-secrets` — `CONTROL_PLANE_JWT_SECRET`, `TRUSTGATE_JWT_SECRET`, etc.
+- `data-plane-jwt-secret` — `DATA_PLANE_JWT_SECRET`
+- `trustgate-secrets` — `SERVER_SECRET_KEY`, `DATABASE_PASSWORD`, and optionally `NEURAL_TRUST_FIREWALL_URL`, `NEURAL_TRUST_FIREWALL_SECRET_KEY`
+
+Optional: `openai-secrets`, `google-secrets`, `resend-secrets`, `huggingface-secrets`
+
+See [SECRETS.md](./SECRETS.md) for the complete reference.
 
 ---
 
 ## Ingress vs Routes
 
-### Ingress (Standard Kubernetes & OpenShift)
-- Works on both Kubernetes and OpenShift
-- Requires Ingress controller
-- Supports TLS via `kubernetes.io/tls` secrets
-- Configure via `ingress.enabled: true`
-
-### Routes (OpenShift Only)
-- OpenShift-native
-- Automatically created when `global.openshift: true` and `ingress.enabled: false`
-- Uses OpenShift's built-in routing
-- TLS handled by OpenShift router
-- Configure via `global.openshift: true` and `ingress.enabled: false`
+| Feature | Ingress | Routes (OpenShift) |
+|---|---|---|
+| Platform | Any Kubernetes | OpenShift only |
+| Controller | Required (NGINX, ALB, GCE, etc.) | Built-in |
+| TLS | `kubernetes.io/tls` secrets or cloud-managed | OpenShift router |
+| Enable | `ingress.enabled: true` per component | Default when `platform: "openshift"` |
 
 ---
 
-## Component Selection
+## Quick reference
 
-### Deploy All Components
-```yaml
-infrastructure:
-  clickhouse:
-    deploy: true
-  kafka:
-    deploy: true
-
-neuraltrust-control-plane:
-  controlPlane:
-    enabled: true
-
-neuraltrust-data-plane:
-  dataPlane:
-    enabled: true
-
-trustgate:
-  enabled: true
-```
-
-### Deploy Only NeuralTrust (Use External Infrastructure)
-```yaml
-infrastructure:
-  clickhouse:
-    deploy: false
-    external:
-      host: "external-clickhouse"
-  kafka:
-    deploy: false
-    external:
-      bootstrapServers: "external-kafka:9092"
-
-neuraltrust-control-plane:
-  controlPlane:
-    enabled: true
-    components:
-      postgresql:
-        # PostgreSQL deployment controlled by neuraltrust-control-plane.infrastructure.postgresql.deploy
-        secrets:
-          host: "external-postgresql"
-
-neuraltrust-data-plane:
-  dataPlane:
-    enabled: true
-
-trustgate:
-  enabled: true
-```
-
-### Deploy Only Infrastructure
-```yaml
-infrastructure:
-  clickhouse:
-    deploy: true
-  kafka:
-    deploy: true
-
-neuraltrust-control-plane:
-  controlPlane:
-    enabled: false
-
-neuraltrust-data-plane:
-  dataPlane:
-    enabled: false
-
-trustgate:
-  enabled: false
-```
-
----
-
-## Quick Reference
-
-| Scenario | File | OpenShift | Ingress | Routes | Secrets |
-|----------|------|-----------|---------|--------|---------|
-| Zero-config | None (defaults) | No | No | No | Auto-generated |
-| Kubernetes | `values-required.yaml` or `values.yaml` | No | Yes | No | Auto-generated |
-| OpenShift Default | `values-openshift.yaml` | Yes | No | Yes | Auto-generated |
-| OpenShift Ingress | `values-openshift-ingress.yaml.example` | Yes | Yes | No | Pre-gen |
-| All Deployed | `values-all-deployed.yaml.example` | Configurable | Yes | Configurable | Auto-generated |
-| External Services | `values-external-services.yaml.example` | Configurable | Yes | Configurable | Auto-generated |
-| Data Plane + GPU firewall (no TrustGate) | `values-dataplane-gpu.yaml.example` | Configurable | Yes | Configurable | Helm-managed / explicit in file |
-
+| Scenario | Values file | Platform | Ingress | Routes | Secrets |
+|---|---|---|---|---|---|
+| Zero-config | None (defaults) | Any | No | No | Auto |
+| Kubernetes | `values-required.yaml` | `aws`/`gcp`/`azure`/`kubernetes` | Yes | No | Auto |
+| OpenShift (Routes) | `values-openshift.yaml` | `openshift` | No | Yes | Auto |
+| OpenShift (Ingress) | `values-openshift-ingress.yaml.example` | `openshift` | Yes | No | Pre-gen |
+| Everything on | `values-all-deployed.yaml.example` | Configurable | Yes | Configurable | Auto |
+| External infra | `values-external-services.yaml.example` | Configurable | Yes | Configurable | Auto |
+| GPU firewall | `values-dataplane-gpu.yaml.example` | Configurable | Yes | Configurable | Explicit |

@@ -1,142 +1,199 @@
 # Secrets Management Guide
 
-This guide explains how to manage secrets for the NeuralTrust Platform deployment.
+How secrets are created, stored, and managed across the NeuralTrust Platform chart.
 
-## Quick Start
+## Quick start
 
-### Option 1: Auto-Generated Secrets (Default -- Recommended)
+### Auto-generated secrets (default — recommended)
 
-**No action required.** With `global.autoGenerateSecrets: true` (the default), the chart automatically generates all required secrets on first install and preserves them across upgrades:
+No action required. Deploy and all secrets are created automatically:
 
 ```bash
-# Deploy with auto-generated secrets -- no values file needed
 helm upgrade --install neuraltrust-platform . --namespace neuraltrust --create-namespace
 ```
 
-**Auto-generated secrets include:**
-
-| Secret | Kubernetes Secret Name | Key(s) |
-|--------|----------------------|--------|
+| Secret | Kubernetes Secret | Key |
+|---|---|---|
 | TrustGate server key | `trustgate-secrets` | `SERVER_SECRET_KEY` |
 | TrustGate DB password | `trustgate-secrets` | `DATABASE_PASSWORD` |
 | Control Plane JWT | `control-plane-secrets` | `CONTROL_PLANE_JWT_SECRET` |
-| TrustGate JWT (synced with SERVER_SECRET_KEY) | `control-plane-secrets` | `TRUSTGATE_JWT_SECRET` |
+| TrustGate JWT (synced) | `control-plane-secrets` | `TRUSTGATE_JWT_SECRET` |
 | Data Plane JWT | `data-plane-jwt-secret` | `DATA_PLANE_JWT_SECRET` |
 | PostgreSQL password | `postgresql-secrets` | `POSTGRES_PASSWORD` |
 
-Optional **TrustGate → NeuralTrust Firewall** keys in `trustgate-secrets` (only present when set in values or already in the cluster): `NEURAL_TRUST_FIREWALL_URL`, `NEURAL_TRUST_FIREWALL_SECRET_KEY`. See [TrustGate firewall integration](#trustgate-firewall-integration-neural_trust).
+> `SERVER_SECRET_KEY` (TrustGate) and `TRUSTGATE_JWT_SECRET` (Control Plane) are always synchronized to the same value.
 
-> **Important:** `SERVER_SECRET_KEY` (TrustGate) and `TRUSTGATE_JWT_SECRET` (Control Plane) are always synchronized to the same value.
+**How it works:**
 
-**How auto-generation works:**
 1. On first install, random 64-character alphanumeric values are generated
 2. On `helm upgrade`, existing values are read from the cluster via `lookup` and reused
-3. If you provide an explicit (non-empty) value in your values file, it takes priority
+3. Explicit (non-empty) values in your values file always take priority
 
-**To override a specific secret:**
+**Override a specific secret:**
+
 ```yaml
 trustgate:
   global:
     env:
-      SERVER_SECRET_KEY: "my-explicit-key"  # Overrides auto-generation
+      SERVER_SECRET_KEY: "my-explicit-key"
 ```
 
-**TrustGate firewall integration (`NEURAL_TRUST_*`):** Control-plane, data-plane, and actions pods read the firewall base URL and API key from **`trustgate-secrets`**. With `global.autoGenerateSecrets: true` (default), the parent chart writes these keys when you set non-empty values under `trustgate.global.env`. Non-empty values in your values file **take priority** on every `helm upgrade`; if omitted, existing cluster keys are reused when present. After changing them, **roll out TrustGate** so containers reload env (`kubectl rollout restart deployment/...` for `trustgate-control-plane`, `trustgate-data-plane`, `trustgate-actions`).
+### Pre-create secrets with the script
 
-### Option 2: Use the Secrets Script
-
-For environments where you want to pre-create secrets before deploying:
+For environments that require secrets before deployment:
 
 ```bash
-# Run the script interactively
-./create-secrets.sh
+# Interactive
+./create-secrets.sh --namespace neuraltrust
 
-# Or use environment variables
+# With environment variables
 export DATA_PLANE_JWT_SECRET="your-secret"
 export CONTROL_PLANE_JWT_SECRET="your-secret"
-export OPENAI_API_KEY="sk-..."
-./create-secrets.sh
+./create-secrets.sh --namespace neuraltrust
 
-# Or with flags
-./create-secrets.sh --namespace neuraltrust --replace-existing
+# Script options
+./create-secrets.sh --replace-existing      # replace without asking
+./create-secrets.sh --no-replace-existing   # skip existing without asking
 ```
 
-### Option 3: Use Pre-defined Secrets
+### Pre-existing secrets (external management)
 
-If you already have secrets in your cluster, the Helm chart will automatically use them. Just ensure the secret names match what the chart expects (see Secret Names section below).
+For Vault, Sealed Secrets, or External Secrets Operator:
 
-### Option 4: Use Environment Variables in Values
+```yaml
+global:
+  autoGenerateSecrets: false
+  preserveExistingSecrets: true   # Helm will NOT create or update secrets
+```
 
-You can also pass secrets directly via Helm values, though this is less secure:
+All required secrets must exist in the namespace before deployment.
+
+## Secret reference
+
+### Data Plane
+
+| Kubernetes Secret | Key | Required | Description |
+|---|---|---|---|
+| `data-plane-jwt-secret` | `DATA_PLANE_JWT_SECRET` | Auto-generated | JWT for Data Plane API auth |
+| `openai-secrets` | `OPENAI_API_KEY` | No | OpenAI API key |
+| `google-secrets` | `GOOGLE_API_KEY` | No | Google API key |
+| `resend-secrets` | `RESEND_API_KEY` | No | Resend email API key |
+| `huggingface-secrets` | `HUGGINGFACE_TOKEN` | No | Hugging Face model access |
+
+### Control Plane
+
+| Kubernetes Secret | Key | Required | Description |
+|---|---|---|---|
+| `control-plane-secrets` | `CONTROL_PLANE_JWT_SECRET` | Auto-generated | JWT for Control Plane API auth |
+| `control-plane-secrets` | `TRUSTGATE_JWT_SECRET` | Auto-generated | Synced with `SERVER_SECRET_KEY` |
+| `control-plane-secrets` | `FIREWALL_JWT_SECRET` | No | JWT for firewall service |
+| `control-plane-secrets` | `MODEL_SCANNER_SECRET` | No | Model scanner service secret |
+| `control-plane-secrets` | `OPENAI_API_KEY` | No | OpenAI API key |
+| `control-plane-secrets` | `resend-api-key` | No | Resend API key |
+| `control-plane-secrets` | `resend-alert-sender` | No | Alert notification email |
+| `control-plane-secrets` | `resend-invite-sender` | No | Invitation email |
+
+### PostgreSQL
+
+| Kubernetes Secret | Key | Required | Description |
+|---|---|---|---|
+| `postgresql-secrets` | `POSTGRES_HOST` | Yes (if pre-generating) | Database hostname |
+| `postgresql-secrets` | `POSTGRES_PORT` | Yes (if pre-generating) | Database port |
+| `postgresql-secrets` | `POSTGRES_USER` | Yes (if pre-generating) | Database username |
+| `postgresql-secrets` | `POSTGRES_PASSWORD` | Auto-generated | Database password |
+| `postgresql-secrets` | `POSTGRES_DB` | Yes (if pre-generating) | Database name |
+| `postgresql-secrets` | `DATABASE_URL` | Yes (if pre-generating) | Connection URL (URL-encoded) |
+| `postgresql-secrets` | `POSTGRES_PRISMA_URL` | Yes (if pre-generating) | Prisma-compatible URL |
+
+### Infrastructure
+
+| Kubernetes Secret | Key | Required | Description |
+|---|---|---|---|
+| `clickhouse` | `admin-password` | Auto-generated | ClickHouse admin password |
+
+### TrustGate
+
+| Kubernetes Secret | Key | Required | Description |
+|---|---|---|---|
+| `trustgate-secrets` | `SERVER_SECRET_KEY` | Auto-generated | Server secret key |
+| `trustgate-secrets` | `DATABASE_HOST` | No | PostgreSQL host (external DB) |
+| `trustgate-secrets` | `DATABASE_PORT` | No | PostgreSQL port (external DB) |
+| `trustgate-secrets` | `DATABASE_USER` | No | PostgreSQL user (external DB) |
+| `trustgate-secrets` | `DATABASE_PASSWORD` | Auto-generated | PostgreSQL password |
+| `trustgate-secrets` | `DATABASE_NAME` | No | PostgreSQL database (external DB) |
+| `trustgate-secrets` | `DATABASE_URL` | No | Connection URL (external DB) |
+| `trustgate-secrets` | `NEURAL_TRUST_FIREWALL_URL` | No | Firewall base URL |
+| `trustgate-secrets` | `NEURAL_TRUST_FIREWALL_SECRET_KEY` | No | Firewall API key |
+
+### Firewall
+
+Created when `neuraltrust-firewall.firewall.enabled: true`:
+
+| Kubernetes Secret | Key | Required | Description |
+|---|---|---|---|
+| `firewall-secrets` | `JWT_SECRET` | Yes | Shared with services calling the firewall |
+| `firewall-secrets` | `HUGGINGFACE_TOKEN` | No | HF token for model weights |
+
+Align `controlPlane.secrets.firewallJwtSecret` (`FIREWALL_JWT_SECRET`) with `firewall-secrets` `JWT_SECRET` when the Control Plane validates firewall tokens.
+
+### Docker registry
+
+| Kubernetes Secret | Type | Required | Description |
+|---|---|---|---|
+| `gcr-secret` | `docker-registry` | Yes | Credentials for NeuralTrust container images |
+
+## TrustGate firewall integration
+
+TrustGate calls the NeuralTrust Firewall using two keys stored in `trustgate-secrets`:
+
+```yaml
+trustgate:
+  global:
+    env:
+      NEURAL_TRUST_FIREWALL_URL: "http://firewall-gateway:8000"
+      NEURAL_TRUST_FIREWALL_SECRET_KEY: "your-secret-key"
+```
+
+| Kubernetes Secret | Key | Required |
+|---|---|---|
+| `trustgate-secrets` | `NEURAL_TRUST_FIREWALL_URL` | No — omit if TrustGate should not call the firewall |
+| `trustgate-secrets` | `NEURAL_TRUST_FIREWALL_SECRET_KEY` | No — omit if not using secret-key auth |
+
+With `global.autoGenerateSecrets: true`, these are merged into `trustgate-secrets` from `trustgate.global.env`. With `global.preserveExistingSecrets: true`, add them to a pre-created `trustgate-secrets`.
+
+After changing firewall secrets, **restart TrustGate** so pods pick up the new values:
+
+```bash
+kubectl rollout restart deployment/trustgate-control-plane -n neuraltrust
+kubectl rollout restart deployment/trustgate-data-plane -n neuraltrust
+kubectl rollout restart deployment/trustgate-actions -n neuraltrust
+```
+
+## Secret reference in values
+
+### Direct value (less secure)
 
 ```yaml
 neuraltrust-data-plane:
   dataPlane:
     secrets:
-      dataPlaneJWTSecret: "your-secret"
-      openaiApiKey: "sk-..."
+      dataPlaneJWTSecret: "your-secret-value"
 ```
 
-## Secret Names
-
-The chart expects the following secret names in your namespace:
-
-### Data Plane Secrets
-- `data-plane-jwt-secret` - Data Plane JWT Secret (key: `DATA_PLANE_JWT_SECRET`)
-- `openai-secrets` - OpenAI API Key (key: `OPENAI_API_KEY`)
-- `google-secrets` - Google API Key (key: `GOOGLE_API_KEY`)
-- `resend-secrets` - Resend API Key (key: `RESEND_API_KEY`)
-- `huggingface-secrets` - Hugging Face Token (key: `HUGGINGFACE_TOKEN`)
-
-### Control Plane Secrets
-- `<release-name>-secrets` or `control-plane-secrets` - Control Plane secrets (keys: `CONTROL_PLANE_JWT_SECRET`, `OPENAI_API_KEY`, `resend-api-key`, `resend-alert-sender`, `resend-invite-sender`, `TRUSTGATE_JWT_SECRET`, `FIREWALL_JWT_SECRET`, `MODEL_SCANNER_SECRET`)
-- `postgresql-secrets` - PostgreSQL connection (keys: `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `DATABASE_URL`, `POSTGRES_PRISMA_URL`)
-
-### Infrastructure Secrets
-- `clickhouse` - ClickHouse password (key: `admin-password`)
-- `postgresql-secrets` - PostgreSQL connection (shared with control plane)
-
-### TrustGate Secrets
-- `trustgate-secrets` — TrustGate server key, PostgreSQL connection, optional LLM provider keys from `trustgate.config.providers`, and optional NeuralTrust Firewall integration:
-  - **Required / usual:** `SERVER_SECRET_KEY`, `DATABASE_HOST`, `DATABASE_PORT`, `DATABASE_USER`, `DATABASE_PASSWORD`, `DATABASE_NAME`, `DATABASE_SSL_MODE` (optional depending on TLS), `DATABASE_URL`
-  - **Optional (firewall HTTP integration):** `NEURAL_TRUST_FIREWALL_URL`, `NEURAL_TRUST_FIREWALL_SECRET_KEY` — set via `trustgate.global.env`; stored in this secret when `global.autoGenerateSecrets: true`, or create them manually when using `preserveExistingSecrets: true`
-
-### Firewall secrets
-
-When **`neuraltrust-firewall.firewall.enabled`** is true, the chart can create **`firewall-secrets`** (unless `global.preserveExistingSecrets` prevents it):
-
-| Key | Required | Notes |
-|-----|----------|--------|
-| `JWT_SECRET` | Yes | Shared with services that call the firewall; align **`controlPlane.secrets.firewallJwtSecret`** (`FIREWALL_JWT_SECRET`) with this value when the Control Plane validates firewall tokens |
-| `HUGGINGFACE_TOKEN` | No | HF token for model weights; can match `huggingface-secrets` or inline `neuraltrust-firewall.firewall.secrets.huggingFaceToken` |
-
-The firewall container (gateway and workers) reads these from **`firewall-secrets`**. TrustGate reads **`NEURAL_TRUST_FIREWALL_URL`** and **`NEURAL_TRUST_FIREWALL_SECRET_KEY`** from **`trustgate-secrets`** (not from the ConfigMap). For deployment modes (gateway + workers, CPU vs GPU images), see [VALUES_SCENARIOS.md](VALUES_SCENARIOS.md#neuraltrust-firewall-gateway--workers-cpu-and-gpu) and [DEPLOYMENT.md](DEPLOYMENT.md#neuraltrust-firewall-gateway--workers).
-
-## TrustGate firewall integration (NEURAL_TRUST_*)
-
-Configure the public firewall endpoint and shared API key TrustGate uses to call the NeuralTrust Firewall:
+### Secret reference (recommended)
 
 ```yaml
-trustgate:
-  global:
-    env:
-      NEURAL_TRUST_FIREWALL_URL: "https://firewall.example.com"
-      NEURAL_TRUST_FIREWALL_SECRET_KEY: "your-secret-key"
+neuraltrust-data-plane:
+  dataPlane:
+    secrets:
+      dataPlaneJWTSecret:
+        secretName: "data-plane-jwt-secret"
+        secretKey: "DATA_PLANE_JWT_SECRET"
 ```
 
-| Kubernetes secret | Key | Required |
-|-------------------|-----|----------|
-| `trustgate-secrets` | `NEURAL_TRUST_FIREWALL_URL` | No — omit if TrustGate must not call the firewall |
-| `trustgate-secrets` | `NEURAL_TRUST_FIREWALL_SECRET_KEY` | No — omit if not using secret key auth toward the firewall |
+## Environment variables for the script
 
-When **`global.autoGenerateSecrets: true`**, the platform template merges these into `trustgate-secrets` from `trustgate.global.env`. When **`global.preserveExistingSecrets: true`**, add the same keys to a pre-created `trustgate-secrets` (or manage them with External Secrets). Align **`FIREWALL_JWT_SECRET`** / **`firewall-secrets`** `JWT_SECRET` with the Control Plane when validating firewall-issued JWTs; see [Firewall secrets](#firewall-secrets) above.
-
-### Docker Registry
-- `gcr-secret` - Docker registry credentials (type: `docker-registry`)
-
-## Environment Variables
-
-All secrets can be provided via environment variables when running the script:
+All secrets can be provided via environment variables:
 
 ```bash
 # Data Plane
@@ -148,8 +205,6 @@ export HUGGINGFACE_TOKEN="your-token"
 
 # Control Plane
 export CONTROL_PLANE_JWT_SECRET="your-secret"
-export RESEND_ALERT_SENDER="alerts@example.com"
-export RESEND_INVITE_SENDER="invites@example.com"
 export TRUSTGATE_JWT_SECRET="your-secret"
 export FIREWALL_JWT_SECRET="your-secret"
 export MODEL_SCANNER_SECRET="your-secret"
@@ -164,151 +219,15 @@ export POSTGRES_DB="neuraltrust"
 
 # TrustGate
 export SERVER_SECRET_KEY="your-secret"
-export HF_API_KEY="your-key"
 
-# Run the script
-./create-secrets.sh
-```
-
-## Using Pre-defined Secrets
-
-If you already have secrets in your cluster, the Helm chart will automatically reference them. The chart uses Kubernetes secret references, so as long as the secret names match, they will be used.
-
-### Example: Using Existing Secrets
-
-```bash
-# Create a secret manually
-kubectl create secret generic data-plane-jwt-secret \
-  --from-literal=DATA_PLANE_JWT_SECRET="your-secret" \
-  -n neuraltrust
-
-# The Helm chart will automatically use it
-helm upgrade --install neuraltrust-platform . \
-  --namespace neuraltrust \
-  -f my-values.yaml
-```
-
-## Secret Reference in Values
-
-The Helm chart supports referencing secrets in two ways:
-
-### 1. Direct Value (Less Secure)
-
-```yaml
-neuraltrust-data-plane:
-  dataPlane:
-    secrets:
-      dataPlaneJWTSecret: "your-secret-value"
-```
-
-### 2. Secret Reference (Recommended)
-
-```yaml
-neuraltrust-data-plane:
-  dataPlane:
-    secrets:
-      dataPlaneJWTSecret:
-        secretName: "data-plane-jwt-secret"
-        secretKey: "DATA_PLANE_JWT_SECRET"
-```
-
-## Script Options
-
-```bash
-./create-secrets.sh [OPTIONS]
-
-Options:
-  --replace-existing      Replace existing secrets without asking
-  --no-replace-existing   Skip existing secrets without asking
-  --namespace NAMESPACE   Use specified namespace (default: neuraltrust)
-  --help, -h              Show help message
-```
-
-## Script Features
-
-- **Environment Variable Support**: All secrets can be provided via environment variables
-- **Interactive Mode**: Prompts for missing values
-- **Pre-existing Secret Detection**: Checks if secrets already exist
-- **Non-destructive Updates**: Can update individual keys in multi-key secrets
-- **Namespace Management**: Automatically creates namespace if it doesn't exist
-- **Password Generation**: Auto-generates passwords for ClickHouse and Redis if not provided
-
-## Security Best Practices
-
-1. **Use Auto-Generated Secrets (Default)**: Let the chart auto-generate secrets for the simplest and safest setup
-2. **Use Pre-defined Secrets for Production**: For production, consider creating secrets before deployment using the script, kubectl, or an external secret manager
-3. **Avoid Values Files for Secrets**: Don't store secrets in your values file (e.g. my-values.yaml) if it is committed to git
-4. **Use Secret Management**: Consider using external secret management systems (Sealed Secrets, External Secrets Operator, etc.)
-5. **Rotate Secrets**: Regularly rotate secrets, especially JWT secrets
-6. **Limit Access**: Use RBAC to limit who can read secrets
-
-## Troubleshooting
-
-### TrustGate firewall env vars not updating
-
-TrustGate loads **`NEURAL_TRUST_FIREWALL_URL`** and **`NEURAL_TRUST_FIREWALL_SECRET_KEY`** from **`trustgate-secrets`**, not from plain `env` on the pod template unless the chart has merged your `trustgate.global.env` values into that secret. After `helm upgrade` changes the Secret, **restart** the TrustGate deployments so new values appear in the process environment.
-
-### Secret Not Found
-
-If you see errors about missing secrets:
-
-```bash
-# Check if secret exists
-kubectl get secret <secret-name> -n neuraltrust
-
-# List all secrets
-kubectl get secrets -n neuraltrust
-
-# View secret (base64 encoded)
-kubectl get secret <secret-name> -n neuraltrust -o yaml
-```
-
-### Wrong Secret Key
-
-If the secret exists but has the wrong key:
-
-```bash
-# Update the key
-kubectl patch secret <secret-name> -n neuraltrust \
-  --type='json' \
-  -p='[{"op": "replace", "path": "/data/<key>", "value": "<base64-encoded-value>"}]'
-```
-
-### Secret Format Issues
-
-The script handles URL encoding for PostgreSQL connection strings automatically. If you create secrets manually, ensure:
-- Passwords are properly URL-encoded in DATABASE_URL
-- All values are base64 encoded in Kubernetes secrets
-- No trailing newlines or whitespace
-
-## Examples
-
-### Full Deployment with Script
-
-```bash
-# 1. Set environment variables
-export DATA_PLANE_JWT_SECRET=$(openssl rand -hex 32)
-export CONTROL_PLANE_JWT_SECRET=$(openssl rand -hex 32)
-export POSTGRES_PASSWORD=$(openssl rand -hex 16)
-export CLICKHOUSE_PASSWORD=$(openssl rand -hex 16)
-
-# 2. Run secrets script
 ./create-secrets.sh --namespace neuraltrust
-
-# 3. Deploy
-helm dependency update
-helm upgrade --install neuraltrust-platform . \
-  --namespace neuraltrust \
-  -f my-values.yaml
 ```
 
-### Using External Secret Management
+## Using external secret management
 
-If you use External Secrets Operator or similar:
+Example with External Secrets Operator:
 
 ```yaml
-# The Helm chart will use pre-created secrets
-# Just ensure secret names match
 apiVersion: external-secrets.io/v1beta1
 kind: ExternalSecret
 metadata:
@@ -326,20 +245,50 @@ spec:
         key: neuraltrust/data-plane/jwt-secret
 ```
 
-## Auto-Generation vs Pre-Generated Secrets
+## Comparison: auto-generated vs pre-generated
 
-| Feature | Auto-Generated (`autoGenerateSecrets: true`) | Pre-Generated (`preserveExistingSecrets: true`) |
-|---------|----------------------------------------------|--------------------------------------------------|
-| Setup effort | None -- just deploy | Must create all secrets first |
-| Secret creation | Helm creates secrets automatically | User/CI creates secrets before deploy |
+| Feature | Auto-generated | Pre-generated |
+|---|---|---|
+| Setup effort | None — just deploy | Must create all secrets first |
+| Secret creation | Helm creates automatically | User/CI creates before deploy |
 | Upgrade behavior | Existing values preserved via `lookup` | Helm never touches secrets |
-| Secret synchronization | `SERVER_SECRET_KEY` = `TRUSTGATE_JWT_SECRET` automatic | Manual -- user must ensure consistency |
-| Best for | Dev, staging, quick starts | Production with Vault/Sealed Secrets/compliance |
+| Secret sync | `SERVER_SECRET_KEY` = `TRUSTGATE_JWT_SECRET` automatic | Manual — user must ensure consistency |
+| Best for | Dev, staging, quick starts | Production with Vault/compliance |
 
-## Next Steps
+## Security best practices
 
-After deployment:
-1. Verify secrets are created: `kubectl get secrets -n neuraltrust`
-2. If using auto-generation, secrets are already created by Helm
-3. Check pod logs if issues occur: `kubectl logs -n neuraltrust <pod-name>`
+1. **Use auto-generated secrets for simplicity** — the default is the safest starting point
+2. **Use external secret management for production** — Vault, Sealed Secrets, or External Secrets Operator
+3. **Never commit secrets to git** — don't store real values in values files that are version-controlled
+4. **Rotate secrets regularly** — especially JWT secrets
+5. **Restrict access with RBAC** — limit who can read Kubernetes secrets
 
+## Troubleshooting
+
+### TrustGate firewall env vars not updating
+
+TrustGate reads `NEURAL_TRUST_FIREWALL_URL` and `NEURAL_TRUST_FIREWALL_SECRET_KEY` from `trustgate-secrets`. After `helm upgrade`, restart TrustGate deployments to reload.
+
+### Secret not found
+
+```bash
+kubectl get secret <secret-name> -n neuraltrust
+kubectl get secrets -n neuraltrust
+kubectl get secret <secret-name> -n neuraltrust -o yaml
+```
+
+### Wrong secret key
+
+```bash
+kubectl patch secret <secret-name> -n neuraltrust \
+  --type='json' \
+  -p='[{"op": "replace", "path": "/data/<key>", "value": "<base64-encoded-value>"}]'
+```
+
+### Secret format issues
+
+When creating secrets manually:
+
+- URL-encode passwords in `DATABASE_URL`
+- Base64-encode all values in Kubernetes secrets
+- Avoid trailing newlines or whitespace
