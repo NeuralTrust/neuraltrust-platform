@@ -28,10 +28,23 @@ spec:
         {{- end }}
         {{- end }}
       {{- end }}
+      {{- if .Values.securityHardening }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      {{- end }}
       containers:
       - name: redis
         image: "{{ .Values.redis.image.repository }}:{{ .Values.redis.image.tag }}"
         imagePullPolicy: {{ .Values.redis.image.pullPolicy }}
+        {{- if .Values.securityHardening }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        {{- end }}
         command: ["redis-server"]
         args:
         - /etc/redis/redis.conf
@@ -45,6 +58,8 @@ spec:
           mountPath: /data
         - name: redis-config
           mountPath: /etc/redis
+        - name: tmp
+          mountPath: /tmp
         livenessProbe:
           tcpSocket:
             port: redis
@@ -58,6 +73,8 @@ spec:
         resources:
           {{- toYaml .Values.redis.master.resources | nindent 10 }}
       volumes:
+      - name: tmp
+        emptyDir: {}
       - name: redis-config
         configMap:
           name: trustgate-redis

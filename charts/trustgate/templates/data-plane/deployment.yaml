@@ -58,6 +58,8 @@ spec:
       volumes:
       - name: logs-volume
         emptyDir: {}
+      - name: tmp
+        emptyDir: {}
       containers:
       - name: data-plane
         image: "{{ .Values.global.image.image }}:{{ .Values.global.image.tag }}"
@@ -130,6 +132,13 @@ spec:
               key: NEURAL_TRUST_FIREWALL_SECRET_KEY
               optional: true
         {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
+        {{- if .Values.securityHardening }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        {{- end }}
         imagePullPolicy: {{ .Values.global.image.pullPolicy }}
         ports:
         - containerPort: {{ .Values.dataPlane.ports.http }}
@@ -137,6 +146,8 @@ spec:
         volumeMounts:
         - name: logs-volume
           mountPath: /app/logs
+        - name: tmp
+          mountPath: /tmp
         resources:
           {{- toYaml .Values.dataPlane.resources | nindent 10 }}
         readinessProbe:
