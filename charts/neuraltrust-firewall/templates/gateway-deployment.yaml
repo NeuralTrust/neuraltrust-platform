@@ -101,8 +101,22 @@ spec:
           resources:
             {{- toYaml .Values.firewall.gateway.resources | nindent 12 }}
           {{- end }}
-          {{- if .Values.firewall.securityContext }}
-          securityContext:
-            {{- toYaml .Values.firewall.securityContext | nindent 12 }}
+          {{- $gwSC := .Values.firewall.securityContext | default dict }}
+          {{- if .Values.securityHardening }}
+          {{- $gwSC = mustMergeOverwrite $gwSC (dict "readOnlyRootFilesystem" true) }}
           {{- end }}
+          {{- if $gwSC }}
+          securityContext:
+            {{- toYaml $gwSC | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: cache
+              mountPath: /root/.cache
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: cache
+          emptyDir: {}
 {{- end }}

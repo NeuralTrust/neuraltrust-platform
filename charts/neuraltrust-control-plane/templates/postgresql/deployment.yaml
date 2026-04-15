@@ -75,6 +75,9 @@ spec:
         image: {{ include "control-plane.image" (dict "repository" .Values.controlPlane.components.postgresql.image.repository "tag" .Values.controlPlane.components.postgresql.image.tag "global" .Values.global) | quote }}
         securityContext:
           allowPrivilegeEscalation: false
+          {{- if .Values.securityHardening }}
+          readOnlyRootFilesystem: true
+          {{- end }}
           capabilities:
             drop:
               - ALL
@@ -113,6 +116,10 @@ spec:
         volumeMounts:
         - name: postgresql-data
           mountPath: /var/lib/postgresql/data
+        - name: tmp
+          mountPath: /tmp
+        - name: run-postgresql
+          mountPath: /var/run/postgresql
         resources:
             {{- if .Values.controlPlane.components.postgresql.resources }}
             {{- toYaml .Values.controlPlane.components.postgresql.resources | nindent 12 }}
@@ -147,6 +154,10 @@ spec:
           successThreshold: 1
           failureThreshold: 3
       volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: run-postgresql
+        emptyDir: {}
       - name: postgresql-data
         {{- $p := index .Values.controlPlane.components.postgresql "persistence" }}
         {{- if $p }}

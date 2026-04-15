@@ -34,10 +34,22 @@ spec:
       imagePullSecrets:
         - name: {{ $imagePullSecret }}
       {{- end }}
+      {{- if .Values.securityHardening }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      {{- end }}
       initContainers:
         - name: clickhouse-migrations
           image: {{ include "data-plane.image" (dict "repository" "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickhouse-server" "tag" "25.8" "global" .Values.global) | quote }}
           imagePullPolicy: IfNotPresent
+          {{- if .Values.securityHardening }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          {{- end }}
           command:
           - /bin/sh
           - -c
@@ -168,16 +180,25 @@ spec:
           - name: init-db
             mountPath: /init-db
             readOnly: true
+          - name: tmp
+            mountPath: /tmp
       containers:
       - name: api
         {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.image }}
         {{- $apiRepo := .Values.dataPlane.components.api.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api" }}
-        {{- $apiTag := .Values.dataPlane.components.api.image.tag | default "v1.17.4" }}
+        {{- $apiTag := .Values.dataPlane.components.api.image.tag | default "v1.17.7" }}
         image: {{ include "data-plane.image" (dict "repository" $apiRepo "tag" $apiTag "global" .Values.global) | quote }}
         imagePullPolicy: {{ .Values.dataPlane.components.api.image.pullPolicy | default "Always" }}
         {{- else }}
         image: {{ include "data-plane.image" (dict "repository" "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api" "tag" "v1.13.0" "global" .Values.global) | quote }}
         imagePullPolicy: Always
+        {{- end }}
+        {{- if .Values.securityHardening }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
         {{- end }}
         ports:
         - containerPort: 8000
@@ -251,6 +272,8 @@ spec:
             mountPath: /app/.trusttest_config.json # Assuming app runs from /app
             subPath: .trusttest_config.json
           {{- end }}
+          - name: tmp
+            mountPath: /tmp
         resources:
           {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.resources }}
           {{- toYaml .Values.dataPlane.components.api.resources | nindent 10 }}
@@ -299,6 +322,8 @@ spec:
           successThreshold: 1
           failureThreshold: 30
       volumes:
+      - name: tmp
+        emptyDir: {}
       - name: init-db
         configMap:
           name: {{ if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.clickhouse .Values.dataPlane.components.clickhouse.configmap }}{{ .Values.dataPlane.components.clickhouse.configmap.name | default "clickhouse-init-job" }}{{ else }}clickhouse-init-job{{ end }}

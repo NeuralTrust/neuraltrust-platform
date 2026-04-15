@@ -43,6 +43,9 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
           securityContext:
             allowPrivilegeEscalation: false
+            {{- if .Values.securityHardening }}
+            readOnlyRootFilesystem: true
+            {{- end }}
             capabilities:
               drop: ["ALL"]
           ports:
@@ -95,11 +98,19 @@ spec:
               subPath: logging.xml
             - name: tmp
               mountPath: /tmp
+            - name: users-d
+              mountPath: /etc/clickhouse-server/users.d
+            - name: log
+              mountPath: /var/log/clickhouse-server
       volumes:
         - name: config
           configMap:
             name: {{ include "clickhouse.fullname" . }}-config
         - name: tmp
+          emptyDir: {}
+        - name: users-d
+          emptyDir: {}
+        - name: log
           emptyDir: {}
   {{- if .Values.persistence.enabled }}
   volumeClaimTemplates:

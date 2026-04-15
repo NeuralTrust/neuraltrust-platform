@@ -37,6 +37,9 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
           securityContext:
             allowPrivilegeEscalation: false
+            {{- if .Values.securityHardening }}
+            readOnlyRootFilesystem: true
+            {{- end }}
             capabilities:
               drop: ["ALL"]
           ports:
@@ -99,8 +102,20 @@ spec:
               mountPath: /tmp/kraft-combined-logs
             - name: tmp
               mountPath: /tmp/kafka-logs
+            - name: tmp-dir
+              mountPath: /tmp
+            - name: kafka-config
+              mountPath: /opt/kafka/config
+            - name: kafka-logs
+              mountPath: /opt/kafka/logs
       volumes:
         - name: tmp
+          emptyDir: {}
+        - name: tmp-dir
+          emptyDir: {}
+        - name: kafka-config
+          emptyDir: {}
+        - name: kafka-logs
           emptyDir: {}
   {{- if .Values.persistence.enabled }}
   volumeClaimTemplates:

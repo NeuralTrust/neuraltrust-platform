@@ -33,8 +33,11 @@ spec:
       imagePullSecrets:
         - name: {{ $imagePullSecret }}
       {{- end }}
-      # Runs before the main container. Often ~1–5m while the Kafka broker becomes reachable
-      # (e.g. same Helm upgrade starting kafka-0). Wall-clock to Ready = init + startupProbe window.
+      {{- if .Values.securityHardening }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      {{- end }}
       initContainers:
         - name: fix-connect-topics
           {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect .Values.dataPlane.components.kafka.connect.image }}
@@ -43,6 +46,13 @@ spec:
           image: {{ include "data-plane.image" (dict "repository" $initRepo "tag" $initTag "global" .Values.global) | quote }}
           {{- else }}
           image: {{ include "data-plane.image" (dict "repository" "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect" "tag" "v0.1.4" "global" .Values.global) | quote }}
+          {{- end }}
+          {{- if .Values.securityHardening }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           {{- end }}
           command: ["/bin/bash", "-c"]
           args:
@@ -76,6 +86,9 @@ spec:
                   --alter --add-config cleanup.policy=compact 2>&1 || true
               done
               echo "Init complete."
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           resources:
             requests:
               cpu: 100m
@@ -93,6 +106,13 @@ spec:
           {{- else }}
           image: {{ include "data-plane.image" (dict "repository" "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect" "tag" "v0.1.4" "global" .Values.global) | quote }}
           imagePullPolicy: Always
+          {{- end }}
+          {{- if .Values.securityHardening }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           {{- end }}
           ports:
             - containerPort: 8083
@@ -192,6 +212,9 @@ spec:
                   key: admin-password
                   optional: true
             {{- include "neuraltrust-platform.proxy-env" . | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           resources:
             {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect .Values.dataPlane.components.kafka.connect.resources }}
             {{- toYaml .Values.dataPlane.components.kafka.connect.resources | nindent 12 }}
@@ -203,3 +226,6 @@ spec:
               cpu: 500m
               memory: 2Gi
             {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
