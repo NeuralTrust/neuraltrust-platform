@@ -59,8 +59,16 @@ spec:
         - name: {{ . }}
         {{- end }}
       {{- end }}
+      {{- if .Values.securityHardening }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      {{- end }}
       volumes:
       - name: logs-volume
+        emptyDir: {}
+      - name: tmp
         emptyDir: {}
       containers:
       - name: control-plane
@@ -134,6 +142,13 @@ spec:
               key: NEURAL_TRUST_FIREWALL_SECRET_KEY
               optional: true
         {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
+        {{- if .Values.securityHardening }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        {{- end }}
         imagePullPolicy: {{ .Values.global.image.pullPolicy }}
         ports:
         - containerPort: {{ .Values.controlPlane.ports.http }}
@@ -141,6 +156,8 @@ spec:
         volumeMounts:
         - name: logs-volume
           mountPath: /app/logs
+        - name: tmp
+          mountPath: /tmp
         resources:
           {{- toYaml .Values.controlPlane.resources | nindent 10 }}
         readinessProbe:

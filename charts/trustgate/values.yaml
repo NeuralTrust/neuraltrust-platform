@@ -1,3 +1,5 @@
+securityHardening: true # Adds readOnlyRootFilesystem, drops capabilities, seccomp profile. Set to false to restore prior behavior.
+
 # Additional global settings
 global:
   version: "ee" # can be "ce" or "ee"
@@ -100,6 +102,10 @@ controlPlane:
 dataPlane:
   name: trustgate-data-plane
   replicas: 1
+  podSecurityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
   resources:
     requests:
       cpu: 1000m
