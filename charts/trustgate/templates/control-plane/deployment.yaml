@@ -61,7 +61,6 @@ spec:
       {{- end }}
       {{- if .Values.securityHardening }}
       securityContext:
-        runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
       {{- end }}

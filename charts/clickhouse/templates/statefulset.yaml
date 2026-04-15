@@ -98,11 +98,15 @@ spec:
               subPath: logging.xml
             - name: tmp
               mountPath: /tmp
+            - name: users-d
+              mountPath: /etc/clickhouse-server/users.d
       volumes:
         - name: config
           configMap:
             name: {{ include "clickhouse.fullname" . }}-config
         - name: tmp
+          emptyDir: {}
+        - name: users-d
           emptyDir: {}
   {{- if .Values.persistence.enabled }}
   volumeClaimTemplates:
