@@ -30,6 +30,11 @@ spec:
       imagePullSecrets:
         - name: {{ $imagePullSecret }}
       {{- end }}
+      {{- if .Values.securityHardening }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      {{- end }}
       containers:
       - name: worker
         {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.worker .Values.dataPlane.components.worker.image }}
@@ -86,6 +91,16 @@ spec:
               name: clickhouse-secrets
               key: CLICKHOUSE_DATABASE
         {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
+        {{- if .Values.securityHardening }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        {{- end }}
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
         command: ["python", "-u", "src/listen.py"]
         resources:
           {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.worker .Values.dataPlane.components.worker.resources }}
@@ -116,3 +131,6 @@ spec:
           periodSeconds: 30
           timeoutSeconds: 5
           failureThreshold: 3
+      volumes:
+      - name: tmp
+        emptyDir: {}

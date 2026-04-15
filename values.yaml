@@ -31,8 +31,8 @@ global:
   # When enabled, HTTP_PROXY/HTTPS_PROXY/NO_PROXY (upper+lowercase) are injected into every workload.
   proxy:
     enabled: false
-    httpProxy: ""   # e.g. "http://proxy.corp:3128"
-    httpsProxy: ""  # e.g. "http://proxy.corp:3128"
+    httpProxy: "" # e.g. "http://proxy.corp:3128"
+    httpsProxy: "" # e.g. "http://proxy.corp:3128"
     noProxy: "localhost,127.0.0.1,.cluster.local,.svc"
   # Private Service Connect (PSC) -- GCP only
   # Services listed in negNames get a standalone NEG (PSC-only, no public Ingress).
@@ -161,6 +161,7 @@ infrastructure:
 # ClickHouse subchart values (passed directly to clickhouse subchart)
 # These values are used when infrastructure.clickhouse.deploy=true
 clickhouse:
+  securityHardening: true # Adds readOnlyRootFilesystem, drops capabilities, seccomp profile. Set to false to restore prior behavior.
   fullnameOverride: "clickhouse"
   replicaCount: 1
   imagePullSecrets: "gcr-secret"
@@ -191,6 +192,7 @@ clickhouse:
 # Kafka subchart values (passed directly to kafka subchart)
 # These values are used when infrastructure.kafka.deploy=true
 kafka:
+  securityHardening: true # Adds readOnlyRootFilesystem, drops capabilities, seccomp profile. Set to false to restore prior behavior.
   fullnameOverride: "kafka"
   replicaCount: 1
   imagePullSecrets: "gcr-secret"
@@ -219,6 +221,7 @@ kafka:
       cpu: 1
 # TrustGate Configuration
 trustgate:
+  securityHardening: true # Adds readOnlyRootFilesystem, drops capabilities, seccomp profile. Set to false to restore prior behavior.
   enabled: true
   global:
     version: "ee" # can be "ce" or "ee"
@@ -230,7 +233,7 @@ trustgate:
     image:
       pullPolicy: Always
       image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee"
-      tag: "v1.26.3"
+      tag: "v1.26.5"
       # imagePullSecrets: if not set, will fall back to parent chart's global.imagePullSecrets
       imagePullSecrets: ["gcr-secret"] # Set to array of secret names, e.g., ["secret-name"] or leave empty to use parent global.imagePullSecrets
     postgresql:
@@ -453,6 +456,7 @@ trustgate:
 # NeuralTrust Control Plane subchart values
 # Helm requires values to be passed to subcharts using the subchart name as a prefix
 neuraltrust-control-plane:
+  securityHardening: true # Adds readOnlyRootFilesystem, drops capabilities, seccomp profile. Set to false to restore prior behavior (e.g. for PostgreSQL).
   infrastructure:
     postgresql:
       deploy: true # Deploy PostgreSQL in-cluster (set to false to use external PostgreSQL)
@@ -527,7 +531,7 @@ neuraltrust-control-plane:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api"
-          tag: "v1.13.8"
+          tag: "v1.13.9"
           pullPolicy: "Always"
         config:
           # URLs will be auto-generated from OpenShift Routes if global.openshift=true and global.openshiftDomain is set
@@ -571,7 +575,7 @@ neuraltrust-control-plane:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.52.8"
+          tag: "v1.53.4"
           pullPolicy: "Always"
         config:
           nodeEnv: production
@@ -641,6 +645,7 @@ neuraltrust-control-plane:
 # NeuralTrust Data Plane subchart values
 # Helm requires values to be passed to subcharts using the subchart name as a prefix
 neuraltrust-data-plane:
+  securityHardening: true # Adds readOnlyRootFilesystem, drops capabilities, seccomp profile. Set to false to restore prior behavior.
   dataPlane:
     enabled: true
     imagePullSecrets: "gcr-secret" # Set imagePullSecrets for all data-plane components (api, worker, kafka-connect)
@@ -704,7 +709,7 @@ neuraltrust-data-plane:
         classifierModel: "gpt"
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.17.4
+          tag: v1.17.7
           pullPolicy: Always
         accessMode: ReadWriteOnce
         huggingfaceToken: ""
@@ -744,6 +749,7 @@ neuraltrust-data-plane:
 # For GPU workers: set workerDefaults.image to firewall-gpu, add nvidia.com/gpu resources,
 # nodeSelector, tolerations, and hostIPC (see values-dataplane-gpu.yaml.example).
 neuraltrust-firewall:
+  securityHardening: true # Adds readOnlyRootFilesystem, drops capabilities, seccomp profile. Set to false to restore prior behavior.
   firewall:
     enabled: true
     imagePullSecrets: "gcr-secret"
@@ -842,6 +848,7 @@ neuraltrust-firewall:
         drop:
           - ALL
       readOnlyRootFilesystem: false
+      allowPrivilegeEscalation: false
       runAsNonRoot: false
       runAsUser: 0
     healthCheckPolicy:

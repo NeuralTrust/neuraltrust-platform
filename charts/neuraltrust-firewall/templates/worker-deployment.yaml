@@ -133,11 +133,24 @@ spec:
           resources:
             {{- toYaml $resources | nindent 12 }}
           {{- end }}
-          {{- $secCtx := $workerCfg.securityContext | default $.Values.firewall.securityContext }}
+          {{- $secCtx := $workerCfg.securityContext | default $.Values.firewall.securityContext | default dict }}
+          {{- if $.Values.securityHardening }}
+          {{- $secCtx = mustMergeOverwrite $secCtx (dict "readOnlyRootFilesystem" true) }}
+          {{- end }}
           {{- if $secCtx }}
           securityContext:
             {{- toYaml $secCtx | nindent 12 }}
           {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: cache
+              mountPath: /root/.cache
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: cache
+          emptyDir: {}
 {{- end }}
 {{- end }}
 {{- end }}
