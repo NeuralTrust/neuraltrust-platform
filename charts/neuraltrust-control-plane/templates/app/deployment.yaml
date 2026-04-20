@@ -206,6 +206,10 @@ spec:
         imagePullPolicy: "{{ $appPullPolicy }}"
         ports:
         - containerPort: {{ $appPort }}
+        {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.extraEnvFrom }}
+        envFrom:
+          {{- toYaml .Values.controlPlane.components.app.extraEnvFrom | nindent 8 }}
+        {{- end }}
         env:
         - name: NODE_ENV
           value: "{{ $nodeEnv }}"
@@ -374,6 +378,9 @@ spec:
           value: "{{ $kafkaHost }}"
         - name: KAFKA_PORT
           value: "{{ $kafkaPort }}"
+        {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.extraEnv }}
+        {{- toYaml .Values.controlPlane.components.app.extraEnv | nindent 8 }}
+        {{- end }}
         {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
         resources:
           {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.resources }}

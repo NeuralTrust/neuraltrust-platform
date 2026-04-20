@@ -28,6 +28,10 @@ firewall:
     podDisruptionBudget:
       enabled: true
       minAvailable: 1
+    # Extra env vars appended to the gateway container (list of EnvVar).
+    extraEnv: []
+    # Extra envFrom sources appended to the gateway container (list of EnvFromSource: configMapRef/secretRef).
+    extraEnvFrom: []
 
   # --- Worker defaults (shared by all workers unless overridden) ---
   # Default: CPU image. For GPU, override image to firewall-gpu, add nvidia.com/gpu
@@ -61,22 +65,43 @@ firewall:
       minAvailable: 1
 
   # --- Workers (each gets Deployment, Service, HPA, PDB) ---
+  # Per-worker extraEnv / extraEnvFrom default to empty; add them under a worker entry
+  # to inject extra env vars or envFrom sources into that specific worker container.
+  # Example:
+  #   toxicity:
+  #     enabled: true
+  #     module: src.workers.toxicity.app:app
+  #     extraEnv:
+  #       - name: MY_VAR
+  #         value: "literal"
+  #     extraEnvFrom:
+  #       - configMapRef: { name: my-configmap }
   workers:
     toxicity:
       enabled: true
       module: src.workers.toxicity.app:app
+      extraEnv: []
+      extraEnvFrom: []
     toolguard:
       enabled: true
       module: src.workers.toolguard.app:app
+      extraEnv: []
+      extraEnvFrom: []
     prompt-jailbreak:
       enabled: true
       module: src.workers.prompt_jailbreak.app:app
+      extraEnv: []
+      extraEnvFrom: []
     prompt-moderation:
       enabled: true
       module: src.workers.prompt_moderation.app:app
+      extraEnv: []
+      extraEnvFrom: []
     response-jailbreak:
       enabled: true
       module: src.workers.response_jailbreak.app:app
+      extraEnv: []
+      extraEnvFrom: []
 
   # --- ServiceAccount ---
   serviceAccount:

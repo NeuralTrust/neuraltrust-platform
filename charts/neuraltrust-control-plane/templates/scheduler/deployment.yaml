@@ -144,6 +144,10 @@ spec:
           {{- end }}
         ports:
         - containerPort: 3000
+        {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.scheduler .Values.controlPlane.components.scheduler.extraEnvFrom }}
+        envFrom:
+          {{- toYaml .Values.controlPlane.components.scheduler.extraEnvFrom | nindent 8 }}
+        {{- end }}
         env:
         - name: PORT
           value: "3000"
@@ -239,5 +243,8 @@ spec:
               name: control-plane-secrets
               key: resend-alert-sender
               optional: true
+        {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.scheduler .Values.controlPlane.components.scheduler.extraEnv }}
+        {{- toYaml .Values.controlPlane.components.scheduler.extraEnv | nindent 8 }}
+        {{- end }}
         {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
 {{- end }}

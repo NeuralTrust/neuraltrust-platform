@@ -324,6 +324,11 @@ trustgate:
     service:
       type: ClusterIP
       port: 8080
+    # Extra env hooks — see neuraltrust-data-plane.dataPlane.components.api below
+    # for syntax. extraEnvFrom entries are appended to the existing
+    # envFrom: [configMapRef: trustgate-env-vars] list.
+    extraEnv: []
+    extraEnvFrom: []
   # Data Plane settings
   dataPlane:
     name: trustgate-data-plane
@@ -361,6 +366,11 @@ trustgate:
     service:
       type: ClusterIP
       port: 8081
+    # Extra env hooks — see neuraltrust-data-plane.dataPlane.components.api below
+    # for syntax. extraEnvFrom entries are appended to the existing
+    # envFrom: [configMapRef: trustgate-env-vars] list.
+    extraEnv: []
+    extraEnvFrom: []
   # Actions settings
   actions:
     name: trustgate-actions
@@ -402,6 +412,11 @@ trustgate:
     service:
       type: ClusterIP
       port: 8084
+    # Extra env hooks — see neuraltrust-data-plane.dataPlane.components.api below
+    # for syntax. extraEnvFrom entries are appended to the existing
+    # envFrom: [configMapRef: trustgate-env-vars] list.
+    extraEnv: []
+    extraEnvFrom: []
   # Redis configuration
   # Note: Redis is deployed as part of TrustGate (not as a separate infrastructure subchart)
   # Set enabled: false to use external Redis, then configure trustgate.redis.external below
@@ -511,6 +526,10 @@ neuraltrust-control-plane:
           limits:
             memory: 512Mi
             cpu: 200m
+        # Extra env hooks — see neuraltrust-data-plane.dataPlane.components.api above
+        # for syntax (EnvVar list and EnvFromSource list).
+        extraEnv: []
+        extraEnvFrom: []
       api:
         enabled: true
         host: "" # Optional: set to your domain (e.g., "control-plane-api.yourdomain.com"). Empty = use ALB auto-generated URL.
@@ -554,6 +573,10 @@ neuraltrust-control-plane:
           image:
             repository: "curlimages/curl" # Default: curlimages/curl (without hub/)
             tag: "8.13.0"
+        # Extra env hooks — see neuraltrust-data-plane.dataPlane.components.api above
+        # for syntax (EnvVar list and EnvFromSource list).
+        extraEnv: []
+        extraEnvFrom: []
       app:
         enabled: true
         host: "" # Optional: set to your domain (e.g., "control-plane-app.yourdomain.com"). Empty = use ALB auto-generated URL.
@@ -613,6 +636,10 @@ neuraltrust-control-plane:
             limits:
               memory: 1Gi
               cpu: 500m
+        # Extra env hooks — see neuraltrust-data-plane.dataPlane.components.api above
+        # for syntax (EnvVar list and EnvFromSource list).
+        extraEnv: []
+        extraEnvFrom: []
       postgresql:
         secrets:
           name: "postgresql-secrets"
@@ -729,6 +756,27 @@ neuraltrust-data-plane:
           limits:
             cpu: 4
             memory: 6Gi
+        # Per-component env injection hooks (available on every main service container
+        # across the NT charts: control-plane api/app/scheduler, data-plane api/worker,
+        # firewall gateway/workers.<name>, trustgate controlPlane/dataPlane/actions).
+        #
+        # extraEnv     — list of EnvVar entries appended to the container env (name+value
+        #                or name+valueFrom.{secretKeyRef,configMapKeyRef,fieldRef}).
+        # extraEnvFrom — list of EnvFromSource entries (configMapRef / secretRef) used to
+        #                load whole ConfigMaps or Secrets as env vars in a single line.
+        #
+        # Example:
+        #   extraEnv:
+        #     - name: MY_VAR
+        #       value: "literal"
+        #     - name: DB_PASSWORD
+        #       valueFrom:
+        #         secretKeyRef: { name: my-secret, key: password }
+        #   extraEnvFrom:
+        #     - configMapRef: { name: my-configmap }
+        #     - secretRef:    { name: my-secret, optional: true }
+        extraEnv: []
+        extraEnvFrom: []
       worker:
         enabled: true
         replicas: 1
@@ -743,6 +791,9 @@ neuraltrust-data-plane:
           limits:
             memory: 8Gi
             cpu: 2000m
+        # See api.extraEnv / api.extraEnvFrom above for syntax and semantics.
+        extraEnv: []
+        extraEnvFrom: []
 # NeuralTrust Firewall subchart values
 # Architecture: gateway (CPU, lightweight router) + 5 specialised workers (CPU by default, GPU-capable).
 # Images: firewall-cpu (default for both gateway and workers) and firewall-gpu share the same tag.
@@ -778,6 +829,11 @@ neuraltrust-firewall:
       podDisruptionBudget:
         enabled: false
         minAvailable: 0
+      # Extra env hooks — see neuraltrust-data-plane.dataPlane.components.api above
+      # for syntax. extraEnvFrom is appended to the existing
+      # envFrom: [configMapRef: firewall-config] list.
+      extraEnv: []
+      extraEnvFrom: []
     # --- Worker defaults (shared by all workers) ---
     # Default: CPU image, no GPU scheduling. For GPU, override with:
     #   workerDefaults.image.repository: .../firewall-gpu
@@ -811,22 +867,35 @@ neuraltrust-firewall:
         enabled: false
         minAvailable: 0
     # --- Workers ---
+    # Per-worker extraEnv / extraEnvFrom default to empty; add them under a worker
+    # entry to inject extra env vars or envFrom sources into that specific worker
+    # container. See neuraltrust-data-plane.dataPlane.components.api above for syntax.
     workers:
       toxicity:
         enabled: true
         module: src.workers.toxicity.app:app
+        extraEnv: []
+        extraEnvFrom: []
       toolguard:
         enabled: true
         module: src.workers.toolguard.app:app
+        extraEnv: []
+        extraEnvFrom: []
       prompt-jailbreak:
         enabled: true
         module: src.workers.prompt_jailbreak.app:app
+        extraEnv: []
+        extraEnvFrom: []
       prompt-moderation:
         enabled: true
         module: src.workers.prompt_moderation.app:app
+        extraEnv: []
+        extraEnvFrom: []
       response-jailbreak:
         enabled: true
         module: src.workers.response_jailbreak.app:app
+        extraEnv: []
+        extraEnvFrom: []
     # --- Shared settings ---
     config:
       pythonUnbuffered: "1"

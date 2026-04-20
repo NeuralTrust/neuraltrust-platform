@@ -57,6 +57,9 @@ spec:
           envFrom:
             - configMapRef:
                 name: firewall-config
+            {{- with .Values.firewall.gateway.extraEnvFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           env:
             - name: JWT_SECRET
               valueFrom:
@@ -69,6 +72,9 @@ spec:
                   name: firewall-secrets
                   key: HUGGINGFACE_TOKEN
                   optional: true
+            {{- with .Values.firewall.gateway.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
             {{- include "neuraltrust-platform.proxy-env" . | nindent 12 }}
           startupProbe:
             httpGet:

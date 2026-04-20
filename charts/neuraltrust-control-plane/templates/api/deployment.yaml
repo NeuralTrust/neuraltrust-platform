@@ -138,6 +138,10 @@ spec:
           {{- end }}
         ports:
         - containerPort: 8000
+        {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.api .Values.controlPlane.components.api.extraEnvFrom }}
+        envFrom:
+          {{- toYaml .Values.controlPlane.components.api.extraEnvFrom | nindent 8 }}
+        {{- end }}
         env:
         {{- /* Use internal Kubernetes service URLs for inter-service communication */}}
         {{- $defaultDataPlaneUrl := "" }}
@@ -224,6 +228,9 @@ spec:
               key: OPENAI_API_KEY
               optional: true
               {{- end }}
+        {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.api .Values.controlPlane.components.api.extraEnv }}
+        {{- toYaml .Values.controlPlane.components.api.extraEnv | nindent 8 }}
+        {{- end }}
         {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
         readinessProbe:
           httpGet:
