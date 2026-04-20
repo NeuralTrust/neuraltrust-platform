@@ -67,6 +67,9 @@ spec:
         envFrom:
         - configMapRef:
             name: trustgate-env-vars
+        {{- with .Values.dataPlane.extraEnvFrom }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         env:
         # Sensitive values from secrets
         - name: SERVER_SECRET_KEY
@@ -131,6 +134,9 @@ spec:
               name: trustgate-secrets
               key: NEURAL_TRUST_FIREWALL_SECRET_KEY
               optional: true
+        {{- with .Values.dataPlane.extraEnv }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
         {{- if .Values.securityHardening }}
         securityContext:

@@ -46,6 +46,10 @@ spec:
         image: {{ include "data-plane.image" (dict "repository" "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/workers" "tag" "v1.6.3" "global" .Values.global) | quote }}
         imagePullPolicy: "Always"
         {{- end }}
+        {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.worker .Values.dataPlane.components.worker.extraEnvFrom }}
+        envFrom:
+          {{- toYaml .Values.dataPlane.components.worker.extraEnvFrom | nindent 8 }}
+        {{- end }}
         env:
         - name: ENV
           value: "prod"
@@ -90,6 +94,9 @@ spec:
             secretKeyRef:
               name: clickhouse-secrets
               key: CLICKHOUSE_DATABASE
+        {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.worker .Values.dataPlane.components.worker.extraEnv }}
+        {{- toYaml .Values.dataPlane.components.worker.extraEnv | nindent 8 }}
+        {{- end }}
         {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
         {{- if .Values.securityHardening }}
         securityContext:

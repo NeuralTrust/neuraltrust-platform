@@ -98,6 +98,10 @@ controlPlane:
   service:
     type: ClusterIP
     port: 8080
+  # Extra env vars appended to the control-plane container (list of EnvVar).
+  extraEnv: []
+  # Extra envFrom sources appended alongside trustgate-env-vars (list of EnvFromSource: configMapRef/secretRef).
+  extraEnvFrom: []
 # Data Plane settings
 dataPlane:
   name: trustgate-data-plane
@@ -139,6 +143,10 @@ dataPlane:
   service:
     type: ClusterIP
     port: 8081
+  # Extra env vars appended to the data-plane container (list of EnvVar).
+  extraEnv: []
+  # Extra envFrom sources appended alongside trustgate-env-vars (list of EnvFromSource: configMapRef/secretRef).
+  extraEnvFrom: []
 # Actions settings
 actions:
   name: trustgate-actions
@@ -180,6 +188,10 @@ actions:
   service:
     type: ClusterIP
     port: 8084
+  # Extra env vars appended to the actions container (list of EnvVar).
+  extraEnv: []
+  # Extra envFrom sources appended alongside trustgate-env-vars (list of EnvFromSource: configMapRef/secretRef).
+  extraEnvFrom: []
 # Redis configuration
 redis:
   enabled: true

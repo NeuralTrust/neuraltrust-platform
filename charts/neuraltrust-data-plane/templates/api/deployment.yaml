@@ -202,6 +202,10 @@ spec:
         {{- end }}
         ports:
         - containerPort: 8000
+        {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.extraEnvFrom }}
+        envFrom:
+          {{- toYaml .Values.dataPlane.components.api.extraEnvFrom | nindent 10 }}
+        {{- end }}
         env:
           - name: PORT
             value: "8000"
@@ -265,6 +269,9 @@ spec:
               secretKeyRef:
                 name: clickhouse
                 key: admin-password
+          {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.extraEnv }}
+          {{- toYaml .Values.dataPlane.components.api.extraEnv | nindent 10 }}
+          {{- end }}
           {{- include "neuraltrust-platform.proxy-env" . | nindent 10 }}
         volumeMounts:
           {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.trustTestConfig }}
