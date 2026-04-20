@@ -531,7 +531,7 @@ neuraltrust-control-plane:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api"
-          tag: "v1.13.9"
+          tag: "v1.15.0"
           pullPolicy: "Always"
         config:
           # URLs will be auto-generated from OpenShift Routes if global.openshift=true and global.openshiftDomain is set
@@ -575,7 +575,7 @@ neuraltrust-control-plane:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.53.4"
+          tag: "v1.54.0"
           pullPolicy: "Always"
         config:
           nodeEnv: production
@@ -709,7 +709,7 @@ neuraltrust-data-plane:
         classifierModel: "gpt"
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.17.7
+          tag: v1.18.1
           pullPolicy: Always
         accessMode: ReadWriteOnce
         huggingfaceToken: ""
