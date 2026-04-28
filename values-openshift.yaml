@@ -327,8 +327,8 @@ trustgate:
   redis:
     enabled: true
     image:
-      repository: redislabs/redisearch
-      tag: 2.6.9
+      repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/redis-stack-server
+      tag: 7.2.0-v20
       pullPolicy: Always
       imagePullSecrets: []  # Empty for public Docker Hub images, or ["user-registry"] for private images
     # External Redis configuration if redis.enabled is false
@@ -560,8 +560,8 @@ neuraltrust-control-plane:
           host: "control-plane-postgresql"  # PostgreSQL host (set to "control-plane-postgresql" when infrastructure.postgresql.deploy=true, or external host when using external PostgreSQL)
           port: "5432"  # PostgreSQL port
         image:
-          repository: "postgres"
-          tag: "17.2-alpine"
+          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/postgres"
+          tag: "17-alpine"
           pullPolicy: "Always"
           imagePullSecrets:
             - name: "user-registry"

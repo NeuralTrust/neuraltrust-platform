@@ -477,8 +477,8 @@ trustgate:
   redis:
     enabled: true
     image:
-      repository: redislabs/redisearch
-      tag: 2.6.9
+      repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/redis-stack-server
+      tag: 7.2.0-v20
       pullPolicy: Always
       imagePullSecrets: []
     # External Redis configuration if redis.enabled is false
@@ -625,8 +625,8 @@ neuraltrust-control-plane:
         healthCheck:
           # Health check job image (used for post-install/post-upgrade health checks)
           image:
-            repository: "curlimages/curl" # Default: curlimages/curl (without hub/)
-            tag: "8.13.0"
+            repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/curl"
+            tag: "8.19.0"
         # Extra env hooks — see neuraltrust-data-plane.dataPlane.components.api above
         # for syntax (EnvVar list and EnvFromSource list).
         extraEnv: []
@@ -703,8 +703,8 @@ neuraltrust-control-plane:
           host: "control-plane-postgresql" # PostgreSQL host (set to "control-plane-postgresql" when infrastructure.postgresql.deploy=true, or external host when using external PostgreSQL)
           port: "5432" # PostgreSQL port
         image:
-          repository: "postgres"
-          tag: "17.2-alpine"
+          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/postgres"
+          tag: "17-alpine"
           pullPolicy: "Always"
           imagePullSecrets:
             - name: ""
