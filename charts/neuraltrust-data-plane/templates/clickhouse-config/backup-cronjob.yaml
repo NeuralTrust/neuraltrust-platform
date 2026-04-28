@@ -12,8 +12,8 @@ spec:
         spec:
           containers:
             - name: backup
-              {{- $backupRepo := "curlimages/curl" }}
-              {{- $backupTag := "8.13.0" }}
+              {{- $backupRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/curl" }}
+              {{- $backupTag := "8.19.0" }}
               {{- if and .Values.dataPlane.components.clickhouse.backup.image .Values.dataPlane.components.clickhouse.backup.image.repository }}
                 {{- $backupRepo = .Values.dataPlane.components.clickhouse.backup.image.repository }}
               {{- end }}

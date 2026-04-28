@@ -195,8 +195,8 @@ actions:
 redis:
   enabled: true
   image:
-    repository: redislabs/redisearch
-    tag: 2.6.9
+    repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/redis-stack-server
+    tag: 7.2.0-v20
     pullPolicy: IfNotPresent
   # External Redis configuration if redis.enabled is false
   # When using external Redis, set trustgate.global.env.REDIS_HOST, REDIS_PORT, and REDIS_PASSWORD
