@@ -1,5 +1,4 @@
 securityHardening: true # Adds readOnlyRootFilesystem, drops capabilities, seccomp profile. Set to false to restore prior behavior.
-
 # Additional global settings
 global:
   version: "ee" # can be "ce" or "ee"
@@ -16,7 +15,7 @@ global:
     pullPolicy: Always
     image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee"
     repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee"
-    tag: "v1.26.5"
+    tag: "v1.26.7"
   env:
     SERVER_SECRET_KEY: ${SERVER_SECRET_KEY}
     SERVER_BASE_DOMAIN: ${SERVER_BASE_DOMAIN:-neuraltrust.ai}
