@@ -1,0 +1,69 @@
+{{- if .Values.backup.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "clickhouse.fullname" . }}-backup-script
+  labels:
+    {{- include "clickhouse.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+data:
+  backup.sh: |
+    #!/bin/sh
+    set -e
+
+    CLICKHOUSE_HOST="${CLICKHOUSE_HOST:-clickhouse}"
+    CLICKHOUSE_PORT="${CLICKHOUSE_PORT:-9000}"
+    CLICKHOUSE_USER="${CLICKHOUSE_USER:-neuraltrust}"
+    CLICKHOUSE_DATABASE="${CLICKHOUSE_DATABASE:-neuraltrust}"
+
+    echo "Waiting for ClickHouse at ${CLICKHOUSE_HOST}:${CLICKHOUSE_PORT}..."
+    until clickhouse-client \
+        --host="${CLICKHOUSE_HOST}" \
+        --port="${CLICKHOUSE_PORT}" \
+        --user="${CLICKHOUSE_USER}" \
+        --password="${CLICKHOUSE_PASSWORD}" \
+        --query="SELECT 1" > /dev/null 2>&1; do
+      echo "  not ready yet, retrying in 5s..."
+      sleep 5
+    done
+    echo "ClickHouse is ready."
+
+    BACKUP_ID="backup-$(date +%Y%m%dT%H%M%S)"
+    echo "Starting backup: ${BACKUP_ID}  database: ${CLICKHOUSE_DATABASE}  storage: ${BACKUP_STORAGE_TYPE}"
+
+    case "${BACKUP_STORAGE_TYPE}" in
+
+      s3)
+        # Works for AWS S3, GCS via S3-compatible API, MinIO, and any S3-compatible store.
+        # BACKUP_S3_ENDPOINT must include bucket and path prefix, e.g.:
+        #   https://s3.us-east-1.amazonaws.com/my-bucket/clickhouse-backups
+        #   https://storage.googleapis.com/my-bucket/clickhouse-backups
+        if [ -n "${BACKUP_S3_ACCESS_KEY}" ] && [ -n "${BACKUP_S3_SECRET_KEY}" ]; then
+          BACKUP_DST="S3('${BACKUP_S3_ENDPOINT}/${BACKUP_ID}/', '${BACKUP_S3_ACCESS_KEY}', '${BACKUP_S3_SECRET_KEY}')"
+        else
+          # No explicit credentials — rely on IAM instance profile, IRSA, or Workload Identity.
+          BACKUP_DST="S3('${BACKUP_S3_ENDPOINT}/${BACKUP_ID}/')"
+        fi
+        ;;
+
+      azblob)
+        # Azure Blob Storage using a connection string.
+        # BACKUP_AZBLOB_PATH is the prefix inside the container (e.g. "clickhouse-backups/").
+        BACKUP_DST="AzureBlobStorage('${BACKUP_AZBLOB_CONNECTION_STRING}', '${BACKUP_AZBLOB_CONTAINER}', '${BACKUP_AZBLOB_PATH}${BACKUP_ID}/')"
+        ;;
+
+      *)
+        echo "ERROR: unknown BACKUP_STORAGE_TYPE '${BACKUP_STORAGE_TYPE}'. Supported values: s3, azblob." >&2
+        exit 1
+        ;;
+    esac
+
+    clickhouse-client \
+        --host="${CLICKHOUSE_HOST}" \
+        --port="${CLICKHOUSE_PORT}" \
+        --user="${CLICKHOUSE_USER}" \
+        --password="${CLICKHOUSE_PASSWORD}" \
+        --query="BACKUP DATABASE \`${CLICKHOUSE_DATABASE}\` TO ${BACKUP_DST} SETTINGS id='${BACKUP_ID}'"
+
+    echo "Backup completed successfully: ${BACKUP_ID}"
+{{- end }}

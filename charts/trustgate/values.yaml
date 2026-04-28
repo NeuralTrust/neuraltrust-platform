@@ -121,7 +121,7 @@ dataPlane:
     http: 8081
   podDisruptionBudget:
     enabled: true
-    minAvailable: 2
+    minAvailable: 1
   autoscaling:
     enabled: true
     minReplicas: 1
