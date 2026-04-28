@@ -27,7 +27,7 @@ helm upgrade --install neuraltrust-platform \
   --namespace neuraltrust --create-namespace
 ```
 
-Replace `<VERSION>` with a [release version](https://github.com/NeuralTrust/neuraltrust-platform/releases) (e.g. `1.7.12`).
+Replace `<VERSION>` with a [release version](https://github.com/NeuralTrust/neuraltrust-platform/releases) (e.g. `1.10.0`).
 
 That's it. All secrets are **auto-generated** on first install and preserved on upgrades.
 
@@ -211,6 +211,49 @@ global:
     httpsProxy: "http://proxy.corp.example:3128"
     noProxy: "localhost,127.0.0.1,.cluster.local,.svc"
 ```
+
+## Custom environment variables
+
+Inject extra environment variables into any service container without forking the chart. Every main service exposes `extraEnv` and `extraEnvFrom`:
+
+```yaml
+neuraltrust-data-plane:
+  dataPlane:
+    components:
+      api:
+        extraEnv:
+          - name: LOG_LEVEL
+            value: "debug"
+          - name: CUSTOM_API_KEY
+            valueFrom:
+              secretKeyRef:
+                name: my-secrets
+                key: API_KEY
+        extraEnvFrom:
+          - configMapRef:
+              name: my-feature-flags
+```
+
+Available on: control plane (api, app, scheduler), data plane (api, worker), TrustGate (control-plane, data-plane, actions), and firewall (gateway, workers).
+
+## ClickHouse backups
+
+Schedule automated ClickHouse backups to S3, GCS, or Azure Blob Storage:
+
+```yaml
+clickhouse:
+  backup:
+    enabled: true
+    schedule: "0 2 * * *"  # daily at 2 AM UTC
+    storage:
+      type: s3            # or "azblob"
+      s3:
+        endpoint: "https://s3.eu-west-1.amazonaws.com/my-bucket/clickhouse-backups"
+        accessKeyId: ""   # leave empty to use IAM / IRSA / Workload Identity
+        secretAccessKey: ""
+```
+
+For GCS, use the S3-compatible endpoint `https://storage.googleapis.com/<bucket>/<prefix>`. For Workload Identity on GKE, set `backup.serviceAccount.create: true` and add the IAM annotation. See the `clickhouse.backup.*` section in `values.yaml` for all options.
 
 ## TLS certificates
 

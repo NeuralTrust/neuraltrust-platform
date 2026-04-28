@@ -176,6 +176,44 @@ All secrets must exist in the namespace before deployment. See [SECRETS.md](./SE
 helm upgrade --install neuraltrust-platform . --namespace neuraltrust --create-namespace
 ```
 
+### Scenario 8: ClickHouse backups to object storage
+
+**File:** Custom values
+
+```yaml
+clickhouse:
+  backup:
+    enabled: true
+    schedule: "0 2 * * *"
+    storage:
+      type: s3              # or "azblob"
+      s3:
+        endpoint: "https://s3.eu-west-1.amazonaws.com/my-bucket/clickhouse-backups"
+        accessKeyId: ""     # empty = use IAM/IRSA/Workload Identity
+        secretAccessKey: ""
+```
+
+For GCS, use `https://storage.googleapis.com/<bucket>/<prefix>` and Workload Identity. See [DEPLOYMENT.md](./DEPLOYMENT.md#clickhouse-backups) for full configuration.
+
+### Scenario 9: Inject custom environment variables
+
+**File:** Custom values
+
+```yaml
+neuraltrust-data-plane:
+  dataPlane:
+    components:
+      api:
+        extraEnv:
+          - name: LOG_LEVEL
+            value: "debug"
+        extraEnvFrom:
+          - configMapRef:
+              name: feature-flags
+```
+
+Available on every main service container. See [DEPLOYMENT.md](./DEPLOYMENT.md#custom-environment-variables) for the full list of supported components.
+
 ---
 
 ## Firewall: CPU and GPU
