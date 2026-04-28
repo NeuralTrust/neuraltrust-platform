@@ -188,6 +188,140 @@ kubectl rollout restart deployment/trustgate-data-plane -n neuraltrust
 
 See [SECRETS.md](./SECRETS.md#firewall-secrets) for firewall secret details.
 
+## Custom environment variables
+
+Every main service container exposes two hooks for injecting extra environment variables without modifying the chart:
+
+| Field | Purpose |
+|---|---|
+| `extraEnv` | List of `EnvVar` entries (literal `value` or `valueFrom.{secretKeyRef,configMapKeyRef,fieldRef}`) appended to the container env |
+| `extraEnvFrom` | List of `EnvFromSource` entries (`configMapRef` / `secretRef`) loading whole ConfigMaps or Secrets |
+
+### Where it's available
+
+| Subchart | Components |
+|---|---|
+| `neuraltrust-control-plane` | `controlPlane.components.api`, `app`, `scheduler` |
+| `neuraltrust-data-plane` | `dataPlane.components.api`, `worker` |
+| `trustgate` | `controlPlane`, `dataPlane`, `actions` |
+| `neuraltrust-firewall` | `firewall.gateway`, `firewall.workers.<name>` |
+
+### Example
+
+```yaml
+neuraltrust-data-plane:
+  dataPlane:
+    components:
+      api:
+        extraEnv:
+          - name: LOG_LEVEL
+            value: "debug"
+          - name: CUSTOM_API_KEY
+            valueFrom:
+              secretKeyRef:
+                name: my-secrets
+                key: API_KEY
+        extraEnvFrom:
+          - configMapRef:
+              name: feature-flags
+          - secretRef:
+              name: my-extra-secrets
+              optional: true
+```
+
+`extraEnvFrom` entries are **appended** to the chart's existing `envFrom` list (e.g. `trustgate-env-vars`, `firewall-config`); they don't replace it.
+
+## ClickHouse backups
+
+The in-cluster ClickHouse subchart can run scheduled backups to object storage via a Kubernetes CronJob. Backups are **off by default**.
+
+### Enable
+
+```yaml
+clickhouse:
+  backup:
+    enabled: true
+    schedule: "0 2 * * *"   # cron (default: daily at 2 AM UTC)
+    database: ""            # default: auth.database (neuraltrust)
+```
+
+### Storage backends
+
+#### S3 (AWS)
+
+```yaml
+clickhouse:
+  backup:
+    enabled: true
+    storage:
+      type: s3
+      s3:
+        endpoint: "https://s3.eu-west-1.amazonaws.com/my-bucket/clickhouse-backups"
+        accessKeyId: ""        # empty = use IAM instance profile or IRSA
+        secretAccessKey: ""
+```
+
+#### GCS (S3-compatible API)
+
+```yaml
+clickhouse:
+  backup:
+    storage:
+      type: s3
+      s3:
+        endpoint: "https://storage.googleapis.com/my-bucket/clickhouse-backups"
+        accessKeyId: ""        # empty = use Workload Identity
+        secretAccessKey: ""
+    serviceAccount:
+      create: true
+      annotations:
+        iam.gke.io/gcp-service-account: "ch-backup@my-project.iam.gserviceaccount.com"
+```
+
+#### Azure Blob Storage
+
+```yaml
+clickhouse:
+  backup:
+    storage:
+      type: azblob
+      azblob:
+        connectionString: ""   # required (or use existingSecret)
+        container: "my-container"
+        path: "clickhouse-backups/"
+```
+
+### External secret reference
+
+To avoid putting credentials in values, reference an existing secret:
+
+```yaml
+clickhouse:
+  backup:
+    storage:
+      type: s3
+      s3:
+        endpoint: "https://s3.eu-west-1.amazonaws.com/my-bucket/clickhouse-backups"
+        existingSecret: "ch-backup-credentials"
+        existingSecretKeyAccessKeyId: "access-key-id"
+        existingSecretKeySecretAccessKey: "secret-access-key"
+```
+
+### Verify
+
+```bash
+# Check the CronJob
+kubectl get cronjob -n neuraltrust -l app.kubernetes.io/component=backup
+
+# Check recent backup jobs
+kubectl get jobs -n neuraltrust -l app.kubernetes.io/component=backup
+
+# View logs from the latest backup run
+kubectl logs -n neuraltrust -l app.kubernetes.io/component=backup --tail=200
+```
+
+History is bounded by `backup.successfulJobsHistoryLimit` (default 3) and `backup.failedJobsHistoryLimit` (default 3).
+
 ## Connection details
 
 ### How infrastructure resolves

@@ -15,11 +15,23 @@ on:
       - '.gitignore'
       - 'helmignore'
       - 'README.md'
+      - 'VALUES_SCENARIOS.md'
       - 'values-all-deployed.yaml.example'
       - 'values-required.yaml.example'
       - 'values.yaml.example'
       - 'values-all-deployed.yaml'
       - 'values-required.yaml'
+      - 'DEPLOYMENT.md'
+      - 'SECRETS.md'
+      - 'LICENSE'
+      - 'NOTICE'
+      - 'CODE_OF_CONDUCT.md'
+      - 'CONTRIBUTING.md'
+      - 'CODEOWNERS'
+      - 'PULL_REQUEST_TEMPLATE.md'
+      - 'SECURITY.md'
+      - 'SUPPORT.md'
+      - 'TESTING.md'
 
 permissions:
   contents: write
