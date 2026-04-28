@@ -40,6 +40,57 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
+Backup: resolve ServiceAccount name.
+Priority: .Values.backup.serviceAccount.name > auto-generated "<fullname>-backup"
+*/}}
+{{- define "clickhouse.backup.serviceAccountName" -}}
+{{- if .Values.backup.serviceAccount.name }}
+  {{- .Values.backup.serviceAccount.name }}
+{{- else }}
+  {{- printf "%s-backup" (include "clickhouse.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+{{- end }}
+
+{{/*
+Backup: resolve the Secret name that holds storage credentials.
+Priority: existingSecret (per-storage-type) > auto-generated "<fullname>-backup-credentials"
+*/}}
+{{- define "clickhouse.backup.credentialsSecretName" -}}
+{{- $type := .Values.backup.storage.type | default "s3" }}
+{{- if eq $type "s3" }}
+  {{- if .Values.backup.storage.s3.existingSecret }}
+    {{- .Values.backup.storage.s3.existingSecret }}
+  {{- else }}
+    {{- printf "%s-backup-credentials" (include "clickhouse.fullname" .) | trunc 63 | trimSuffix "-" }}
+  {{- end }}
+{{- else if eq $type "azblob" }}
+  {{- if .Values.backup.storage.azblob.existingSecret }}
+    {{- .Values.backup.storage.azblob.existingSecret }}
+  {{- else }}
+    {{- printf "%s-backup-credentials" (include "clickhouse.fullname" .) | trunc 63 | trimSuffix "-" }}
+  {{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
+Backup: resolve the container image.
+Defaults to the main ClickHouse image so no extra image pull is needed.
+*/}}
+{{- define "clickhouse.backup.image" -}}
+{{- $repo := .Values.backup.image.repository | default .Values.image.repository }}
+{{- $tag := .Values.backup.image.tag | default .Values.image.tag }}
+{{- $registry := "" }}
+{{- if and .Values.global .Values.global.imageRegistry }}
+  {{- $registry = .Values.global.imageRegistry }}
+{{- end }}
+{{- if $registry }}
+  {{- printf "%s/%s:%s" $registry $repo $tag }}
+{{- else }}
+  {{- printf "%s:%s" $repo $tag }}
+{{- end }}
+{{- end }}
+
+{{/*
 Construct image path with optional global registry prefix.
 */}}
 {{- define "clickhouse.image" -}}

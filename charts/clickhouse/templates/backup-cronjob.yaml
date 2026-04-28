@@ -1,0 +1,130 @@
+{{- if .Values.backup.enabled }}
+{{- $type := .Values.backup.storage.type | default "s3" }}
+{{- $database := .Values.backup.database | default (.Values.auth.database | default "neuraltrust") }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "clickhouse.fullname" . }}-backup
+  labels:
+    {{- include "clickhouse.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+spec:
+  schedule: {{ .Values.backup.schedule | default "0 2 * * *" | quote }}
+  successfulJobsHistoryLimit: {{ .Values.backup.successfulJobsHistoryLimit | default 3 }}
+  failedJobsHistoryLimit: {{ .Values.backup.failedJobsHistoryLimit | default 3 }}
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            {{- include "clickhouse.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: backup
+        spec:
+          {{- if .Values.backup.serviceAccount.create }}
+          serviceAccountName: {{ include "clickhouse.backup.serviceAccountName" . }}
+          {{- end }}
+          restartPolicy: OnFailure
+          {{- $pullSecrets := list }}
+          {{- if .Values.imagePullSecrets }}
+            {{- $pullSecrets = append $pullSecrets .Values.imagePullSecrets }}
+          {{- end }}
+          {{- if and .Values.global .Values.global.imagePullSecrets }}
+            {{- $pullSecrets = concat $pullSecrets .Values.global.imagePullSecrets }}
+          {{- end }}
+          {{- if $pullSecrets }}
+          imagePullSecrets:
+            {{- range $pullSecrets }}
+            - name: {{ . }}
+            {{- end }}
+          {{- end }}
+          {{- if .Values.backup.nodeSelector }}
+          nodeSelector:
+            {{- toYaml .Values.backup.nodeSelector | nindent 12 }}
+          {{- end }}
+          {{- if .Values.backup.tolerations }}
+          tolerations:
+            {{- toYaml .Values.backup.tolerations | nindent 12 }}
+          {{- end }}
+          {{- if .Values.backup.affinity }}
+          affinity:
+            {{- toYaml .Values.backup.affinity | nindent 12 }}
+          {{- end }}
+          securityContext:
+            {{- if ne (.Values.global.platform | default "kubernetes") "openshift" }}
+            fsGroup: 101
+            runAsGroup: 101
+            runAsUser: 101
+            {{- end }}
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: clickhouse-backup
+              image: {{ include "clickhouse.backup.image" . | quote }}
+              imagePullPolicy: {{ .Values.backup.image.pullPolicy | default "IfNotPresent" }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+              command: ["/bin/sh", "/scripts/backup.sh"]
+              env:
+                - name: CLICKHOUSE_HOST
+                  value: {{ include "clickhouse.fullname" . | quote }}
+                - name: CLICKHOUSE_PORT
+                  value: "9000"
+                - name: CLICKHOUSE_USER
+                  value: {{ .Values.auth.username | default "neuraltrust" | quote }}
+                - name: CLICKHOUSE_DATABASE
+                  value: {{ $database | quote }}
+                - name: CLICKHOUSE_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ if .Values.auth.existingSecret }}{{ .Values.auth.existingSecret }}{{ else }}{{ include "clickhouse.fullname" . }}{{ end }}
+                      key: {{ .Values.auth.existingSecretKey | default "admin-password" | quote }}
+                - name: BACKUP_STORAGE_TYPE
+                  value: {{ $type | quote }}
+                {{- if eq $type "s3" }}
+                - name: BACKUP_S3_ENDPOINT
+                  value: {{ .Values.backup.storage.s3.endpoint | default "" | quote }}
+                {{- $s3SecretName := include "clickhouse.backup.credentialsSecretName" . | trim }}
+                {{- $hasS3Secret := or .Values.backup.storage.s3.existingSecret .Values.backup.storage.s3.accessKeyId .Values.backup.storage.s3.secretAccessKey }}
+                {{- if $hasS3Secret }}
+                - name: BACKUP_S3_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ $s3SecretName | quote }}
+                      key: {{ .Values.backup.storage.s3.existingSecretKeyAccessKeyId | default "access-key-id" | quote }}
+                      optional: true
+                - name: BACKUP_S3_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ $s3SecretName | quote }}
+                      key: {{ .Values.backup.storage.s3.existingSecretKeySecretAccessKey | default "secret-access-key" | quote }}
+                      optional: true
+                {{- end }}
+                {{- else if eq $type "azblob" }}
+                - name: BACKUP_AZBLOB_CONTAINER
+                  value: {{ .Values.backup.storage.azblob.container | default "" | quote }}
+                - name: BACKUP_AZBLOB_PATH
+                  value: {{ .Values.backup.storage.azblob.path | default "clickhouse-backups/" | quote }}
+                {{- $azSecretName := include "clickhouse.backup.credentialsSecretName" . | trim }}
+                - name: BACKUP_AZBLOB_CONNECTION_STRING
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ $azSecretName | quote }}
+                      key: {{ .Values.backup.storage.azblob.existingSecretKeyConnectionString | default "connection-string" | quote }}
+                {{- end }}
+              {{- if .Values.backup.resources }}
+              resources:
+                {{- toYaml .Values.backup.resources | nindent 16 }}
+              {{- end }}
+              volumeMounts:
+                - name: backup-script
+                  mountPath: /scripts
+          volumes:
+            - name: backup-script
+              configMap:
+                name: {{ include "clickhouse.fullname" . }}-backup-script
+                defaultMode: 0550
+{{- end }}
