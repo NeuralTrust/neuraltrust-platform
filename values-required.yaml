@@ -90,8 +90,8 @@ neuraltrust-control-plane:
           # PostgreSQL password - auto-generated if empty and autoGenerateSecrets: true
           password: "" # Auto-generated if empty
         image:
-          repository: "postgres"
-          tag: "17.2-alpine"
+          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/postgres"
+          tag: "17-alpine"
 
 # NeuralTrust Data Plane
 neuraltrust-data-plane:

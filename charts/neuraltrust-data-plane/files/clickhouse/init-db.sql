@@ -203,7 +203,7 @@ CREATE TABLE IF NOT EXISTS metrics
     conversation_id String,
     session_id String,
     user_id String DEFAULT '',
-    
+
     -- Request/Response
     path String,
     input String,
@@ -217,12 +217,12 @@ CREATE TABLE IF NOT EXISTS metrics
     request_headers String,
     response_headers String,
     status_code Int32,
-    
+
     -- Timing
     start_timestamp Int64,
     end_timestamp Int64,
     latency Int32,
-    
+
     -- User info
     user_ip String,
     browser String DEFAULT '',
@@ -230,13 +230,13 @@ CREATE TABLE IF NOT EXISTS metrics
     os String DEFAULT '',
     locale String DEFAULT '',
     location String DEFAULT '',
-    
+
     -- Materialized fields
     start_time DateTime MATERIALIZED fromUnixTimestamp64Milli(start_timestamp),
     end_time DateTime MATERIALIZED fromUnixTimestamp64Milli(end_timestamp),
     event_date Date MATERIALIZED toDate(start_time),
     event_hour DateTime MATERIALIZED toStartOfHour(start_time),
-    
+
     -- Indexes
     INDEX idx_team_id (team_id) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_gateway_id (gateway_id) TYPE bloom_filter(0.01) GRANULARITY 1,
@@ -253,6 +253,64 @@ SETTINGS index_granularity = 8192;
 
 
 -- ============================================================================
+-- DETECTIONS TABLE: Detection events emitted to the detections topic
+-- ============================================================================
+SET enable_json_type = 1;
+
+CREATE TABLE IF NOT EXISTS detections
+(
+    event_id String,
+    service_name String,
+    team_id String,
+    gateway_id String DEFAULT '',
+    engine_id String DEFAULT '',
+    trace_id String DEFAULT '',
+    engine_policy_id String DEFAULT '',
+    gateway_rule_id String DEFAULT '',
+    type String,
+    action String DEFAULT '',
+    severity String DEFAULT '',
+    user_ip String DEFAULT '',
+    session_id String DEFAULT '',
+    user_id String DEFAULT '',
+    user_email String DEFAULT '',
+    latency Int64 DEFAULT 0,
+    metadata JSON,
+    occurred_on DateTime64(3, 'UTC'),
+
+    event_date Date MATERIALIZED toDate(occurred_on),
+    event_hour DateTime MATERIALIZED toStartOfHour(occurred_on),
+
+    INDEX idx_team_id (team_id) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_service_name (service_name) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_gateway_id (gateway_id) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_engine_id (engine_id) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_trace_id (trace_id) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_engine_policy_id (engine_policy_id) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_gateway_rule_id (gateway_rule_id) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_type (type) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_action (action) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_severity (severity) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_session_id (session_id) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_user_id (user_id) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_user_email (user_email) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_event_date (event_date) TYPE minmax GRANULARITY 1,
+    INDEX idx_event_hour (event_hour) TYPE minmax GRANULARITY 1
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMM(event_date)
+ORDER BY (event_hour, team_id, service_name, event_id)
+TTL event_date + INTERVAL 12 MONTH
+SETTINGS index_granularity = 8192;
+
+ALTER TABLE detections ADD COLUMN IF NOT EXISTS session_id String DEFAULT '' AFTER user_ip;
+ALTER TABLE detections ADD COLUMN IF NOT EXISTS user_id String DEFAULT '' AFTER session_id;
+ALTER TABLE detections ADD COLUMN IF NOT EXISTS user_email String DEFAULT '' AFTER user_id;
+ALTER TABLE detections ADD INDEX IF NOT EXISTS idx_session_id (session_id) TYPE bloom_filter(0.01) GRANULARITY 1;
+ALTER TABLE detections ADD INDEX IF NOT EXISTS idx_user_id (user_id) TYPE bloom_filter(0.01) GRANULARITY 1;
+ALTER TABLE detections ADD INDEX IF NOT EXISTS idx_user_email (user_email) TYPE bloom_filter(0.01) GRANULARITY 1;
+
+
+-- ============================================================================
 -- TOPICS_CLASSIFIED TABLE: Topics/Classifications linked to traces
 -- One row per trace + classifier + label combination
 -- Receives topic classification data directly from ingestion
@@ -262,21 +320,21 @@ CREATE TABLE IF NOT EXISTS topics_classified
     -- Link to trace (from interaction)
     trace_id String,
     team_id String,
-    
+
     -- Classification data
     classifier_id UInt32,
     category String DEFAULT '',
     label Array(String),             -- Array of labels from classification
     score Nullable(Float64),         -- For single-score classifiers
-    
+
     -- Timestamp (milliseconds)
     timestamp Int64,
-    
+
     -- Materialized fields
     event_time DateTime MATERIALIZED fromUnixTimestamp64Milli(timestamp),
     event_date Date MATERIALIZED toDate(event_time),
     day Date MATERIALIZED toDate(event_time),
-    
+
     -- Indexes
     INDEX idx_team_id (team_id) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_classifier_id (classifier_id) TYPE bloom_filter(0.01) GRANULARITY 1,
@@ -329,7 +387,7 @@ CREATE TABLE IF NOT EXISTS discover_events (
     INDEX idx_has_sensitive (has_sensitive_data) TYPE minmax GRANULARITY 1,
     INDEX idx_date (date) TYPE minmax GRANULARITY 1,
     INDEX idx_hour (hour) TYPE minmax GRANULARITY 1
-    
+
 ) ENGINE = MergeTree()
 PARTITION BY toYYYYMM(date)
 ORDER BY (team_id, timestamp, session_id)
@@ -401,7 +459,7 @@ AS SELECT
     uniqState(session_id) as sessions_count_state,
     uniqStateIf(user_id, is_first_time) as new_users_count_state
 FROM (
-    SELECT 
+    SELECT
         team_id,
         gateway_id,
         engine_id,
@@ -508,15 +566,15 @@ SELECT
     uniqMerge(u.sessions_count_state) AS sessions_count,
     uniqMerge(u.new_users_count_state) AS new_users_count,
     -- Sessions per user
-    if(uniqMerge(u.users_count_state) > 0, 
-       uniqMerge(u.sessions_count_state) / uniqMerge(u.users_count_state), 
+    if(uniqMerge(u.users_count_state) > 0,
+       uniqMerge(u.sessions_count_state) / uniqMerge(u.users_count_state),
        0) AS sessions_per_user
 FROM daily_metrics d
-LEFT JOIN user_metrics u 
-    ON d.team_id = u.team_id 
-    AND d.gateway_id = u.gateway_id 
+LEFT JOIN user_metrics u
+    ON d.team_id = u.team_id
+    AND d.gateway_id = u.gateway_id
     AND d.engine_id = u.engine_id
-    AND d.event_date = u.event_date 
+    AND d.event_date = u.event_date
     AND d.day = u.day
 GROUP BY d.team_id, d.gateway_id, d.engine_id, d.event_date, d.day;
 
