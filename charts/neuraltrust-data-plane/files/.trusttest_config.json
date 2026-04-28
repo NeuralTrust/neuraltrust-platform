@@ -23,7 +23,7 @@
     },
     "translation": {
         "provider": "google",
-        "model": "gemini-2.0-flash",
+        "model": "gemini-2.5-flash-lite",
         "temperature": 0.0,
         "retry_config": {
             "attempts": 3
@@ -42,4 +42,3 @@
         "model": "text-embedding-3-small"
     }
   }
-  
