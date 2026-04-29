@@ -293,8 +293,8 @@ trustgate:
     postgresql:
       # PostgreSQL image used for TrustGate database initialization job
       image:
-        repository: "postgres" # PostgreSQL image repository
-        tag: "17.2-alpine" # PostgreSQL image tag
+        repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/postgres" # PostgreSQL image repository
+        tag: "17-alpine" # PostgreSQL image tag
     env:
       SERVER_SECRET_KEY: "" # Auto-generated if empty (shared with trustgateJwtSecret)
       SERVER_BASE_DOMAIN: "yourdomain.com" # Set to your domain
