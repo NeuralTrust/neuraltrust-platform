@@ -2,10 +2,12 @@ Thank you for installing {{ .Chart.Name }}.
 
 Your TrustGate deployment is now being set up. This may take a few minutes.
 
+{{- $cpHost := include "neuraltrust-platform.ingress.host" (dict "host" .Values.ingress.controlPlane.host "prefix" .Values.ingress.controlPlane.hostPrefix "global" .Values.global) }}
+{{- $dpHost := include "neuraltrust-platform.ingress.host" (dict "host" .Values.ingress.dataPlane.host "prefix" .Values.ingress.dataPlane.hostPrefix "global" .Values.global) }}
 {{- if .Values.ingress.enabled }}
 You can access the TrustGate services at:
-  - Control Plane: https://{{ .Values.ingress.controlPlane.host }}
-  - Data Plane: https://{{ .Values.ingress.dataPlane.host }}
+  - Control Plane: https://{{ $cpHost }}
+  - Data Plane: https://{{ $dpHost }}
 {{- else }}
 To get the IP addresses for your TrustGate services:
 
@@ -30,10 +32,10 @@ To view the status of your deployment:
 Access URLs:
 {{- if .Values.ingress.enabled }}
 1. Access the Control Plane API at:
-   https://{{ .Values.ingress.controlPlane.host }}
+   https://{{ $cpHost }}
 
 2. Access the Data Plane API at:
-   https://{{ .Values.ingress.dataPlane.host }}
+   https://{{ $dpHost }}
 
 {{- else }}
 1. Get the Control Plane URL by running these commands:
@@ -57,7 +59,7 @@ Access URLs:
 Initial setup:
 1. Ensure your DNS records are configured for the above hostnames
 2. Configure your first API Gateway:
-   curl -X POST https://{{ .Values.ingress.controlPlane.host }}/api/v1/gateways \
+   curl -X POST https://{{ $cpHost }}/api/v1/gateways \
      -H "Content-Type: application/json" \
      -d '{"name": "my-gateway", "subdomain": "api.example.com"}'
 

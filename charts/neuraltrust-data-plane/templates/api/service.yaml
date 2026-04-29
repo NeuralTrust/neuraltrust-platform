@@ -49,17 +49,17 @@ spec:
   ingressClassName: {{ $className }}
   {{- end }}
   {{- $tlsEnabled := and $apiIngress.tls $apiIngress.tls.enabled }}
-  {{- if and $tlsEnabled (include "neuraltrust-platform.ingress.renderTLS" (dict "global" .Values.global "tlsEnabled" $tlsEnabled)) }}
-  tls:
-    - {{- if .Values.dataPlane.components.api.host }}
-      hosts:
-        - "{{ .Values.dataPlane.components.api.host }}"
-      {{- end }}
-      secretName: {{ include "neuraltrust-platform.ingress.effectiveTLSSecretName" (dict "global" .Values.global "localSecretName" $apiIngress.tls.secretName) }}
-  {{- end }}
   {{- $apiHost := "" }}
   {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api }}
-    {{- $apiHost = .Values.dataPlane.components.api.host }}
+    {{- $apiHost = include "neuraltrust-platform.ingress.host" (dict "host" .Values.dataPlane.components.api.host "prefix" .Values.dataPlane.components.api.hostPrefix "global" .Values.global) }}
+  {{- end }}
+  {{- if and $tlsEnabled (include "neuraltrust-platform.ingress.renderTLS" (dict "global" .Values.global "tlsEnabled" $tlsEnabled)) }}
+  tls:
+    - {{- if $apiHost }}
+      hosts:
+        - "{{ $apiHost }}"
+      {{- end }}
+      secretName: {{ include "neuraltrust-platform.ingress.effectiveTLSSecretName" (dict "global" .Values.global "localSecretName" $apiIngress.tls.secretName) }}
   {{- end }}
   rules:
     - {{- if $apiHost }}

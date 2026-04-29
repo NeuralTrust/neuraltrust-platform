@@ -195,7 +195,60 @@ clickhouse:
 
 For GCS, use `https://storage.googleapis.com/<bucket>/<prefix>` and Workload Identity. See [DEPLOYMENT.md](./DEPLOYMENT.md#clickhouse-backups) for full configuration.
 
-### Scenario 9: Inject custom environment variables
+### Scenario 9: Auto-derive Ingress hostnames from `global.domain`
+
+**File:** any
+
+When `global.domain` is set, every Ingress auto-fills its host. No per-service `host` is needed for the common case.
+
+```yaml
+global:
+  domain: "platform.example.com"
+```
+
+Yields: `admin.platform.example.com`, `gateway.platform.example.com`, `actions.platform.example.com`, `api.platform.example.com`, `app.platform.example.com`, `scheduler.platform.example.com`, `data-plane-api.platform.example.com`.
+
+Override per service:
+
+```yaml
+trustgate:
+  ingress:
+    controlPlane:
+      host: "tg-admin.example.com"   # full hostname override
+    dataPlane:
+      hostPrefix: "tg"               # change subdomain only
+```
+
+Disable auto-derive (catch-all) by setting `hostPrefix: ""`. OpenShift Routes are unaffected. Full table of default prefixes in [DEPLOYMENT.md](./DEPLOYMENT.md#ingress-hostnames).
+
+### Scenario 10: Mirror images to a private registry
+
+**File:** any
+
+Set once at the parent level and every subchart inherits:
+
+```yaml
+global:
+  imageRegistry: "my-registry.corp/neuraltrust"
+```
+
+The image helpers strip the chart's default GCP prefix and prepend yours, so no per-component override is needed when you mirror with the same short names.
+
+Need different tags or renamed paths? Override per component:
+
+```yaml
+neuraltrust-control-plane:
+  controlPlane:
+    components:
+      api:
+        image:
+          repository: "my-registry.corp/cp-api"   # renamed path
+          tag: "v1.13.9-corp1"                    # custom tag
+```
+
+When `image.repository` starts with your registry's host, the helper uses it as-is. See [DEPLOYMENT.md](./DEPLOYMENT.md#private--mirrored-image-registry) for the full list of components and the resolution rules.
+
+### Scenario 11: Inject custom environment variables
 
 **File:** Custom values
 
@@ -218,7 +271,7 @@ Available on every main service container. See [DEPLOYMENT.md](./DEPLOYMENT.md#c
 
 ## Firewall: CPU and GPU
 
-The firewall is controlled by `neuraltrust-firewall.firewall.enabled` (default: `false`). It deploys a **gateway** (CPU router) plus **5 specialized workers**.
+The firewall is controlled by `neuraltrust-firewall.firewall.enabled` (default: `true`, CPU image). It deploys a **gateway** (CPU router) plus **5 specialized workers**. Disable with `enabled: false` if your environment doesn't need in-cluster prompt/response safety.
 
 | Component | Image | Scheduling | CUDA MPS |
 |---|---|---|---|

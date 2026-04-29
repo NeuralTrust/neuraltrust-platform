@@ -11,8 +11,15 @@
 
 global:
   platform: "gcp"  # "aws" | "gcp" | "azure" | "openshift" | "kubernetes"
-  domain: ""  # Base domain for service URLs (e.g., "aws.neuraltrust.ai")
-  imageRegistry: ""  # Optional global registry prefix. Leave empty when repositories are already fully qualified.
+  # Base domain for service URLs. When set, every Ingress auto-derives its host as
+  # <hostPrefix>.<domain> (e.g. admin.<domain>, gateway.<domain>, api.<domain>, app.<domain>).
+  # Override per service via .host (full hostname) or .hostPrefix (subdomain only).
+  # OpenShift Routes derive hostnames separately as <service-name>.<domain>.
+  domain: ""
+  # Optional global registry prefix for private/mirrored images (e.g. "my-registry.corp/neuraltrust").
+  # When set, the chart strips the default GCP prefix and prepends this value across every subchart.
+  # Leave empty to use the chart's defaults.
+  imageRegistry: ""
   autoGenerateSecrets: true  # Auto-generate required secrets if not explicitly provided. Preserves existing values on upgrades.
   preserveExistingSecrets: false  # Set to true only when every required secret already exists in the namespace.
   storageClass: ""  # Optional default storage class used by in-cluster stateful components.

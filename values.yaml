@@ -508,11 +508,14 @@ trustgate:
     className: "" # Per-service override for ingress class (leave empty to use global.ingress.className)
     annotations: {} # Per-service annotations (merged with global and AWS auto-generated annotations)
     controlPlane:
-      host: "" # Optional: set to your domain (e.g., "admin.yourdomain.com"). Empty = use ALB auto-generated URL.
+      host: "" # Optional: set to your domain (e.g., "admin.yourdomain.com"). Empty = auto-derive as <hostPrefix>.<global.domain> when both are set, otherwise use ALB auto-generated URL.
+      hostPrefix: "admin" # Default subdomain prefix when host is empty and global.domain is set. Set to "" to disable auto-derive.
     dataPlane:
-      host: "" # Optional: set to your domain (e.g., "gateway.yourdomain.com"). Empty = use ALB auto-generated URL.
+      host: "" # Optional: set to your domain (e.g., "gateway.yourdomain.com"). Empty = auto-derive as <hostPrefix>.<global.domain> when both are set, otherwise use ALB auto-generated URL.
+      hostPrefix: "gateway" # Default subdomain prefix when host is empty and global.domain is set. Set to "" to disable auto-derive.
     actions:
-      host: "" # Optional: set to your domain (e.g., "actions.yourdomain.com"). Empty = use ALB auto-generated URL.
+      host: "" # Optional: set to your domain (e.g., "actions.yourdomain.com"). Empty = auto-derive as <hostPrefix>.<global.domain> when both are set, otherwise use ALB auto-generated URL.
+      hostPrefix: "actions" # Default subdomain prefix when host is empty and global.domain is set. Set to "" to disable auto-derive.
     # TLS configuration for Ingress
     # HTTPS is enabled by default for bundled ingresses.
     # The shared secret from global.ingress.tls.secretName is created by default.
@@ -544,7 +547,8 @@ neuraltrust-control-plane:
     components:
       scheduler:
         enabled: true
-        host: "" # Optional: set to your domain (e.g., "control-plane-scheduler.yourdomain.com"). Empty = use ALB auto-generated URL.
+        host: "" # Optional: full hostname override. Empty = auto-derive as <hostPrefix>.<global.domain> when both are set, otherwise use ALB auto-generated URL.
+        hostPrefix: "scheduler" # Default subdomain prefix when host is empty and global.domain is set. Set to "" to disable auto-derive.
         service:
           type: ClusterIP
         ingress:
@@ -586,7 +590,8 @@ neuraltrust-control-plane:
         extraEnvFrom: []
       api:
         enabled: true
-        host: "" # Optional: set to your domain (e.g., "control-plane-api.yourdomain.com"). Empty = use ALB auto-generated URL.
+        host: "" # Optional: full hostname override. Empty = auto-derive as <hostPrefix>.<global.domain> when both are set, otherwise use ALB auto-generated URL.
+        hostPrefix: "api" # Default subdomain prefix when host is empty and global.domain is set. Set to "" to disable auto-derive.
         service:
           type: ClusterIP
         ingress:
@@ -633,7 +638,8 @@ neuraltrust-control-plane:
         extraEnvFrom: []
       app:
         enabled: true
-        host: "" # Optional: set to your domain (e.g., "control-plane-app.yourdomain.com"). Empty = use ALB auto-generated URL.
+        host: "" # Optional: full hostname override. Empty = auto-derive as <hostPrefix>.<global.domain> when both are set, otherwise use ALB auto-generated URL.
+        hostPrefix: "app" # Default subdomain prefix when host is empty and global.domain is set. Set to "" to disable auto-derive.
         secondaryHost: ""
         service:
           type: ClusterIP
@@ -772,7 +778,8 @@ neuraltrust-data-plane:
               memory: 2Gi
       api:
         enabled: true
-        host: "" # Optional: set to your domain (e.g., "data-plane-api.yourdomain.com"). Empty = use ALB auto-generated URL.
+        host: "" # Optional: full hostname override. Empty = auto-derive as <hostPrefix>.<global.domain> when both are set, otherwise use ALB auto-generated URL.
+        hostPrefix: "data-plane-api" # Default subdomain prefix when host is empty and global.domain is set. Set to "" to disable auto-derive.
         service:
           type: ClusterIP
         ingress:
@@ -849,10 +856,18 @@ neuraltrust-data-plane:
         extraEnv: []
         extraEnvFrom: []
 # NeuralTrust Firewall subchart values
-# Architecture: gateway (CPU, lightweight router) + 5 specialised workers (CPU by default, GPU-capable).
-# Images: firewall-cpu (default for both gateway and workers) and firewall-gpu share the same tag.
-# For GPU workers: set workerDefaults.image to firewall-gpu, add nvidia.com/gpu resources,
-# nodeSelector, tolerations, and hostIPC (see values-dataplane-gpu.yaml.example).
+# Default: ON (gateway + 5 workers using firewall-cpu, CPU only). To disable, set
+# neuraltrust-firewall.firewall.enabled: false. To run workers on GPU, override
+# workerDefaults.image to firewall-gpu and add nvidia.com/gpu resources,
+# nodeSelector, tolerations, and hostIPC (see values-dataplane-gpu.yaml.example
+# and regions/values-us-prod.yaml for GPU patterns).
+#
+# When firewall is enabled, the parent chart auto-populates:
+#   - trustgate-secrets/NEURAL_TRUST_FIREWALL_URL  → http://firewall.<release-namespace>.svc.cluster.local
+#   - control-plane-secrets/FIREWALL_API_URL       → same FQDN
+# When firewall is disabled, FIREWALL_API_URL falls back to the data-plane API service.
+# Cross-namespace or external firewall? Override trustgate.global.env.NEURAL_TRUST_FIREWALL_URL
+# (and controlPlane.components.app.config.firewallApiUrl) explicitly.
 neuraltrust-firewall:
   securityHardening: true # Adds readOnlyRootFilesystem, drops capabilities, seccomp profile. Set to false to restore prior behavior.
   firewall:

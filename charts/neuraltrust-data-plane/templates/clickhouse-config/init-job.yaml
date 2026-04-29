@@ -29,7 +29,13 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: clickhouse-init
-          image: {{ include "data-plane.image" (dict "repository" "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickhouse-server" "tag" "25.8" "global" .Values.global) | quote }}
+          {{- $chInitRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickhouse-server" }}
+          {{- $chInitTag := "25.8" }}
+          {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.clickhouse .Values.dataPlane.components.clickhouse.image }}
+            {{- if .Values.dataPlane.components.clickhouse.image.repository }}{{- $chInitRepo = .Values.dataPlane.components.clickhouse.image.repository }}{{- end }}
+            {{- if .Values.dataPlane.components.clickhouse.image.tag }}{{- $chInitTag = .Values.dataPlane.components.clickhouse.image.tag }}{{- end }}
+          {{- end }}
+          image: {{ include "data-plane.image" (dict "repository" $chInitRepo "tag" $chInitTag "global" .Values.global) | quote }}
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "-c"]
           args:

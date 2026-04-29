@@ -74,16 +74,7 @@ spec:
             {{- $postgresImageTag = .Values.global.postgresql.image.tag }}
           {{- end }}
         {{- end }}
-        {{- $postgresImage := printf "%s:%s" $postgresImageRepo $postgresImageTag }}
-        {{- if and .Values.global .Values.global.imageRegistry .Values.global.imageRegistry }}
-          {{- $registry := .Values.global.imageRegistry }}
-          {{- if hasPrefix $registry $postgresImageRepo }}
-            {{- $postgresImage = printf "%s:%s" $postgresImageRepo $postgresImageTag }}
-          {{- else }}
-            {{- $postgresImage = printf "%s/%s:%s" $registry $postgresImageRepo $postgresImageTag }}
-          {{- end }}
-        {{- end }}
-        image: {{ $postgresImage | quote }}
+        image: {{ include "trustgate.image" (dict "repository" $postgresImageRepo "tag" $postgresImageTag "global" .Values.global) | quote }}
         command:
         - /bin/sh
         - -c

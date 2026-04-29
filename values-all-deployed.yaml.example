@@ -12,14 +12,15 @@
 # - Using Ingress for external access (Kubernetes) or Routes (OpenShift)
 # - Creating the chart's shared self-signed TLS secret by default
 # - Using that shared secret automatically whenever an ingress enables TLS without a secretName
+# - Auto-derived Ingress hostnames from global.domain (admin/gateway/actions/api/app/scheduler/data-plane-api)
 
 # Global settings
 global:
-  openshift: false  # Set to true if using OpenShift
-  openshiftDomain: ""  # OpenShift wildcard DNS domain (e.g., *.apps.example.com)
-  imageRegistry: ""  # Global image registry prefix
+  platform: "kubernetes"        # "aws" | "gcp" | "azure" | "openshift" | "kubernetes"
+  domain: "yourdomain.com"      # Set to your base domain. Ingresses auto-derive as <prefix>.<domain>.
+  imageRegistry: ""             # Optional: set to your private/mirrored registry to rebrand all images.
   preserveExistingSecrets: false  # Set to true if secrets are pre-generated
-  storageClass: ""  # Global storage class for persistent volumes
+  storageClass: ""              # Global storage class for persistent volumes
   ingress:
     tls:
       autoGenerate: true  # Create the shared self-signed TLS secret by default.
@@ -42,6 +43,8 @@ infrastructure:
     # Set deploy: true/false in that section to enable/disable in-cluster PostgreSQL deployment
 
 # NeuralTrust Control Plane - Deploy all components
+# Hostnames auto-derive from global.domain (api.<domain>, app.<domain>, scheduler.<domain>).
+# Override per service with .host (full hostname) or .hostPrefix (subdomain only) when needed.
 neuraltrust-control-plane:
   infrastructure:
     postgresql:
@@ -55,7 +58,6 @@ neuraltrust-control-plane:
           database: "neuraltrust"
       api:
         enabled: true
-        host: "control-plane-api.yourdomain.com"  # Set to your domain
         ingress:
           enabled: true  # Use Ingress for external access
           # tls:
@@ -63,16 +65,15 @@ neuraltrust-control-plane:
           #   secretName: ""  # Empty = use the default shared self-signed secret
       app:
         enabled: true
-        host: "control-plane-app.yourdomain.com"  # Set to your domain
         ingress:
           enabled: true  # Use Ingress for external access
       scheduler:
         enabled: true
-        host: "control-plane-scheduler.yourdomain.com"  # Set to your domain
         ingress:
           enabled: true  # Use Ingress for external access
 
 # NeuralTrust Data Plane - Deploy all components
+# Data Plane API hostname auto-derives as data-plane-api.<global.domain>.
 neuraltrust-data-plane:
   dataPlane:
     enabled: true
@@ -84,7 +85,6 @@ neuraltrust-data-plane:
         enabled: true  # Kafka will be deployed via infrastructure.kafka.deploy
       api:
         enabled: true
-        host: "data-plane-api.yourdomain.com"  # Set to your domain
         ingress:
           enabled: true  # Use Ingress for external access
           # tls:
@@ -94,6 +94,7 @@ neuraltrust-data-plane:
         enabled: true
 
 # TrustGate - Deploy all components
+# Ingress hostnames auto-derive: admin.<global.domain>, gateway.<global.domain>, actions.<global.domain>.
 trustgate:
   enabled: true
   global:
@@ -110,9 +111,3 @@ trustgate:
     # tls:
     #   enabled: true
     #   secretName: ""  # Empty = use the default shared self-signed secret
-    controlPlane:
-      host: "admin.yourdomain.com"  # Set to your domain
-    dataPlane:
-      host: "gateway.yourdomain.com"  # Set to your domain
-    actions:
-      host: "actions.yourdomain.com"  # Set to your domain

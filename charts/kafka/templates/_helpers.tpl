@@ -44,12 +44,22 @@ Construct image path with optional global registry prefix.
 */}}
 {{- define "kafka.image" -}}
 {{- $registry := "" }}
+{{- $repository := .Values.image.repository }}
+{{- $tag := .Values.image.tag }}
+{{- $defaultRegistry := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker" }}
 {{- if and .Values.global .Values.global.imageRegistry }}
   {{- $registry = .Values.global.imageRegistry }}
 {{- end }}
 {{- if $registry }}
-  {{- printf "%s/%s:%s" $registry .Values.image.repository .Values.image.tag }}
+  {{- if hasPrefix $registry $repository }}
+    {{- printf "%s:%s" $repository $tag }}
+  {{- else if hasPrefix (printf "%s/" $defaultRegistry) $repository }}
+    {{- $shortName := trimPrefix (printf "%s/" $defaultRegistry) $repository }}
+    {{- printf "%s/%s:%s" $registry $shortName $tag }}
+  {{- else }}
+    {{- printf "%s/%s:%s" $registry $repository $tag }}
+  {{- end }}
 {{- else }}
-  {{- printf "%s:%s" .Values.image.repository .Values.image.tag }}
+  {{- printf "%s:%s" $repository $tag }}
 {{- end }}
 {{- end }}

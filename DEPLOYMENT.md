@@ -118,7 +118,7 @@ Create all secrets before deploying. See [SECRETS.md](./SECRETS.md) for the full
 
 ## NeuralTrust Firewall (gateway + workers)
 
-The firewall subchart is **off by default** (`neuraltrust-firewall.firewall.enabled: false`). Enable it when TrustGate or the Control Plane need in-cluster prompt/response safety.
+The firewall subchart is **on by default** (`neuraltrust-firewall.firewall.enabled: true`, CPU image). Disable with `neuraltrust-firewall.firewall.enabled: false` if your environment doesn't need in-cluster prompt/response safety.
 
 ### Architecture
 
@@ -167,17 +167,36 @@ neuraltrust-firewall:
 
 CUDA MPS env vars are only rendered in the ConfigMap when **both** MPS keys are set. CPU-only installs omit them.
 
+### Firewall URL auto-derivation
+
+When `neuraltrust-firewall.firewall.enabled: true`, the parent chart auto-populates two URL keys to point at the in-cluster firewall Service (`name: firewall`, port 80):
+
+| Key | Secret | Default value |
+|---|---|---|
+| `NEURAL_TRUST_FIREWALL_URL` | `trustgate-secrets` | `http://firewall.<release-namespace>.svc.cluster.local` |
+| `FIREWALL_API_URL` | `control-plane-secrets` | same FQDN |
+
+Resolution priority for both:
+
+```
+explicit override > existing secret value (lookup) > firewall FQDN (when enabled) > data-plane API fallback
+```
+
+When the firewall is disabled (`enabled: false`), `FIREWALL_API_URL` falls back to `http://data-plane-api-service:80` and `NEURAL_TRUST_FIREWALL_URL` is omitted.
+
 ### TrustGate integration
 
-TrustGate calls the firewall using `NEURAL_TRUST_FIREWALL_URL` and `NEURAL_TRUST_FIREWALL_SECRET_KEY`, stored in `trustgate-secrets`. With `global.autoGenerateSecrets: true`, set these via `trustgate.global.env`:
+TrustGate calls the firewall using `NEURAL_TRUST_FIREWALL_URL` and `NEURAL_TRUST_FIREWALL_SECRET_KEY`, stored in `trustgate-secrets`. With `global.autoGenerateSecrets: true` both are populated automatically when the firewall is enabled. To point TrustGate at a cross-namespace or external firewall, override explicitly:
 
 ```yaml
 trustgate:
   global:
     env:
-      NEURAL_TRUST_FIREWALL_URL: "http://firewall-gateway:8000"
-      NEURAL_TRUST_FIREWALL_SECRET_KEY: ""  # auto-populated from firewall JWT
+      NEURAL_TRUST_FIREWALL_URL: "http://firewall.shared-ns.svc.cluster.local"
+      NEURAL_TRUST_FIREWALL_SECRET_KEY: ""  # set when firewall requires explicit auth
 ```
+
+The same pattern works for the Control Plane app via `controlPlane.components.app.config.firewallApiUrl`. See `accounts/bv/values-bv-pre.yaml` for a worked cross-namespace example.
 
 After changing firewall secrets, restart TrustGate to pick up the new values:
 
@@ -187,6 +206,90 @@ kubectl rollout restart deployment/trustgate-data-plane -n neuraltrust
 ```
 
 See [SECRETS.md](./SECRETS.md#firewall-secrets) for firewall secret details.
+
+## Ingress hostnames
+
+When `global.domain` is set, every Ingress auto-fills its hostname as `<prefix>.<global.domain>` — no per-service host needs to be set.
+
+### Default prefixes
+
+| Service | Default prefix |
+|---|---|
+| `trustgate.ingress.controlPlane` | `admin` |
+| `trustgate.ingress.dataPlane` | `gateway` |
+| `trustgate.ingress.actions` | `actions` |
+| `neuraltrust-control-plane.controlPlane.components.api` | `api` |
+| `neuraltrust-control-plane.controlPlane.components.app` | `app` |
+| `neuraltrust-control-plane.controlPlane.components.scheduler` | `scheduler` |
+| `neuraltrust-data-plane.dataPlane.components.api` | `data-plane-api` |
+
+### Resolution priority
+
+```
+explicit .host  >  <hostPrefix>.<global.domain>  >  empty (catch-all)
+```
+
+### Override patterns
+
+```yaml
+global:
+  domain: "platform.example.com"
+
+trustgate:
+  ingress:
+    controlPlane:
+      host: "tg-admin.example.com"   # full hostname override (wins)
+    dataPlane:
+      hostPrefix: "tg"               # custom subdomain → tg.platform.example.com
+    actions:
+      hostPrefix: ""                 # disable auto-derive → catch-all
+```
+
+### OpenShift Routes
+
+OpenShift Routes use a separate code path with their existing long-prefix derivation (`control-plane-api.<domain>`, `trustgate-admin.<domain>`, etc.) and are **not** affected by `hostPrefix`. Auto-derive applies only when an Ingress is rendered (component `ingress.enabled: true`). See [README-OPENSHIFT.md](./README-OPENSHIFT.md).
+
+## Private / mirrored image registry
+
+Set `global.imageRegistry` once and every subchart inherits it:
+
+```yaml
+global:
+  imageRegistry: "my-registry.corp/neuraltrust"
+```
+
+The chart's image helpers use a "smart strip" pattern:
+
+1. If the per-component `repository` already starts with your registry → use as-is.
+2. Else if it starts with the chart's default prefix `europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/` → strip the default and prepend `imageRegistry`.
+3. Else → just prepend `imageRegistry` to whatever is there.
+
+### Three customization levels
+
+| Mirror style | Override required |
+|---|---|
+| Same short names, same tags | only `global.imageRegistry` |
+| Same short names, custom tags | + per-component `image.tag` |
+| Renamed paths (different repo names) | + per-component `image.repository` (full path starting with your registry host) and `image.tag` |
+
+When using renamed paths, the helper detects that the `repository` already matches your registry's host and uses it verbatim. This lets you mix namespaces — e.g. `<registry>/neuraltrust/...` for first-party images and `<registry>/library/postgres` for shared upstream images.
+
+### Components that read this setting
+
+- `trustgate.global.image` (gateway, control-plane, data-plane, actions, postgresql init job, redis)
+- `neuraltrust-control-plane.controlPlane.components.{api,app,scheduler,postgresql}.image`
+- `neuraltrust-data-plane.dataPlane.components.{api,worker,kafka.connect}.image`
+- `neuraltrust-firewall.firewall.{gateway,workerDefaults}.image`
+- `clickhouse.image` (and `clickhouse.backup.image`)
+- `kafka.image`
+
+### Verify before rollout
+
+```bash
+helm template . -f my-values.yaml | grep -E '^\s+image:' | sort -u
+```
+
+All resolved image references should be under your registry. If any still point to `europe-west1-docker.pkg.dev`, the mirror path needs adjustment in the corresponding `image.repository` override.
 
 ## Custom environment variables
 

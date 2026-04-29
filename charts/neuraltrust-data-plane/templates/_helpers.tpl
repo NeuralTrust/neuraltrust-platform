@@ -42,16 +42,17 @@ Usage: {{ include "data-plane.image" (dict "repository" .Values.dataPlane.compon
 {{- $registry := "" }}
 {{- $repository := .repository }}
 {{- $tag := .tag }}
-{{- if and .global .global.imageRegistry .global.imageRegistry }}
+{{- $defaultRegistry := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker" }}
+{{- if and .global .global.imageRegistry }}
   {{- $registry = .global.imageRegistry }}
 {{- end }}
 {{- if $registry }}
-  {{- /* Check if repository already starts with registry (e.g., "europe-west1-docker.pkg.dev/project/repo/...") */}}
   {{- if hasPrefix $registry $repository }}
-    {{- /* Repository already has registry, use as-is */}}
     {{- printf "%s:%s" $repository $tag }}
+  {{- else if hasPrefix (printf "%s/" $defaultRegistry) $repository }}
+    {{- $shortName := trimPrefix (printf "%s/" $defaultRegistry) $repository }}
+    {{- printf "%s/%s:%s" $registry $shortName $tag }}
   {{- else }}
-    {{- /* Prepend registry */}}
     {{- printf "%s/%s:%s" $registry $repository $tag }}
   {{- end }}
 {{- else }}

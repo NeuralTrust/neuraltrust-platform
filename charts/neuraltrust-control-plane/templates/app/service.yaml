@@ -59,6 +59,7 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: "control-plane-app-ingress"
+  {{- $resolvedAppHost := include "neuraltrust-platform.ingress.host" (dict "host" .Values.controlPlane.components.app.host "prefix" .Values.controlPlane.components.app.hostPrefix "global" .Values.global) }}
   {{- $annotations := include "neuraltrust-platform.ingress.annotations" (dict "global" .Values.global "local" .Values.controlPlane.components.app.ingress.annotations) }}
   {{- if $annotations }}
   annotations:
@@ -71,10 +72,10 @@ spec:
   {{- end }}
   {{- if and .Values.controlPlane.components.app.ingress.tls.enabled (include "neuraltrust-platform.ingress.renderTLS" (dict "global" .Values.global "tlsEnabled" .Values.controlPlane.components.app.ingress.tls.enabled)) }}
   tls:
-    - {{- if or .Values.controlPlane.components.app.host .Values.controlPlane.components.app.secondaryHost }}
+    - {{- if or $resolvedAppHost .Values.controlPlane.components.app.secondaryHost }}
       hosts:
-        {{- if .Values.controlPlane.components.app.host }}
-        - {{ .Values.controlPlane.components.app.host | quote }}
+        {{- if $resolvedAppHost }}
+        - {{ $resolvedAppHost | quote }}
         {{- end }}
         {{- if .Values.controlPlane.components.app.secondaryHost }}
         - {{ .Values.controlPlane.components.app.secondaryHost | quote }}
@@ -83,8 +84,8 @@ spec:
       secretName: {{ include "neuraltrust-platform.ingress.effectiveTLSSecretName" (dict "global" .Values.global "localSecretName" .Values.controlPlane.components.app.ingress.tls.secretName) }}
   {{- end }}
   rules:
-    - {{- if .Values.controlPlane.components.app.host }}
-      host: {{ .Values.controlPlane.components.app.host | quote }}
+    - {{- if $resolvedAppHost }}
+      host: {{ $resolvedAppHost | quote }}
       {{- end }}
       http:
         paths:

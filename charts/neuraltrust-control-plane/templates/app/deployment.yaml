@@ -162,7 +162,6 @@ spec:
         {{- $trustgateDataPlaneUrl := "" }}
         {{- $trustgateActionsUrl := "" }}
         {{- $nextAuthUrl := "" }}
-        {{- $firewallApiUrl := "" }}
         {{- $modelScannerApiUrl := "" }}
         {{- $kafkaHost := "kafka" }}
         {{- $kafkaPort := "9092" }}
@@ -178,7 +177,6 @@ spec:
           {{- if .Values.controlPlane.components.app.config.trustgateDataPlaneUrl }}{{- $trustgateDataPlaneUrl = .Values.controlPlane.components.app.config.trustgateDataPlaneUrl }}{{- end }}
           {{- if .Values.controlPlane.components.app.config.trustgateActionsUrl }}{{- $trustgateActionsUrl = .Values.controlPlane.components.app.config.trustgateActionsUrl }}{{- end }}
           {{- if .Values.controlPlane.components.app.config.nextAuthUrl }}{{- $nextAuthUrl = .Values.controlPlane.components.app.config.nextAuthUrl }}{{- end }}
-          {{- if .Values.controlPlane.components.app.config.firewallApiUrl }}{{- $firewallApiUrl = .Values.controlPlane.components.app.config.firewallApiUrl }}{{- end }}
           {{- if .Values.controlPlane.components.app.config.modelScannerApiUrl }}{{- $modelScannerApiUrl = .Values.controlPlane.components.app.config.modelScannerApiUrl }}{{- end }}
           {{- if .Values.controlPlane.components.app.config.kafkaHost }}{{- $kafkaHost = .Values.controlPlane.components.app.config.kafkaHost }}{{- end }}
           {{- if .Values.controlPlane.components.app.config.kafkaPort }}{{- $kafkaPort = .Values.controlPlane.components.app.config.kafkaPort }}{{- end }}
@@ -345,12 +343,15 @@ spec:
               key: TRUSTGATE_JWT_SECRET
               optional: true
         - name: FIREWALL_API_URL
-          {{- if $firewallApiUrl }}
-          value: "{{ $firewallApiUrl }}"
-          {{- else }}
-          # Use data plane API URL as default for firewall
-          value: "{{ $dataPlaneApiUrl }}"
-          {{- end }}
+          # Resolved by the parent chart (templates/platform-secrets.yaml):
+          # explicit controlPlane.components.app.config.firewallApiUrl >
+          # existing control-plane-secrets value > firewall service FQDN
+          # when neuraltrust-firewall.firewall.enabled, else data-plane API.
+          valueFrom:
+            secretKeyRef:
+              name: control-plane-secrets
+              key: FIREWALL_API_URL
+              optional: true
         - name: FIREWALL_JWT_SECRET
           {{- if and .Values.controlPlane .Values.controlPlane.secrets .Values.controlPlane.secrets.firewallJwtSecret (or (kindIs "map" .Values.controlPlane.secrets.firewallJwtSecret) (and (kindIs "string" .Values.controlPlane.secrets.firewallJwtSecret) (ne .Values.controlPlane.secrets.firewallJwtSecret ""))) }}
           # Use firewall JWT secret from control-plane secrets if present

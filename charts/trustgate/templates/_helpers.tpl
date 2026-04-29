@@ -73,6 +73,34 @@ Redis secret name
 
 
 {{/*
+Construct image path with optional global registry prefix.
+Strips the known default registry prefix when a custom global.imageRegistry is set,
+so users only need to mirror images under short names.
+Usage: {{ include "trustgate.image" (dict "repository" "europe-west1-docker.pkg.dev/.../trustgate-ee" "tag" "v1.26.7" "global" .Values.global) }}
+*/}}
+{{- define "trustgate.image" -}}
+{{- $registry := "" }}
+{{- $repository := .repository }}
+{{- $tag := .tag }}
+{{- $defaultRegistry := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker" }}
+{{- if and .global .global.imageRegistry }}
+  {{- $registry = .global.imageRegistry }}
+{{- end }}
+{{- if $registry }}
+  {{- if hasPrefix $registry $repository }}
+    {{- printf "%s:%s" $repository $tag }}
+  {{- else if hasPrefix (printf "%s/" $defaultRegistry) $repository }}
+    {{- $shortName := trimPrefix (printf "%s/" $defaultRegistry) $repository }}
+    {{- printf "%s/%s:%s" $registry $shortName $tag }}
+  {{- else }}
+    {{- printf "%s/%s:%s" $registry $repository $tag }}
+  {{- end }}
+{{- else }}
+  {{- printf "%s:%s" $repository $tag }}
+{{- end }}
+{{- end }}
+
+{{/*
 Control Plane labels
 */}}
 {{- define "trustgate.controlPlane.labels" -}}

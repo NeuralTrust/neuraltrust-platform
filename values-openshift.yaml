@@ -2,15 +2,22 @@
 # This file contains all configuration for deploying NeuralTrust platform components
 # including infrastructure (ClickHouse, Kafka, PostgreSQL), NeuralTrust services,
 # and TrustGate components.
+#
+# Notes:
+# - With global.platform: "openshift" (default here), the chart creates OpenShift Routes for external access.
+#   Route hostnames derive as <service-name>.<global.domain> (e.g. control-plane-api.<domain>).
+# - Switching any component to ingress.enabled: true uses Kubernetes Ingress with short prefixes
+#   (admin/gateway/actions/api/app/scheduler/data-plane-api). Override per service via .host or .hostPrefix.
+# - To mirror images to a private registry, set global.imageRegistry once — all subcharts inherit it.
 
 # Global settings
 global:
   platform: "openshift"
-  domain: "YOUR_DOMAIN"  # OpenShift wildcard DNS domain (e.g., apps.neuraltrust-dev.c4u5.p2.openshiftapps.com)
+  domain: "YOUR_DOMAIN"  # OpenShift wildcard DNS domain (e.g., apps.example.com)
   # DEPRECATED aliases (kept for backward compatibility):
   openshift: true
   openshiftDomain: "YOUR_DOMAIN"
-  imageRegistry: "" # Global image registry prefix (e.g., "europe-west1-docker.pkg.dev/project/repo"). If set, will be prepended to image repositories.
+  imageRegistry: "" # Optional global registry prefix (e.g., "my-registry.corp/neuraltrust"). If set, replaces the chart's default GCP prefix across every subchart.
   preserveExistingSecrets: false  # Set to true to prevent Helm from creating/updating secrets (secrets are pre-generated). When true, secret templates are NOT rendered.
   security:
     allowInsecureImages: true # Allow Bitnami charts to use their container images

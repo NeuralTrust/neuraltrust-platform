@@ -227,11 +227,14 @@ ingress:
   className: "" # Leave empty to use global.ingress.className
   annotations: {} # Per-service annotations (merged with global.ingress.annotations and AWS auto-generated annotations)
   controlPlane:
-    host: "" # Optional: set to your domain (e.g., "admin.yourdomain.com"). Empty = use ALB auto-generated URL.
+    host: "" # Optional: full hostname override. Empty = auto-derive as <hostPrefix>.<global.domain> when both are set.
+    hostPrefix: "admin" # Default subdomain prefix when host is empty. Set to "" to disable auto-derive.
   dataPlane:
-    host: "" # Optional: set to your domain (e.g., "gateway.yourdomain.com"). Empty = use ALB auto-generated URL.
+    host: "" # Optional: full hostname override. Empty = auto-derive as <hostPrefix>.<global.domain> when both are set.
+    hostPrefix: "gateway" # Default subdomain prefix when host is empty. Set to "" to disable auto-derive.
   actions:
-    host: "" # Optional: set to your domain (e.g., "actions.yourdomain.com"). Empty = use ALB auto-generated URL.
+    host: "" # Optional: full hostname override. Empty = auto-derive as <hostPrefix>.<global.domain> when both are set.
+    hostPrefix: "actions" # Default subdomain prefix when host is empty. Set to "" to disable auto-derive.
 # Optional: Add cert-manager configuration
 certManager:
   enabled: true

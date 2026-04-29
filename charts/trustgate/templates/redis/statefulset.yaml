@@ -35,7 +35,7 @@ spec:
       {{- end }}
       containers:
       - name: redis
-        image: "{{ .Values.redis.image.repository }}:{{ .Values.redis.image.tag }}"
+        image: {{ include "trustgate.image" (dict "repository" .Values.redis.image.repository "tag" .Values.redis.image.tag "global" .Values.global) | quote }}
         imagePullPolicy: {{ .Values.redis.image.pullPolicy }}
         {{- if .Values.securityHardening }}
         securityContext:

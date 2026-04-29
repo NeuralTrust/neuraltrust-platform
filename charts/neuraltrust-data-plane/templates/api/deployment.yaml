@@ -41,7 +41,13 @@ spec:
       {{- end }}
       initContainers:
         - name: clickhouse-migrations
-          image: {{ include "data-plane.image" (dict "repository" "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickhouse-server" "tag" "25.8" "global" .Values.global) | quote }}
+          {{- $chMigrationRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickhouse-server" }}
+          {{- $chMigrationTag := "25.8" }}
+          {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.clickhouse .Values.dataPlane.components.clickhouse.image }}
+            {{- if .Values.dataPlane.components.clickhouse.image.repository }}{{- $chMigrationRepo = .Values.dataPlane.components.clickhouse.image.repository }}{{- end }}
+            {{- if .Values.dataPlane.components.clickhouse.image.tag }}{{- $chMigrationTag = .Values.dataPlane.components.clickhouse.image.tag }}{{- end }}
+          {{- end }}
+          image: {{ include "data-plane.image" (dict "repository" $chMigrationRepo "tag" $chMigrationTag "global" .Values.global) | quote }}
           imagePullPolicy: IfNotPresent
           {{- if .Values.securityHardening }}
           securityContext:
