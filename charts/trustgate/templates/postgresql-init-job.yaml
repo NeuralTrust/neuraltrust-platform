@@ -64,8 +64,8 @@ spec:
       restartPolicy: Never
       containers:
       - name: postgresql-init
-        {{- $postgresImageRepo := "postgres" }}
-        {{- $postgresImageTag := "17.2-alpine" }}
+        {{- $postgresImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/postgres" }}
+        {{- $postgresImageTag := "17-alpine" }}
         {{- if and .Values.global .Values.global.postgresql .Values.global.postgresql.image }}
           {{- if .Values.global.postgresql.image.repository }}
             {{- $postgresImageRepo = .Values.global.postgresql.image.repository }}
