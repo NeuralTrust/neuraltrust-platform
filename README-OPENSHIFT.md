@@ -80,6 +80,28 @@ neuraltrust-control-plane:
 
 When Ingress is enabled for a component, Routes are automatically disabled for that component.
 
+### Hostname derivation
+
+Routes and Ingresses derive hostnames differently:
+
+| Resource | Hostname pattern | Example |
+|---|---|---|
+| **Route** (default on OpenShift) | `<service-name>.<global.domain>` | `control-plane-api.apps.mycluster.example.com` |
+| **Ingress** (when `ingress.enabled: true`) | `<hostPrefix>.<global.domain>` | `api.apps.mycluster.example.com` |
+
+Both use `global.domain`. The Ingress prefixes are short (`admin`, `gateway`, `api`, `app`, `scheduler`, `data-plane-api`, etc.) and configurable per service via `hostPrefix` or fully overridable via `host`. Route prefixes are fixed and match the service name. See the [main README](./README.md#ingress-hostnames) for the full Ingress prefix table.
+
+### Private / mirrored image registry
+
+For air-gapped or proxied OpenShift clusters, mirror the NeuralTrust images to your registry and set:
+
+```yaml
+global:
+  imageRegistry: "my-registry.corp/neuraltrust"
+```
+
+This applies to every subchart automatically. See [DEPLOYMENT.md](./DEPLOYMENT.md#private--mirrored-image-registry) for the full guide and customization options.
+
 ### Security Context Constraints (SCC)
 
 The chart automatically adapts security contexts for OpenShift when `global.platform: "openshift"`. If pods fail due to SCC restrictions:

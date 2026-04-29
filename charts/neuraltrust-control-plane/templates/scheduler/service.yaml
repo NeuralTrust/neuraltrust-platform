@@ -50,6 +50,7 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: "control-plane-scheduler-ingress"
+  {{- $resolvedSchedHost := include "neuraltrust-platform.ingress.host" (dict "host" .host "prefix" .hostPrefix "global" $.Values.global) }}
   {{- $annotations := include "neuraltrust-platform.ingress.annotations" (dict "global" $.Values.global "local" .ingress.annotations) }}
   {{- if $annotations }}
   annotations:
@@ -62,15 +63,15 @@ spec:
   {{- end }}
   {{- if and .ingress.tls.enabled (include "neuraltrust-platform.ingress.renderTLS" (dict "global" $.Values.global "tlsEnabled" .ingress.tls.enabled)) }}
   tls:
-    - {{- if .host }}
+    - {{- if $resolvedSchedHost }}
       hosts:
-        - {{ .host | quote }}
+        - {{ $resolvedSchedHost | quote }}
       {{- end }}
       secretName: {{ include "neuraltrust-platform.ingress.effectiveTLSSecretName" (dict "global" $.Values.global "localSecretName" .ingress.tls.secretName) }}
   {{- end }}
   rules:
-    - {{- if .host }}
-      host: {{ .host | quote }}
+    - {{- if $resolvedSchedHost }}
+      host: {{ $resolvedSchedHost | quote }}
       {{- end }}
       http:
         paths:

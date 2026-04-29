@@ -77,16 +77,24 @@ Backup: resolve the container image.
 Defaults to the main ClickHouse image so no extra image pull is needed.
 */}}
 {{- define "clickhouse.backup.image" -}}
-{{- $repo := .Values.backup.image.repository | default .Values.image.repository }}
+{{- $repository := .Values.backup.image.repository | default .Values.image.repository }}
 {{- $tag := .Values.backup.image.tag | default .Values.image.tag }}
 {{- $registry := "" }}
+{{- $defaultRegistry := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker" }}
 {{- if and .Values.global .Values.global.imageRegistry }}
   {{- $registry = .Values.global.imageRegistry }}
 {{- end }}
 {{- if $registry }}
-  {{- printf "%s/%s:%s" $registry $repo $tag }}
+  {{- if hasPrefix $registry $repository }}
+    {{- printf "%s:%s" $repository $tag }}
+  {{- else if hasPrefix (printf "%s/" $defaultRegistry) $repository }}
+    {{- $shortName := trimPrefix (printf "%s/" $defaultRegistry) $repository }}
+    {{- printf "%s/%s:%s" $registry $shortName $tag }}
+  {{- else }}
+    {{- printf "%s/%s:%s" $registry $repository $tag }}
+  {{- end }}
 {{- else }}
-  {{- printf "%s:%s" $repo $tag }}
+  {{- printf "%s:%s" $repository $tag }}
 {{- end }}
 {{- end }}
 
@@ -95,12 +103,22 @@ Construct image path with optional global registry prefix.
 */}}
 {{- define "clickhouse.image" -}}
 {{- $registry := "" }}
+{{- $repository := .Values.image.repository }}
+{{- $tag := .Values.image.tag }}
+{{- $defaultRegistry := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker" }}
 {{- if and .Values.global .Values.global.imageRegistry }}
   {{- $registry = .Values.global.imageRegistry }}
 {{- end }}
 {{- if $registry }}
-  {{- printf "%s/%s:%s" $registry .Values.image.repository .Values.image.tag }}
+  {{- if hasPrefix $registry $repository }}
+    {{- printf "%s:%s" $repository $tag }}
+  {{- else if hasPrefix (printf "%s/" $defaultRegistry) $repository }}
+    {{- $shortName := trimPrefix (printf "%s/" $defaultRegistry) $repository }}
+    {{- printf "%s/%s:%s" $registry $shortName $tag }}
+  {{- else }}
+    {{- printf "%s/%s:%s" $registry $repository $tag }}
+  {{- end }}
 {{- else }}
-  {{- printf "%s:%s" .Values.image.repository .Values.image.tag }}
+  {{- printf "%s:%s" $repository $tag }}
 {{- end }}
 {{- end }}

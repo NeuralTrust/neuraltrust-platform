@@ -96,6 +96,45 @@ global:
   domain: "example.com"    # base domain for service URLs
 ```
 
+## Ingress hostnames
+
+When `global.domain` is set, every Ingress auto-fills its hostname as `<prefix>.<global.domain>`. No per-service host configuration is required for the common case.
+
+| Service | Default prefix | Resolves to |
+|---|---|---|
+| TrustGate Admin | `admin` | `admin.<global.domain>` |
+| TrustGate Gateway | `gateway` | `gateway.<global.domain>` |
+| TrustGate Actions | `actions` | `actions.<global.domain>` |
+| Control Plane API | `api` | `api.<global.domain>` |
+| Control Plane App | `app` | `app.<global.domain>` |
+| Scheduler | `scheduler` | `scheduler.<global.domain>` |
+| Data Plane API | `data-plane-api` | `data-plane-api.<global.domain>` |
+
+Resolution priority per service:
+
+```
+explicit .host  >  <hostPrefix>.<global.domain>  >  empty (catch-all)
+```
+
+Override per service in either way:
+
+```yaml
+trustgate:
+  ingress:
+    controlPlane:
+      host: "tg-admin.example.com"   # full hostname override
+    dataPlane:
+      hostPrefix: "tg"               # subdomain only → tg.<global.domain>
+
+neuraltrust-control-plane:
+  controlPlane:
+    components:
+      app:
+        hostPrefix: ""               # disable auto-derive (catch-all)
+```
+
+OpenShift Routes are unaffected — they use their existing `<service-name>.<domain>` long-prefix derivation. See [README-OPENSHIFT.md](./README-OPENSHIFT.md).
+
 ## Image pull secret
 
 NeuralTrust container images are hosted in a private registry. You will receive a JSON key file from NeuralTrust.
@@ -111,6 +150,33 @@ kubectl create secret docker-registry gcr-secret \
   --docker-password="$(cat path/to/gcr-keys.json)" \
   --docker-email=admin@neuraltrust.ai \
   -n neuraltrust
+```
+
+## Private / mirrored image registry
+
+If your environment cannot reach `europe-west1-docker.pkg.dev`, mirror the images to your own registry and set `global.imageRegistry`. Every subchart inherits this setting.
+
+```yaml
+global:
+  imageRegistry: "my-registry.corp/neuraltrust"
+```
+
+The chart helpers automatically strip the default GCP prefix and prepend your registry, so `europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api` becomes `my-registry.corp/neuraltrust/control-plane-api` with no other changes required.
+
+Three escalating customization levels:
+
+| You mirror images with… | What to override |
+|---|---|
+| Same short names, same tags | only `global.imageRegistry` |
+| Same short names, custom tags | `global.imageRegistry` + per-component `image.tag` |
+| Renamed paths (e.g. `my-registry.corp/cp-api`) | `global.imageRegistry` + per-component `image.repository` and `image.tag` |
+
+For renamed paths, set `image.repository` to the **full path** starting with your registry host. The helper detects the host already matches and uses the value as-is. See `accounts/unicaja/values-unicaja-pre-v2.yaml` for a worked example with mixed namespaces (`docker-neuraltrust/...` plus `hub/postgres`, `hub/redislabs/...`).
+
+Verify rendered images before rolling out:
+
+```bash
+helm template . -f my-values.yaml | grep -E '^\s+image:' | sort -u
 ```
 
 ## Secrets
@@ -196,7 +262,7 @@ trustgate:
 
 neuraltrust-firewall:
   firewall:
-    enabled: false      # Firewall gateway + workers (off by default)
+    enabled: true       # Firewall gateway + workers (on by default, CPU image)
 ```
 
 ## Corporate proxy

@@ -50,6 +50,7 @@ kind: Ingress
 metadata:
   name: "control-plane-api-ingress"
   {{- with .Values.controlPlane.components.api }}
+  {{- $resolvedHost := include "neuraltrust-platform.ingress.host" (dict "host" .host "prefix" .hostPrefix "global" $.Values.global) }}
   {{- $annotations := include "neuraltrust-platform.ingress.annotations" (dict "global" $.Values.global "local" .ingress.annotations) }}
   {{- if $annotations }}
   annotations:
@@ -62,15 +63,15 @@ spec:
   {{- end }}
   {{- if and .ingress.tls.enabled (include "neuraltrust-platform.ingress.renderTLS" (dict "global" $.Values.global "tlsEnabled" .ingress.tls.enabled)) }}
   tls:
-    - {{- if .host }}
+    - {{- if $resolvedHost }}
       hosts:
-        - {{ .host | quote }}
+        - {{ $resolvedHost | quote }}
       {{- end }}
       secretName: {{ include "neuraltrust-platform.ingress.effectiveTLSSecretName" (dict "global" $.Values.global "localSecretName" .ingress.tls.secretName) }}
   {{- end }}
   rules:
-    - {{- if .host }}
-      host: {{ .host | quote }}
+    - {{- if $resolvedHost }}
+      host: {{ $resolvedHost | quote }}
       {{- end }}
       http:
         paths:

@@ -62,7 +62,7 @@ spec:
         emptyDir: {}
       containers:
       - name: data-plane
-        image: "{{ .Values.global.image.image }}:{{ .Values.global.image.tag }}"
+        image: {{ include "trustgate.image" (dict "repository" .Values.global.image.image "tag" .Values.global.image.tag "global" .Values.global) | quote }}
         args: ["proxy"]
         envFrom:
         - configMapRef:

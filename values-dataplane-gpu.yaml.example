@@ -17,9 +17,9 @@
 
 # Global settings
 global:
-  openshift: false
-  openshiftDomain: ""
-  imageRegistry: ""
+  platform: "kubernetes"        # "aws" | "gcp" | "azure" | "openshift" | "kubernetes"
+  domain: "yourdomain.com"      # Set to your base domain. Ingresses auto-derive as <prefix>.<domain>.
+  imageRegistry: ""             # Optional: set to your private/mirrored registry to rebrand all images.
   preserveExistingSecrets: false
   storageClass: ""
   ingress:
@@ -44,6 +44,7 @@ neuraltrust-control-plane:
     secrets:
       controlPlaneJWTSecret: "your-control-plane-jwt-secret"
       trustgateJwtSecret: "dummy-trustgate-jwt-secret"
+    # Ingress hostnames auto-derive from global.domain (api/app/scheduler).
     components:
       postgresql:
         secrets:
@@ -51,17 +52,14 @@ neuraltrust-control-plane:
           database: "neuraltrust"
       api:
         enabled: true
-        host: "control-plane-api.yourdomain.com"
         ingress:
           enabled: true
       app:
         enabled: true
-        host: "control-plane-app.yourdomain.com"
         ingress:
           enabled: true
       scheduler:
         enabled: true
-        host: "control-plane-scheduler.yourdomain.com"
         ingress:
           enabled: true
 
@@ -77,9 +75,9 @@ neuraltrust-data-plane:
         host: "clickhouse"
       kafka:
         enabled: true
+      # data-plane API hostname auto-derives as data-plane-api.<global.domain>.
       api:
         enabled: true
-        host: "data-plane-api.yourdomain.com"
         ingress:
           enabled: true
       worker:

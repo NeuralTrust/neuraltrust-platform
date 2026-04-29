@@ -226,6 +226,28 @@ Usage: {{ include "neuraltrust-platform.domain" . }}
 {{- end }}
 
 {{/*
+Resolve the effective ingress hostname for a service.
+Priority:
+  1. Explicit host (full hostname) — wins if non-empty
+  2. <prefix>.<global.domain> (or global.openshiftDomain fallback) when both are set
+  3. Empty (catch-all)
+Usage: {{ include "neuraltrust-platform.ingress.host" (dict "host" .Values.x.host "prefix" "api" "global" .Values.global) }}
+*/}}
+{{- define "neuraltrust-platform.ingress.host" -}}
+{{- $explicit := .host | default "" }}
+{{- if $explicit }}
+{{- $explicit }}
+{{- else }}
+  {{- $global := default dict .global }}
+  {{- $domain := $global.domain | default $global.openshiftDomain | default "" }}
+  {{- $prefix := .prefix | default "" }}
+  {{- if and $domain $prefix }}
+{{- printf "%s.%s" $prefix $domain }}
+  {{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
 Resolve the effective ingress provider.
 Priority: global.ingress.provider (explicit) > auto-detect from global.platform.
 Platform mapping: aws→aws, gcp→gcp, azure→azure, openshift→openshift, kubernetes→none.

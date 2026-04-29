@@ -15,11 +15,11 @@
 
 # Global settings
 global:
-  openshift: false  # Set to true if using OpenShift
-  openshiftDomain: ""  # OpenShift wildcard DNS domain (e.g., *.apps.example.com)
-  imageRegistry: ""  # Global image registry prefix
+  platform: "kubernetes"        # "aws" | "gcp" | "azure" | "openshift" | "kubernetes"
+  domain: "yourdomain.com"      # Set to your base domain. Ingresses auto-derive as <prefix>.<domain>.
+  imageRegistry: ""             # Optional: set to your private/mirrored registry to rebrand all images.
   preserveExistingSecrets: false  # Set to true if secrets are pre-generated
-  storageClass: ""  # Global storage class for persistent volumes
+  storageClass: ""              # Global storage class for persistent volumes
   ingress:
     tls:
       autoGenerate: true  # Create the shared self-signed TLS secret by default.
@@ -69,9 +69,9 @@ neuraltrust-control-plane:
           user: "neuraltrust"
           password: "your-postgres-password"  # Define this value
           database: "neuraltrust"
+      # Hostnames auto-derive from global.domain (api.<domain>, app.<domain>, scheduler.<domain>).
       api:
         enabled: true
-        host: "control-plane-api.yourdomain.com"  # Set to your domain
         ingress:
           enabled: true  # Use Ingress for external access
           # tls:
@@ -79,12 +79,10 @@ neuraltrust-control-plane:
           #   secretName: ""  # Empty = use the default shared self-signed secret
       app:
         enabled: true
-        host: "control-plane-app.yourdomain.com"  # Set to your domain
         ingress:
           enabled: true  # Use Ingress for external access
       scheduler:
         enabled: true
-        host: "control-plane-scheduler.yourdomain.com"  # Set to your domain
         ingress:
           enabled: true  # Use Ingress for external access
 
@@ -101,9 +99,9 @@ neuraltrust-data-plane:
         database: "neuraltrust"
       kafka:
         enabled: false  # External Kafka
+      # data-plane API hostname auto-derives as data-plane-api.<global.domain>.
       api:
         enabled: true
-        host: "data-plane-api.yourdomain.com"  # Set to your domain
         ingress:
           enabled: true  # Use Ingress for external access
           # tls:
@@ -123,15 +121,10 @@ trustgate:
       DATABASE_PASSWORD: "your-postgres-password"  # Define this value
       DATABASE_NAME: "trustgate"
       DATABASE_SSL_MODE: "require"  # Use "require" for external PostgreSQL
+  # TrustGate Ingress hostnames auto-derive: admin.<global.domain>, gateway.<global.domain>, actions.<global.domain>.
   ingress:
     enabled: true  # Use Ingress for external access
     # Optional:
     # tls:
     #   enabled: true
     #   secretName: ""  # Empty = use the default shared self-signed secret
-    controlPlane:
-      host: "admin.yourdomain.com"  # Set to your domain
-    dataPlane:
-      host: "gateway.yourdomain.com"  # Set to your domain
-    actions:
-      host: "actions.yourdomain.com"  # Set to your domain
