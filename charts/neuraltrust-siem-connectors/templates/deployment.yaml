@@ -1,0 +1,107 @@
+{{- if .Values.siemConnectors.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: siem-connectors
+  labels:
+    {{- include "siemConnectors.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.siemConnectors.replicas | default 1 }}
+  selector:
+    matchLabels:
+      {{- include "siemConnectors.selectorLabels" . | nindent 6 }}
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        {{- include "siemConnectors.labels" . | nindent 8 }}
+    spec:
+      {{- if .Values.siemConnectors.serviceAccount.create }}
+      serviceAccountName: {{ .Values.siemConnectors.serviceAccount.name | default "siem-connectors" }}
+      {{- end }}
+      {{- $imagePullSecret := .Values.siemConnectors.imagePullSecrets | default "" }}
+      {{- if and $imagePullSecret (ne $imagePullSecret "") }}
+      imagePullSecrets:
+        - name: {{ $imagePullSecret }}
+      {{- end }}
+      {{- if .Values.siemConnectors.podSecurityContext }}
+      securityContext:
+        {{- toYaml .Values.siemConnectors.podSecurityContext | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: siem-connectors
+          {{- $repo := .Values.siemConnectors.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/siem-connectors" }}
+          {{- $tag := .Values.siemConnectors.image.tag | default "latest" }}
+          image: {{ include "siemConnectors.image" (dict "repository" $repo "tag" $tag "global" .Values.global) | quote }}
+          imagePullPolicy: {{ .Values.siemConnectors.image.pullPolicy | default "IfNotPresent" }}
+          args:
+            - npm
+            - start
+          ports:
+            - containerPort: 3000
+              name: http
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: siem-connectors-config
+            {{- with .Values.siemConnectors.extraEnvFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          env:
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.siemConnectors.clickhouse.secretName | default "clickhouse-secrets" }}
+                  key: {{ .Values.siemConnectors.clickhouse.secretKey | default "admin-password" }}
+                  optional: true
+            {{- with .Values.siemConnectors.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- include "neuraltrust-platform.proxy-env" . | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: http
+              scheme: HTTP
+            periodSeconds: 5
+            failureThreshold: {{ .Values.siemConnectors.startupProbe.failureThreshold | default 12 }}
+            successThreshold: 1
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+              scheme: HTTP
+            periodSeconds: 10
+            failureThreshold: 3
+            successThreshold: 1
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+              scheme: HTTP
+            periodSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1
+            timeoutSeconds: 3
+          {{- if .Values.siemConnectors.resources }}
+          resources:
+            {{- toYaml .Values.siemConnectors.resources | nindent 12 }}
+          {{- end }}
+          {{- $sc := include "siemConnectors.securityContext" . }}
+          {{- if $sc }}
+          securityContext:
+            {{- $sc | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}

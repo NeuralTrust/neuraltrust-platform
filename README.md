@@ -10,6 +10,8 @@ Deploy the complete NeuralTrust AI governance and runtime security stack on any 
 | **Control Plane** | Management API, product UI, and scheduler |
 | **Data Plane** | Telemetry and analytics API with Kafka workers |
 | **Firewall** *(optional)* | Prompt and response safety — gateway + ML worker pool (CPU or GPU) |
+| **AISPM** *(optional, off by default)* | AI Security Posture Management — FastAPI + Celery worker + beat scheduler |
+| **SIEM Connectors** *(optional, off by default)* | Kafka consumer that forwards audit / posture events to external SIEMs |
 | **ClickHouse** | Analytics database (in-cluster or external) |
 | **Kafka** | Event streaming (in-cluster or external) |
 | **PostgreSQL** | Relational store (in-cluster or external) |
@@ -263,7 +265,17 @@ trustgate:
 neuraltrust-firewall:
   firewall:
     enabled: true       # Firewall gateway + workers (on by default, CPU image)
+
+neuraltrust-aispm:
+  aispm:
+    enabled: false      # AI Security Posture Management (off by default)
+
+neuraltrust-siem-connectors:
+  siemConnectors:
+    enabled: false      # SIEM forwarder (off by default)
 ```
+
+When `neuraltrust-aispm.aispm.enabled` is true, the parent chart auto-populates `control-plane-secrets/POSTURE_API_URL` so the Control Plane app talks to AISPM at `http://aispm-api-service.<release-namespace>.svc.cluster.local:80`. AISPM authenticates with the same JWT secret as the Data Plane (`data-plane-jwt-secret/DATA_PLANE_JWT_SECRET`) — no additional secret is required. Override with `neuraltrust-control-plane.controlPlane.components.app.config.postureApiUrl` to point the app at an external AISPM instance.
 
 ## Corporate proxy
 
@@ -300,7 +312,7 @@ neuraltrust-data-plane:
               name: my-feature-flags
 ```
 
-Available on: control plane (api, app, scheduler), data plane (api, worker), TrustGate (control-plane, data-plane, actions), and firewall (gateway, workers).
+Available on: control plane (api, app, scheduler), data plane (api, worker), TrustGate (control-plane, data-plane, actions), firewall (gateway, workers), AISPM (api, worker, beat), and SIEM connectors.
 
 ## ClickHouse backups
 

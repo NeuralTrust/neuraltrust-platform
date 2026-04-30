@@ -352,6 +352,22 @@ spec:
               name: control-plane-secrets
               key: FIREWALL_API_URL
               optional: true
+        - name: POSTURE_API_URL
+          # Resolved by the parent chart (templates/platform-secrets.yaml):
+          # explicit controlPlane.components.app.config.postureApiUrl >
+          # existing control-plane-secrets value > aispm-api-service FQDN
+          # when neuraltrust-aispm.aispm.enabled. Optional when AISPM is off.
+          valueFrom:
+            secretKeyRef:
+              name: control-plane-secrets
+              key: POSTURE_API_URL
+              optional: true
+        - name: POSTURE_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: data-plane-jwt-secret
+              key: DATA_PLANE_JWT_SECRET
+              optional: true
         - name: FIREWALL_JWT_SECRET
           {{- if and .Values.controlPlane .Values.controlPlane.secrets .Values.controlPlane.secrets.firewallJwtSecret (or (kindIs "map" .Values.controlPlane.secrets.firewallJwtSecret) (and (kindIs "string" .Values.controlPlane.secrets.firewallJwtSecret) (ne .Values.controlPlane.secrets.firewallJwtSecret ""))) }}
           # Use firewall JWT secret from control-plane secrets if present

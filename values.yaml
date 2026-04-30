@@ -103,6 +103,62 @@ global:
       wafPolicyId: "" # Optional: WAF policy resource ID
       requestTimeout: "" # Optional: backend request timeout in seconds (e.g., "30")
       additionalAnnotations: {} # Any additional AGIC annotations as key-value pairs
+# Optional add-on services (off by default, listed first for visibility).
+# Toggle each one with its own enabled flag; everything else uses chart defaults.
+#
+# AI Security Posture Management (AISPM)
+# When enabled, the parent chart auto-populates:
+#   - control-plane-secrets/POSTURE_API_URL → http://aispm-api-service.<release-namespace>.svc.cluster.local:80
+# The control-plane-app reads POSTURE_API_URL (and falls back to DATA_PLANE_JWT_SECRET
+# for POSTURE_JWT_SECRET) automatically; no app code changes needed.
+neuraltrust-aispm:
+  aispm:
+    enabled: false
+    # imagePullSecrets: "gcr-secret"
+    # api:
+    #   replicas: 1
+    #   image: { repository: "...", tag: "v0.15.0", pullPolicy: IfNotPresent }
+    #   resources: { requests: {...}, limits: {...} }
+    #   autoscaling: { enabled: true, minReplicas: 1, maxReplicas: 4 }
+    #   podDisruptionBudget: { enabled: true, minAvailable: 1 }
+    #   extraEnv: []
+    #   extraEnvFrom: []
+    # worker: { replicas: 1, image: {...}, resources: {...}, autoscaling: { enabled: false } }
+    # beat:   { image: {...}, resources: {...} }
+    # config:
+    #   openaiModel: "gpt-4o-mini"
+    #   defaultSyncIntervalSeconds: "86400"
+    #   otelEnabled: "false"
+    #   aispmApiUrl: ""        # Empty = internal Service URL
+    # secrets:
+    #   authEncryptionKey: ""  # Auto-generated if empty (Fernet 44-char urlsafe base64)
+    #   dbPassword: ""         # Auto-generated if empty
+    #   openaiApiKey: ""       # Required at runtime; chart does not enforce
+    # database: { host: "control-plane-postgresql", user: "aispm", name: "aispm", sslMode: "disable" }
+    # redis:    { host: "", port: "6379", database: "1" }   # Empty host shares TrustGate Redis
+    # kafka:    { bootstrapServers: "", postureTopic: "posture_alerts" }
+
+# SIEM forwarder
+# Internal-only worker that consumes Kafka audit/posture events and forwards
+# them to external SIEMs (Splunk, Sentinel, Datadog, Elasticsearch, …) using
+# per-team configuration stored in ClickHouse.
+neuraltrust-siem-connectors:
+  siemConnectors:
+    enabled: false
+    # imagePullSecrets: "gcr-secret"
+    # replicas: 1
+    # image: { repository: "...", tag: "latest", pullPolicy: IfNotPresent }
+    # resources: { requests: {...}, limits: {...} }
+    # autoscaling: { enabled: false, minReplicas: 1, maxReplicas: 4 }
+    # podDisruptionBudget: { enabled: true, minAvailable: 1 }
+    # config:
+    #   kafkaTopics: "audit_events,posture_alerts"
+    #   logLevel: "info"
+    #   port: "3000"
+    # kafka:      { brokers: "" }     # Empty => resolved via parent infrastructure helper
+    # clickhouse: { host: "", database: "neuraltrust", user: "neuraltrust",
+    #               secretName: "clickhouse-secrets", secretKey: "admin-password" }
+
 # Infrastructure Components
 # These can be deployed or configured to use pre-installed instances
 infrastructure:
@@ -673,6 +729,11 @@ neuraltrust-control-plane:
           trustgateActionsUrl: "" # Auto: https://trustgate-actions.{global.openshiftDomain} or http://trustgate-actions:80 (same namespace)
           nextAuthUrl: "" # Auto: https://{app.host} or https://control-plane-app.yourdomain.com
           firewallApiUrl: ""
+          # POSTURE_API_URL — control-plane-app → AISPM API host (no path).
+          # Empty value lets the parent chart auto-resolve to
+          # http://aispm-api-service.<release-namespace>.svc.cluster.local:80
+          # when neuraltrust-aispm.aispm.enabled is true.
+          postureApiUrl: ""
           modelScannerApiUrl: ""
           openaiModel: "gpt-4o-mini"
           kafkaHost: "kafka"

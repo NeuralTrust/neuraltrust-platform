@@ -1,0 +1,264 @@
+{{- /*
+Job to initialize the AISPM PostgreSQL database and user.
+1) First tries to connect using aispm-secrets (DATABASE_PASSWORD) and the
+   .Values.aispm.database.{host,port,user,name} values. If the connection
+   succeeds, the user and database already exist – the job exits 0.
+2) If that fails, creates the user/database using postgresql-secrets
+   (admin credentials) when PostgreSQL is deployed in-cluster.
+   postgresql-secrets is optional when using external PostgreSQL — in that
+   case the customer must pre-create the aispm user and database.
+*/}}
+{{- if .Values.aispm.enabled }}
+{{- $pgSecretName := "postgresql-secrets" }}
+{{- $aispmSecretName := "aispm-secrets" }}
+{{- $aispmDbHost := .Values.aispm.database.host | default "control-plane-postgresql" | toString }}
+{{- $aispmDbPort := .Values.aispm.database.port | default "5432" | toString }}
+{{- $aispmDbUser := .Values.aispm.database.user | default "aispm" | toString }}
+{{- $aispmDbName := .Values.aispm.database.name | default "aispm" | toString }}
+{{- $aispmDbSslMode := .Values.aispm.database.sslMode | default "disable" | toString }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: aispm-postgresql-init
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aispm.labels" (dict "component" "postgresql-init" "context" .) | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    "helm.sh/hook-weight": "-5"
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        {{- include "aispm.labels" (dict "component" "postgresql-init" "context" .) | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      {{- if .Values.aispm.serviceAccount.create }}
+      serviceAccountName: {{ .Values.aispm.serviceAccount.name | default "aispm" }}
+      {{- end }}
+      {{- $imagePullSecret := .Values.aispm.imagePullSecrets | default "" }}
+      {{- if and $imagePullSecret (ne $imagePullSecret "") }}
+      imagePullSecrets:
+        - name: {{ $imagePullSecret }}
+      {{- end }}
+      containers:
+      - name: postgresql-init
+        {{- $postgresImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/postgres" }}
+        {{- $postgresImageTag := "17-alpine" }}
+        {{- if and .Values.global .Values.global.postgresql .Values.global.postgresql.image }}
+          {{- if .Values.global.postgresql.image.repository }}
+            {{- $postgresImageRepo = .Values.global.postgresql.image.repository }}
+          {{- end }}
+          {{- if .Values.global.postgresql.image.tag }}
+            {{- $postgresImageTag = .Values.global.postgresql.image.tag }}
+          {{- end }}
+        {{- end }}
+        image: {{ include "aispm.image" (dict "repository" $postgresImageRepo "tag" $postgresImageTag "global" .Values.global) | quote }}
+        imagePullPolicy: IfNotPresent
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+
+          # AISPM database connection (host/port/user/name from values, password from aispm-secrets)
+          AISPM_DB_HOST="${AISPM_DATABASE_HOST}"
+          AISPM_DB_PORT="${AISPM_DATABASE_PORT:-5432}"
+          AISPM_DB_USER="${AISPM_DATABASE_USER:-aispm}"
+          AISPM_DB_NAME="${AISPM_DATABASE_NAME:-aispm}"
+          AISPM_DB_PASSWORD="${AISPM_DATABASE_PASSWORD}"
+
+          PG_SSL_MODE="${POSTGRES_SSL_MODE:-disable}"
+
+          # Wait for aispm-secrets to populate (the parent chart or the
+          # subchart's secrets.yaml seeds DATABASE_PASSWORD when enabled).
+          echo "Waiting for aispm-secrets to be available..."
+          SECRET_MAX_ATTEMPTS=60
+          SECRET_ATTEMPT=0
+
+          while [ $SECRET_ATTEMPT -lt $SECRET_MAX_ATTEMPTS ]; do
+            if [ -n "${AISPM_DB_PASSWORD}" ]; then
+              echo "✓ aispm-secrets values loaded successfully"
+              break
+            fi
+            SECRET_ATTEMPT=$((SECRET_ATTEMPT + 1))
+            if [ $((SECRET_ATTEMPT % 5)) -eq 0 ]; then
+              echo "Attempt $SECRET_ATTEMPT/$SECRET_MAX_ATTEMPTS: Waiting for aispm-secrets..."
+            fi
+            sleep 2
+          done
+
+          if [ -z "${AISPM_DB_PASSWORD}" ]; then
+            echo "ERROR: aispm-secrets not found or incomplete after $((SECRET_MAX_ATTEMPTS * 2)) seconds."
+            echo "Ensure global.autoGenerateSecrets=true OR aispm.secrets.dbPassword is set."
+            exit 1
+          fi
+
+          if [ "${PG_SSL_MODE}" != "disable" ]; then
+            export PGSSLMODE="${PG_SSL_MODE}"
+          fi
+
+          # First try to connect using AISPM credentials.
+          # If successful, the user and database already exist – we are done.
+          echo "Trying to connect using AISPM credentials at ${AISPM_DB_HOST}:${AISPM_DB_PORT}..."
+          TRY_MAX=10
+          TRY_N=0
+          while [ $TRY_N -lt $TRY_MAX ]; do
+            if PGPASSWORD="${AISPM_DB_PASSWORD}" psql -h "${AISPM_DB_HOST}" -p "${AISPM_DB_PORT}" -U "${AISPM_DB_USER}" -d "${AISPM_DB_NAME}" -c "SELECT 1" 2>/dev/null; then
+              echo "✓ Connected with AISPM credentials; user and database already exist."
+              exit 0
+            fi
+            TRY_N=$((TRY_N + 1))
+            if [ $((TRY_N % 10)) -eq 0 ] && [ $TRY_N -gt 0 ]; then
+              echo "Attempt $TRY_N/$TRY_MAX: AISPM connection not successful yet, retrying..."
+            fi
+            sleep 2
+          done
+
+          echo "Could not connect with AISPM credentials after $TRY_MAX attempts. Will try to create user/database using admin credentials if available."
+
+          # Admin credentials (postgresql-secrets) are required to create user/database.
+          # They are optional when using external PostgreSQL – in that case create the aispm user and database beforehand.
+          if [ -z "${POSTGRES_HOST}" ] || [ -z "${POSTGRES_USER}" ] || [ -z "${POSTGRES_PASSWORD}" ]; then
+            echo "ERROR: Could not connect with AISPM credentials and admin credentials (postgresql-secrets) are not available."
+            echo "When using external PostgreSQL, create the aispm user and database beforehand."
+            exit 1
+          fi
+
+          PG_HOST="${POSTGRES_HOST}"
+          PG_PORT="${POSTGRES_PORT:-5432}"
+          PG_ADMIN_USER="${POSTGRES_USER}"
+          PG_ADMIN_PASSWORD="${POSTGRES_PASSWORD}"
+
+          echo "Waiting for PostgreSQL to be ready at ${PG_HOST}:${PG_PORT}..."
+          MAX_ATTEMPTS=240
+          ATTEMPT=0
+
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            if nc -z -w 2 "${PG_HOST}" "${PG_PORT}" 2>/dev/null; then
+              export PGPASSWORD="${PG_ADMIN_PASSWORD}"
+              if pg_isready -h "${PG_HOST}" -p "${PG_PORT}" -U "${PG_ADMIN_USER}" -t 2 >/dev/null 2>&1; then
+                echo "✓ PostgreSQL is ready and accepting connections!"
+                break
+              fi
+            fi
+            ATTEMPT=$((ATTEMPT + 1))
+            if [ $((ATTEMPT % 10)) -eq 0 ]; then
+              echo "Attempt $ATTEMPT/$MAX_ATTEMPTS: PostgreSQL not ready yet, waiting..."
+            fi
+            sleep 2
+          done
+
+          if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
+            echo "ERROR: PostgreSQL did not become ready at ${PG_HOST}:${PG_PORT} within $((MAX_ATTEMPTS * 2)) seconds."
+            exit 1
+          fi
+
+          PSQL_OPTS="-h ${PG_HOST} -p ${PG_PORT} -U ${PG_ADMIN_USER}"
+          export PGPASSWORD="${PG_ADMIN_PASSWORD}"
+
+          echo "Connecting to PostgreSQL at ${PG_HOST}:${PG_PORT} as ${PG_ADMIN_USER} (SSL mode: ${PG_SSL_MODE})"
+          echo "Creating database '${AISPM_DB_NAME}' and user '${AISPM_DB_USER}' if they don't exist..."
+
+          # Create user if it doesn't exist
+          USER_EXISTS=$(psql ${PSQL_OPTS} -d postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='${AISPM_DB_USER}'" 2>/dev/null || echo "0")
+
+          if [ "${USER_EXISTS}" != "1" ]; then
+            echo "Creating user '${AISPM_DB_USER}'..."
+            psql ${PSQL_OPTS} -d postgres -c "CREATE USER \"${AISPM_DB_USER}\" WITH PASSWORD '${AISPM_DB_PASSWORD}';" || {
+              echo "ERROR: Failed to create user '${AISPM_DB_USER}'"
+              exit 1
+            }
+            echo "User '${AISPM_DB_USER}' created successfully"
+          else
+            echo "User '${AISPM_DB_USER}' already exists, updating password..."
+            psql ${PSQL_OPTS} -d postgres -c "ALTER USER \"${AISPM_DB_USER}\" WITH PASSWORD '${AISPM_DB_PASSWORD}';" || {
+              echo "WARNING: Failed to update password for user '${AISPM_DB_USER}'"
+            }
+          fi
+
+          # Create database if it doesn't exist
+          DB_EXISTS=$(psql ${PSQL_OPTS} -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='${AISPM_DB_NAME}'" 2>/dev/null || echo "0")
+
+          if [ "${DB_EXISTS}" != "1" ]; then
+            echo "Creating database '${AISPM_DB_NAME}'..."
+            psql ${PSQL_OPTS} -d postgres -c "CREATE DATABASE \"${AISPM_DB_NAME}\" OWNER \"${AISPM_DB_USER}\";" || {
+              echo "ERROR: Failed to create database '${AISPM_DB_NAME}'"
+              exit 1
+            }
+            echo "Database '${AISPM_DB_NAME}' created successfully"
+          else
+            echo "Database '${AISPM_DB_NAME}' already exists"
+          fi
+
+          # Grant all privileges on the database to the user
+          echo "Granting privileges on database '${AISPM_DB_NAME}' to user '${AISPM_DB_USER}'..."
+          psql ${PSQL_OPTS} -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE \"${AISPM_DB_NAME}\" TO \"${AISPM_DB_USER}\";" || {
+            echo "WARNING: Failed to grant privileges"
+          }
+
+          # Grant schema privileges (PostgreSQL 15+)
+          echo "Granting schema privileges..."
+          psql ${PSQL_OPTS} -d "${AISPM_DB_NAME}" -c "GRANT ALL ON SCHEMA public TO \"${AISPM_DB_USER}\";" || {
+            echo "WARNING: Failed to grant schema privileges"
+          }
+
+          echo "PostgreSQL initialization completed successfully!"
+        resources:
+          {{- $pgInit := .Values.aispm.postgresqlInit | default dict }}
+          {{- if and $pgInit (hasKey $pgInit "resources") }}
+          {{- toYaml (index $pgInit "resources") | nindent 10 }}
+          {{- else }}
+          requests:
+            cpu: 250m
+            memory: 64Mi
+          limits:
+            cpu: 500m
+            memory: 128Mi
+          {{- end }}
+        env:
+        # PostgreSQL admin credentials from postgresql-secrets (optional when using external PostgreSQL)
+        - name: POSTGRES_HOST
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: POSTGRES_HOST
+              optional: true
+        - name: POSTGRES_PORT
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: POSTGRES_PORT
+              optional: true
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: POSTGRES_USER
+              optional: true
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: POSTGRES_PASSWORD
+              optional: true
+        # AISPM credentials: host/port/user/name from values, password from aispm-secrets.
+        - name: AISPM_DATABASE_HOST
+          value: {{ $aispmDbHost | quote }}
+        - name: AISPM_DATABASE_PORT
+          value: {{ $aispmDbPort | quote }}
+        - name: AISPM_DATABASE_USER
+          value: {{ $aispmDbUser | quote }}
+        - name: AISPM_DATABASE_NAME
+          value: {{ $aispmDbName | quote }}
+        - name: AISPM_DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ $aispmSecretName }}
+              key: DATABASE_PASSWORD
+        - name: POSTGRES_SSL_MODE
+          value: {{ $aispmDbSslMode | quote }}
+{{- end }}

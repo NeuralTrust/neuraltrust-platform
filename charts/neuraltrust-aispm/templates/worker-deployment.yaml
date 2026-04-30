@@ -1,0 +1,76 @@
+{{- if .Values.aispm.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aispm-worker
+  labels:
+    {{- include "aispm.labels" (dict "component" "worker" "context" .) | nindent 4 }}
+spec:
+  replicas: {{ .Values.aispm.worker.replicas | default 1 }}
+  selector:
+    matchLabels:
+      {{- include "aispm.selectorLabels" (dict "component" "worker") | nindent 6 }}
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        {{- include "aispm.labels" (dict "component" "worker" "context" .) | nindent 8 }}
+    spec:
+      {{- if .Values.aispm.serviceAccount.create }}
+      serviceAccountName: {{ .Values.aispm.serviceAccount.name | default "aispm" }}
+      {{- end }}
+      {{- $imagePullSecret := .Values.aispm.imagePullSecrets | default "" }}
+      {{- if and $imagePullSecret (ne $imagePullSecret "") }}
+      imagePullSecrets:
+        - name: {{ $imagePullSecret }}
+      {{- end }}
+      {{- if .Values.aispm.podSecurityContext }}
+      securityContext:
+        {{- toYaml .Values.aispm.podSecurityContext | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: worker
+          {{- $repo := .Values.aispm.worker.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/aispm-worker" }}
+          {{- $tag := .Values.aispm.worker.image.tag | default "v0.15.0" }}
+          image: {{ include "aispm.image" (dict "repository" $repo "tag" $tag "global" .Values.global) | quote }}
+          imagePullPolicy: {{ .Values.aispm.worker.image.pullPolicy | default "IfNotPresent" }}
+          args:
+            - uv
+            - run
+            - --quiet
+            - celery
+            - -A
+            - app.workers.celery_app:celery_app
+            - worker
+          envFrom:
+            - configMapRef:
+                name: aispm-config
+            {{- with .Values.aispm.worker.extraEnvFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          env:
+            {{- include "aispm.commonEnv" . | nindent 12 }}
+            {{- with .Values.aispm.worker.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- include "neuraltrust-platform.proxy-env" . | nindent 12 }}
+          {{- if .Values.aispm.worker.resources }}
+          resources:
+            {{- toYaml .Values.aispm.worker.resources | nindent 12 }}
+          {{- end }}
+          {{- $sc := include "aispm.securityContext" . }}
+          {{- if $sc }}
+          securityContext:
+            {{- $sc | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}

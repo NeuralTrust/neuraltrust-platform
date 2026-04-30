@@ -207,6 +207,74 @@ kubectl rollout restart deployment/trustgate-data-plane -n neuraltrust
 
 See [SECRETS.md](./SECRETS.md#firewall-secrets) for firewall secret details.
 
+## AISPM (AI Security Posture Management)
+
+The AISPM subchart is **off by default** (`neuraltrust-aispm.aispm.enabled: false`). Enable it when you need posture scanning of cloud, code, and model resources alongside the rest of the platform.
+
+### Architecture
+
+AISPM deploys three workloads sharing a common image family:
+
+| Workload | Purpose |
+|---|---|
+| `aispm-api` | FastAPI HTTP API (port 8000), exposed in-cluster as `aispm-api-service` (port 80) |
+| `aispm-worker` | Celery worker pool — runs scheduled syncs and LLM scoring |
+| `aispm-beat` | Celery beat scheduler (single replica) |
+
+### Shared infrastructure
+
+When AISPM is enabled, defaults reuse platform infrastructure:
+
+| Resource | Default | Override |
+|---|---|---|
+| PostgreSQL | `control-plane-postgresql` (db `aispm`, user `aispm`) | `neuraltrust-aispm.aispm.database.{host,port,user,name,sslMode}` |
+| Redis | `<release>-redis-master:6379` db `1` (TrustGate uses db `0`) | `neuraltrust-aispm.aispm.redis.{host,port,database}` |
+| Kafka | `<release>-kafka:9092` topic `posture_alerts` | `neuraltrust-aispm.aispm.kafka.{bootstrapServers,postureTopic}` |
+| JWT secret | `data-plane-jwt-secret/DATA_PLANE_JWT_SECRET` | n/a — intentionally shared with the data plane |
+
+The `aispm` user/database in the in-cluster PostgreSQL is **not** auto-created by the chart today. Provision it with the standard PostgreSQL bootstrap (or point AISPM at an external instance) before enabling.
+
+### POSTURE_API_URL auto-derivation
+
+When `neuraltrust-aispm.aispm.enabled: true`, the parent chart writes `POSTURE_API_URL` into `control-plane-secrets`:
+
+| Key | Secret | Default value |
+|---|---|---|
+| `POSTURE_API_URL` | `control-plane-secrets` | `http://aispm-api-service.<release-namespace>.svc.cluster.local:80` |
+
+Resolution priority:
+
+```
+explicit override (controlPlane.components.app.config.postureApiUrl) > existing secret value (lookup) > aispm-api-service FQDN (when enabled) > omitted
+```
+
+The Control Plane app reads `POSTURE_API_URL` and `POSTURE_JWT_SECRET` (which falls back to `DATA_PLANE_JWT_SECRET`) — both with `optional: true`, so the app starts cleanly even when AISPM is off.
+
+### Auto-generated secrets
+
+When `global.autoGenerateSecrets: true`, the parent chart creates `aispm-secrets` with:
+
+| Key | Default behavior |
+|---|---|
+| `AUTH_ENCRYPTION_KEY` | Auto-generated 44-char Fernet key (urlsafe base64 of 32 bytes), preserved on upgrade via `lookup` |
+| `DATABASE_PASSWORD` | Auto-generated 32-char password, preserved on upgrade |
+| `OPENAI_API_KEY` | Pass-through (required at runtime; chart does not enforce) |
+| `GITHUB_APP_*`, `AZURE_*`, `RESEND_API_KEY`, `ADMIN_API_KEY` | Pass-through, only emitted when set |
+
+## SIEM Connectors
+
+The SIEM Connectors subchart is **off by default** (`neuraltrust-siem-connectors.siemConnectors.enabled: false`). It is a single Node.js Deployment that consumes `audit_events` and `posture_alerts` from Kafka and forwards each event to the SIEM configured per team in ClickHouse (Splunk, Sentinel, Datadog, Elasticsearch, QRadar, or generic webhook).
+
+### Shared infrastructure
+
+| Resource | Default | Override |
+|---|---|---|
+| Kafka | `<release>-kafka:9092` | `neuraltrust-siem-connectors.siemConnectors.kafka.brokers` |
+| ClickHouse | `http://<release>-clickhouse:8123`, db `neuraltrust`, user `neuraltrust` | `neuraltrust-siem-connectors.siemConnectors.clickhouse.{host,database,user}` |
+| ClickHouse password | `clickhouse-secrets/admin-password` | `neuraltrust-siem-connectors.siemConnectors.clickhouse.{secretName,secretKey}` |
+
+The deployment is internal-only — it exposes a `/api/health` endpoint on port 3000 (mapped to a ClusterIP service on port 80) but no Ingress is rendered.
+
 ## Ingress hostnames
 
 When `global.domain` is set, every Ingress auto-fills its hostname as `<prefix>.<global.domain>` — no per-service host needs to be set.
@@ -308,6 +376,8 @@ Every main service container exposes two hooks for injecting extra environment v
 | `neuraltrust-data-plane` | `dataPlane.components.api`, `worker` |
 | `trustgate` | `controlPlane`, `dataPlane`, `actions` |
 | `neuraltrust-firewall` | `firewall.gateway`, `firewall.workers.<name>` |
+| `neuraltrust-aispm` | `aispm.api`, `aispm.worker`, `aispm.beat` |
+| `neuraltrust-siem-connectors` | `siemConnectors` |
 
 ### Example
 

@@ -1,0 +1,18 @@
+{{- if and .Values.siemConnectors.enabled .Values.siemConnectors.podDisruptionBudget .Values.siemConnectors.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: siem-connectors
+  labels:
+    {{- include "siemConnectors.labels" . | nindent 4 }}
+spec:
+  {{- if hasKey .Values.siemConnectors.podDisruptionBudget "minAvailable" }}
+  minAvailable: {{ .Values.siemConnectors.podDisruptionBudget.minAvailable }}
+  {{- end }}
+  {{- if hasKey .Values.siemConnectors.podDisruptionBudget "maxUnavailable" }}
+  maxUnavailable: {{ .Values.siemConnectors.podDisruptionBudget.maxUnavailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "siemConnectors.selectorLabels" . | nindent 6 }}
+{{- end }}

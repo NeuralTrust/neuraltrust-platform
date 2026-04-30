@@ -1,0 +1,29 @@
+{{- if .Values.aispm.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aispm-config
+  labels:
+    {{- include "aispm.labels" (dict "component" "api" "context" .) | nindent 4 }}
+data:
+  OPENAI_MODEL: {{ .Values.aispm.config.openaiModel | quote }}
+  DEFAULT_SYNC_INTERVAL_SECONDS: {{ .Values.aispm.config.defaultSyncIntervalSeconds | quote }}
+  DB_POOL_SIZE: {{ .Values.aispm.config.dbPoolSize | quote }}
+  DB_MAX_OVERFLOW: {{ .Values.aispm.config.dbMaxOverflow | quote }}
+  DB_POOL_RECYCLE: {{ .Values.aispm.config.dbPoolRecycle | quote }}
+  LOG_LEVEL: {{ .Values.aispm.config.logLevel | quote }}
+  LOG_JSON_FORMAT: {{ .Values.aispm.config.logJsonFormat | quote }}
+  NOTIFICATION_EMAIL_MIN_SEVERITY: {{ .Values.aispm.config.notificationEmailMinSeverity | quote }}
+  NOTIFICATION_SIEM_MIN_SEVERITY: {{ .Values.aispm.config.notificationSiemMinSeverity | quote }}
+  OTEL_ENABLED: {{ .Values.aispm.config.otelEnabled | quote }}
+  OTEL_SERVICE_NAME: {{ .Values.aispm.config.otelServiceName | quote }}
+  OTEL_EXPORTER_ENDPOINT: {{ .Values.aispm.config.otelExporterEndpoint | quote }}
+  OTEL_ENVIRONMENT: {{ .Values.aispm.config.otelEnvironment | quote }}
+  KAFKA_POSTURE_TOPIC: {{ .Values.aispm.kafka.postureTopic | quote }}
+  {{- if .Values.aispm.config.applicationVersion }}
+  APPLICATION_VERSION: {{ .Values.aispm.config.applicationVersion | quote }}
+  {{- end }}
+  {{- range $key, $value := .Values.aispm.config.extraEnv }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+{{- end }}
