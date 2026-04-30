@@ -123,14 +123,22 @@ spec:
             secretKeyRef:
               key: POSTGRES_PASSWORD
               name: {{ $pgSecretName }}
-        {{- $sslMode := "require" }}
-        {{- if include "control-plane.postgresql.deploy" . }}
-          {{- $sslMode = "disable" }}
-        {{- end }}
+        # Read DATABASE_URL / POSTGRES_PRISMA_URL from the secret instead of
+        # building them inline. The secret encodes the password with urlquery
+        # so backticks, '@', '/', '?' etc. in the password are safe; an inline
+        # "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@..." breaks Prisma
+        # (P1013 "invalid port number in database URL") when the password
+        # contains URL-reserved chars.
         - name: POSTGRES_PRISMA_URL
-          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DATABASE)?connection_limit=15&sslmode={{ $sslMode }}"
+          valueFrom:
+            secretKeyRef:
+              key: POSTGRES_PRISMA_URL
+              name: {{ $pgSecretName }}
         - name: DATABASE_URL
-          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DATABASE)?connection_limit=15&sslmode={{ $sslMode }}"
+          valueFrom:
+            secretKeyRef:
+              key: DATABASE_URL
+              name: {{ $pgSecretName }}
         resources:
           {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.initContainerResources }}
           {{- toYaml .Values.controlPlane.components.app.initContainerResources | nindent 10 }}

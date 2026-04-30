@@ -69,21 +69,31 @@ spec:
                 fi
               done
               echo "Kafka broker reachable after ${WAITED}s"
+              # List existing topics ONCE; --list is the only reliable existence
+              # check across Kafka versions. --describe --topic <missing> behaves
+              # inconsistently (some images emit the topic name on stdout inside
+              # an error message, fooling grep and causing a spurious --alter
+              # against a non-existent topic with UnknownTopicOrPartitionException).
+              EXISTING_TOPICS=$(/opt/kafka/bin/kafka-topics.sh --bootstrap-server "${BOOTSTRAP}" --list 2>/dev/null || true)
               for topic in $TOPICS; do
-                if ! /opt/kafka/bin/kafka-topics.sh --bootstrap-server "${BOOTSTRAP}" --describe --topic "$topic" 2>/dev/null | grep -q "$topic"; then
-                  echo "Topic '$topic' does not exist yet — Connect will create it"
+                if ! printf '%s\n' "$EXISTING_TOPICS" | grep -qFx "$topic"; then
+                  echo "Topic '$topic' does not exist yet — Connect will create it with cleanup.policy=compact on first start"
                   continue
                 fi
                 if /opt/kafka/bin/kafka-configs.sh --bootstrap-server "${BOOTSTRAP}" \
                     --entity-type topics --entity-name "$topic" --describe 2>/dev/null \
                     | grep -qE '^[[:space:]]*cleanup\.policy=.*compact'; then
-                  echo "Topic '$topic' already uses cleanup.policy compact — skipping alter"
+                  echo "Topic '$topic' already uses cleanup.policy=compact — skipping alter"
                   continue
                 fi
                 echo "Setting cleanup.policy=compact on '$topic'"
-                /opt/kafka/bin/kafka-configs.sh --bootstrap-server "${BOOTSTRAP}" \
-                  --entity-type topics --entity-name "$topic" \
-                  --alter --add-config cleanup.policy=compact 2>&1 || true
+                if ! /opt/kafka/bin/kafka-configs.sh --bootstrap-server "${BOOTSTRAP}" \
+                    --entity-type topics --entity-name "$topic" \
+                    --alter --add-config cleanup.policy=compact 2>&1; then
+                  # Don't fail the init container on a single topic alter failure —
+                  # log it and keep going so other topics still get processed.
+                  echo "WARN: failed to alter '$topic'; Connect will retry on its own"
+                fi
               done
               echo "Init complete."
           volumeMounts:
