@@ -47,6 +47,34 @@ on:
         description: "firewall-cpu / firewall-gpu tag (e.g. v2.4.3). Empty = latest from firewall-cpu in AR (same tag as firewall-gpu)."
         required: false
         default: ""
+      aispm_tag:
+        description: "aispm-api / aispm-worker / aispm-beat tag (shared, e.g. v0.15.0). Empty = latest from aispm-api in AR (api/worker/beat ship together)."
+        required: false
+        default: ""
+      siem_connectors_tag:
+        description: "siem-connectors tag (e.g. v0.1.0). Empty = latest from AR (no change if no semver tag is published)."
+        required: false
+        default: ""
+      clickhouse_tag:
+        description: "clickhouse-server tag (e.g. 25.8 or 25.10.1). Empty = latest from AR (matches X.Y, X.Y.Z, X.Y.Z.W)."
+        required: false
+        default: ""
+      kafka_tag:
+        description: "kafka tag (e.g. 4.2.0). Empty = latest bare semver from AR (no v prefix)."
+        required: false
+        default: ""
+      redis_tag:
+        description: "redis-stack-server tag (e.g. 7.2.0-v20). Empty = latest matching X.Y.Z-vNN from AR."
+        required: false
+        default: ""
+      postgres_tag:
+        description: "postgres tag (e.g. 17-alpine). Empty = latest matching N-alpine from AR (used by trustgate db-init and control-plane in-cluster postgres)."
+        required: false
+        default: ""
+      curl_tag:
+        description: "curl tag (e.g. 8.19.0). Empty = latest bare semver from AR (used by ClickHouse backup cronjob and the api healthCheck job placeholder)."
+        required: false
+        default: ""
       fetch_latest:
         description: "Fetch latest from Artifact Registry for empty inputs"
         required: false
@@ -149,6 +177,15 @@ jobs:
           WORKERS=$(resolve_tag "workers" "${{ inputs.workers_tag }}")
           KAFKA_CONNECT=$(resolve_tag "kafka-connect" "${{ inputs.kafka_connect_tag }}")
           FIREWALL=$(resolve_tag "firewall-cpu" "${{ inputs.firewall_tag }}")
+          AISPM=$(resolve_tag "aispm-api" "${{ inputs.aispm_tag }}")
+          SIEM_CONNECTORS=$(resolve_tag "siem-connectors" "${{ inputs.siem_connectors_tag }}")
+
+          # Infrastructure images (non-standard tag patterns, override default regex).
+          CLICKHOUSE=$(resolve_tag "clickhouse-server" "${{ inputs.clickhouse_tag }}" '^[0-9]+\.[0-9]+(\.[0-9]+){0,2}$')
+          KAFKA=$(resolve_tag "kafka" "${{ inputs.kafka_tag }}" '^[0-9]+\.[0-9]+\.[0-9]+$')
+          REDIS=$(resolve_tag "redis-stack-server" "${{ inputs.redis_tag }}" '^[0-9]+\.[0-9]+\.[0-9]+-v[0-9]+$')
+          POSTGRES=$(resolve_tag "postgres" "${{ inputs.postgres_tag }}" '^[0-9]+-alpine$')
+          CURL=$(resolve_tag "curl" "${{ inputs.curl_tag }}" '^[0-9]+\.[0-9]+\.[0-9]+$')
 
           echo "trustgate=${TRUSTGATE}" >> "$GITHUB_OUTPUT"
           echo "control_plane_api=${CONTROL_PLANE_API}" >> "$GITHUB_OUTPUT"
@@ -158,6 +195,13 @@ jobs:
           echo "workers=${WORKERS}" >> "$GITHUB_OUTPUT"
           echo "kafka_connect=${KAFKA_CONNECT}" >> "$GITHUB_OUTPUT"
           echo "firewall=${FIREWALL}" >> "$GITHUB_OUTPUT"
+          echo "aispm=${AISPM}" >> "$GITHUB_OUTPUT"
+          echo "siem_connectors=${SIEM_CONNECTORS}" >> "$GITHUB_OUTPUT"
+          echo "clickhouse=${CLICKHOUSE}" >> "$GITHUB_OUTPUT"
+          echo "kafka=${KAFKA}" >> "$GITHUB_OUTPUT"
+          echo "redis=${REDIS}" >> "$GITHUB_OUTPUT"
+          echo "postgres=${POSTGRES}" >> "$GITHUB_OUTPUT"
+          echo "curl=${CURL}" >> "$GITHUB_OUTPUT"
 
           echo "### Resolved Tags" >> "$GITHUB_STEP_SUMMARY"
           echo "| Image | Tag |" >> "$GITHUB_STEP_SUMMARY"
@@ -170,6 +214,13 @@ jobs:
           echo "| workers | \`${WORKERS:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| kafka-connect | \`${KAFKA_CONNECT:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| firewall-cpu (tag shared with firewall-gpu) | \`${FIREWALL:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| aispm-api/worker/beat (shared tag) | \`${AISPM:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| siem-connectors | \`${SIEM_CONNECTORS:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| clickhouse-server | \`${CLICKHOUSE:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| kafka | \`${KAFKA:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| redis-stack-server | \`${REDIS:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| postgres (trustgate db-init + control-plane in-cluster) | \`${POSTGRES:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| curl (clickhouse backup cronjob) | \`${CURL:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Update values.yaml and template defaults
         id: update
@@ -179,6 +230,10 @@ jobs:
           BUMP_DATA_PLANE=false
           BUMP_TRUSTGATE=false
           BUMP_FIREWALL=false
+          BUMP_AISPM=false
+          BUMP_SIEM_CONNECTORS=false
+          BUMP_CLICKHOUSE=false
+          BUMP_KAFKA=false
 
           # --- Helper: update a tag in values.yaml via yq ---
           update_values_tag() {
@@ -209,22 +264,38 @@ jobs:
           # Handles both patterns:
           #   {{- $var := "TAG" }}                        (control-plane style)
           #   {{- $var := .Values.path | default "TAG" }} (data-plane style)
+          # Always returns 0 (safe under set -e). Sets TEMPLATE_TAG_CHANGED=1 if
+          # the file was actually modified, 0 otherwise (no match / already at this tag).
+          TEMPLATE_TAG_CHANGED=0
           update_template_tag() {
+            TEMPLATE_TAG_CHANGED=0
             local file="$1"
             local var_name="$2"
             local new_tag="$3"
 
             if [[ -z "$new_tag" ]]; then
-              return
+              return 0
             fi
 
-            if grep -q "\$${var_name} :=" "$file" 2>/dev/null; then
-              # Pattern: {{- $var := "OLD" }}
-              sed -i "s/\(\$${var_name} := \)\"[^\"]*\"/\1\"${new_tag}\"/" "$file"
-              # Pattern: {{- $var := .Values.xxx | default "OLD" }}
-              sed -i "s/\(\$${var_name} := .*| default \)\"[^\"]*\"/\1\"${new_tag}\"/" "$file"
-              echo "  Updated fallback \$${var_name} → ${new_tag} in ${file}"
+            if ! grep -q "\$${var_name} :=" "$file" 2>/dev/null; then
+              return 0
             fi
+
+            cp "$file" "${file}.bump-bak"
+            # Pattern: {{- $var := "OLD" }}
+            sed -i "s/\(\$${var_name} := \)\"[^\"]*\"/\1\"${new_tag}\"/" "$file"
+            # Pattern: {{- $var := .Values.xxx | default "OLD" }}
+            sed -i "s/\(\$${var_name} := .*| default \)\"[^\"]*\"/\1\"${new_tag}\"/" "$file"
+
+            if cmp -s "$file" "${file}.bump-bak"; then
+              rm -f "${file}.bump-bak"
+              return 0
+            fi
+
+            rm -f "${file}.bump-bak"
+            echo "  Updated fallback \$${var_name} → ${new_tag} in ${file}"
+            TEMPLATE_TAG_CHANGED=1
+            return 0
           }
 
           # --- Helper: bump patch version in a Chart.yaml ---
@@ -308,12 +379,123 @@ jobs:
           fi
 
           # =============================================
-          # 8. Firewall
+          # 8. Firewall (gateway + worker share a single tag/image)
+          # Touches: two parent values paths, the firewall subchart's own
+          # values.yaml mirror, and the hardcoded fallbacks in both
+          # gateway-deployment.yaml ($gwTag) and worker-deployment.yaml ($wTag).
+          # NOTE: the orphan .["neuraltrust-firewall"].firewall.image.tag in
+          # parent values.yaml is intentionally NOT touched — no template reads
+          # it. It remains for backward-compat with any external --set callers.
           # =============================================
           TAG="${{ steps.tags.outputs.firewall }}"
-          if update_values_tag '.["neuraltrust-firewall"].firewall.image.tag' "$TAG" "firewall-cpu"; then
-            BUMP_FIREWALL=true
-            update_template_tag "charts/neuraltrust-firewall/templates/deployment.yaml" "firewallTag" "$TAG"
+          if [[ -n "$TAG" ]]; then
+            if update_values_tag '.["neuraltrust-firewall"].firewall.gateway.image.tag' "$TAG" "firewall-cpu (gateway)"; then
+              BUMP_FIREWALL=true
+              yq eval -i ".firewall.gateway.image.tag = \"${TAG}\"" charts/neuraltrust-firewall/values.yaml
+              echo "  Synced charts/neuraltrust-firewall/values.yaml firewall.gateway.image.tag"
+              update_template_tag "charts/neuraltrust-firewall/templates/gateway-deployment.yaml" "gwTag" "$TAG"
+            fi
+            if update_values_tag '.["neuraltrust-firewall"].firewall.workerDefaults.image.tag' "$TAG" "firewall-cpu (worker)"; then
+              BUMP_FIREWALL=true
+              yq eval -i ".firewall.workerDefaults.image.tag = \"${TAG}\"" charts/neuraltrust-firewall/values.yaml
+              echo "  Synced charts/neuraltrust-firewall/values.yaml firewall.workerDefaults.image.tag"
+              update_template_tag "charts/neuraltrust-firewall/templates/worker-deployment.yaml" "wTag" "$TAG"
+            fi
+          fi
+
+          # =============================================
+          # 9. AISPM (api / worker / beat share a single coordinated tag)
+          # Parent values.yaml has these blocks commented out by default —
+          # write tags into the subchart's own values.yaml and template fallbacks.
+          # =============================================
+          TAG="${{ steps.tags.outputs.aispm }}"
+          if [[ -n "$TAG" ]]; then
+            for COMPONENT in api worker beat; do
+              if update_values_tag ".aispm.${COMPONENT}.image.tag" "$TAG" "aispm-${COMPONENT}" "charts/neuraltrust-aispm/values.yaml"; then
+                BUMP_AISPM=true
+                update_template_tag "charts/neuraltrust-aispm/templates/${COMPONENT}-deployment.yaml" "tag" "$TAG"
+              fi
+            done
+          fi
+
+          # =============================================
+          # 10. SIEM Connectors (single image)
+          # Parent values.yaml has this block commented out by default —
+          # write the tag into the subchart's own values.yaml and template fallback.
+          # =============================================
+          TAG="${{ steps.tags.outputs.siem_connectors }}"
+          if update_values_tag '.siemConnectors.image.tag' "$TAG" "siem-connectors" "charts/neuraltrust-siem-connectors/values.yaml"; then
+            BUMP_SIEM_CONNECTORS=true
+            update_template_tag "charts/neuraltrust-siem-connectors/templates/deployment.yaml" "tag" "$TAG"
+          fi
+
+          # =============================================
+          # 11. Infrastructure: ClickHouse (clickhouse-server)
+          # No subchart values.yaml — parent values.yaml is the sole source.
+          # No template fallback (charts/clickhouse uses .Values.image directly).
+          # =============================================
+          TAG="${{ steps.tags.outputs.clickhouse }}"
+          if update_values_tag '.clickhouse.image.tag' "$TAG" "clickhouse-server"; then
+            BUMP_CLICKHOUSE=true
+          fi
+
+          # =============================================
+          # 12. Infrastructure: Kafka
+          # No subchart values.yaml — parent values.yaml is the sole source.
+          # =============================================
+          TAG="${{ steps.tags.outputs.kafka }}"
+          if update_values_tag '.kafka.image.tag' "$TAG" "kafka"; then
+            BUMP_KAFKA=true
+          fi
+
+          # =============================================
+          # 13. Infrastructure: Redis (redis-stack-server, used by trustgate)
+          # Lives under .trustgate.redis.image — also mirrored in the trustgate
+          # subchart's own values.yaml. No hardcoded template fallback.
+          # =============================================
+          TAG="${{ steps.tags.outputs.redis }}"
+          if update_values_tag '.trustgate.redis.image.tag' "$TAG" "redis-stack-server (parent)"; then
+            BUMP_TRUSTGATE=true
+            yq eval -i ".redis.image.tag = \"${TAG}\"" charts/trustgate/values.yaml
+            echo "  Synced charts/trustgate/values.yaml redis.image.tag"
+          fi
+
+          # =============================================
+          # 14. Infrastructure: Postgres (used by trustgate db-init job
+          # and the control-plane in-cluster postgres)
+          # Two parent paths + three template fallbacks.
+          # =============================================
+          TAG="${{ steps.tags.outputs.postgres }}"
+          if [[ -n "$TAG" ]]; then
+            if update_values_tag '.trustgate.global.postgresql.image.tag' "$TAG" "postgres (trustgate)"; then
+              BUMP_TRUSTGATE=true
+              update_template_tag "charts/trustgate/templates/postgresql-init-job.yaml" "postgresImageTag" "$TAG"
+            fi
+            if update_values_tag '.["neuraltrust-control-plane"].controlPlane.components.postgresql.image.tag' "$TAG" "postgres (control-plane)"; then
+              BUMP_CONTROL_PLANE=true
+              update_template_tag "charts/neuraltrust-control-plane/templates/api/deployment.yaml" "pgWaitImageTag" "$TAG"
+              update_template_tag "charts/neuraltrust-control-plane/templates/scheduler/deployment.yaml" "pgWaitImageTag" "$TAG"
+            fi
+          fi
+
+          # =============================================
+          # 15. Infrastructure: curl (ClickHouse backup cronjob)
+          # The parent path under controlPlane.components.api.healthCheck is
+          # documentation-only (no template references it) — kept in sync for
+          # values.yaml accuracy. The functional usage is the data-plane
+          # backup-cronjob template fallback.
+          # =============================================
+          TAG="${{ steps.tags.outputs.curl }}"
+          if [[ -n "$TAG" ]]; then
+            if update_values_tag '.["neuraltrust-control-plane"].controlPlane.components.api.healthCheck.image.tag' "$TAG" "curl (control-plane healthCheck doc)"; then
+              BUMP_CONTROL_PLANE=true
+            fi
+            # The backup-cronjob fallback is the only functional curl usage.
+            update_template_tag "charts/neuraltrust-data-plane/templates/clickhouse-config/backup-cronjob.yaml" "backupTag" "$TAG"
+            if [[ "$TEMPLATE_TAG_CHANGED" == "1" ]]; then
+              CHANGES+=("curl (clickhouse backup-cronjob fallback): → ${TAG}")
+              BUMP_DATA_PLANE=true
+            fi
           fi
 
           # =============================================
@@ -346,6 +528,30 @@ jobs:
             NEW_VER=$(bump_chart_version "charts/neuraltrust-firewall/Chart.yaml")
             yq eval -i "(.dependencies[] | select(.name == \"neuraltrust-firewall\")).version = \"${NEW_VER}\"" Chart.yaml
             echo "  Updated root Chart.yaml dep: neuraltrust-firewall → ${NEW_VER}"
+          fi
+
+          if [[ "$BUMP_AISPM" == "true" ]]; then
+            NEW_VER=$(bump_chart_version "charts/neuraltrust-aispm/Chart.yaml")
+            yq eval -i "(.dependencies[] | select(.name == \"neuraltrust-aispm\")).version = \"${NEW_VER}\"" Chart.yaml
+            echo "  Updated root Chart.yaml dep: neuraltrust-aispm → ${NEW_VER}"
+          fi
+
+          if [[ "$BUMP_SIEM_CONNECTORS" == "true" ]]; then
+            NEW_VER=$(bump_chart_version "charts/neuraltrust-siem-connectors/Chart.yaml")
+            yq eval -i "(.dependencies[] | select(.name == \"neuraltrust-siem-connectors\")).version = \"${NEW_VER}\"" Chart.yaml
+            echo "  Updated root Chart.yaml dep: neuraltrust-siem-connectors → ${NEW_VER}"
+          fi
+
+          if [[ "$BUMP_CLICKHOUSE" == "true" ]]; then
+            NEW_VER=$(bump_chart_version "charts/clickhouse/Chart.yaml")
+            yq eval -i "(.dependencies[] | select(.name == \"clickhouse\")).version = \"${NEW_VER}\"" Chart.yaml
+            echo "  Updated root Chart.yaml dep: clickhouse → ${NEW_VER}"
+          fi
+
+          if [[ "$BUMP_KAFKA" == "true" ]]; then
+            NEW_VER=$(bump_chart_version "charts/kafka/Chart.yaml")
+            yq eval -i "(.dependencies[] | select(.name == \"kafka\")).version = \"${NEW_VER}\"" Chart.yaml
+            echo "  Updated root Chart.yaml dep: kafka → ${NEW_VER}"
           fi
 
           # Save changes summary
@@ -397,12 +603,22 @@ jobs:
             Chart.lock \
             charts/trustgate/values.yaml \
             charts/trustgate/Chart.yaml \
+            charts/trustgate/templates/ \
             charts/neuraltrust-control-plane/Chart.yaml \
             charts/neuraltrust-control-plane/templates/ \
             charts/neuraltrust-data-plane/Chart.yaml \
             charts/neuraltrust-data-plane/templates/ \
+            charts/neuraltrust-firewall/values.yaml \
             charts/neuraltrust-firewall/Chart.yaml \
-            charts/neuraltrust-firewall/templates/
+            charts/neuraltrust-firewall/templates/ \
+            charts/neuraltrust-aispm/values.yaml \
+            charts/neuraltrust-aispm/Chart.yaml \
+            charts/neuraltrust-aispm/templates/ \
+            charts/neuraltrust-siem-connectors/values.yaml \
+            charts/neuraltrust-siem-connectors/Chart.yaml \
+            charts/neuraltrust-siem-connectors/templates/ \
+            charts/clickhouse/Chart.yaml \
+            charts/kafka/Chart.yaml
           git commit -m "$(cat <<COMMIT
           chore: bump image versions
 

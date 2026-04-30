@@ -1,0 +1,88 @@
+securityHardening: true # Adds readOnlyRootFilesystem, drops capabilities. Set to false to restore prior behavior.
+
+siemConnectors:
+  # Optional, off by default. Toggle the entire subchart with this flag.
+  enabled: false
+
+  imagePullSecrets: ""
+
+  replicas: 1
+  image:
+    repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/siem-connectors
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  resources:
+    requests:
+      cpu: "250m"
+      memory: 512Mi
+    limits:
+      cpu: "500m"
+      memory: 1Gi
+
+  startupProbe:
+    failureThreshold: 12
+
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 80
+    targetMemoryUtilizationPercentage: 85
+
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+  # --- ServiceAccount ---
+  serviceAccount:
+    create: true
+    name: siem-connectors
+    annotations: {}
+
+  # --- ConfigMap (non-secret env) ---
+  config:
+    kafkaTopics: "audit_events,posture_alerts"
+    kafkaClientId: "siem-connectors"
+    kafkaGroupId: "siem-connectors-group"
+    defaultBatchSize: "100"
+    defaultFlushIntervalMs: "5000"
+    logLevel: "info"
+    nodeEnv: "production"
+    port: "3000"
+    extraEnv: {}
+
+  # --- Kafka ---
+  # Empty brokers => parent helper resolves to the in-cluster Kafka service.
+  kafka:
+    brokers: ""
+
+  # --- ClickHouse ---
+  # Defaults reuse the platform clickhouse-secrets pattern (admin password key).
+  clickhouse:
+    host: ""        # Empty => resolved via the platform helper (ClickHouse host:port)
+    database: "neuraltrust"
+    user: "neuraltrust"
+    secretName: "clickhouse-secrets"
+    secretKey: "admin-password"
+
+  # --- Pod / container security ---
+  podSecurityContext:
+    fsGroup: 2000
+
+  securityContext:
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: false
+    allowPrivilegeEscalation: false
+    runAsNonRoot: false
+    runAsUser: 0
+
+  extraEnv: []
+  extraEnvFrom: []
+
+global:
+  imageRegistry: ""
+  autoGenerateSecrets: false
+  preserveExistingSecrets: false

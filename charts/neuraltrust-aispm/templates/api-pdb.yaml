@@ -1,0 +1,18 @@
+{{- if and .Values.aispm.enabled .Values.aispm.api.podDisruptionBudget .Values.aispm.api.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: aispm-api
+  labels:
+    {{- include "aispm.labels" (dict "component" "api" "context" .) | nindent 4 }}
+spec:
+  {{- if hasKey .Values.aispm.api.podDisruptionBudget "minAvailable" }}
+  minAvailable: {{ .Values.aispm.api.podDisruptionBudget.minAvailable }}
+  {{- end }}
+  {{- if hasKey .Values.aispm.api.podDisruptionBudget "maxUnavailable" }}
+  maxUnavailable: {{ .Values.aispm.api.podDisruptionBudget.maxUnavailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "aispm.selectorLabels" (dict "component" "api") | nindent 6 }}
+{{- end }}

@@ -121,3 +121,20 @@ neuraltrust-firewall:
     enabled: true
     secrets:
       jwtSecret: "" # Auto-generated if empty
+
+# Optional: AI Security Posture Management (AISPM)
+# When enabled, the parent chart auto-wires POSTURE_API_URL into the Control
+# Plane app (via control-plane-secrets) and creates aispm-secrets with an
+# auto-generated AUTH_ENCRYPTION_KEY and DATABASE_PASSWORD.
+# neuraltrust-aispm:
+#   aispm:
+#     enabled: true
+#     secrets:
+#       openaiApiKey: ""           # Required at runtime
+#       authEncryptionKey: ""      # Auto-generated if empty
+#       dbPassword: ""             # Auto-generated if empty
+
+# Optional: SIEM forwarder (Kafka → Splunk/Sentinel/Datadog/...)
+# neuraltrust-siem-connectors:
+#   siemConnectors:
+#     enabled: true

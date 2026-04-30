@@ -1,0 +1,16 @@
+{{- if .Values.siemConnectors.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: siem-connectors
+  labels:
+    {{- include "siemConnectors.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "siemConnectors.selectorLabels" . | nindent 4 }}
+  ports:
+    - port: 80
+      targetPort: http
+      name: http
+{{- end }}

@@ -1,0 +1,109 @@
+{{- if .Values.aispm.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aispm-api
+  labels:
+    {{- include "aispm.labels" (dict "component" "api" "context" .) | nindent 4 }}
+spec:
+  replicas: {{ .Values.aispm.api.replicas | default 1 }}
+  selector:
+    matchLabels:
+      {{- include "aispm.selectorLabels" (dict "component" "api") | nindent 6 }}
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        {{- include "aispm.labels" (dict "component" "api" "context" .) | nindent 8 }}
+    spec:
+      {{- if .Values.aispm.serviceAccount.create }}
+      serviceAccountName: {{ .Values.aispm.serviceAccount.name | default "aispm" }}
+      {{- end }}
+      {{- $imagePullSecret := .Values.aispm.imagePullSecrets | default "" }}
+      {{- if and $imagePullSecret (ne $imagePullSecret "") }}
+      imagePullSecrets:
+        - name: {{ $imagePullSecret }}
+      {{- end }}
+      {{- if .Values.aispm.podSecurityContext }}
+      securityContext:
+        {{- toYaml .Values.aispm.podSecurityContext | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: api
+          {{- $repo := .Values.aispm.api.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/aispm-api" }}
+          {{- $tag := .Values.aispm.api.image.tag | default "v0.15.0" }}
+          image: {{ include "aispm.image" (dict "repository" $repo "tag" $tag "global" .Values.global) | quote }}
+          imagePullPolicy: {{ .Values.aispm.api.image.pullPolicy | default "IfNotPresent" }}
+          args:
+            - uv
+            - run
+            - --quiet
+            - uvicorn
+            - app.main:app
+            - --host
+            - "0.0.0.0"
+            - --port
+            - "8000"
+          ports:
+            - containerPort: 8000
+              name: http
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: aispm-config
+            {{- with .Values.aispm.api.extraEnvFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          env:
+            {{- include "aispm.commonEnv" . | nindent 12 }}
+            {{- with .Values.aispm.api.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- include "neuraltrust-platform.proxy-env" . | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+              scheme: HTTP
+            periodSeconds: 5
+            failureThreshold: {{ (.Values.aispm.api.startupProbe).failureThreshold | default 24 }}
+            successThreshold: 1
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+              scheme: HTTP
+            periodSeconds: 10
+            failureThreshold: 3
+            successThreshold: 1
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+              scheme: HTTP
+            periodSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1
+            timeoutSeconds: 3
+          {{- if .Values.aispm.api.resources }}
+          resources:
+            {{- toYaml .Values.aispm.api.resources | nindent 12 }}
+          {{- end }}
+          {{- $sc := include "aispm.securityContext" . }}
+          {{- if $sc }}
+          securityContext:
+            {{- $sc | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}

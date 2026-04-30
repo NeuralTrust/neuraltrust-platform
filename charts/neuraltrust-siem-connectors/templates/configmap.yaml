@@ -1,0 +1,24 @@
+{{- if .Values.siemConnectors.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: siem-connectors-config
+  labels:
+    {{- include "siemConnectors.labels" . | nindent 4 }}
+data:
+  NODE_ENV: {{ .Values.siemConnectors.config.nodeEnv | quote }}
+  LOG_LEVEL: {{ .Values.siemConnectors.config.logLevel | quote }}
+  PORT: {{ .Values.siemConnectors.config.port | quote }}
+  KAFKA_BROKERS: {{ include "siemConnectors.kafka.brokers" . | quote }}
+  KAFKA_TOPICS: {{ .Values.siemConnectors.config.kafkaTopics | quote }}
+  KAFKA_CLIENT_ID: {{ .Values.siemConnectors.config.kafkaClientId | quote }}
+  KAFKA_GROUP_ID: {{ .Values.siemConnectors.config.kafkaGroupId | quote }}
+  CLICKHOUSE_HOST: {{ include "siemConnectors.clickhouse.host" . | quote }}
+  CLICKHOUSE_DATABASE: {{ .Values.siemConnectors.clickhouse.database | quote }}
+  CLICKHOUSE_USER: {{ .Values.siemConnectors.clickhouse.user | quote }}
+  DEFAULT_BATCH_SIZE: {{ .Values.siemConnectors.config.defaultBatchSize | quote }}
+  DEFAULT_FLUSH_INTERVAL_MS: {{ .Values.siemConnectors.config.defaultFlushIntervalMs | quote }}
+  {{- range $key, $value := .Values.siemConnectors.config.extraEnv }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+{{- end }}

@@ -1,0 +1,16 @@
+{{- if .Values.aispm.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: aispm-api-service
+  labels:
+    {{- include "aispm.labels" (dict "component" "api" "context" .) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "aispm.selectorLabels" (dict "component" "api") | nindent 4 }}
+  ports:
+    - port: 80
+      targetPort: http
+      name: http
+{{- end }}
