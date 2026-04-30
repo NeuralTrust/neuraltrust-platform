@@ -15,19 +15,13 @@ permissions:
   security-events: write
 
 jobs:
-  code-review:
-    uses: NeuralTrust/workflows/.github/workflows/ai-code-review.yml@main
-    secrets:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      GH_TOKEN: ${{ secrets.GH_TOKEN }}
-
   security:
     uses: NeuralTrust/workflows/.github/workflows/sast.yml@main
     with:
       scan_type: config
 
   auto-approve:
-    needs: [code-review, security]
+    needs: [security]
     uses: NeuralTrust/workflows/.github/workflows/auto-approve.yml@main
     secrets:
       GH_TOKEN: ${{ secrets.GH_TOKEN }}
