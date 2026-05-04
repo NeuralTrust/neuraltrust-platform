@@ -61,6 +61,33 @@ Usage: {{ include "data-plane.image" (dict "repository" .Values.dataPlane.compon
 {{- end }}
 
 {{/*
+Resolve data-plane imagePullSecrets in priority order:
+  1. .Values.imagePullSecrets             (subchart root, set via parent's `neuraltrust-data-plane.imagePullSecrets`)
+  2. .Values.dataPlane.imagePullSecrets   (component-tier override)
+  3. "gcr-secret"                          (hardcoded default for backward compat)
+The literal string "none" or "" suppresses the block entirely (used to opt out
+when nodes have IAM-level pull permissions and no Secret exists).
+Returns an "imagePullSecrets:" YAML block ready to be inlined, or empty.
+Usage:
+  spec:
+    {{- include "data-plane.imagePullSecrets" . | nindent 6 }}
+*/}}
+{{- define "data-plane.imagePullSecrets" -}}
+{{- $imagePullSecret := "gcr-secret" -}}
+{{- if .Values.imagePullSecrets -}}
+  {{- $imagePullSecret = .Values.imagePullSecrets -}}
+{{- else if and .Values.dataPlane (hasKey .Values.dataPlane "imagePullSecrets") -}}
+  {{- if and .Values.dataPlane.imagePullSecrets (ne .Values.dataPlane.imagePullSecrets "none") (ne .Values.dataPlane.imagePullSecrets "") -}}
+    {{- $imagePullSecret = .Values.dataPlane.imagePullSecrets -}}
+  {{- end -}}
+{{- end -}}
+{{- if and $imagePullSecret (ne $imagePullSecret "none") (ne $imagePullSecret "") -}}
+imagePullSecrets:
+  - name: {{ $imagePullSecret }}
+{{- end -}}
+{{- end }}
+
+{{/*
 Helper to get secret value - supports both direct values and secret references
 Usage: {{ include "data-plane.getSecretValue" (dict "value" .Values.dataPlane.secrets.openaiApiKey "secretName" "my-secret" "secretKey" "OPENAI_API_KEY" "context" $) }}
 */}}

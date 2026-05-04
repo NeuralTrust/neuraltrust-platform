@@ -7,12 +7,30 @@ metadata:
     component: redis
 data:
   redis.conf: |
+    # Load RediSearch directly from the redis-stack-server install path.
+    # /opt/redis-stack/lib/ is the canonical module directory in redis/redis-stack-server
+    # images (see upstream: github.com/redis-stack/redis-stack/blob/master/etc/redis-stack.conf).
+    # We don't `include /redis-stack.conf` because that path isn't stable across tags
+    # (some tags stage it at /opt/redis-stack/etc/redis-stack.conf and rely on the
+    # /opt/redis-stack/bin/redis-stack-server wrapper to symlink it). The deprecated
+    # redislabs/redisearch image used /usr/lib/redis/modules/ — that image is EOL
+    # (per https://hub.docker.com/r/redislabs/redisearch/, "deprecated, please use redis-stack").
+    loadmodule /opt/redis-stack/lib/redisearch.so
+
     # Basic configuration
     port 6379
     bind 0.0.0.0
-    protected-mode yes
-    
-    # No password required - internal cluster communication only
+
+    # No password required — internal cluster communication only.
+    # protected-mode MUST be `no` here. As of Redis 7.2, protected-mode is triggered
+    # whenever the `default` ACL user has the `nopass` flag, regardless of the `bind`
+    # directive (older versions only triggered it when bind was loopback-only).
+    # With `protected-mode yes` + no password, Redis 7.2 rejects all non-loopback
+    # clients with: "DENIED Redis is running in protected mode...".
+    # Trustgate-redis is exposed only via a ClusterIP Service inside the namespace,
+    # so disabling protected-mode here is safe; isolation is enforced at the
+    # K8s Service/NetworkPolicy layer, not at the Redis layer.
+    protected-mode no
     
     # Performance tuning
     maxmemory 1gb

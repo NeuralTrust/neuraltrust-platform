@@ -3,7 +3,7 @@
 accounts
 regions
 
-my-values.yaml
+my-values*.yaml
 
 # Helm chart packages
 *.tgz
