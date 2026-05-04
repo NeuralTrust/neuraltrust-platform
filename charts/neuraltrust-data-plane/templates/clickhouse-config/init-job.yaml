@@ -27,6 +27,7 @@ spec:
         app.kubernetes.io/instance: data-plane
     spec:
       restartPolicy: OnFailure
+      {{- include "data-plane.imagePullSecrets" . | nindent 6 }}
       containers:
         - name: clickhouse-init
           {{- $chInitRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickhouse-server" }}

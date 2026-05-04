@@ -101,6 +101,66 @@ Usage: {{ include "trustgate.image" (dict "repository" "europe-west1-docker.pkg.
 {{- end }}
 
 {{/*
+Resolve trustgate imagePullSecrets in priority order:
+  1. .Values.imagePullSecrets             (string | list of strings | list of maps)
+  2. .Values.global.image.imagePullSecrets (same)
+  3. .Values.global.imagePullSecrets       (same — chart default lives here as [{name: gcr-secret}])
+Returns an "imagePullSecrets:" YAML block ready to be inlined, or empty when nothing resolved.
+Usage:
+  spec:
+    {{- include "trustgate.imagePullSecrets" . | nindent 6 }}
+Map elements ({name: foo}) and string elements ("foo") are both accepted in lists,
+matching what we now do in postgresql-init-job.yaml — strict superset of the
+prior inline cascade (which silently dropped map-typed list entries).
+*/}}
+{{- define "trustgate.imagePullSecrets" -}}
+{{- $pullSecrets := list -}}
+{{- if .Values.imagePullSecrets -}}
+  {{- if kindIs "string" .Values.imagePullSecrets -}}
+    {{- $pullSecrets = append $pullSecrets .Values.imagePullSecrets -}}
+  {{- else if kindIs "slice" .Values.imagePullSecrets -}}
+    {{- range .Values.imagePullSecrets -}}
+      {{- if kindIs "string" . -}}
+        {{- $pullSecrets = append $pullSecrets . -}}
+      {{- else if kindIs "map" . -}}
+        {{- if .name -}}{{- $pullSecrets = append $pullSecrets .name -}}{{- end -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
+{{- else if and .Values.global .Values.global.image .Values.global.image.imagePullSecrets -}}
+  {{- if kindIs "string" .Values.global.image.imagePullSecrets -}}
+    {{- $pullSecrets = append $pullSecrets .Values.global.image.imagePullSecrets -}}
+  {{- else if kindIs "slice" .Values.global.image.imagePullSecrets -}}
+    {{- range .Values.global.image.imagePullSecrets -}}
+      {{- if kindIs "string" . -}}
+        {{- $pullSecrets = append $pullSecrets . -}}
+      {{- else if kindIs "map" . -}}
+        {{- if .name -}}{{- $pullSecrets = append $pullSecrets .name -}}{{- end -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
+{{- else if and .Values.global .Values.global.imagePullSecrets -}}
+  {{- if kindIs "string" .Values.global.imagePullSecrets -}}
+    {{- $pullSecrets = append $pullSecrets .Values.global.imagePullSecrets -}}
+  {{- else if kindIs "slice" .Values.global.imagePullSecrets -}}
+    {{- range .Values.global.imagePullSecrets -}}
+      {{- if kindIs "string" . -}}
+        {{- $pullSecrets = append $pullSecrets . -}}
+      {{- else if kindIs "map" . -}}
+        {{- if .name -}}{{- $pullSecrets = append $pullSecrets .name -}}{{- end -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- if gt (len $pullSecrets) 0 -}}
+imagePullSecrets:
+{{- range $pullSecrets }}
+  - name: {{ . }}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Control Plane labels
 */}}
 {{- define "trustgate.controlPlane.labels" -}}

@@ -773,8 +773,10 @@ neuraltrust-control-plane:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/postgres"
           tag: "17-alpine"
           pullPolicy: "Always"
-          imagePullSecrets:
-            - name: ""
+          # Component-level override; leave empty so the postgresql/deployment.yaml
+          # template falls back to controlPlane.imagePullSecrets ("gcr-secret" by default).
+          # Set to e.g. [{name: my-registry-secret}] to override per component.
+          imagePullSecrets: []
         persistence:
           enabled: true
           size: 10Gi

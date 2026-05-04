@@ -62,6 +62,7 @@ spec:
         app.kubernetes.io/component: postgresql-init
     spec:
       restartPolicy: Never
+      {{- include "trustgate.imagePullSecrets" . | nindent 6 }}
       containers:
       - name: postgresql-init
         {{- $postgresImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/postgres" }}

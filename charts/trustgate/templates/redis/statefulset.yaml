@@ -18,6 +18,11 @@ spec:
         {{- include "trustgate.selectorLabels" . | nindent 8 }}
         component: redis
     spec:
+      {{- /* Redis pull secrets:
+             1. .Values.redis.image.imagePullSecrets (per-component override, highest priority)
+             2. fall back to the trustgate-wide cascade (global.image.imagePullSecrets, global.imagePullSecrets)
+             Lets parent set a single trustgate.global.imagePullSecrets / .image.imagePullSecrets
+             and have it apply to redis without an explicit redis.image override. */}}
       {{- if .Values.redis.image.imagePullSecrets }}
       imagePullSecrets:
         {{- range .Values.redis.image.imagePullSecrets }}
@@ -27,6 +32,8 @@ spec:
         - name: {{ .name | default . }}
         {{- end }}
         {{- end }}
+      {{- else }}
+      {{- include "trustgate.imagePullSecrets" . | nindent 6 }}
       {{- end }}
       {{- if .Values.securityHardening }}
       securityContext:
@@ -44,11 +51,13 @@ spec:
           capabilities:
             drop: ["ALL"]
         {{- end }}
+        {{- /* RediSearch is loaded via `loadmodule /opt/redis-stack/lib/redisearch.so` in the
+               trustgate-redis ConfigMap (the canonical module path inside redis/redis-stack-server).
+               This used to pass `--loadmodule /usr/lib/redis/modules/redisearch.so` here — that
+               path only exists in the DEPRECATED redislabs/redisearch image. */}}
         command: ["redis-server"]
         args:
         - /etc/redis/redis.conf
-        - --loadmodule
-        - /usr/lib/redis/modules/redisearch.so
         ports:
         - containerPort: 6379
           name: redis
