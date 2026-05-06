@@ -42,23 +42,29 @@ app.kubernetes.io/name: siem-connectors
 
 {{/*
 Resolve the Kafka brokers. Empty value falls back to the in-cluster Kafka service.
+The default `kafka:9092` matches the parent chart's `kafka.fullnameOverride: "kafka"` default
+(values.yaml). If a downstream values file overrides `kafka.fullnameOverride`, the operator
+must also set `siemConnectors.kafka.brokers` to point at the right hostname.
 */}}
 {{- define "siemConnectors.kafka.brokers" -}}
 {{- if and .Values.siemConnectors.kafka .Values.siemConnectors.kafka.brokers (ne (.Values.siemConnectors.kafka.brokers | toString) "") -}}
 {{- .Values.siemConnectors.kafka.brokers -}}
 {{- else -}}
-{{- printf "%s-kafka:9092" .Release.Name -}}
+{{- "kafka:9092" -}}
 {{- end -}}
 {{- end }}
 
 {{/*
 Resolve the ClickHouse host. Empty value falls back to the in-cluster ClickHouse service.
+The default `http://clickhouse:8123` matches the parent chart's
+`clickhouse.fullnameOverride: "clickhouse"` default (values.yaml). Override
+`siemConnectors.clickhouse.host` if you change `clickhouse.fullnameOverride`.
 */}}
 {{- define "siemConnectors.clickhouse.host" -}}
 {{- if and .Values.siemConnectors.clickhouse .Values.siemConnectors.clickhouse.host (ne (.Values.siemConnectors.clickhouse.host | toString) "") -}}
 {{- .Values.siemConnectors.clickhouse.host -}}
 {{- else -}}
-{{- printf "http://%s-clickhouse:8123" .Release.Name -}}
+{{- "http://clickhouse:8123" -}}
 {{- end -}}
 {{- end }}
 

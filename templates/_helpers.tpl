@@ -54,7 +54,9 @@ Returns host, port, user, database based on whether ClickHouse is deployed or ex
 */}}
 {{- define "neuraltrust-platform.clickhouse.host" -}}
 {{- if .Values.infrastructure.clickhouse.deploy }}
-{{- printf "%s-clickhouse" .Release.Name }}
+{{/* Service name is `clickhouse` (no release prefix) because values.yaml pins
+     clickhouse.fullnameOverride: "clickhouse". Keep these in sync. */}}
+{{- "clickhouse" }}
 {{- else }}
 {{- .Values.infrastructure.clickhouse.external.host }}
 {{- end }}
@@ -89,7 +91,9 @@ Get Kafka connection details
 */}}
 {{- define "neuraltrust-platform.kafka.bootstrapServers" -}}
 {{- if .Values.infrastructure.kafka.deploy }}
-{{- printf "%s-kafka:9092" .Release.Name }}
+{{/* Service name is `kafka` (no release prefix) because values.yaml pins
+     kafka.fullnameOverride: "kafka". Keep these in sync. */}}
+{{- "kafka:9092" }}
 {{- else }}
 {{- if .Values.infrastructure.kafka.external.bootstrapServers }}
 {{- .Values.infrastructure.kafka.external.bootstrapServers }}

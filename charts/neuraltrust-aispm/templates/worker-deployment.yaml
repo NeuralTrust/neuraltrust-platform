@@ -38,14 +38,14 @@ spec:
           {{- $tag := .Values.aispm.worker.image.tag | default "v0.15.0" }}
           image: {{ include "aispm.image" (dict "repository" $repo "tag" $tag "global" .Values.global) | quote }}
           imagePullPolicy: {{ .Values.aispm.worker.image.pullPolicy | default "IfNotPresent" }}
+          {{- /* See api-deployment.yaml for the rationale on direct venv exec. */}}
           args:
-            - uv
-            - run
-            - --quiet
-            - celery
+            - /app/.venv/bin/celery
             - -A
             - app.workers.celery_app:celery_app
             - worker
+            - -l
+            - INFO
           envFrom:
             - configMapRef:
                 name: aispm-config

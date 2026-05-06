@@ -2,20 +2,20 @@ apiVersion: v2
 name: neuraltrust-platform
 description: Unified Helm chart for NeuralTrust platform including Data Plane, Control Plane, TrustGate, and infrastructure components
 type: application
-version: 1.12.2
+version: 1.12.3
 appVersion: "1.0.0"
 icon: https://neuraltrust.ai/favicon.ico
 dependencies:
   # Optional add-on services (off by default, listed first for visibility)
   - name: neuraltrust-aispm
-    version: 1.0.0
+    version: 1.0.1
     repository: file://./charts/neuraltrust-aispm
     condition: neuraltrust-aispm.aispm.enabled
     tags:
       - neuraltrust
       - optional
   - name: neuraltrust-siem-connectors
-    version: 1.0.0
+    version: 1.0.1
     repository: file://./charts/neuraltrust-siem-connectors
     condition: neuraltrust-siem-connectors.siemConnectors.enabled
     tags:
