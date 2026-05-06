@@ -1,14 +1,12 @@
 securityHardening: true # Adds readOnlyRootFilesystem, drops capabilities, seccomp profile. Set to false to restore prior behavior.
-
 firewall:
   enabled: true
-
   # --- Gateway (CPU-only, lightweight API router) ---
   gateway:
     replicas: 2
     image:
       repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-      tag: v2.6.0
+      tag: v2.9.0
       pullPolicy: IfNotPresent
     resources:
       limits:
@@ -32,14 +30,13 @@ firewall:
     extraEnv: []
     # Extra envFrom sources appended to the gateway container (list of EnvFromSource: configMapRef/secretRef).
     extraEnvFrom: []
-
   # --- Worker defaults (shared by all workers unless overridden) ---
   # Default: CPU image. For GPU, override image to firewall-gpu, add nvidia.com/gpu
   # resources, nodeSelector, tolerations, and hostIPC (see values-dataplane-gpu.yaml.example).
   workerDefaults:
     image:
       repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-      tag: v2.6.0
+      tag: v2.9.0
       pullPolicy: IfNotPresent
     replicas: 1
     resources:
@@ -63,7 +60,6 @@ firewall:
     podDisruptionBudget:
       enabled: true
       minAvailable: 1
-
   # --- Workers (each gets Deployment, Service, HPA, PDB) ---
   # Per-worker extraEnv / extraEnvFrom default to empty; add them under a worker entry
   # to inject extra env vars or envFrom sources into that specific worker container.
@@ -102,18 +98,15 @@ firewall:
       module: src.workers.response_jailbreak.app:app
       extraEnv: []
       extraEnvFrom: []
-
   # --- ServiceAccount ---
   serviceAccount:
     create: true
     name: firewall
     annotations: {}
-
   # --- Secrets (standard K8s Secret, same pattern as other charts) ---
   secrets:
     jwtSecret: ""
     huggingFaceToken: ""
-
   # --- ConfigMap ---
   config:
     pythonUnbuffered: "1"
@@ -128,11 +121,9 @@ firewall:
     otelServiceName: ""
     otelEnvironment: "prod"
     extraEnv: {}
-
   # --- Shared pod/container security ---
   podSecurityContext:
     fsGroup: 2000
-
   securityContext:
     capabilities:
       drop:
@@ -141,9 +132,7 @@ firewall:
     allowPrivilegeEscalation: false
     runAsNonRoot: false
     runAsUser: 0
-
   imagePullSecrets: ""
-
   # --- GKE HealthCheckPolicy ---
   healthCheckPolicy:
     enabled: true
@@ -151,7 +140,6 @@ firewall:
     timeoutSec: 5
     healthyThreshold: 1
     unhealthyThreshold: 2
-
 global:
   imageRegistry: ""
   autoGenerateSecrets: false

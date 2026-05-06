@@ -33,7 +33,7 @@ spec:
       containers:
         - name: beat
           {{- $repo := .Values.aispm.beat.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/aispm-beat" }}
-          {{- $tag := .Values.aispm.beat.image.tag | default "v0.15.0" }}
+          {{- $tag := .Values.aispm.beat.image.tag | default "v0.21.0" }}
           image: {{ include "aispm.image" (dict "repository" $repo "tag" $tag "global" .Values.global) | quote }}
           imagePullPolicy: {{ .Values.aispm.beat.image.pullPolicy | default "IfNotPresent" }}
           {{- /* See api-deployment.yaml for the rationale on direct venv exec.
