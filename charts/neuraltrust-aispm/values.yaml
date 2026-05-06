@@ -1,17 +1,14 @@
 securityHardening: true # Adds readOnlyRootFilesystem, drops capabilities. Set to false to restore prior behavior.
-
 aispm:
   # Optional, off by default. Toggle the entire subchart with this flag.
   enabled: false
-
   imagePullSecrets: ""
-
   # --- API (FastAPI / uvicorn) ---
   api:
     replicas: 1
     image:
       repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/aispm-api
-      tag: v0.15.0
+      tag: v0.21.0
       pullPolicy: IfNotPresent
     resources:
       requests:
@@ -33,13 +30,12 @@ aispm:
       minAvailable: 1
     extraEnv: []
     extraEnvFrom: []
-
   # --- Celery worker ---
   worker:
     replicas: 1
     image:
       repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/aispm-worker
-      tag: v0.15.0
+      tag: v0.21.0
       pullPolicy: IfNotPresent
     resources:
       requests:
@@ -58,12 +54,11 @@ aispm:
       minAvailable: 1
     extraEnv: []
     extraEnvFrom: []
-
   # --- Celery beat (scheduler — keep at 1 replica) ---
   beat:
     image:
       repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/aispm-beat
-      tag: v0.15.0
+      tag: v0.21.0
       pullPolicy: IfNotPresent
     resources:
       requests:
@@ -74,13 +69,11 @@ aispm:
         memory: 512Mi
     extraEnv: []
     extraEnvFrom: []
-
   # --- ServiceAccount ---
   serviceAccount:
     create: true
     name: aispm
     annotations: {}
-
   # --- ConfigMap (non-secret env) ---
   config:
     openaiModel: "gpt-4o-mini"
@@ -101,12 +94,11 @@ aispm:
     aispmApiUrl: ""
     # Extra arbitrary key-value pairs added to the ConfigMap.
     extraEnv: {}
-
   # --- Secrets (auto-generated when global.autoGenerateSecrets is true) ---
   secrets:
     authEncryptionKey: "" # Auto-generated if empty (Fernet key — 44-char urlsafe base64)
-    dbPassword: ""        # Auto-generated if empty (PostgreSQL password for the aispm user)
-    openaiApiKey: ""      # Required at runtime; chart does not enforce
+    dbPassword: "" # Auto-generated if empty (PostgreSQL password for the aispm user)
+    openaiApiKey: "" # Required at runtime; chart does not enforce
     githubAppId: ""
     githubAppPrivateKey: ""
     githubWebhookSecret: ""
@@ -115,7 +107,6 @@ aispm:
     azureClientSecret: ""
     resendApiKey: ""
     adminApiKey: ""
-
   # --- Database (PostgreSQL) ---
   # Defaults reuse the in-cluster control-plane PostgreSQL with a dedicated aispm db/user.
   # Set explicit values to point at an external instance.
@@ -125,7 +116,6 @@ aispm:
     user: "aispm"
     name: "aispm"
     sslMode: "disable" # "disable" for in-cluster PG, "require" for external
-
   # --- PostgreSQL init Job (post-install / post-upgrade hook) ---
   # The job tries the AISPM credentials first; if it can connect, it exits 0.
   # Otherwise it falls back to admin credentials from postgresql-secrets to
@@ -144,17 +134,14 @@ aispm:
     host: ""
     port: "6379"
     database: "1"
-
   # --- Kafka ---
   # Empty bootstrapServers => parent chart helper fills it from infrastructure.kafka.
   kafka:
     bootstrapServers: ""
     postureTopic: "posture_alerts"
-
   # --- Shared pod/container security ---
   podSecurityContext:
     fsGroup: 2000
-
   securityContext:
     capabilities:
       drop:
@@ -163,7 +150,6 @@ aispm:
     allowPrivilegeEscalation: false
     runAsNonRoot: false
     runAsUser: 0
-
 global:
   imageRegistry: ""
   autoGenerateSecrets: false
