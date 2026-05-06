@@ -255,8 +255,6 @@ SETTINGS index_granularity = 8192;
 -- ============================================================================
 -- DETECTIONS TABLE: Detection events emitted to the detections topic
 -- ============================================================================
-SET enable_json_type = 1;
-
 CREATE TABLE IF NOT EXISTS detections
 (
     event_id String,
@@ -275,7 +273,7 @@ CREATE TABLE IF NOT EXISTS detections
     user_id String DEFAULT '',
     user_email String DEFAULT '',
     latency Int64 DEFAULT 0,
-    metadata JSON,
+    metadata String DEFAULT '{}',
     occurred_on DateTime64(3, 'UTC'),
 
     event_date Date MATERIALIZED toDate(occurred_on),
@@ -305,6 +303,7 @@ SETTINGS index_granularity = 8192;
 ALTER TABLE detections ADD COLUMN IF NOT EXISTS session_id String DEFAULT '' AFTER user_ip;
 ALTER TABLE detections ADD COLUMN IF NOT EXISTS user_id String DEFAULT '' AFTER session_id;
 ALTER TABLE detections ADD COLUMN IF NOT EXISTS user_email String DEFAULT '' AFTER user_id;
+ALTER TABLE detections MODIFY COLUMN IF EXISTS metadata String DEFAULT '{}';
 ALTER TABLE detections ADD INDEX IF NOT EXISTS idx_session_id (session_id) TYPE bloom_filter(0.01) GRANULARITY 1;
 ALTER TABLE detections ADD INDEX IF NOT EXISTS idx_user_id (user_id) TYPE bloom_filter(0.01) GRANULARITY 1;
 ALTER TABLE detections ADD INDEX IF NOT EXISTS idx_user_email (user_email) TYPE bloom_filter(0.01) GRANULARITY 1;
