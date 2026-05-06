@@ -137,7 +137,6 @@ neuraltrust-aispm:
     # database: { host: "control-plane-postgresql", user: "aispm", name: "aispm", sslMode: "disable" }
     # redis:    { host: "", port: "6379", database: "1" }   # Empty host shares TrustGate Redis
     # kafka:    { bootstrapServers: "", postureTopic: "posture_alerts" }
-
 # SIEM forwarder
 # Internal-only worker that consumes Kafka audit/posture events and forwards
 # them to external SIEMs (Splunk, Sentinel, Datadog, Elasticsearch, …) using
@@ -158,7 +157,6 @@ neuraltrust-siem-connectors:
     # kafka:      { brokers: "" }     # Empty => resolved via parent infrastructure helper
     # clickhouse: { host: "", database: "neuraltrust", user: "neuraltrust",
     #               secretName: "clickhouse-secrets", secretKey: "admin-password" }
-
 # Infrastructure Components
 # These can be deployed or configured to use pre-installed instances
 infrastructure:
@@ -343,7 +341,7 @@ trustgate:
     image:
       pullPolicy: Always
       image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee"
-      tag: "v1.26.7"
+      tag: "v1.26.9"
       # imagePullSecrets: if not set, will fall back to parent chart's global.imagePullSecrets
       imagePullSecrets: ["gcr-secret"] # Set to array of secret names, e.g., ["secret-name"] or leave empty to use parent global.imagePullSecrets
     postgresql:
@@ -665,7 +663,7 @@ neuraltrust-control-plane:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api"
-          tag: "v1.17.1"
+          tag: "v1.17.2"
           pullPolicy: "Always"
         config:
           # URLs will be auto-generated from OpenShift Routes if global.openshift=true and global.openshiftDomain is set
@@ -714,7 +712,7 @@ neuraltrust-control-plane:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.59.0"
+          tag: "v1.63.5"
           pullPolicy: "Always"
         config:
           nodeEnv: production
@@ -860,7 +858,7 @@ neuraltrust-data-plane:
         classifierModel: "gpt"
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.21.0
+          tag: v1.24.0
           pullPolicy: Always
         accessMode: ReadWriteOnce
         huggingfaceToken: ""
@@ -906,7 +904,7 @@ neuraltrust-data-plane:
         replicas: 1
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/workers
-          tag: v1.6.4
+          tag: v1.6.8
           pullPolicy: Always
         resources:
           requests:
@@ -941,7 +939,7 @@ neuraltrust-firewall:
       replicas: 2
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-        tag: "v2.6.0"
+        tag: "v2.9.0"
         pullPolicy: IfNotPresent
       resources:
         requests:
@@ -974,7 +972,7 @@ neuraltrust-firewall:
     workerDefaults:
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-        tag: "v2.6.0"
+        tag: "v2.9.0"
         pullPolicy: IfNotPresent
       replicas: 1
       resources:
