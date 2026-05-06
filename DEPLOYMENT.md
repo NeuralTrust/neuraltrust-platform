@@ -229,7 +229,7 @@ When AISPM is enabled, defaults reuse platform infrastructure:
 |---|---|---|
 | PostgreSQL | `control-plane-postgresql` (db `aispm`, user `aispm`) | `neuraltrust-aispm.aispm.database.{host,port,user,name,sslMode}` |
 | Redis | `<release>-redis-master:6379` db `1` (TrustGate uses db `0`) | `neuraltrust-aispm.aispm.redis.{host,port,database}` |
-| Kafka | `<release>-kafka:9092` topic `posture_alerts` | `neuraltrust-aispm.aispm.kafka.{bootstrapServers,postureTopic}` |
+| Kafka | `kafka:9092` topic `posture_alerts` | `neuraltrust-aispm.aispm.kafka.{bootstrapServers,postureTopic}` |
 | JWT secret | `data-plane-jwt-secret/DATA_PLANE_JWT_SECRET` | n/a — intentionally shared with the data plane |
 
 The `aispm` user/database in the in-cluster PostgreSQL is **not** auto-created by the chart today. Provision it with the standard PostgreSQL bootstrap (or point AISPM at an external instance) before enabling.
@@ -269,8 +269,8 @@ The SIEM Connectors subchart is **off by default** (`neuraltrust-siem-connectors
 
 | Resource | Default | Override |
 |---|---|---|
-| Kafka | `<release>-kafka:9092` | `neuraltrust-siem-connectors.siemConnectors.kafka.brokers` |
-| ClickHouse | `http://<release>-clickhouse:8123`, db `neuraltrust`, user `neuraltrust` | `neuraltrust-siem-connectors.siemConnectors.clickhouse.{host,database,user}` |
+| Kafka | `kafka:9092` | `neuraltrust-siem-connectors.siemConnectors.kafka.brokers` |
+| ClickHouse | `http://clickhouse:8123`, db `neuraltrust`, user `neuraltrust` | `neuraltrust-siem-connectors.siemConnectors.clickhouse.{host,database,user}` |
 | ClickHouse password | `clickhouse-secrets/admin-password` | `neuraltrust-siem-connectors.siemConnectors.clickhouse.{secretName,secretKey}` |
 
 The deployment is internal-only — it exposes a `/api/health` endpoint on port 3000 (mapped to a ClusterIP service on port 80) but no Ingress is rendered.
@@ -501,8 +501,8 @@ History is bounded by `backup.successfulJobsHistoryLimit` (default 3) and `backu
 
 | Component | In-cluster service name | External config path |
 |---|---|---|
-| ClickHouse | `<release>-clickhouse` | `infrastructure.clickhouse.external.host` |
-| Kafka | `<release>-kafka:9092` | `infrastructure.kafka.external.bootstrapServers` |
+| ClickHouse | `clickhouse` | `infrastructure.clickhouse.external.host` |
+| Kafka | `kafka:9092` | `infrastructure.kafka.external.bootstrapServers` |
 | PostgreSQL | `control-plane-postgresql` | `neuraltrust-control-plane.controlPlane.components.postgresql.secrets.host` |
 
 The `_helpers.tpl` template resolves these automatically based on `deploy: true/false`.

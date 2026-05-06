@@ -36,14 +36,24 @@ spec:
           {{- $tag := .Values.aispm.beat.image.tag | default "v0.15.0" }}
           image: {{ include "aispm.image" (dict "repository" $repo "tag" $tag "global" .Values.global) | quote }}
           imagePullPolicy: {{ .Values.aispm.beat.image.pullPolicy | default "IfNotPresent" }}
+          {{- /* See api-deployment.yaml for the rationale on direct venv exec.
+                 --schedule and --pidfile both point to /tmp because:
+                 (a) the persistent scheduler shelf (celerybeat-schedule.db) defaults to
+                     CWD-relative, which is /app/celerybeat-schedule — read-only under
+                     securityHardening, so beat crashes at startup with OSError EROFS.
+                 (b) the pidfile must also live somewhere writable; /tmp is the only
+                     mount we provision for this pod. */}}
           args:
-            - uv
-            - run
-            - --quiet
-            - celery
+            - /app/.venv/bin/celery
             - -A
             - app.workers.celery_app:celery_app
             - beat
+            - -l
+            - INFO
+            - --schedule
+            - /tmp/celerybeat-schedule
+            - --pidfile
+            - /tmp/celerybeat.pid
           envFrom:
             - configMapRef:
                 name: aispm-config

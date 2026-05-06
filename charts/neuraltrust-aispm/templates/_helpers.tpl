@@ -57,13 +57,16 @@ Usage: {{ include "aispm.redis.host" . }}
 
 {{/*
 Resolve the Kafka bootstrap servers. Empty value falls back to the in-cluster Kafka service.
+The default `kafka:9092` matches the parent chart's `kafka.fullnameOverride: "kafka"` default
+(values.yaml). If a downstream values file overrides `kafka.fullnameOverride`, the operator
+must also set `aispm.kafka.bootstrapServers` to point at the right hostname.
 Usage: {{ include "aispm.kafka.bootstrapServers" . }}
 */}}
 {{- define "aispm.kafka.bootstrapServers" -}}
 {{- if and .Values.aispm.kafka .Values.aispm.kafka.bootstrapServers (ne (.Values.aispm.kafka.bootstrapServers | toString) "") -}}
 {{- .Values.aispm.kafka.bootstrapServers -}}
 {{- else -}}
-{{- printf "%s-kafka:9092" .Release.Name -}}
+{{- "kafka:9092" -}}
 {{- end -}}
 {{- end }}
 
