@@ -264,6 +264,8 @@ CREATE TABLE IF NOT EXISTS detections
     engine_id String DEFAULT '',
     trace_id String DEFAULT '',
     engine_policy_id String DEFAULT '',
+    policy_id String DEFAULT '',
+    integration_id String DEFAULT '',
     gateway_rule_id String DEFAULT '',
     type String,
     action String DEFAULT '',
@@ -285,6 +287,8 @@ CREATE TABLE IF NOT EXISTS detections
     INDEX idx_engine_id (engine_id) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_trace_id (trace_id) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_engine_policy_id (engine_policy_id) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_policy_id (policy_id) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_integration_id (integration_id) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_gateway_rule_id (gateway_rule_id) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_type (type) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_action (action) TYPE bloom_filter(0.01) GRANULARITY 1,
@@ -303,10 +307,14 @@ SETTINGS index_granularity = 8192;
 ALTER TABLE detections ADD COLUMN IF NOT EXISTS session_id String DEFAULT '' AFTER user_ip;
 ALTER TABLE detections ADD COLUMN IF NOT EXISTS user_id String DEFAULT '' AFTER session_id;
 ALTER TABLE detections ADD COLUMN IF NOT EXISTS user_email String DEFAULT '' AFTER user_id;
+ALTER TABLE detections ADD COLUMN IF NOT EXISTS policy_id String DEFAULT '' AFTER engine_policy_id;
+ALTER TABLE detections ADD COLUMN IF NOT EXISTS integration_id String DEFAULT '' AFTER policy_id;
 ALTER TABLE detections MODIFY COLUMN IF EXISTS metadata String DEFAULT '{}';
 ALTER TABLE detections ADD INDEX IF NOT EXISTS idx_session_id (session_id) TYPE bloom_filter(0.01) GRANULARITY 1;
 ALTER TABLE detections ADD INDEX IF NOT EXISTS idx_user_id (user_id) TYPE bloom_filter(0.01) GRANULARITY 1;
 ALTER TABLE detections ADD INDEX IF NOT EXISTS idx_user_email (user_email) TYPE bloom_filter(0.01) GRANULARITY 1;
+ALTER TABLE detections ADD INDEX IF NOT EXISTS idx_policy_id (policy_id) TYPE bloom_filter(0.01) GRANULARITY 1;
+ALTER TABLE detections ADD INDEX IF NOT EXISTS idx_integration_id (integration_id) TYPE bloom_filter(0.01) GRANULARITY 1;
 
 
 -- ============================================================================
