@@ -20,8 +20,3 @@ jobs:
     with:
       scan_type: config
 
-  auto-approve:
-    needs: [security]
-    uses: NeuralTrust/workflows/.github/workflows/auto-approve.yml@main
-    secrets:
-      GH_TOKEN: ${{ secrets.GH_TOKEN }}

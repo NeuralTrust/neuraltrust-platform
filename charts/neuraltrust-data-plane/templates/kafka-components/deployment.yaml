@@ -4,6 +4,7 @@ metadata:
   name: kafka-connect
   namespace: {{ .Release.Namespace }}
 spec:
+  {{- $defaultKafkaConnectTag := "v0.3.0" }}
   {{- $kafkaConnectReplicas := 1 }}
   {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect (hasKey .Values.dataPlane.components.kafka.connect "replicas") }}
     {{- $kafkaConnectReplicas = .Values.dataPlane.components.kafka.connect.replicas }}
@@ -29,10 +30,10 @@ spec:
         - name: fix-connect-topics
           {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect .Values.dataPlane.components.kafka.connect.image }}
           {{- $initRepo := .Values.dataPlane.components.kafka.connect.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect" }}
-          {{- $initTag := .Values.dataPlane.components.kafka.connect.image.tag | default "v0.1.5" }}
+          {{- $initTag := .Values.dataPlane.components.kafka.connect.image.tag | default $defaultKafkaConnectTag }}
           image: {{ include "data-plane.image" (dict "repository" $initRepo "tag" $initTag "global" .Values.global) | quote }}
           {{- else }}
-          image: {{ include "data-plane.image" (dict "repository" "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect" "tag" "v0.1.4" "global" .Values.global) | quote }}
+          image: {{ include "data-plane.image" (dict "repository" "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect" "tag" $defaultKafkaConnectTag "global" .Values.global) | quote }}
           {{- end }}
           {{- if .Values.securityHardening }}
           securityContext:
@@ -97,11 +98,11 @@ spec:
         - name: kafka-connect
           {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect .Values.dataPlane.components.kafka.connect.image }}
           {{- $kafkaConnectRepo := .Values.dataPlane.components.kafka.connect.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect" }}
-          {{- $kafkaConnectTag := .Values.dataPlane.components.kafka.connect.image.tag | default "v0.2.0" }}
+          {{- $kafkaConnectTag := .Values.dataPlane.components.kafka.connect.image.tag | default $defaultKafkaConnectTag }}
           image: {{ include "data-plane.image" (dict "repository" $kafkaConnectRepo "tag" $kafkaConnectTag "global" .Values.global) | quote }}
           imagePullPolicy: {{ .Values.dataPlane.components.kafka.connect.image.pullPolicy | default "Always" }}
           {{- else }}
-          image: {{ include "data-plane.image" (dict "repository" "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect" "tag" "v0.1.4" "global" .Values.global) | quote }}
+          image: {{ include "data-plane.image" (dict "repository" "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect" "tag" $defaultKafkaConnectTag "global" .Values.global) | quote }}
           imagePullPolicy: Always
           {{- end }}
           {{- if .Values.securityHardening }}
