@@ -40,15 +40,16 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
-Construct image path with optional global registry prefix.
+Construct an image path with optional global registry prefix.
+Usage: {{ include "kafka.imageFor" (dict "repository" .Values.image.repository "tag" .Values.image.tag "global" .Values.global) }}
 */}}
-{{- define "kafka.image" -}}
+{{- define "kafka.imageFor" -}}
 {{- $registry := "" }}
-{{- $repository := .Values.image.repository }}
-{{- $tag := .Values.image.tag }}
+{{- $repository := .repository }}
+{{- $tag := .tag }}
 {{- $defaultRegistry := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker" }}
-{{- if and .Values.global .Values.global.imageRegistry }}
-  {{- $registry = .Values.global.imageRegistry }}
+{{- if and .global .global.imageRegistry }}
+  {{- $registry = .global.imageRegistry }}
 {{- end }}
 {{- if $registry }}
   {{- if hasPrefix $registry $repository }}
@@ -62,4 +63,11 @@ Construct image path with optional global registry prefix.
 {{- else }}
   {{- printf "%s:%s" $repository $tag }}
 {{- end }}
+{{- end }}
+
+{{/*
+Construct the Kafka broker image path.
+*/}}
+{{- define "kafka.image" -}}
+{{- include "kafka.imageFor" (dict "repository" .Values.image.repository "tag" .Values.image.tag "global" .Values.global) }}
 {{- end }}

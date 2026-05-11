@@ -373,9 +373,21 @@ jobs:
           # 7. Kafka Connect
           # =============================================
           TAG="${{ steps.tags.outputs.kafka_connect }}"
-          if update_values_tag '.["neuraltrust-data-plane"].dataPlane.components.kafka.connect.image.tag' "$TAG" "kafka-connect"; then
-            BUMP_DATA_PLANE=true
-            update_template_tag "charts/neuraltrust-data-plane/templates/kafka-components/deployment.yaml" "kafkaConnectTag" "$TAG"
+          if [[ -n "$TAG" ]]; then
+            if update_values_tag '.["neuraltrust-data-plane"].dataPlane.components.kafka.connect.image.tag' "$TAG" "kafka-connect"; then
+              BUMP_DATA_PLANE=true
+            fi
+            if update_values_tag '.kafka.connectorMonitor.image.tag' "$TAG" "kafka-connect monitor"; then
+              BUMP_KAFKA=true
+            fi
+            update_template_tag "charts/neuraltrust-data-plane/templates/kafka-components/deployment.yaml" "defaultKafkaConnectTag" "$TAG"
+            if [[ "$TEMPLATE_TAG_CHANGED" == "1" ]]; then
+              BUMP_DATA_PLANE=true
+            fi
+            update_template_tag "charts/kafka/templates/connector-monitor-cronjob.yaml" "defaultKafkaConnectTag" "$TAG"
+            if [[ "$TEMPLATE_TAG_CHANGED" == "1" ]]; then
+              BUMP_KAFKA=true
+            fi
           fi
 
           # =============================================
@@ -618,7 +630,8 @@ jobs:
             charts/neuraltrust-siem-connectors/Chart.yaml \
             charts/neuraltrust-siem-connectors/templates/ \
             charts/clickhouse/Chart.yaml \
-            charts/kafka/Chart.yaml
+            charts/kafka/Chart.yaml \
+            charts/kafka/templates/
           git commit -m "$(cat <<COMMIT
           chore: bump image versions
 

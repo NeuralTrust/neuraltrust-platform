@@ -327,6 +327,40 @@ kafka:
     limits:
       memory: 2Gi
       cpu: 1
+  connectorMonitor:
+    enabled: false # Enable scheduled Kafka Connect connector self-healing. Runs monitor-connectors.sh from the kafka-connect image.
+    name: connector-monitor
+    schedule: "*/10 * * * *"
+    suspend: false
+    concurrencyPolicy: Forbid
+    successfulJobsHistoryLimit: 1
+    failedJobsHistoryLimit: 3
+    startingDeadlineSeconds: 60
+    backoffLimit: 0
+    ttlSecondsAfterFinished: 86400
+    kafkaConnectUrl: "" # Empty = http://kafka-connect-svc.<release-namespace>.svc.cluster.local:8083
+    dryRun: "0"
+    restartTimeoutSeconds: "30"
+    image:
+      repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect
+      tag: v0.3.0
+      pullPolicy: IfNotPresent
+    configMapName: "" # Optional envFrom ConfigMap for monitor settings
+    secretName: "kafka-connect-monitor-secrets" # Optional envFrom Secret, e.g. SLACK_WEBHOOK_URL
+    slackWebhookUrl: "" # Optional Slack webhook URL. If set, Helm creates secretName with SLACK_WEBHOOK_URL.
+    env: {}
+    extraEnv: []
+    extraEnvFrom: []
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+    resources:
+      requests:
+        cpu: 10m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
 # TrustGate Configuration
 trustgate:
   securityHardening: true # Adds readOnlyRootFilesystem, drops capabilities, seccomp profile. Set to false to restore prior behavior.
@@ -411,7 +445,7 @@ trustgate:
       minAvailable: 1
     autoscaling:
       enabled: true
-      minReplicas: 2
+      minReplicas: 1
       maxReplicas: 10
       targetCPUUtilizationPercentage: 80
       targetMemoryUtilizationPercentage: 80
@@ -828,7 +862,7 @@ neuraltrust-data-plane:
           bootstrapServers: "kafka:9092"
           image:
             repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect
-            tag: v0.2.0
+            tag: v0.3.0
             pullPolicy: Always
           resources:
             limits:

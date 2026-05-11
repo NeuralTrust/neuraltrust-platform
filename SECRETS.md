@@ -111,6 +111,7 @@ All required secrets must exist in the namespace before deployment.
 | Kubernetes Secret | Key | Required | Description |
 |---|---|---|---|
 | `clickhouse` | `admin-password` | Auto-generated | ClickHouse admin password |
+| `kafka-connect-monitor-secrets` | `SLACK_WEBHOOK_URL` | No | Optional Slack webhook for Kafka Connect monitor self-heal notifications. Created from `kafka.connectorMonitor.slackWebhookUrl` when set. |
 
 ### TrustGate
 
