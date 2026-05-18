@@ -103,6 +103,135 @@ global:
       wafPolicyId: "" # Optional: WAF policy resource ID
       requestTimeout: "" # Optional: backend request timeout in seconds (e.g., "30")
       additionalAnnotations: {} # Any additional AGIC annotations as key-value pairs
+  # ----------------------------------------------------------------------
+  # In-chart OpenTelemetry Collector + optional hosted observability egress.
+  # ----------------------------------------------------------------------
+  # When `global.observability.enabled` is true, the chart deploys a
+  # single-replica OTel Collector (Contrib) under the release namespace.
+  # All component telemetry — Prometheus scrapes, OTLP traces from
+  # TrustGate/Firewall/AISPM, K8s events, kubeletstats — is funnelled
+  # through this collector. The hosted exporter ships infra metrics +
+  # K8s events to NeuralTrust's managed observability endpoint when a
+  # bearer token is provided (see `hostedExport` below).
+  #
+  # GRACEFUL DEGRADATION: if no token is resolvable (Secret missing,
+  # tokenValue empty, lookup returns nothing), the hosted exporter is
+  # silently OMITTED. The collector still runs locally and never blocks
+  # install in air-gapped environments. Two flag-level opt-outs:
+  #   - global.observability.enabled: false       # remove collector entirely
+  #   - global.observability.hostedExport.enabled: false  # local-only collector
+  # Optional integration with the Prometheus Operator. When enabled AND
+  # the cluster ships the monitoring.coreos.com/v1 CRDs, every subchart
+  # renders a ServiceMonitor + PrometheusRule under
+  # `charts/<sub>/templates/monitoring/`. If the CRDs are missing the
+  # blocks are silently skipped — `helm install` still succeeds. Customers
+  # who don't run Prometheus Operator can leave this OFF and rely on the
+  # in-chart OTel Collector + watchdog instead.
+  monitoring:
+    enabled: false
+    # Apply to every PrometheusRule/ServiceMonitor so the operator selectors
+    # only pick up our resources (e.g. `release: kube-prometheus-stack`).
+    additionalLabels: {}
+    # Default scrape interval applied to every ServiceMonitor unless
+    # overridden per-subchart.
+    interval: 30s
+    # Default alert severity label so customers can route via Alertmanager
+    # without editing the rules.
+    alertLabels:
+      team: platform
+  observability:
+    enabled: true
+    tenantId: "" # Sent as nt.tenant_id resource attribute (optional).
+    hostedExport:
+      enabled: true
+      endpoint: "https://collector.neuraltrust.ai:4318" # OTLP/HTTP
+      auth:
+        # Bearer token. resolveSecret order: tokenValue > existingSecret > lookup.
+        # When all three are empty, the otlphttp/neuraltrust exporter is omitted.
+        tokenSecretName: "neuraltrust-observability-token"
+        tokenSecretKey: "token"
+        tokenValue: ""
+      tlsCaSecretName: "" # Optional custom CA Secret (key: ca.crt) for proxies that MITM TLS.
+      sendingQueue:
+        enabled: true
+        storage: file_storage # disk-backed buffer
+        maxSize: 1000        # max items in queue, oldest dropped on overflow
+      retry:
+        initialInterval: 5s
+        maxInterval: 30s
+        maxElapsedTime: 0s   # never give up
+    # sendLogs covers the K8s events receiver + watchdog log records;
+    # NEVER application payloads. Enable carefully.
+    sendLogs: false
+    sendTraces: true
+    collector:
+      # Optional: route every component (TrustGate, Firewall, AISPM,
+      # Control Plane, Data Plane) at this OTLP endpoint. When set, the
+      # subchart configmaps OVERRIDE their per-component defaults so
+      # operators don't have to touch each one. Recommended value when
+      # using the in-chart collector:
+      #   http://<RELEASE>-otel-collector.<NAMESPACE>.svc.cluster.local:4318
+      # Leave empty to keep each subchart pointing at whatever its own
+      # `*.config.otel*Endpoint` already references (preserves the prior
+      # behaviour for upgrades).
+      endpoint: ""
+      image:
+        repository: otel/opentelemetry-collector-contrib
+        tag: "0.110.0"
+        pullPolicy: IfNotPresent
+      replicas: 1
+      service:
+        type: ClusterIP
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: "1"
+          memory: 1Gi
+      bufferPVC:
+        enabled: true
+        size: 2Gi
+        storageClass: "" # Falls back to global.storageClass.
+      podSecurityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [ALL]
+      podAnnotations: {}
+      podLabels: {}
+      nodeSelector: {}
+      tolerations: []
+      affinity: {}
+      debug: false # When true, adds the OTel `debug` exporter for local troubleshooting.
+      # extraReceivers / extraProcessors / extraExporters / extraServicePipelines
+      # are merged into the rendered config without escaping. Use to point a
+      # second exporter at the customer's own collector or to enable e.g.
+      # the `googlecloudmonitoring` receiver.
+      extraReceivers: {}
+      extraProcessors: {}
+      extraExporters: {}
+      extraServicePipelines: {}
+      # Service account for the collector. The k8s_events + kubeletstats
+      # receivers require cluster-scoped read permissions; gated by RBAC below.
+      serviceAccount:
+        create: true
+        name: ""
+        annotations: {}
+      rbac:
+        create: true
+        # When true, ClusterRole + ClusterRoleBinding give cluster-wide read of
+        # events + kubeletstats. Required for the `k8s_events` and
+        # `kubeletstats` receivers. Disable to keep RBAC namespace-scoped at
+        # the cost of those signals.
+        clusterScoped: true
 # Optional add-on services (off by default, listed first for visibility).
 # Toggle each one with its own enabled flag; everything else uses chart defaults.
 #
@@ -327,40 +456,19 @@ kafka:
     limits:
       memory: 2Gi
       cpu: 1
-  connectorMonitor:
-    enabled: false # Enable scheduled Kafka Connect connector self-healing. Runs monitor-connectors.sh from the kafka-connect image.
-    name: connector-monitor
-    schedule: "*/10 * * * *"
-    suspend: false
-    concurrencyPolicy: Forbid
-    successfulJobsHistoryLimit: 1
-    failedJobsHistoryLimit: 3
-    startingDeadlineSeconds: 60
-    backoffLimit: 0
-    ttlSecondsAfterFinished: 86400
-    kafkaConnectUrl: "" # Empty = http://kafka-connect-svc.<release-namespace>.svc.cluster.local:8083
-    dryRun: "0"
-    restartTimeoutSeconds: "30"
-    image:
-      repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect
-      tag: v0.3.0
-      pullPolicy: IfNotPresent
-    configMapName: "" # Optional envFrom ConfigMap for monitor settings
-    secretName: "kafka-connect-monitor-secrets" # Optional envFrom Secret, e.g. SLACK_WEBHOOK_URL
-    slackWebhookUrl: "" # Optional Slack webhook URL. If set, Helm creates secretName with SLACK_WEBHOOK_URL.
-    env: {}
-    extraEnv: []
-    extraEnvFrom: []
-    nodeSelector: {}
-    tolerations: []
-    affinity: {}
-    resources:
-      requests:
-        cpu: 10m
-        memory: 64Mi
-      limits:
-        cpu: 200m
-        memory: 128Mi
+  # DEPRECATED: kafka.connectorMonitor was removed in chart v1.13.0.
+  # The CronJob has been replaced by the long-running neuraltrust-watchdog
+  # service (subchart `neuraltrust-watchdog`) which polls Kafka Connect via
+  # `kafka_connect_connectors` and can restart FAILED tasks behind a dryRun
+  # flag. Migration:
+  #   1. Set `neuraltrust-watchdog.enabled: true`.
+  #   2. Add (or keep) the `kafka-connect` check in the watchdog's checks
+  #      list pointing at your Kafka Connect URL.
+  # The values block below is intentionally left as an empty placeholder so
+  # existing accounts/<client>/values.yaml files referencing
+  # `kafka.connectorMonitor.*` do not fail Helm rendering. Helm garbage-
+  # collects the old CronJob + Secret on the next upgrade.
+  connectorMonitor: {}
 # TrustGate Configuration
 trustgate:
   securityHardening: true # Adds readOnlyRootFilesystem, drops capabilities, seccomp profile. Set to false to restore prior behavior.
@@ -1088,3 +1196,18 @@ neuraltrust-firewall:
       enabled: false
     image:
       tag: v2.7.0
+
+# ----------------------------------------------------------------------
+# neuraltrust-watchdog (subchart)
+# ----------------------------------------------------------------------
+# Self-monitoring + self-healing controller. OFF by default. When
+# enabled, the watchdog runs as a single Deployment in the release
+# namespace and periodically probes the platform components configured
+# under `neuraltrust-watchdog.checks`. Mutating actions default to
+# dryRun: true so adoption can be incremental.
+#
+# Full reference: charts/neuraltrust-watchdog/values.yaml
+# Example: values-watchdog.yaml.example
+neuraltrust-watchdog:
+  enabled: false
+

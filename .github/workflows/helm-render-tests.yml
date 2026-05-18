@@ -1,0 +1,29 @@
+name: Helm render tests
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "Chart.yaml"
+      - "values*.yaml"
+      - "templates/**"
+      - "charts/**"
+      - "scripts/test-helm-render.sh"
+      - ".github/workflows/helm-render-tests.yml"
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    name: helm template scenarios
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
+      - name: Run scenarios
+        run: ./scripts/test-helm-render.sh

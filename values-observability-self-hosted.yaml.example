@@ -1,0 +1,85 @@
+# values-observability-self-hosted.yaml.example
+#
+# Self-hosted observability scenario:
+#   - In-chart OpenTelemetry Collector runs locally
+#   - NO data leaves the cluster (hosted export disabled)
+#   - PrometheusRule + ServiceMonitor + PodMonitor resources feed the
+#     customer's own Prometheus Operator
+#   - Watchdog still fires healing actions in-cluster
+#
+# Use this for air-gapped / no-egress / regulated environments. Pair
+# with the customer's own kube-prometheus-stack (or equivalent) — the
+# chart never installs Prometheus/Grafana for you.
+#
+# Apply with:
+#
+#   helm upgrade --install neuraltrust-platform . \
+#     -f values-required.yaml \
+#     -f values-observability-self-hosted.yaml
+
+global:
+  # Master switch for the in-chart OTel Collector. Stays ON so the
+  # collector still scrapes component metrics and serves them on the
+  # local Service for the customer's Prometheus to scrape via the
+  # ServiceMonitor we ship.
+  observability:
+    enabled: true
+    hostedExport:
+      # Hard off — no OTLP export to collector.neuraltrust.ai.
+      # Combined with `enabled: true` above, this gives you a local-
+      # only collector pipeline (`nop` exporter as the safety net).
+      enabled: false
+    sendLogs: false                 # change to true if you want
+    sendTraces: true                # k8s_events stays in-cluster
+    collector:
+      # Route every component (TrustGate, Firewall, AISPM) at the
+      # in-chart Collector with one knob.
+      endpoint: ""                  # auto-resolves to the in-chart Service
+      bufferPVC:
+        enabled: false              # no upstream means no buffer needed
+      resources:
+        requests: { cpu: 100m, memory: 256Mi }
+        limits:   { cpu: "1",  memory: 1Gi }
+
+  # Render PrometheusRule / ServiceMonitor / PodMonitor for every
+  # subchart. Both gates required — chart flag AND monitoring.coreos.com/v1
+  # CRDs in the cluster.
+  monitoring:
+    enabled: true
+    # Match your Prometheus Operator's serviceMonitorSelector / ruleSelector.
+    additionalLabels:
+      release: kube-prometheus-stack
+    interval: 30s
+    alertLabels:
+      team: platform
+
+# Optional: deploy the watchdog alongside the self-hosted observability
+# stack. Healing actions run in dry-run by default. Comment this whole
+# block out if you only want the OTel Collector + alerts.
+#
+# Keys mirror `charts/neuraltrust-watchdog/values.yaml`. See
+# `values-watchdog.yaml.example` for the full schema.
+neuraltrust-watchdog:
+  enabled: true
+  actions:
+    dryRun: true                    # flip per-check after parity
+    slack:
+      # Inline value or existing Secret you control. Empty = no-op.
+      webhookUrl: ""
+      existingSecret: neuraltrust-watchdog-slack
+      secretKey: webhook
+  monitoring:
+    # Annotations are baseline and feed the in-chart OTel collector.
+    scrapeAnnotations:
+      enabled: true
+    # Render PodMonitor + PrometheusRule for the customer's
+    # kube-prometheus-stack. Auto-skipped when the CRDs are absent.
+    podMonitor:
+      enabled: true
+      additionalLabels:
+        release: kube-prometheus-stack
+      interval: 30s
+    prometheusRule:
+      enabled: true
+      alertLabels:
+        team: platform

@@ -1,0 +1,34 @@
+{{- /*
+  Optional PodDisruptionBudgets for the three Control Plane Deployments
+  (app, api, scheduler). All default OFF and additive — no behavior
+  change unless an operator explicitly opts in:
+
+    controlPlane.components.<component>.podDisruptionBudget:
+      enabled: true
+      minAvailable: 1          # XOR maxUnavailable
+      # maxUnavailable: 1
+*/ -}}
+{{- if and .Values.controlPlane .Values.controlPlane.enabled }}
+{{- range $name, $cfg := .Values.controlPlane.components -}}
+{{- $pdb := default dict $cfg.podDisruptionBudget -}}
+{{- if and $pdb.enabled (or (gt (default 1 $cfg.replicaCount | int) 1) (gt (default 1 $cfg.replicas | int) 1)) -}}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: control-plane-{{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app: control-plane-{{ $name }}
+spec:
+  {{- if hasKey $pdb "maxUnavailable" }}
+  maxUnavailable: {{ $pdb.maxUnavailable }}
+  {{- else }}
+  minAvailable: {{ default 1 $pdb.minAvailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app: control-plane-{{ $name }}
+{{- end -}}
+{{- end -}}
+{{- end -}}

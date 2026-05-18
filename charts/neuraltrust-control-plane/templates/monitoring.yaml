@@ -1,0 +1,70 @@
+{{- $g := default dict .Values.global -}}
+{{- $m := default dict $g.monitoring -}}
+{{- $cap := .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" -}}
+{{- if and $m.enabled $cap (and .Values.controlPlane .Values.controlPlane.enabled) -}}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: control-plane
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service | quote }}
+    app.kubernetes.io/instance: {{ .Release.Name | quote }}
+    app.kubernetes.io/part-of: neuraltrust-platform
+    {{- with $m.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: control-plane
+      interval: 1m
+      rules:
+        - alert: ControlPlaneAppDown
+          expr: |
+            sum(kube_deployment_status_replicas_available{namespace="{{ .Release.Namespace }}",deployment="control-plane-app"}) == 0
+          for: 5m
+          labels:
+            severity: critical
+            {{- with $m.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: "Control Plane UI has no ready replicas"
+            description: "Operators cannot reach the management UI. Customer traffic is unaffected."
+        - alert: ControlPlaneApiDown
+          expr: |
+            sum(kube_deployment_status_replicas_available{namespace="{{ .Release.Namespace }}",deployment="control-plane-api"}) == 0
+          for: 5m
+          labels:
+            severity: critical
+            {{- with $m.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: "Control Plane API has no ready replicas"
+            description: "Management API is unreachable. New plugins/policies cannot be applied."
+        - alert: ControlPlaneSchedulerDown
+          expr: |
+            sum(kube_deployment_status_replicas_available{namespace="{{ .Release.Namespace }}",deployment="control-plane-scheduler"}) == 0
+          for: 15m
+          labels:
+            severity: warning
+            {{- with $m.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: "Control Plane Scheduler is down"
+            description: "Periodic jobs (sync, cleanup, posture) won't run while this is down."
+        - alert: ControlPlanePostgresDown
+          expr: |
+            sum(kube_statefulset_status_replicas_ready{namespace="{{ .Release.Namespace }}",statefulset=~"postgres.*"}) == 0
+          for: 5m
+          labels:
+            severity: critical
+            {{- with $m.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: "In-cluster Postgres has no ready replicas"
+            description: "Only fires when in-cluster postgres subchart is enabled. External managed Postgres alerts live in cloud-infrastructure."
+{{- end }}

@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "neuraltrust-watchdog.fullname" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "neuraltrust-watchdog.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    runner:
+      defaultInterval: {{ .Values.runner.defaultInterval }}
+      defaultTimeout: {{ .Values.runner.defaultTimeout }}
+      failureThreshold: {{ .Values.runner.failureThreshold }}
+    server:
+      listenAddr: "{{ .Values.server.listenAddr }}"
+      {{- if or .Values.server.authToken.value .Values.server.authToken.existingSecret }}
+      authTokenEnv: WATCHDOG_API_TOKEN
+      {{- end }}
+    telemetry:
+      serviceName: {{ .Values.telemetry.serviceName | quote }}
+      otlpEndpointEnv: OTEL_EXPORTER_OTLP_ENDPOINT
+      otlpHeadersEnv: OTEL_EXPORTER_OTLP_HEADERS
+      tenantIdEnv: NT_TENANT_ID
+      enableTraces: {{ .Values.telemetry.enableTraces }}
+      enableLogs: {{ .Values.telemetry.enableLogs }}
+    actions:
+      dryRun: {{ .Values.actions.dryRun }}
+      slack:
+        webhookUrlEnv: SLACK_WEBHOOK_URL
+      otlp:
+        endpointEnv: {{ .Values.actions.otlp.endpointEnv | quote }}
+    checks:
+      {{- range .Values.checks }}
+      - {{ toYaml . | nindent 8 | trim }}
+      {{- end }}

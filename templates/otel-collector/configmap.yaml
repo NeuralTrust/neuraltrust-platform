@@ -1,0 +1,266 @@
+{{- if include "neuraltrust-platform.otelCollector.enabled" . }}
+{{- $obs := default dict (default dict .Values.global).observability -}}
+{{- $coll := default dict $obs.collector -}}
+{{- $hosted := default dict $obs.hostedExport -}}
+{{- $renderHosted := include "neuraltrust-platform.otelCollector.hostedExportRender" . -}}
+{{- $bufEnabled := default true (default dict $coll.bufferPVC).enabled -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "neuraltrust-platform.otelCollector.fullname" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "neuraltrust-platform.otelCollector.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+      {{- if and $renderHosted $bufEnabled }}
+      file_storage:
+        directory: /var/lib/otelcol/buffer
+        timeout: 1s
+        compaction:
+          on_start: true
+          directory: /var/lib/otelcol/buffer
+      {{- end }}
+
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+      k8s_events:
+        auth_type: serviceAccount
+        # Only the release namespace by default; the watchdog Role is
+        # namespace-scoped and we don't want events from unrelated namespaces.
+        namespaces:
+          - {{ .Release.Namespace }}
+      kubeletstats:
+        collection_interval: 30s
+        auth_type: serviceAccount
+        endpoint: "https://${env:K8S_NODE_NAME}:10250"
+        insecure_skip_verify: true
+        metric_groups: [node, pod, container]
+      prometheus:
+        config:
+          scrape_configs:
+            # Self-scrape so we have collector internals.
+            - job_name: otel-collector
+              scrape_interval: 30s
+              static_configs:
+                - targets: [127.0.0.1:8888]
+            # Watchdog /metrics (rendered when the watchdog subchart is on).
+            - job_name: neuraltrust-watchdog
+              scrape_interval: 30s
+              kubernetes_sd_configs:
+                - role: pod
+                  namespaces:
+                    names: [{{ .Release.Namespace }}]
+              relabel_configs:
+                - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+                  regex: neuraltrust-watchdog
+                  action: keep
+                - source_labels: [__meta_kubernetes_pod_container_port_name]
+                  regex: http
+                  action: keep
+            # TrustGate exposes Prometheus on :9090 (env-driven).
+            - job_name: trustgate
+              scrape_interval: 30s
+              kubernetes_sd_configs:
+                - role: pod
+                  namespaces:
+                    names: [{{ .Release.Namespace }}]
+              relabel_configs:
+                - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+                  regex: trustgate
+                  action: keep
+                - source_labels: [__meta_kubernetes_pod_container_port_number]
+                  regex: "9090"
+                  action: keep
+            # ClickHouse Prometheus endpoint (gated by clickhouse subchart).
+            - job_name: clickhouse
+              scrape_interval: 30s
+              kubernetes_sd_configs:
+                - role: pod
+                  namespaces:
+                    names: [{{ .Release.Namespace }}]
+              relabel_configs:
+                - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+                  regex: clickhouse
+                  action: keep
+                - source_labels: [__meta_kubernetes_pod_container_port_number]
+                  regex: "9363"
+                  action: keep
+      {{- with (default dict $coll.extraReceivers) }}
+      {{- toYaml . | nindent 6 }}
+      {{- end }}
+
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: 80
+        spike_limit_percentage: 20
+      batch:
+        timeout: 5s
+        send_batch_size: 1024
+      resource:
+        attributes:
+          - key: nt.cluster
+            value: {{ .Release.Name | quote }}
+            action: upsert
+          - key: nt.chart_version
+            value: {{ .Chart.Version | quote }}
+            action: upsert
+          {{- if $obs.tenantId }}
+          - key: nt.tenant_id
+            value: {{ $obs.tenantId | quote }}
+            action: upsert
+          {{- end }}
+          - key: k8s.namespace.name
+            value: {{ .Release.Namespace | quote }}
+            action: upsert
+      # Hard guarantee: customer payload data NEVER leaves the cluster.
+      # Drop any field that could contain prompts, headers, or arbitrary
+      # request/response metadata, on every span/log.
+      attributes/redact:
+        actions:
+          - key: input
+            action: delete
+          - key: output
+            action: delete
+          - key: prompt
+            action: delete
+          - key: prompt_text
+            action: delete
+          - key: response
+            action: delete
+          - key: response_text
+            action: delete
+          - key: request_headers
+            action: delete
+          - key: response_headers
+            action: delete
+          - key: metadata
+            action: delete
+          - key: payload
+            action: delete
+          - key: body
+            action: delete
+          - key: http.request.body
+            action: delete
+          - key: http.response.body
+            action: delete
+      filter/drop_debug:
+        error_mode: ignore
+        logs:
+          log_record:
+            - 'severity_number < SEVERITY_NUMBER_INFO'
+      {{- with (default dict $coll.extraProcessors) }}
+      {{- toYaml . | nindent 6 }}
+      {{- end }}
+
+    exporters:
+      # Always-on safety net so the collector starts even when no other
+      # exporter is wired (no token + debug off). nop drops everything;
+      # observability-side it's a no-op, but the receivers + processors
+      # still run, so components writing to the collector never block.
+      nop: {}
+      {{- if $coll.debug }}
+      debug:
+        verbosity: detailed
+      {{- end }}
+      {{- if $renderHosted }}
+      otlphttp/neuraltrust:
+        endpoint: {{ $hosted.endpoint | default "https://collector.neuraltrust.ai:4318" | quote }}
+        compression: gzip
+        headers:
+          authorization: "Bearer ${env:NT_OBSERVABILITY_TOKEN}"
+        {{- if (default dict $hosted.auth).tlsCaSecretName }}
+        tls:
+          ca_file: /etc/otelcol/ca/ca.crt
+        {{- end }}
+        {{- if (default dict $hosted.sendingQueue).enabled }}
+        sending_queue:
+          enabled: true
+          {{- if $bufEnabled }}
+          storage: file_storage
+          {{- end }}
+          queue_size: {{ default 1000 (default dict $hosted.sendingQueue).maxSize }}
+          num_consumers: 4
+        {{- end }}
+        retry_on_failure:
+          enabled: true
+          initial_interval: {{ (default dict $hosted.retry).initialInterval | default "5s" }}
+          max_interval: {{ (default dict $hosted.retry).maxInterval | default "30s" }}
+          max_elapsed_time: {{ (default dict $hosted.retry).maxElapsedTime | default "0s" }}
+      {{- end }}
+      {{- with (default dict $coll.extraExporters) }}
+      {{- toYaml . | nindent 6 }}
+      {{- end }}
+
+    service:
+      extensions:
+        - health_check
+        {{- if and $renderHosted $bufEnabled }}
+        - file_storage
+        {{- end }}
+      telemetry:
+        logs:
+          level: info
+        metrics:
+          # Bind on all interfaces so the cluster's existing Prometheus can
+          # scrape the collector's internal metrics through its Service.
+          # The pod still publishes them to localhost for the in-collector
+          # prometheus receiver scrape.
+          address: 0.0.0.0:8888
+      pipelines:
+        metrics:
+          receivers: [prometheus, otlp, kubeletstats]
+          processors: [memory_limiter, attributes/redact, resource, batch]
+          exporters:
+            {{- if $renderHosted }}
+            - otlphttp/neuraltrust
+            {{- end }}
+            {{- if $coll.debug }}
+            - debug
+            {{- end }}
+            {{- if not (or $renderHosted $coll.debug) }}
+            - nop
+            {{- end }}
+        {{- if $obs.sendTraces }}
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, attributes/redact, resource, batch]
+          exporters:
+            {{- if $renderHosted }}
+            - otlphttp/neuraltrust
+            {{- end }}
+            {{- if $coll.debug }}
+            - debug
+            {{- end }}
+            {{- if not (or $renderHosted $coll.debug) }}
+            - nop
+            {{- end }}
+        {{- end }}
+        {{- if $obs.sendLogs }}
+        logs:
+          receivers: [otlp, k8s_events]
+          processors: [memory_limiter, filter/drop_debug, attributes/redact, resource, batch]
+          exporters:
+            {{- if $renderHosted }}
+            - otlphttp/neuraltrust
+            {{- end }}
+            {{- if $coll.debug }}
+            - debug
+            {{- end }}
+            {{- if not (or $renderHosted $coll.debug) }}
+            - nop
+            {{- end }}
+        {{- end }}
+        {{- with (default dict $coll.extraServicePipelines) }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+{{- end }}

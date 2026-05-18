@@ -1,0 +1,68 @@
+{{- /*
+  PrometheusRule for the watchdog service (Prometheus Operator path).
+  Renders only when:
+    - the chart is enabled
+    - monitoring.prometheusRule.enabled is true (or global.monitoring.enabled)
+    - the monitoring.coreos.com/v1 CRDs are installed
+
+  The same three alerts are mirrored for Google Managed Prometheus in
+  templates/gmprules.yaml when monitoring.gmpRules.enabled.
+*/}}
+{{- $mon := default dict .Values.monitoring -}}
+{{- $pr  := default dict $mon.prometheusRule -}}
+{{- $g := default dict .Values.global -}}
+{{- $globalMon := default dict $g.monitoring -}}
+{{- /* Back-compat: global.monitoring.enabled flips every subchart on. */ -}}
+{{- $prEnabled := $pr.enabled -}}
+{{- if and (not $pr.enabled) $globalMon.enabled -}}{{- $prEnabled = true -}}{{- end -}}
+{{- if and .Values.enabled $prEnabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") -}}
+{{- $fn := include "neuraltrust-watchdog.fullname" . -}}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ $fn }}-rules
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "neuraltrust-watchdog.labels" . | nindent 4 }}
+    {{- with $pr.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: neuraltrust-watchdog
+      interval: 1m
+      rules:
+        - alert: NeuralTrustWatchdogDown
+          expr: up{job=~".*watchdog.*"} == 0
+          for: 5m
+          labels:
+            severity: warning
+            {{- with $pr.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: "NeuralTrust watchdog is unreachable"
+            description: 'The watchdog pod stopped exposing /metrics for 5m. Self-healing actions are NOT firing during this window. Check `kubectl logs deploy/{{ $fn }}`.'
+        - alert: NeuralTrustWatchdogCheckFailing
+          expr: increase(neuraltrust_watchdog_check_failures_total[10m]) > 3
+          for: 10m
+          labels:
+            severity: warning
+            {{- with $pr.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: 'Watchdog check {{ printf "{{ $labels.check_id }}" }} keeps failing'
+            description: 'Check {{ printf "{{ $labels.check_id }}" }} produced more than 3 failures in 10m. Inspect /checks on the watchdog Service and review the upstream component.'
+        - alert: NeuralTrustWatchdogActionDispatchFailing
+          expr: increase(neuraltrust_watchdog_action_failures_total[15m]) > 0
+          for: 15m
+          labels:
+            severity: warning
+            {{- with $pr.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: "Watchdog action dispatch is failing"
+            description: "The watchdog tried to fire an action (Slack notify, kafka_connect.restart_task, k8s.restart_deployment) and the dispatch failed. Most likely cause: missing RBAC, missing webhook secret, or unreachable external system."
+{{- end }}

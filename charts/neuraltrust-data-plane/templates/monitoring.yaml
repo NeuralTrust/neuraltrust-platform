@@ -1,0 +1,58 @@
+{{- $g := default dict .Values.global -}}
+{{- $m := default dict $g.monitoring -}}
+{{- $cap := .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" -}}
+{{- if and $m.enabled $cap (and .Values.dataPlane .Values.dataPlane.enabled) -}}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: data-plane
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service | quote }}
+    app.kubernetes.io/instance: {{ .Release.Name | quote }}
+    app.kubernetes.io/part-of: neuraltrust-platform
+    {{- with $m.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: data-plane
+      interval: 1m
+      rules:
+        - alert: DataPlaneApiDown
+          expr: |
+            sum(kube_deployment_status_replicas_available{namespace="{{ .Release.Namespace }}",deployment="data-plane-api"}) == 0
+          for: 5m
+          labels:
+            severity: critical
+            {{- with $m.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: "Data Plane API has no ready replicas"
+            description: "Telemetry ingest from TrustGate is failing. Spans/metrics are dropping."
+        - alert: DataPlaneKafkaWorkersDown
+          expr: |
+            sum by (deployment) (kube_deployment_status_replicas_available{namespace="{{ .Release.Namespace }}",deployment=~"data-plane-kafka-worker.*"}) == 0
+          for: 10m
+          labels:
+            severity: warning
+            {{- with $m.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: 'Data plane Kafka worker {{ printf "{{ $labels.deployment }}" }} is down'
+            description: "Kafka consumer lag will grow until the worker recovers."
+        - alert: ClickHouseBackupCronJobFailed
+          expr: |
+            kube_job_failed{namespace="{{ .Release.Namespace }}",job_name=~"clickhouse-backup.*"} > 0
+          for: 5m
+          labels:
+            severity: warning
+            {{- with $m.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: "ClickHouse hourly backup Job failed"
+            description: 'Inspect with `kubectl logs job/{{ printf "{{ $labels.job_name }}" }}`. Failure means the most recent backup did not write to S3/GCS.'
+{{- end }}

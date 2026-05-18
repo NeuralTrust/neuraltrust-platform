@@ -597,3 +597,161 @@ Usage: {{- if include "neuraltrust-platform.autoGenerateSecrets" . }}
 {{- if $autoGenerate }}true{{- end }}
 {{- end }}
 
+{{/*
+Returns "true" iff the operator opted in via global.monitoring.enabled AND
+the cluster ships the Prometheus Operator CRDs (monitoring.coreos.com/v1).
+
+Subcharts MUST guard every ServiceMonitor/PrometheusRule template with:
+
+  {{- if eq (include "neuraltrust-platform.monitoring.enabled" .) "true" }}
+  ...
+  {{- end }}
+
+The double-condition (flag AND capability) means clusters without the
+operator never fail to install — the blocks render to empty. This is
+why we don't alias the helper to a Boolean output.
+*/}}
+{{- define "neuraltrust-platform.monitoring.enabled" -}}
+{{- $g := default dict .Values.global -}}
+{{- $m := default dict $g.monitoring -}}
+{{- if and $m.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") -}}
+true
+{{- end -}}
+{{- end -}}
+
+{{/*
+Common labels for monitoring CRDs. Pass `.` as the context.
+Includes operator-specific selector labels from
+global.monitoring.additionalLabels so the customer can target a specific
+Prometheus Operator install (e.g. release: kube-prometheus-stack).
+*/}}
+{{- define "neuraltrust-platform.monitoring.labels" -}}
+app.kubernetes.io/managed-by: {{ .Release.Service | quote }}
+app.kubernetes.io/instance: {{ .Release.Name | quote }}
+app.kubernetes.io/part-of: neuraltrust-platform
+{{- $g := default dict .Values.global -}}
+{{- $m := default dict $g.monitoring -}}
+{{- with $m.additionalLabels }}
+{{ toYaml . }}
+{{- end }}
+{{- end -}}
+
+{{/*
+Default scrape interval and alert labels resolved from
+global.monitoring. Use as:
+  interval: {{ include "neuraltrust-platform.monitoring.interval" . }}
+*/}}
+{{- define "neuraltrust-platform.monitoring.interval" -}}
+{{- $g := default dict .Values.global -}}
+{{- $m := default dict $g.monitoring -}}
+{{- default "30s" $m.interval -}}
+{{- end -}}
+
+{{- define "neuraltrust-platform.monitoring.alertLabels" -}}
+{{- $g := default dict .Values.global -}}
+{{- $m := default dict $g.monitoring -}}
+{{- $labels := default dict $m.alertLabels -}}
+{{- range $k, $v := $labels }}
+{{ $k }}: {{ $v | quote }}
+{{- end -}}
+{{- end -}}
+
+{{/*
+HTTP liveness + readiness probe block.
+
+Pass a dict with:
+  - cfg:  the per-component .healthProbes map (may be nil/empty -> falls back to defaults)
+  - port: container port (int)
+  - path: HTTP path (string)
+The probes are emitted only when (cfg.enabled is true) OR (cfg is unset).
+That preserves backward compatibility — existing customer overrides that
+explicitly set healthProbes.enabled=false continue to opt out.
+
+Usage:
+  {{- include "neuraltrust-platform.healthProbes" (dict
+        "cfg"  $appHealthProbes
+        "port" 3000
+        "path" "/api/health") | nindent 8 }}
+*/}}
+{{- define "neuraltrust-platform.healthProbes" -}}
+{{- $cfg := default dict .cfg -}}
+{{- $enabled := true -}}
+{{- if hasKey $cfg "enabled" -}}{{- $enabled = $cfg.enabled -}}{{- end -}}
+{{- if $enabled -}}
+{{- $port := .port -}}
+{{- $path := default "/health" .path -}}
+{{- $live := default dict $cfg.liveness -}}
+{{- $ready := default dict $cfg.readiness -}}
+livenessProbe:
+  httpGet:
+    path: {{ default $path $live.path | quote }}
+    port: {{ default $port $live.port }}
+  initialDelaySeconds: {{ default 30 $live.initialDelaySeconds }}
+  periodSeconds: {{ default 30 $live.periodSeconds }}
+  timeoutSeconds: {{ default 5 $live.timeoutSeconds }}
+  failureThreshold: {{ default 5 $live.failureThreshold }}
+readinessProbe:
+  httpGet:
+    path: {{ default $path $ready.path | quote }}
+    port: {{ default $port $ready.port }}
+  initialDelaySeconds: {{ default 10 $ready.initialDelaySeconds }}
+  periodSeconds: {{ default 10 $ready.periodSeconds }}
+  timeoutSeconds: {{ default 3 $ready.timeoutSeconds }}
+  failureThreshold: {{ default 3 $ready.failureThreshold }}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Optional PodDisruptionBudget renderer.
+
+Pass a dict with:
+  - cfg:           the per-component .podDisruptionBudget map (may be nil)
+  - name:          PDB metadata.name
+  - selectorLabels: map of labels matching the workload
+  - namespace:     (optional) override; defaults to .Release.Namespace via caller
+
+The PDB is emitted only when cfg.enabled is true and at least one of
+cfg.minAvailable / cfg.maxUnavailable is set. Default values when both
+omitted: minAvailable=1.
+
+Usage (caller already sets metadata; this returns just the spec block):
+  {{- include "neuraltrust-platform.pdbSpec" (dict
+        "cfg" $cfg
+        "selectorLabels" (dict "app" "control-plane-app")) }}
+*/}}
+{{- define "neuraltrust-platform.pdbSpec" -}}
+{{- $cfg := default dict .cfg -}}
+{{- if not (hasKey $cfg "minAvailable") -}}
+  {{- if not (hasKey $cfg "maxUnavailable") -}}
+    {{- $_ := set $cfg "minAvailable" 1 -}}
+  {{- end -}}
+{{- end -}}
+{{- if hasKey $cfg "maxUnavailable" -}}
+maxUnavailable: {{ $cfg.maxUnavailable }}
+{{ else -}}
+minAvailable: {{ $cfg.minAvailable }}
+{{ end -}}
+selector:
+  matchLabels:
+{{ toYaml .selectorLabels | indent 4 }}
+{{- end -}}
+
+{{/*
+Stable annotations dict for triggering Deployment rollouts when any
+ConfigMap/Secret it depends on changes content. Caller passes a list of
+file paths under templates/ to checksum.
+
+Usage:
+  metadata:
+    annotations:
+      {{- include "neuraltrust-platform.checksumAnnotations" (dict
+            "context" $
+            "files"   (list "/configmap.yaml" "/secret.yaml")) | nindent 8 }}
+*/}}
+{{- define "neuraltrust-platform.checksumAnnotations" -}}
+{{- $ctx := .context -}}
+{{- range .files -}}
+checksum/{{ . | base | replace ".yaml" "" }}: {{ include (print $ctx.Template.BasePath .) $ctx | sha256sum }}
+{{ end -}}
+{{- end -}}
+

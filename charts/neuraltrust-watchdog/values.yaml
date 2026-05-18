@@ -1,0 +1,366 @@
+# neuraltrust-watchdog Helm values.
+#
+# All settings are additive: the chart installs cleanly with the
+# defaults below. When this chart is included as a subchart of
+# neuraltrust-platform, set `neuraltrust-watchdog.enabled` from the
+# umbrella; in that mode the rest of these defaults still apply.
+
+enabled: false
+
+image:
+  repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/neuraltrust-watchdog
+  tag: ""                         # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# replicaCount > 1 requires k8s Lease-based leader election; left to a
+# follow-up. Stick with 1 for now.
+replicaCount: 1
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+service:
+  type: ClusterIP
+  port: 8080
+  metricsPort: 8080
+
+# Monitoring resources. Five independent capability-gated toggles, so
+# every cluster can pick the combination its stack supports. The
+# annotation baseline is universal; the rest are opt-in CRD-bound
+# resources that only render when both the chart toggle is true AND the
+# matching CRD exists.
+monitoring:
+  # Pod scrape annotations on the Deployment. Universal contract — works
+  # with Prometheus Operator additionalScrapeConfigs, Google Managed
+  # Prometheus, Amazon Managed Prometheus agent in annotation mode,
+  # Azure Monitor for Containers, and the in-chart OTel collector.
+  scrapeAnnotations:
+    enabled: true
+  # PodMonitor (monitoring.coreos.com/v1) — Prometheus Operator path.
+  podMonitor:
+    enabled: true
+    additionalLabels: {}
+    interval: 30s
+    scrapeTimeout: 10s
+  # PrometheusRule (monitoring.coreos.com/v1) — chart-side alerts.
+  prometheusRule:
+    enabled: true
+    additionalLabels: {}
+    alertLabels:
+      team: platform
+  # PodMonitoring (monitoring.googleapis.com/v1) — Google Managed
+  # Prometheus path. Off by default; GMP-native customers flip it on.
+  podMonitoring:
+    enabled: false
+    additionalLabels: {}
+    interval: 30s
+    scrapeTimeout: 10s
+  # Rules (monitoring.googleapis.com/v1) — GMP-native alerts.
+  gmpRules:
+    enabled: false
+    additionalLabels: {}
+    alertLabels:
+      team: platform
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# RBAC defaults are minimal: read-only access to namespace resources.
+# Healing actions that mutate (k8s.restart_deployment) require explicit
+# opt-in via rbac.actions.restartDeployment.enabled below.
+rbac:
+  create: true
+  # When watchAllNamespaces is true, ClusterRole + ClusterRoleBinding
+  # are rendered. Otherwise namespace-scoped Role + RoleBinding.
+  watchAllNamespaces: false
+  actions:
+    restartDeployment:
+      enabled: false
+
+# Pod-level overrides.
+podAnnotations: {}
+podLabels: {}
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+priorityClassName: ""
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+networkPolicy:
+  enabled: false
+  # Allow ingress from these namespace selectors when networkPolicy.enabled.
+  ingressFromNamespaces: []
+  egress:
+    enabled: true
+    # extraEgress is appended verbatim; allows custom cluster-scoped
+    # egress rules for the watchdog (e.g. to a managed Kafka SaaS).
+    extraEgress: []
+
+# Telemetry: when otlp.endpoint is empty the watchdog falls back to
+# OTEL_EXPORTER_OTLP_ENDPOINT env at runtime; when both are empty the
+# OTel SDK is initialized with no-op providers (graceful no-egress).
+telemetry:
+  serviceName: neuraltrust-watchdog
+  otlp:
+    endpoint: ""
+    headers: ""
+  tenantId: ""
+  enableTraces: true
+  enableLogs: true
+
+# HTTP server.
+server:
+  listenAddr: ":8080"
+  authToken:
+    # Optional bearer token securing POST /checks/{id}/run.
+    # Provide either `value` (rendered into a Secret) or `existingSecret`.
+    value: ""
+    existingSecret: ""
+    secretKey: token
+
+# Notification + healing action defaults.
+actions:
+  # Global default for all mutating actions; per-check override allowed
+  # via checks[].dryRun.
+  dryRun: true
+  slack:
+    # When webhookUrl is empty, notify.slack is a silent no-op.
+    webhookUrl: ""
+    existingSecret: ""
+    secretKey: webhook
+  otlp:
+    endpointEnv: OTEL_EXPORTER_OTLP_ENDPOINT
+
+# Connection envs sourced from existing cluster secrets.
+secretEnv:
+  clickhouse:
+    userSecret: ""
+    userKey: username
+    passwordSecret: ""
+    passwordKey: password
+  redis:
+    passwordSecret: ""
+    passwordKey: password
+
+# Where the runner schedules checks. defaultInterval applies to checks
+# that omit `interval`. failureThreshold gates healing actions: only
+# fire after N consecutive non-OK results.
+runner:
+  defaultInterval: 60s
+  defaultTimeout: 15s
+  failureThreshold: 3
+
+# Default check set. Override / extend via the watchdog.checks key in
+# customer values. Each entry is passed to the Go watchdog as-is. Set
+# enabled: false to skip a check; the corresponding components do not
+# need to exist in-cluster.
+checks:
+  - id: clickhouse
+    kind: clickhouse
+    enabled: false
+    target:
+      address: clickhouse:9000
+      database: neuraltrust
+      usernameEnv: CLICKHOUSE_USER
+      passwordEnv: CLICKHOUSE_PASSWORD
+    thresholds:
+      diskFreePctMin: 15
+      mutationsMaxAgeSeconds: 1800
+      replicationQueueMax: 100
+      memoryUsageRatioMax: 0.85
+      partsPerPartitionMax: 300
+      maxErrorsPerInterval: 50
+    actions: [notify.otlp, notify.slack]
+
+  - id: kafka-broker
+    kind: kafka_broker
+    enabled: false
+    target:
+      bootstrapServers: ["kafka:9092"]
+    actions: [notify.otlp, notify.slack]
+
+  - id: kafka-connect
+    kind: kafka_connect
+    enabled: false
+    dryRun: true
+    target:
+      url: http://kafka-connect:8083
+    actions: [notify.otlp, notify.slack, kafka_connect.restart_task]
+
+  - id: data-plane-worker-lag
+    kind: kafka_consumer_lag
+    enabled: false
+    dryRun: true
+    target:
+      bootstrapServers: ["kafka:9092"]
+      group: data-plane-worker
+      # Required if k8s.restart_deployment is in the actions list —
+      # otherwise the action falls back to the check id.
+      k8sDeployment: data-plane-kafka-worker
+      k8sNamespace: data-plane-workers
+    thresholds:
+      maxLag: 5000
+    actions: [notify.otlp, notify.slack]
+
+  - id: control-plane-synthetic
+    kind: httpsynthetic
+    enabled: false
+    target:
+      urls:
+        - { name: api, url: http://control-plane-api/health, expectedStatus: 200, latencyWarnMs: 500, latencyCriticalMs: 2000 }
+        - { name: app, url: http://control-plane-app:3000/api/health, expectedStatus: 200 }
+        - { name: scheduler, url: http://control-plane-scheduler:3000/health, expectedStatus: 200 }
+    actions: [notify.otlp, notify.slack]
+
+  - id: postgres-tcp
+    kind: tcpsynthetic
+    enabled: false
+    target:
+      host: postgresql.neuraltrust
+      port: 5432
+    actions: [notify.otlp, notify.slack]
+
+  # Smoke probe — Cloud SQL CPU/memory/disk stays in cloud-infrastructure TF.
+  - id: postgres-ping
+    kind: postgres_ping
+    enabled: false
+    target:
+      dsnEnv: POSTGRES_DSN
+    actions: [notify.otlp]
+
+  - id: trustgate-synthetic
+    kind: httpsynthetic
+    enabled: false
+    target:
+      urls:
+        - { name: control-plane, url: http://trustgate-control-plane:8080/health }
+        - { name: data-plane, url: http://trustgate-data-plane:8081/health }
+        - { name: actions, url: http://trustgate-actions:8080/health }
+    actions: [notify.otlp, notify.slack]
+
+  - id: trustgate-redis
+    kind: redis
+    enabled: false
+    target:
+      host: trustgate-redis
+      port: 6379
+      passwordEnv: REDIS_PASSWORD
+    actions: [notify.otlp]
+
+  - id: firewall-synthetic
+    kind: httpsynthetic
+    enabled: false
+    target:
+      urls:
+        - { name: gateway, url: http://neuraltrust-firewall-gateway:8000/health }
+    actions: [notify.otlp, notify.slack]
+
+  - id: gateway-health
+    kind: gateway_health
+    enabled: false
+    target:
+      url: http://neuraltrust-firewall-gateway:8000/health
+      namespace: gateway
+      labelSelector: app.kubernetes.io/name=neuraltrust-firewall-gateway
+    thresholds:
+      minReadyPods: 1
+    actions: [notify.otlp, notify.slack]
+
+  # Watches cert-manager Certificates across the listed namespaces.
+  - id: cert-renewal
+    kind: cert_renewal
+    enabled: false
+    target:
+      namespaces: [neuraltrust]
+    thresholds:
+      renewalWarnDays: 14
+      renewalCriticalDays: 3
+    actions: [notify.otlp, notify.slack]
+
+  - id: otel-collector
+    kind: otel_collector
+    enabled: false
+    target:
+      url: http://opentelemetry-collector.opentelemetry:13133/
+      namespace: opentelemetry
+      labelSelector: app.kubernetes.io/name=opentelemetry-collector
+    thresholds:
+      minReadyPods: 1
+    actions: [notify.otlp, notify.slack]
+
+  # Replaces gcp/metric_based_alerts.tf pod_crash_alert.
+  - id: pod-health
+    kind: pod_health
+    enabled: false
+    target:
+      namespaces: [neuraltrust]
+      reasons: [CrashLoopBackOff, OOMKilled, ImagePullBackOff, ErrImagePull, CreateContainerConfigError]
+    thresholds:
+      maxFailingPods: 0
+    actions: [notify.otlp, notify.slack]
+
+  # Replaces gcp/metric_based_alerts.tf container_restart_rate.
+  - id: deployment-health
+    kind: deployment_health
+    enabled: false
+    target:
+      namespace: neuraltrust
+      deployments: [trustgate-control-plane, trustgate-data-plane]
+    thresholds:
+      maxRestartsPerInterval: 3
+      minAvailableRatio: 1.0
+    actions: [notify.otlp, notify.slack]  # add k8s.restart_deployment when ready
+
+  # Multi-tenant SaaS coverage. Discovers tenant namespaces dynamically
+  # via label selector — NeuralTrust SaaS uses this to cover tenants
+  # created at runtime by trustgate-ee
+  # (project=multitenant-gateway, managed-by=trustgate-ee). Requires
+  # rbac.watchAllNamespaces=true so the watchdog SA can list namespaces
+  # and workloads cluster-wide. Leave OFF for single-tenant customer
+  # installs.
+  - id: tenant-discovery
+    kind: tenant_discovery
+    enabled: false
+    interval: 120s
+    timeout: 60s
+    target:
+      namespaceSelector: project=multitenant-gateway
+      workloadSelector: managed-by=trustgate-ee
+    thresholds:
+      maxRestartsPerInterval: 5
+      minAvailableRatio: 0.5
+      maxUnhealthyTenants: 0
+    actions: [notify.otlp, notify.slack]
+
+# Inherited from the umbrella chart. Local overrides win.
+global:
+  proxy:
+    enabled: false
+    httpProxy: ""
+    httpsProxy: ""
+    noProxy: ""

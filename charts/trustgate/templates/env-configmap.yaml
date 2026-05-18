@@ -22,8 +22,26 @@ data:
   SERVER_METRICS_PORT: "9090"
   SERVER_PROXY_PORT: "8081"
   SERVER_ACTIONS_PORT: "8084"
+  {{- /*
+    Telemetry routing.
+
+    OPENTELEMETRY_ENABLED is the master switch (legacy default: off).
+    Operators can flip every component to the in-chart collector by
+    setting global.observability.collector.endpoint at the umbrella level.
+    When set, TrustGate auto-enables OTLP and points at it; otherwise the
+    legacy off-by-default behavior is preserved exactly.
+  */ -}}
+  {{- $tgGlobalObs := default dict (default dict .Values.global).observability -}}
+  {{- $tgGlobalColl := default dict $tgGlobalObs.collector -}}
+  {{- if $tgGlobalColl.endpoint }}
+  OPENTELEMETRY_ENABLED: "true"
+  OPENTELEMETRY_INSECURE: "true"
+  OPENTELEMETRY_ENDPOINT: {{ $tgGlobalColl.endpoint | quote }}
+  OPENTELEMETRY_OTLP_ENDPOINT: {{ $tgGlobalColl.endpoint | quote }}
+  {{- else }}
   OPENTELEMETRY_ENABLED: "false"
   OPENTELEMETRY_INSECURE: "true"
+  {{- end }}
   # Redis configuration
   {{- if .Values.redis.enabled }}
   # Internal Redis - use default service name and no password

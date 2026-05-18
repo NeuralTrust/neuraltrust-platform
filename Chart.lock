@@ -23,5 +23,8 @@ dependencies:
 - name: neuraltrust-firewall
   repository: file://./charts/neuraltrust-firewall
   version: 2.0.4
-digest: sha256:13cf5d0d900eb3326ef1409f805481a3f390f1cd5f8acdd80a0220246d67bf52
-generated: "2026-05-06T15:03:32.053417564Z"
+- name: neuraltrust-watchdog
+  repository: file://./charts/neuraltrust-watchdog
+  version: 0.1.0
+digest: sha256:9c0b1e28994fad9c8ea8ccee2a08d9cfd15828750bd62ef5ddc1045ad04c26e8
+generated: "2026-05-15T16:52:49.350934+02:00"

@@ -1,0 +1,23 @@
+{{- if include "neuraltrust-platform.otelCollector.enabled" . }}
+{{- $obs := default dict (default dict .Values.global).observability }}
+{{- $coll := default dict $obs.collector }}
+{{- $buf := default dict $coll.bufferPVC }}
+{{- if and (default true $buf.enabled) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "neuraltrust-platform.otelCollector.fullname" . }}-buffer
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "neuraltrust-platform.otelCollector.labels" . | nindent 4 }}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: {{ $buf.size | default "2Gi" }}
+  {{- $sc := include "neuraltrust-platform.otelCollector.bufferStorageClass" . }}
+  {{- if $sc }}
+  storageClassName: {{ $sc | quote }}
+  {{- end }}
+{{- end }}
+{{- end }}

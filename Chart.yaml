@@ -62,3 +62,11 @@ dependencies:
     repository: file://./charts/neuraltrust-firewall
     tags:
       - neuraltrust
+  # Self-monitoring + self-healing watchdog
+  - name: neuraltrust-watchdog
+    version: 0.1.0
+    repository: file://./charts/neuraltrust-watchdog
+    condition: neuraltrust-watchdog.enabled
+    tags:
+      - neuraltrust
+      - optional
