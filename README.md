@@ -376,6 +376,8 @@ Persistent volume claims are retained by default to prevent accidental data loss
 | `values-dataplane-gpu.yaml.example` | Data Plane + GPU firewall workers |
 | `values-all-deployed.yaml.example` | Everything enabled |
 | `values-openshift-ingress.yaml.example` | OpenShift with Ingress instead of Routes |
+| `values-watchdog.yaml.example` | Self-monitoring + self-healing watchdog (dry-run defaults) |
+| `values-observability-self-hosted.yaml.example` | In-chart OTel Collector wired to your own Prometheus Operator (no egress) |
 
 ## Further reading
 
@@ -385,6 +387,7 @@ Persistent volume claims are retained by default to prevent accidental data loss
 | [OpenShift Guide](./README-OPENSHIFT.md) | OpenShift-specific configuration, Routes, SCC, and troubleshooting |
 | [Secrets Guide](./SECRETS.md) | Secret names, keys, auto-generation behavior, and external secret managers |
 | [Values Scenarios](./VALUES_SCENARIOS.md) | Side-by-side comparison of all values files and configuration scenarios |
+| [Observability & Self-healing](./docs/observability.md) | In-chart OTel Collector, watchdog rollout, dry-run cutover playbook |
 
 ## Support
 

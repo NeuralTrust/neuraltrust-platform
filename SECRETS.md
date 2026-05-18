@@ -111,7 +111,17 @@ All required secrets must exist in the namespace before deployment.
 | Kubernetes Secret | Key | Required | Description |
 |---|---|---|---|
 | `clickhouse` | `admin-password` | Auto-generated | ClickHouse admin password |
-| `kafka-connect-monitor-secrets` | `SLACK_WEBHOOK_URL` | No | Optional Slack webhook for Kafka Connect monitor self-heal notifications. Created from `kafka.connectorMonitor.slackWebhookUrl` when set. |
+| ~~`kafka-connect-monitor-secrets`~~ | ~~`SLACK_WEBHOOK_URL`~~ | Removed in chart v1.13.0 | Use the `neuraltrust-watchdog` subchart instead — set `neuraltrust-watchdog.actions.slack.existingSecret` (and `secretKey`) to a pre-created Secret you control, OR set `actions.slack.webhookUrl` inline and the chart will render a managed Secret. The standalone `kafka-connect-monitor-secrets` Secret is no longer rendered. |
+
+### Observability (chart v1.13.0+)
+
+Created only when explicitly enabled. None are auto-generated — operators bring their own values.
+
+| Kubernetes Secret | Key | Required | Description |
+|---|---|---|---|
+| `neuraltrust-observability-token` | `token` | Only when `global.observability.hostedExport.enabled: true` AND data should leave the cluster | Bearer token for `collector.neuraltrust.ai`. Without it the in-chart OTel Collector still runs locally — the `otlphttp/neuraltrust` exporter is silently omitted (graceful degradation; install never fails). |
+| `<your-name>` (caller-controlled) | `webhook` | Only when `neuraltrust-watchdog.actions.slack.existingSecret` is set | Slack webhook URL for watchdog notifications. The chart never logs the URL. Set `neuraltrust-watchdog.actions.slack.existingSecret` to this Secret's name and `secretKey` to the data key (default `webhook`). Alternatively, set `actions.slack.webhookUrl` inline and the chart renders a managed Secret for you. |
+| `<your-name>` (caller-controlled) | `token` | Only when `neuraltrust-watchdog.server.authToken.existingSecret` is set | Bearer token guarding the watchdog `POST /checks/{id}/run` force-run endpoint. Optional — the read-only endpoints (`/healthz`, `/readyz`, `/metrics`, `/checks`) stay unauthenticated. The chart can render a Secret from `server.authToken.value` instead. |
 
 ### TrustGate
 

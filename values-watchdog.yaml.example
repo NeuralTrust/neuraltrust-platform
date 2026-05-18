@@ -1,0 +1,187 @@
+# values-watchdog.yaml.example
+#
+# Minimal opt-in for the neuraltrust-watchdog subchart.
+# Copy to values-watchdog.yaml and customise; pass with:
+#
+#   helm upgrade --install neuraltrust-platform . \
+#     -f values-required.yaml \
+#     -f values-watchdog.yaml
+#
+# Defaults are deliberately conservative: every healing action runs in
+# DRY-RUN mode (logs + emits the planned action without touching the
+# cluster). Flip `actions.dryRun: false` (global) or per-check after one
+# full on-call rotation of dry-run parity. See `docs/observability.md`
+# for the rollout playbook.
+#
+# Keys here mirror `charts/neuraltrust-watchdog/values.yaml` exactly.
+# The chart README contains the complete schema; this example shows the
+# fields most operators want to change.
+
+neuraltrust-watchdog:
+  enabled: true
+
+  # Mutating actions (k8s.restart_deployment, k8s.scale_deployment,
+  # kafka_connect.restart_task) are gated by TWO independent flags:
+  #
+  #   1. `rbac.actions.restartDeployment.enabled` — grants
+  #      patch/update on Deployments (and deployments/scale). Without
+  #      this RBAC, every healing action 403s at the API server.
+  #   2. `actions.dryRun` — global default. Per-check override via
+  #      `checks[].dryRun`.
+  #
+  # Both must allow the mutation for it to fire.
+  rbac:
+    create: true
+    watchAllNamespaces: false
+    actions:
+      restartDeployment:
+        enabled: false             # flip to true to permit k8s mutations
+
+  actions:
+    dryRun: true                   # global; per-check override below
+    slack:
+      # Either inline value (rendered into a chart-managed Secret) OR
+      # reference an existing Secret you control. Set BOTH webhookUrl
+      # and existingSecret empty to make notify.slack a silent no-op.
+      webhookUrl: ""
+      existingSecret: ""           # e.g. neuraltrust-watchdog-slack
+      secretKey: webhook
+    otlp:
+      endpointEnv: OTEL_EXPORTER_OTLP_ENDPOINT
+
+  # Telemetry. Set `telemetry.otlp.endpoint` explicitly when not relying
+  # on the in-chart OTel collector; otherwise the chart auto-points the
+  # watchdog at the collector Service when global.observability.enabled
+  # is true.
+  telemetry:
+    serviceName: neuraltrust-watchdog
+    otlp:
+      endpoint: ""                 # falls back to OTEL_EXPORTER_OTLP_ENDPOINT env
+      headers: ""                  # "k1=v1,k2=v2" — passed to OTLP exporters
+    tenantId: ""
+    enableTraces: true
+    enableLogs: true
+
+  # Connection envs sourced from existing cluster Secrets. Each check's
+  # target reads username/password via the env var names below.
+  secretEnv:
+    clickhouse:
+      userSecret: clickhouse
+      userKey: username
+      passwordSecret: clickhouse
+      passwordKey: admin-password
+    redis:
+      passwordSecret: trustgate-redis
+      passwordKey: password
+
+  # Force-run endpoint auth (POST /checks/{id}/run). Leave empty to make
+  # the route open (protect via NetworkPolicy). Otherwise the chart can
+  # render a Secret or reference an existing one.
+  server:
+    listenAddr: ":8080"
+    authToken:
+      value: ""
+      existingSecret: ""
+      secretKey: token
+
+  # Runner schedules + the failureThreshold that gates healing actions.
+  # An action only fires after N consecutive non-OK results — single
+  # transient failures never auto-heal.
+  runner:
+    defaultInterval: 60s
+    defaultTimeout: 15s
+    failureThreshold: 3
+
+  # Monitoring resources. Five independent toggles, each capability-
+  # gated, so every cluster picks exactly what its stack supports. The
+  # baseline `scrapeAnnotations` works everywhere (Prometheus Operator,
+  # GMP, AMP, Azure Monitor, in-chart OTel collector); the rest are
+  # opt-in for clusters with the matching CRDs.
+  monitoring:
+    scrapeAnnotations:
+      enabled: true                # pod-level prometheus.io/{scrape,port,path}
+    podMonitor:
+      enabled: true                # rendered only when monitoring.coreos.com/v1 is present
+      additionalLabels:
+        release: kube-prometheus-stack
+      interval: 30s
+    prometheusRule:
+      enabled: true                # rendered only when monitoring.coreos.com/v1 is present
+      alertLabels:
+        team: platform
+    podMonitoring:
+      enabled: false               # GMP-native — set true on GKE clusters running Google Managed Prometheus
+    gmpRules:
+      enabled: false               # GMP-native rules (monitoring.googleapis.com/v1)
+
+  # Check catalog. Each entry is passed to the Go watchdog as-is. Set
+  # enabled: false to skip a check; the corresponding components do not
+  # need to exist in-cluster.
+  #
+  # NB: This is a YAML LIST, not a map. The keys "kafkaConnect",
+  # "dataPlaneConsumerLag", etc. used in earlier examples are gone —
+  # entries are identified by `id`.
+  checks:
+    - id: clickhouse
+      kind: clickhouse
+      enabled: true
+      target:
+        address: clickhouse:9000
+        database: neuraltrust
+        usernameEnv: CLICKHOUSE_USER
+        passwordEnv: CLICKHOUSE_PASSWORD
+      thresholds:
+        diskFreePctMin: 15
+        mutationsMaxAgeSeconds: 1800
+        replicationQueueMax: 100
+      actions: [notify.otlp, notify.slack]
+
+    - id: kafka-broker
+      kind: kafka_broker
+      enabled: true
+      target:
+        bootstrapServers: ["kafka:9092"]
+      actions: [notify.otlp, notify.slack]
+
+    - id: kafka-connect
+      kind: kafka_connect
+      enabled: true
+      dryRun: true                 # flip false AFTER parity for this check
+      target:
+        url: http://kafka-connect:8083
+      actions: [notify.otlp, notify.slack, kafka_connect.restart_task]
+
+    - id: data-plane-worker-lag
+      kind: kafka_consumer_lag
+      enabled: true
+      dryRun: true                 # flip false AFTER parity for this check
+      target:
+        bootstrapServers: ["kafka:9092"]
+        group: data-plane-worker
+        # Set these if the action k8s.restart_deployment is in the
+        # action list — otherwise the action falls back to the check id.
+        k8sDeployment: data-plane-kafka-worker
+        k8sNamespace: data-plane-workers
+      thresholds:
+        maxLag: 100000
+      actions: [notify.otlp, notify.slack]  # add k8s.restart_deployment when ready
+
+    - id: control-plane-synthetic
+      kind: httpsynthetic
+      enabled: true
+      target:
+        urls:
+          - { name: api, url: http://control-plane-api/health }
+          - { name: app, url: http://control-plane-app:3000/api/health }
+          - { name: scheduler, url: http://control-plane-scheduler:3000/health }
+      actions: [notify.otlp, notify.slack]
+
+    - id: trustgate-synthetic
+      kind: httpsynthetic
+      enabled: true
+      target:
+        urls:
+          - { name: control-plane, url: http://trustgate-control-plane:8080/health }
+          - { name: data-plane, url: http://trustgate-data-plane:8081/health }
+          - { name: actions, url: http://trustgate-actions:8080/health }
+      actions: [notify.otlp, notify.slack]

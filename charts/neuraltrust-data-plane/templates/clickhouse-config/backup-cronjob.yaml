@@ -1,4 +1,30 @@
 {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.clickhouse .Values.dataPlane.components.clickhouse.backup .Values.dataPlane.components.clickhouse.backup.enabled }}
+{{- /*
+  Hardened ClickHouse backup CronJob.
+
+  Previous behaviour (pre v1.13.0): the BACKUP statement ran with ASYNC,
+  curl exited 0 as soon as ClickHouse acknowledged the request, and the
+  Job was marked Complete even if the backup later failed mid-flight.
+  Operators only learned about failures by manually checking
+  system.backups.
+
+  Hardened behaviour:
+    - `set -euo pipefail` so any failed shell pipeline kills the Job.
+    - Default `backup.failOnError: true` runs BACKUP synchronously
+      (no ASYNC keyword); curl waits for completion.
+    - Operators who need long-running backups can opt back into ASYNC
+      via `backup.failOnError: false` (degraded — pre-1.13 behaviour).
+    - `activeDeadlineSeconds` caps the Job at `backup.timeoutSeconds`
+      so a stuck backup doesn't pile up Jobs forever.
+    - The HTTP response is captured and inspected for ClickHouse error
+      strings ("Code:", "Exception"); presence fails the Job.
+*/}}
+{{- $backupCfg := .Values.dataPlane.components.clickhouse.backup }}
+{{- $failOnError := true }}
+{{- if hasKey $backupCfg "failOnError" }}{{- $failOnError = $backupCfg.failOnError }}{{- end }}
+{{- $timeout := default 3600 $backupCfg.timeoutSeconds }}
+{{- $asyncKeyword := "ASYNC" }}
+{{- if $failOnError }}{{- $asyncKeyword = "" }}{{- end }}
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -8,17 +34,19 @@ spec:
   concurrencyPolicy: "Forbid"
   jobTemplate:
     spec:
+      activeDeadlineSeconds: {{ $timeout }}
+      backoffLimit: 0
       template:
         spec:
           containers:
             - name: backup
               {{- $backupRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/curl" }}
               {{- $backupTag := "8.19.0" }}
-              {{- if and .Values.dataPlane.components.clickhouse.backup.image .Values.dataPlane.components.clickhouse.backup.image.repository }}
-                {{- $backupRepo = .Values.dataPlane.components.clickhouse.backup.image.repository }}
+              {{- if and $backupCfg.image $backupCfg.image.repository }}
+                {{- $backupRepo = $backupCfg.image.repository }}
               {{- end }}
-              {{- if and .Values.dataPlane.components.clickhouse.backup.image .Values.dataPlane.components.clickhouse.backup.image.tag }}
-                {{- $backupTag = .Values.dataPlane.components.clickhouse.backup.image.tag }}
+              {{- if and $backupCfg.image $backupCfg.image.tag }}
+                {{- $backupTag = $backupCfg.image.tag }}
               {{- end }}
               image: {{ include "data-plane.image" (dict "repository" $backupRepo "tag" $backupTag "global" .Values.global) | quote }}
               imagePullPolicy: IfNotPresent
@@ -26,20 +54,36 @@ spec:
                 - /bin/sh
                 - -ec
                 - |
+                  set -euo pipefail
                   BACKUP_DATE=$(date +%Y-%m-%d-%H-%M-%S)
-                  echo "Starting backup..."
-                  {{- if and .Values.dataPlane.components.clickhouse.backup.type (eq .Values.dataPlane.components.clickhouse.backup.type "s3") }}
-                  curl -X POST "http://clickhouse:8123" \
-                    -H "X-ClickHouse-User: {{ if and .Values.dataPlane.components.clickhouse.auth .Values.dataPlane.components.clickhouse.auth.username }}{{ .Values.dataPlane.components.clickhouse.auth.username }}{{ else }}neuraltrust{{ end }}" \
-                    -H "X-ClickHouse-Key: $CLICKHOUSE_PASSWORD" \
-                    -d "BACKUP DATABASE neuraltrust TO S3('https://{{ if .Values.dataPlane.components.clickhouse.backup.s3.bucket }}{{ .Values.dataPlane.components.clickhouse.backup.s3.bucket }}{{ else }}backup-bucket{{ end }}.s3.{{ if .Values.dataPlane.components.clickhouse.backup.s3.region }}{{ .Values.dataPlane.components.clickhouse.backup.s3.region }}{{ else }}us-east-1{{ end }}.amazonaws.com/$BACKUP_DATE/shard-0', '{{ if .Values.dataPlane.components.clickhouse.backup.s3.accessKey }}{{ .Values.dataPlane.components.clickhouse.backup.s3.accessKey }}{{ else }}access-key{{ end }}', '{{ if .Values.dataPlane.components.clickhouse.backup.s3.secretKey }}{{ .Values.dataPlane.components.clickhouse.backup.s3.secretKey }}{{ else }}secret-key{{ end }}'{{- if and .Values.dataPlane.components.clickhouse.backup.s3 .Values.dataPlane.components.clickhouse.backup.s3.endpoint }}, '{{ .Values.dataPlane.components.clickhouse.backup.s3.endpoint }}'{{- end }}) ASYNC"
+                  RESP=$(mktemp)
+                  trap 'rm -f "$RESP"' EXIT
+                  echo "Starting backup ($BACKUP_DATE)..."
+                  {{- if and $backupCfg.type (eq $backupCfg.type "s3") }}
+                  STATEMENT="BACKUP DATABASE neuraltrust TO S3('https://{{ if $backupCfg.s3.bucket }}{{ $backupCfg.s3.bucket }}{{ else }}backup-bucket{{ end }}.s3.{{ if $backupCfg.s3.region }}{{ $backupCfg.s3.region }}{{ else }}us-east-1{{ end }}.amazonaws.com/$BACKUP_DATE/shard-0', '{{ if $backupCfg.s3.accessKey }}{{ $backupCfg.s3.accessKey }}{{ else }}access-key{{ end }}', '{{ if $backupCfg.s3.secretKey }}{{ $backupCfg.s3.secretKey }}{{ else }}secret-key{{ end }}'{{- if and $backupCfg.s3 $backupCfg.s3.endpoint }}, '{{ $backupCfg.s3.endpoint }}'{{- end }}) {{ $asyncKeyword }}"
                   {{- else }}
-                  curl -X POST "http://clickhouse:8123" \
+                  STATEMENT="BACKUP DATABASE neuraltrust TO S3('https://storage.googleapis.com/{{ if $backupCfg.gcs.bucket }}{{ $backupCfg.gcs.bucket }}{{ else }}backup-bucket{{ end }}/$BACKUP_DATE/shard-0', '{{ if $backupCfg.gcs.accessKey }}{{ $backupCfg.gcs.accessKey }}{{ else }}access-key{{ end }}', '{{ if $backupCfg.gcs.secretKey }}{{ $backupCfg.gcs.secretKey }}{{ else }}secret-key{{ end }}') {{ $asyncKeyword }}"
+                  {{- end }}
+                  HTTP_CODE=$(curl -sS -o "$RESP" -w "%{http_code}" \
+                    --max-time {{ $timeout }} \
+                    -X POST "http://clickhouse:8123" \
                     -H "X-ClickHouse-User: {{ if and .Values.dataPlane.components.clickhouse.auth .Values.dataPlane.components.clickhouse.auth.username }}{{ .Values.dataPlane.components.clickhouse.auth.username }}{{ else }}neuraltrust{{ end }}" \
                     -H "X-ClickHouse-Key: $CLICKHOUSE_PASSWORD" \
-                    -d "BACKUP DATABASE neuraltrust TO S3('https://storage.googleapis.com/{{ if .Values.dataPlane.components.clickhouse.backup.gcs.bucket }}{{ .Values.dataPlane.components.clickhouse.backup.gcs.bucket }}{{ else }}backup-bucket{{ end }}/$BACKUP_DATE/shard-0', '{{ if .Values.dataPlane.components.clickhouse.backup.gcs.accessKey }}{{ .Values.dataPlane.components.clickhouse.backup.gcs.accessKey }}{{ else }}access-key{{ end }}', '{{ if .Values.dataPlane.components.clickhouse.backup.gcs.secretKey }}{{ .Values.dataPlane.components.clickhouse.backup.gcs.secretKey }}{{ else }}secret-key{{ end }}') ASYNC"
-                  {{- end }}
-                  echo "Backup initiated for $BACKUP_DATE"
+                    --data "$STATEMENT")
+                  echo "ClickHouse HTTP $HTTP_CODE"
+                  echo "--- response ---"
+                  cat "$RESP" || true
+                  echo
+                  echo "--- end response ---"
+                  if [ "$HTTP_CODE" != "200" ]; then
+                    echo "ERROR: ClickHouse returned non-200 status"
+                    exit 1
+                  fi
+                  if grep -qE 'Code: [0-9]+|Exception' "$RESP"; then
+                    echo "ERROR: ClickHouse response contains an error"
+                    exit 1
+                  fi
+                  echo "Backup completed for $BACKUP_DATE"
               env:
                 - name: CLICKHOUSE_PASSWORD
                   valueFrom:

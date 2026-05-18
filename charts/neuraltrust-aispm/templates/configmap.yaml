@@ -17,7 +17,18 @@ data:
   NOTIFICATION_SIEM_MIN_SEVERITY: {{ .Values.aispm.config.notificationSiemMinSeverity | quote }}
   OTEL_ENABLED: {{ .Values.aispm.config.otelEnabled | quote }}
   OTEL_SERVICE_NAME: {{ .Values.aispm.config.otelServiceName | quote }}
-  OTEL_EXPORTER_ENDPOINT: {{ .Values.aispm.config.otelExporterEndpoint | quote }}
+  {{- /*
+    Endpoint resolution order:
+      1. global.observability.collector.endpoint (umbrella-wide override)
+      2. aispm.config.otelExporterEndpoint (per-component override)
+  */ -}}
+  {{- $aispmEndpoint := .Values.aispm.config.otelExporterEndpoint -}}
+  {{- $aispmGlobalObs := default dict (default dict .Values.global).observability -}}
+  {{- $aispmGlobalColl := default dict $aispmGlobalObs.collector -}}
+  {{- if $aispmGlobalColl.endpoint -}}
+    {{- $aispmEndpoint = $aispmGlobalColl.endpoint -}}
+  {{- end }}
+  OTEL_EXPORTER_ENDPOINT: {{ $aispmEndpoint | quote }}
   OTEL_ENVIRONMENT: {{ .Values.aispm.config.otelEnvironment | quote }}
   KAFKA_POSTURE_TOPIC: {{ .Values.aispm.kafka.postureTopic | quote }}
   {{- if .Values.aispm.config.applicationVersion }}

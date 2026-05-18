@@ -1,0 +1,35 @@
+{{- /*
+  PodMonitor (Prometheus Operator path).
+
+  Renders only when ALL of:
+    - the chart is enabled
+    - monitoring.podMonitor.enabled is true
+    - the monitoring.coreos.com/v1/PodMonitor CRD is installed
+
+  Customers on kube-prometheus-stack, Amazon Managed Prometheus with an
+  on-cluster operator, and OpenShift user-workload-monitoring all use
+  this path.
+*/}}
+{{- $mon := default dict .Values.monitoring -}}
+{{- $pm  := default dict $mon.podMonitor -}}
+{{- if and .Values.enabled $pm.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/PodMonitor") }}
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "neuraltrust-watchdog.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "neuraltrust-watchdog.labels" . | nindent 4 }}
+    {{- with $pm.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "neuraltrust-watchdog.selectorLabels" . | nindent 6 }}
+  podMetricsEndpoints:
+    - port: http
+      path: /metrics
+      interval: {{ $pm.interval | default "30s" }}
+      scrapeTimeout: {{ $pm.scrapeTimeout | default "10s" }}
+{{- end }}

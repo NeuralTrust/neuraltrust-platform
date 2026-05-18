@@ -18,7 +18,20 @@ data:
   APPLICATION_VERSION: {{ .Values.firewall.config.applicationVersion | quote }}
   {{- end }}
   OTEL_ENABLED: {{ .Values.firewall.config.otelEnabled | quote }}
-  OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.firewall.config.otelExporterOtlpEndpoint | quote }}
+  {{- /*
+    Endpoint resolution order:
+      1. global.observability.collector.endpoint (umbrella-wide override)
+      2. firewall.config.otelExporterOtlpEndpoint (per-component override)
+    The umbrella override wins so an operator can flip every component to
+    the in-chart collector with one knob without editing every subchart.
+  */ -}}
+  {{- $otelEndpoint := .Values.firewall.config.otelExporterOtlpEndpoint -}}
+  {{- $globalObs := default dict (default dict .Values.global).observability -}}
+  {{- $globalColl := default dict $globalObs.collector -}}
+  {{- if $globalColl.endpoint -}}
+    {{- $otelEndpoint = $globalColl.endpoint -}}
+  {{- end }}
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ $otelEndpoint | quote }}
   {{- if .Values.firewall.config.otelServiceName }}
   OTEL_SERVICE_NAME: {{ .Values.firewall.config.otelServiceName | quote }}
   {{- end }}

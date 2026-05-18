@@ -418,4 +418,33 @@ spec:
             cpu: 500m
             memory: 1Gi
           {{- end }}
+        {{- /*
+          Health probes. Default ON; opt out per-install for older
+          images that don't expose /api/health by setting:
+            controlPlane.components.app.healthProbes.enabled: false
+        */}}
+        {{- $hp := dict }}
+        {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.healthProbes }}
+          {{- $hp = .Values.controlPlane.components.app.healthProbes }}
+        {{- end }}
+        {{- $hpEnabled := true }}
+        {{- if hasKey $hp "enabled" }}{{- $hpEnabled = $hp.enabled }}{{- end }}
+        {{- if $hpEnabled }}
+        livenessProbe:
+          httpGet:
+            path: {{ default "/api/health" $hp.path | quote }}
+            port: {{ $appPort }}
+          initialDelaySeconds: {{ default 30 $hp.initialDelaySeconds }}
+          periodSeconds: {{ default 30 $hp.periodSeconds }}
+          timeoutSeconds: {{ default 5 $hp.timeoutSeconds }}
+          failureThreshold: {{ default 5 $hp.failureThreshold }}
+        readinessProbe:
+          httpGet:
+            path: {{ default "/api/health" $hp.path | quote }}
+            port: {{ $appPort }}
+          initialDelaySeconds: {{ default 10 $hp.readinessInitialDelaySeconds }}
+          periodSeconds: {{ default 10 $hp.readinessPeriodSeconds }}
+          timeoutSeconds: {{ default 3 $hp.readinessTimeoutSeconds }}
+          failureThreshold: {{ default 3 $hp.readinessFailureThreshold }}
+        {{- end }}
 {{- end }}

@@ -1,0 +1,49 @@
+{{- $g := default dict .Values.global -}}
+{{- $m := default dict $g.monitoring -}}
+{{- $cap := .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" -}}
+{{- /* The kafka subchart is only loaded when infrastructure.kafka.deploy
+       is true (Chart.yaml condition), so we don't double-gate here. */ -}}
+{{- if and $m.enabled $cap -}}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: kafka
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service | quote }}
+    app.kubernetes.io/instance: {{ .Release.Name | quote }}
+    app.kubernetes.io/part-of: neuraltrust-platform
+    app.kubernetes.io/component: kafka
+    {{- with $m.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: kafka
+      interval: 1m
+      rules:
+        - alert: KafkaBrokerDown
+          expr: |
+            sum(kube_statefulset_status_replicas_ready{namespace="{{ .Release.Namespace }}",statefulset="kafka-broker"}) < 1
+          for: 5m
+          labels:
+            severity: critical
+            {{- with $m.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: "Kafka broker StatefulSet has no ready replicas"
+            description: "Kafka is unavailable; data-plane workers cannot consume telemetry. Watchdog kafka_broker check will report controller status if it's deployed."
+        - alert: KafkaConnectDown
+          expr: |
+            sum(kube_deployment_status_replicas_available{namespace="{{ .Release.Namespace }}",deployment=~"kafka-connect.*"}) == 0
+          for: 10m
+          labels:
+            severity: warning
+            {{- with $m.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: "Kafka Connect has no ready replicas"
+            description: "ClickHouse sink connector cannot run. Telemetry will buffer in Kafka topics; recovery is automatic once Connect comes back."
+{{- end }}

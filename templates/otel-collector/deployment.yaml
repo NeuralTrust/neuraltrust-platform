@@ -1,0 +1,157 @@
+{{- if include "neuraltrust-platform.otelCollector.enabled" . }}
+{{- $obs := default dict (default dict .Values.global).observability -}}
+{{- $coll := default dict $obs.collector -}}
+{{- $hosted := default dict $obs.hostedExport -}}
+{{- $auth := default dict $hosted.auth -}}
+{{- $renderHosted := include "neuraltrust-platform.otelCollector.hostedExportRender" . -}}
+{{- $bufEnabled := default true (default dict $coll.bufferPVC).enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "neuraltrust-platform.otelCollector.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "neuraltrust-platform.otelCollector.labels" . | nindent 4 }}
+spec:
+  replicas: {{ default 1 $coll.replicas }}
+  selector:
+    matchLabels:
+      {{- include "neuraltrust-platform.otelCollector.selectorLabels" . | nindent 6 }}
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        {{- include "neuraltrust-platform.otelCollector.selectorLabels" . | nindent 8 }}
+        {{- with $coll.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/otel-collector/configmap.yaml") . | sha256sum }}
+        {{- with $coll.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "neuraltrust-platform.otelCollector.serviceAccountName" . }}
+      {{- if and .Values.global .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- range .Values.global.imagePullSecrets }}
+        {{- if kindIs "string" . }}
+        - name: {{ . }}
+        {{- else if kindIs "map" . }}
+        - {{ toYaml . | nindent 10 | trim }}
+        {{- end }}
+        {{- end }}
+      {{- end }}
+      {{- with $coll.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: otel-collector
+          image: {{ printf "%s:%s" (default "otel/opentelemetry-collector-contrib" (default dict $coll.image).repository) (default "0.110.0" (default dict $coll.image).tag) | quote }}
+          imagePullPolicy: {{ default "IfNotPresent" (default dict $coll.image).pullPolicy }}
+          args:
+            - --config=/etc/otelcol/config.yaml
+          env:
+            - name: K8S_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            {{- if $renderHosted }}
+            - name: NT_OBSERVABILITY_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default "neuraltrust-observability-token" $auth.tokenSecretName }}
+                  key: {{ default "token" $auth.tokenSecretKey }}
+            {{- end }}
+            {{- include "neuraltrust-platform.proxy-env" . | nindent 12 }}
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+              protocol: TCP
+            - name: otlp-http
+              containerPort: 4318
+              protocol: TCP
+            - name: health
+              containerPort: 13133
+              protocol: TCP
+            # Internal collector telemetry (scraped by the collector itself
+            # via the prometheus receiver targeting localhost). Exposed as
+            # a named container port so the Service can publish it for
+            # third-party scrapers (e.g. existing Prometheus operators).
+            - name: metrics
+              containerPort: 8888
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /
+              port: health
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /
+              port: health
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 5
+          resources:
+            {{- toYaml $coll.resources | nindent 12 }}
+          {{- with $coll.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/otelcol
+              readOnly: true
+            {{- if $bufEnabled }}
+            - name: buffer
+              mountPath: /var/lib/otelcol/buffer
+            {{- end }}
+            - name: tmp
+              mountPath: /tmp
+            {{- if and $renderHosted $auth.tlsCaSecretName }}
+            - name: ca-bundle
+              mountPath: /etc/otelcol/ca
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "neuraltrust-platform.otelCollector.fullname" . }}-config
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+        {{- if $bufEnabled }}
+        - name: buffer
+          persistentVolumeClaim:
+            claimName: {{ include "neuraltrust-platform.otelCollector.fullname" . }}-buffer
+        {{- end }}
+        {{- if and $renderHosted $auth.tlsCaSecretName }}
+        - name: ca-bundle
+          secret:
+            secretName: {{ $auth.tlsCaSecretName }}
+            items:
+              - key: ca.crt
+                path: ca.crt
+        {{- end }}
+      {{- with $coll.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $coll.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $coll.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

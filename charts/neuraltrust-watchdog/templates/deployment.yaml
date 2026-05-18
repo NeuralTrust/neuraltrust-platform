@@ -1,0 +1,164 @@
+{{- if .Values.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "neuraltrust-watchdog.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "neuraltrust-watchdog.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "neuraltrust-watchdog.selectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        {{- include "neuraltrust-watchdog.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- /* Baseline scrape contract — uniform across Prometheus
+               Operator, GMP, AMP, Azure Monitor, OTel collector, and
+               air-gapped customer stacks. Opt out via
+               monitoring.scrapeAnnotations.enabled=false. */ -}}
+        {{- $mon := default dict .Values.monitoring -}}
+        {{- $sa  := default dict $mon.scrapeAnnotations -}}
+        {{- if $sa.enabled }}
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "neuraltrust-watchdog.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.priorityClassName }}
+      priorityClassName: {{ .Values.priorityClassName }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: watchdog
+          image: {{ include "neuraltrust-watchdog.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - -config=/etc/watchdog/config.yaml
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: NT_ENVIRONMENT
+              value: {{ default "unknown" (default "" (default dict .Values.global).environment) | quote }}
+            {{- if .Values.telemetry.tenantId }}
+            - name: NT_TENANT_ID
+              value: {{ .Values.telemetry.tenantId | quote }}
+            {{- end }}
+            {{- if .Values.telemetry.otlp.endpoint }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.telemetry.otlp.endpoint | quote }}
+            {{- end }}
+            {{- if .Values.telemetry.otlp.headers }}
+            - name: OTEL_EXPORTER_OTLP_HEADERS
+              value: {{ .Values.telemetry.otlp.headers | quote }}
+            {{- end }}
+            {{- if or .Values.server.authToken.value .Values.server.authToken.existingSecret }}
+            - name: WATCHDOG_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "neuraltrust-watchdog.authSecretName" . }}
+                  key: {{ .Values.server.authToken.secretKey }}
+            {{- end }}
+            {{- if or .Values.actions.slack.webhookUrl .Values.actions.slack.existingSecret }}
+            - name: SLACK_WEBHOOK_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "neuraltrust-watchdog.slackSecretName" . }}
+                  key: {{ .Values.actions.slack.secretKey }}
+                  optional: true
+            {{- end }}
+            {{- with .Values.secretEnv.clickhouse }}
+            {{- if .userSecret }}
+            - name: CLICKHOUSE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .userSecret }}
+                  key: {{ .userKey | default "username" }}
+                  optional: true
+            {{- end }}
+            {{- if .passwordSecret }}
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .passwordSecret }}
+                  key: {{ .passwordKey | default "password" }}
+                  optional: true
+            {{- end }}
+            {{- end }}
+            {{- with .Values.secretEnv.redis }}
+            {{- if .passwordSecret }}
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .passwordSecret }}
+                  key: {{ .passwordKey | default "password" }}
+                  optional: true
+            {{- end }}
+            {{- end }}
+            {{- include "neuraltrust-watchdog.proxyEnv" . | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/watchdog
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "neuraltrust-watchdog.fullname" . }}-config
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

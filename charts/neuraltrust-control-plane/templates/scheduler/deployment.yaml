@@ -247,4 +247,33 @@ spec:
         {{- toYaml .Values.controlPlane.components.scheduler.extraEnv | nindent 8 }}
         {{- end }}
         {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
+        {{- /*
+          Health probes. Default ON; disable for older scheduler images
+          that don't expose /health on :3000 by setting:
+            controlPlane.components.scheduler.healthProbes.enabled: false
+        */}}
+        {{- $hp := dict }}
+        {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.scheduler .Values.controlPlane.components.scheduler.healthProbes }}
+          {{- $hp = .Values.controlPlane.components.scheduler.healthProbes }}
+        {{- end }}
+        {{- $hpEnabled := true }}
+        {{- if hasKey $hp "enabled" }}{{- $hpEnabled = $hp.enabled }}{{- end }}
+        {{- if $hpEnabled }}
+        livenessProbe:
+          httpGet:
+            path: {{ default "/health" $hp.path | quote }}
+            port: 3000
+          initialDelaySeconds: {{ default 30 $hp.initialDelaySeconds }}
+          periodSeconds: {{ default 30 $hp.periodSeconds }}
+          timeoutSeconds: {{ default 5 $hp.timeoutSeconds }}
+          failureThreshold: {{ default 5 $hp.failureThreshold }}
+        readinessProbe:
+          httpGet:
+            path: {{ default "/health" $hp.path | quote }}
+            port: 3000
+          initialDelaySeconds: {{ default 10 $hp.readinessInitialDelaySeconds }}
+          periodSeconds: {{ default 10 $hp.readinessPeriodSeconds }}
+          timeoutSeconds: {{ default 3 $hp.readinessTimeoutSeconds }}
+          failureThreshold: {{ default 3 $hp.readinessFailureThreshold }}
+        {{- end }}
 {{- end }}

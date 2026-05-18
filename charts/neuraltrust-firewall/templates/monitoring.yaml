@@ -1,0 +1,48 @@
+{{- $g := default dict .Values.global -}}
+{{- $m := default dict $g.monitoring -}}
+{{- $cap := .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" -}}
+{{- if and $m.enabled $cap (and .Values.firewall .Values.firewall.enabled) -}}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: firewall
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "firewall.gateway.labels" . | nindent 4 }}
+    {{- with $m.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: firewall
+      interval: 1m
+      rules:
+        - alert: FirewallGatewayDown
+          expr: |
+            sum(kube_deployment_status_replicas_available{namespace="{{ .Release.Namespace }}",deployment="firewall-gateway"}) == 0
+          for: 5m
+          labels:
+            severity: critical
+            {{- with $m.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: "Firewall gateway has no ready replicas"
+            description: "Prompt/response safety scoring is offline. Depending on the integration mode, requests may pass through unscored."
+        {{- range $workerName, $workerCfg := .Values.firewall.workers }}
+        {{- if $workerCfg.enabled }}
+        - alert: FirewallWorker{{ $workerName | replace "-" "" | title }}Down
+          expr: |
+            sum(kube_deployment_status_replicas_available{namespace="{{ $.Release.Namespace }}",deployment="{{ $workerName }}-worker"}) == 0
+          for: 5m
+          labels:
+            severity: warning
+            {{- with $m.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: "Firewall worker pool {{ $workerName }} is down"
+            description: "The {{ $workerName }} worker pool has no ready replicas. The gateway will fall back per-check policy (typically allow-with-warning)."
+        {{- end }}
+        {{- end }}
+{{- end }}

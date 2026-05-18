@@ -1,0 +1,66 @@
+{{- /*
+  Rules (Google Managed Prometheus path).
+
+  Mirrors the three alerts from monitoring.yaml (NeuralTrustWatchdogDown,
+  NeuralTrustWatchdogCheckFailing, NeuralTrustWatchdogActionDispatchFailing)
+  but emitted as monitoring.googleapis.com/v1/Rules so GMP-native
+  customers get alerting parity without the Prometheus Operator.
+
+  Renders only when ALL of:
+    - the chart is enabled
+    - monitoring.gmpRules.enabled is true
+    - the monitoring.googleapis.com/v1/Rules CRD is installed
+*/}}
+{{- $mon := default dict .Values.monitoring -}}
+{{- $gr  := default dict $mon.gmpRules -}}
+{{- if and .Values.enabled $gr.enabled (.Capabilities.APIVersions.Has "monitoring.googleapis.com/v1/Rules") }}
+{{- $fn := include "neuraltrust-watchdog.fullname" . -}}
+apiVersion: monitoring.googleapis.com/v1
+kind: Rules
+metadata:
+  name: {{ $fn }}-rules
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "neuraltrust-watchdog.labels" . | nindent 4 }}
+    {{- with $gr.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: neuraltrust-watchdog
+      interval: 1m
+      rules:
+        - alert: NeuralTrustWatchdogDown
+          expr: up{job=~".*watchdog.*"} == 0
+          for: 5m
+          labels:
+            severity: warning
+            {{- with $gr.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: "NeuralTrust watchdog is unreachable"
+            description: 'The watchdog pod stopped exposing /metrics for 5m. Self-healing actions are NOT firing during this window. Check `kubectl logs deploy/{{ $fn }}`.'
+        - alert: NeuralTrustWatchdogCheckFailing
+          expr: increase(neuraltrust_watchdog_check_failures_total[10m]) > 3
+          for: 10m
+          labels:
+            severity: warning
+            {{- with $gr.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: 'Watchdog check {{ printf "{{ $labels.check_id }}" }} keeps failing'
+            description: 'Check {{ printf "{{ $labels.check_id }}" }} produced more than 3 failures in 10m. Inspect /checks on the watchdog Service and review the upstream component.'
+        - alert: NeuralTrustWatchdogActionDispatchFailing
+          expr: increase(neuraltrust_watchdog_action_failures_total[15m]) > 0
+          for: 15m
+          labels:
+            severity: warning
+            {{- with $gr.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: "Watchdog action dispatch is failing"
+            description: "The watchdog tried to fire an action (Slack notify, kafka_connect.restart_task, k8s.restart_deployment) and the dispatch failed."
+{{- end }}

@@ -1,0 +1,35 @@
+{{- /*
+  PodMonitoring (Google Managed Prometheus path).
+
+  Renders only when ALL of:
+    - the chart is enabled
+    - monitoring.podMonitoring.enabled is true
+    - the monitoring.googleapis.com/v1/PodMonitoring CRD is installed
+
+  GKE clusters with managed_prometheus.enabled (and customers running
+  Google Managed Service for Prometheus on other clouds) install this
+  CRD. The Prometheus Operator equivalent lives in podmonitor.yaml.
+*/}}
+{{- $mon := default dict .Values.monitoring -}}
+{{- $pm  := default dict $mon.podMonitoring -}}
+{{- if and .Values.enabled $pm.enabled (.Capabilities.APIVersions.Has "monitoring.googleapis.com/v1/PodMonitoring") }}
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata:
+  name: {{ include "neuraltrust-watchdog.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "neuraltrust-watchdog.labels" . | nindent 4 }}
+    {{- with $pm.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "neuraltrust-watchdog.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ $pm.interval | default "30s" }}
+      timeout: {{ $pm.scrapeTimeout | default "10s" }}
+{{- end }}

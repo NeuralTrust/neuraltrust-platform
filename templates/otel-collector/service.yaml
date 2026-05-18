@@ -1,0 +1,35 @@
+{{- if include "neuraltrust-platform.otelCollector.enabled" . }}
+{{- $obs := default dict (default dict .Values.global).observability -}}
+{{- $coll := default dict $obs.collector -}}
+{{- $svc := default dict $coll.service -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "neuraltrust-platform.otelCollector.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "neuraltrust-platform.otelCollector.labels" . | nindent 4 }}
+spec:
+  type: {{ default "ClusterIP" $svc.type }}
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: otlp-grpc
+      protocol: TCP
+    - name: otlp-http
+      port: 4318
+      targetPort: otlp-http
+      protocol: TCP
+    # Expose the collector's internal Prometheus metrics endpoint so the
+    # platform's own Prometheus (or third-party Prometheus operators in the
+    # cluster) can scrape collector telemetry without going through the
+    # collector's prometheus receiver. The collector binds 8888 to localhost
+    # internally, so this Service port targets the deployment's `metrics`
+    # named container port (deployment.yaml exposes 8888 as `metrics`).
+    - name: metrics
+      port: 8888
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    {{- include "neuraltrust-platform.otelCollector.selectorLabels" . | nindent 4 }}
+{{- end }}

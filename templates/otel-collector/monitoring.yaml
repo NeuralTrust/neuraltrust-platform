@@ -1,0 +1,62 @@
+{{- if and (include "neuraltrust-platform.otelCollector.enabled" .) (eq (include "neuraltrust-platform.monitoring.enabled" .) "true") -}}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "neuraltrust-platform.otelCollector.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "neuraltrust-platform.monitoring.labels" . | nindent 4 }}
+    {{- include "neuraltrust-platform.otelCollector.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "neuraltrust-platform.otelCollector.selectorLabels" . | nindent 6 }}
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ include "neuraltrust-platform.monitoring.interval" . }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "neuraltrust-platform.otelCollector.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "neuraltrust-platform.monitoring.labels" . | nindent 4 }}
+    {{- include "neuraltrust-platform.otelCollector.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: neuraltrust-otel-collector
+      interval: 1m
+      rules:
+        - alert: NeuralTrustOTelCollectorDown
+          expr: up{job=~".*otel-collector.*"} == 0
+          for: 5m
+          labels:
+            severity: warning
+            {{- include "neuraltrust-platform.monitoring.alertLabels" . | nindent 12 }}
+          annotations:
+            summary: "OpenTelemetry Collector is unreachable"
+            description: "The in-chart OTel Collector pod has not exposed metrics for 5m. Outbound observability data may be queueing on disk; check the collector pod status."
+        - alert: NeuralTrustOTelCollectorRefusedSpans
+          expr: rate(otelcol_receiver_refused_spans_total[5m]) > 0
+          for: 10m
+          labels:
+            severity: warning
+            {{- include "neuraltrust-platform.monitoring.alertLabels" . | nindent 12 }}
+          annotations:
+            summary: "OTel Collector is refusing spans"
+            description: "The collector has refused spans for 10m, indicating back-pressure. Verify the file_storage buffer is mounted and the upstream exporter (collector.neuraltrust.ai) is reachable."
+        - alert: NeuralTrustOTelCollectorExportFailures
+          expr: rate(otelcol_exporter_send_failed_spans_total[5m]) > 0
+          for: 15m
+          labels:
+            severity: warning
+            {{- include "neuraltrust-platform.monitoring.alertLabels" . | nindent 12 }}
+          annotations:
+            summary: "OTel Collector cannot export to upstream"
+            description: "Persistent export failures for 15m. Check the proxy, TLS bundle, and bearer token."
+{{- end }}
