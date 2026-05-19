@@ -22,6 +22,15 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 - TrustGate's `OPENTELEMETRY_ENABLED` auto-flips to `true` when `global.observability.collector.endpoint` is set; legacy off-by-default behaviour preserved otherwise.
 - Firewall and AISPM ConfigMaps prefer `global.observability.collector.endpoint` over their per-subchart defaults. No behaviour change when the global override is unset.
 - OTel Collector internal telemetry (`address: 0.0.0.0:8888`) is now exposed via the Collector Service so existing Prometheus Operator installs can scrape collector internals.
+- **Fixed**: TrustGate's OTel endpoint ConfigMap now emits the only env names TrustGate-EE actually reads — `OPENTELEMETRY_TRACES_ENDPOINT` and `OPENTELEMETRY_METRICS_ENDPOINT` (`internal/config/config.go`). The previously written `OPENTELEMETRY_ENDPOINT` / `OPENTELEMETRY_OTLP_ENDPOINT` keys were never consumed by the binary and have been removed (safe because no customer is on TrustGate OTel yet). Without this fix TrustGate's OTLP egress was silently a no-op even when the umbrella endpoint was set.
+- Control Plane (`api`, `app`) and Data Plane (`api`, `worker`) subcharts now ship an `<component>-otel` ConfigMap that emits `OTEL_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `OTEL_ENVIRONMENT` whenever `global.observability.collector.endpoint` is resolved. Each Deployment auto-`envFrom`s the matching ConfigMap. Backward-compatible: ConfigMap and `envFrom` are both omitted when the endpoint is empty.
+- `neuraltrust-watchdog` `data-plane-synthetic` check added (covers `data-plane-api` `/health`, `/health/ready`, `/health/deep`). Default `enabled: false`.
+- `neuraltrust-watchdog` `control-plane-synthetic` check now targets the scheduler's actual route — `http://control-plane-scheduler:3000/v1/health` instead of the previously incorrect `/health`.
+
+### Added
+
+- **`global.selfMonitoring.enabled`** umbrella flag and companion overlay `values-self-monitoring.yaml.example`. Merging the overlay on top of customer values enables the watchdog subchart and flips a curated default check set (control plane / data plane / trustgate / firewall synthetics, pod- and deployment-health, otel-collector, cert-renewal, kafka and clickhouse infra) without re-declaring every `target` / `thresholds` / `actions` block.
+- **`neuraltrust-watchdog.enabledCheckIds`** additive overlay. Lists check ids to flip on by id without replacing the rest of the check definition. Per-check `enabled: true/false` in `.Values.checks` still wins. Lets the umbrella opt-in stay compact and customer-edits stay surgical.
 
 ### Removed
 

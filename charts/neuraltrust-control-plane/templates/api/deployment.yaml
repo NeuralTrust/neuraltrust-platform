@@ -138,10 +138,11 @@ spec:
           {{- end }}
         ports:
         - containerPort: 8000
+        {{- $apiExtraEnvFrom := list }}
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.api .Values.controlPlane.components.api.extraEnvFrom }}
-        envFrom:
-          {{- toYaml .Values.controlPlane.components.api.extraEnvFrom | nindent 8 }}
+          {{- $apiExtraEnvFrom = .Values.controlPlane.components.api.extraEnvFrom }}
         {{- end }}
+        {{- include "control-plane.envFrom" (dict "component" "api" "extraEnvFrom" $apiExtraEnvFrom "context" .) | nindent 8 }}
         env:
         {{- /* Use internal Kubernetes service URLs for inter-service communication */}}
         {{- $defaultDataPlaneUrl := "" }}

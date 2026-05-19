@@ -21,6 +21,48 @@ plane:
    ships `monitoring.coreos.com/v1` CRDs) — otherwise nothing renders
    and `helm install` never breaks on a non-Prometheus cluster.
 
+## Per-subchart wiring at a glance
+
+What each platform service contributes to the observability plane:
+
+| Service                       | Subchart                      | Prometheus `/metrics` scraped by the Collector | OTLP push (auto-wired when `global.observability.collector.endpoint` is set) | Watchdog check id        |
+|-------------------------------|-------------------------------|------------------------------------------------|------------------------------------------------------------------------------|--------------------------|
+| TrustGate (OSS + EE)          | `trustgate`                   | yes (`:9090`)                                  | yes (`OPENTELEMETRY_TRACES_ENDPOINT` / `OPENTELEMETRY_METRICS_ENDPOINT`)     | `trustgate-synthetic`    |
+| control-plane-api             | `neuraltrust-control-plane`   | no                                             | yes (`OTEL_EXPORTER_OTLP_ENDPOINT`)                                          | `control-plane-synthetic` |
+| control-plane-app (Next.js)   | `neuraltrust-control-plane`   | no                                             | yes (`OTEL_EXPORTER_OTLP_ENDPOINT`)                                          | `control-plane-synthetic` |
+| control-plane-scheduler       | `neuraltrust-control-plane`   | no                                             | no (no OTel SDK)                                                             | `control-plane-synthetic` (HTTP `/v1/health`) |
+| data-plane-api                | `neuraltrust-data-plane`      | no                                             | yes (`OTEL_EXPORTER_OTLP_ENDPOINT`)                                          | `data-plane-synthetic`   |
+| kafka-workers                 | `neuraltrust-data-plane`      | no                                             | yes (`OTEL_EXPORTER_OTLP_ENDPOINT`)                                          | `data-plane-worker-lag`  |
+| kafka-connect                 | `neuraltrust-data-plane`      | no (Strimzi JMX exporter disabled in image)    | no                                                                           | `kafka-connect`          |
+| firewall (gateway + workers)  | `neuraltrust-firewall`        | no                                             | yes (`OTEL_EXPORTER_OTLP_ENDPOINT`)                                          | `firewall-synthetic`     |
+| aispm                         | `neuraltrust-aispm`           | no                                             | yes (`OTEL_EXPORTER_ENDPOINT` — note legacy name)                            | (none — add via `httpsynthetic` if needed) |
+| watchdog                      | `neuraltrust-watchdog`        | yes (`:8080`)                                  | yes                                                                          | self-scraped              |
+| ClickHouse                    | `clickhouse`                  | yes (`:9363`)                                  | n/a (server)                                                                 | `clickhouse`             |
+| Kafka                         | `kafka`                       | varies (JMX)                                   | n/a                                                                          | `kafka-broker`           |
+
+The Collector's `prometheus` receiver only scrapes endpoints that
+actually exist — when a subchart is disabled, its pod label selector
+matches nothing and the scrape is a no-op.
+
+## Quickstart: one-flag self-monitoring
+
+```sh
+helm upgrade --install neuraltrust . \
+  -f accounts/<client>/values-<client>.yaml \
+  -f values-self-monitoring.yaml.example
+```
+
+This overlay:
+
+1. Sets `global.selfMonitoring.enabled: true` (informational marker).
+2. Enables the `neuraltrust-watchdog` subchart.
+3. Flips a curated check set via `neuraltrust-watchdog.enabledCheckIds`
+   — an additive overlay that toggles checks by id without replacing
+   their `target` / `thresholds` / `actions` blocks.
+4. Keeps `actions.dryRun: true` for every mutating action. Flip
+   per-check as you validate parity with the corresponding Cloud
+   Monitoring policy.
+
 ## Phased rollout
 
 The watchdog and the in-chart alerts are intentionally additive — they
@@ -146,6 +188,31 @@ likewise still probes its targets and fires actions in-cluster — only
 the Slack notifier requires a webhook URL, which the customer
 controls.
 
+## How to add a new OTel-emitting component
+
+1. The component image must read **`OTEL_EXPORTER_OTLP_ENDPOINT`** (and
+   ideally `OTEL_SERVICE_NAME` / `OTEL_ENVIRONMENT`). TrustGate is the
+   one exception — it reads `OPENTELEMETRY_TRACES_ENDPOINT` and
+   `OPENTELEMETRY_METRICS_ENDPOINT` directly. The chart writes only
+   those two TrustGate-specific names.
+2. In the component's subchart, create
+   `templates/<component>/otel-configmap.yaml` that mirrors
+   `charts/neuraltrust-control-plane/templates/api/otel-configmap.yaml`
+   — it should render only when the OTel endpoint helper resolves to a
+   non-empty string.
+3. Add a single line in the component Deployment's container spec:
+
+   ```gotemplate
+   {{- include "<subchart>.envFrom" (dict "component" "<name>" "extraEnvFrom" $extra "context" .) | nindent 8 }}
+   ```
+
+   This merges the OTel ConfigMap reference with any operator-supplied
+   `extraEnvFrom`. The helper emits *nothing* when no endpoint is set,
+   so customers who don't enable observability see zero diff.
+4. Add a synthetic check entry to
+   `charts/neuraltrust-watchdog/values.yaml` (start with `enabled: false`)
+   and add its id to `values-self-monitoring.yaml.example`.
+
 ## See also
 
 - `cloud-infrastructure/docs/alerts-migration.md` — the
@@ -154,3 +221,5 @@ controls.
   configuration reference.
 - `templates/otel-collector/configmap.yaml` — pipelines and the
   redaction processor.
+- `values-self-monitoring.yaml.example` — single-overlay opt-in for
+  the curated check set.

@@ -212,10 +212,11 @@ spec:
         imagePullPolicy: "{{ $appPullPolicy }}"
         ports:
         - containerPort: {{ $appPort }}
+        {{- $appExtraEnvFrom := list }}
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.extraEnvFrom }}
-        envFrom:
-          {{- toYaml .Values.controlPlane.components.app.extraEnvFrom | nindent 8 }}
+          {{- $appExtraEnvFrom = .Values.controlPlane.components.app.extraEnvFrom }}
         {{- end }}
+        {{- include "control-plane.envFrom" (dict "component" "app" "extraEnvFrom" $appExtraEnvFrom "context" .) | nindent 8 }}
         env:
         - name: NODE_ENV
           value: "{{ $nodeEnv }}"

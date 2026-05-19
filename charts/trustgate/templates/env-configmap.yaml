@@ -33,11 +33,17 @@ data:
   */ -}}
   {{- $tgGlobalObs := default dict (default dict .Values.global).observability -}}
   {{- $tgGlobalColl := default dict $tgGlobalObs.collector -}}
+  {{- /*
+    These are the only env names TrustGate-EE reads — see
+    TrustGate-EE/internal/config/config.go. The earlier
+    OPENTELEMETRY_ENDPOINT / OPENTELEMETRY_OTLP_ENDPOINT keys were never
+    consumed by the binary and have been removed.
+  */}}
   {{- if $tgGlobalColl.endpoint }}
   OPENTELEMETRY_ENABLED: "true"
   OPENTELEMETRY_INSECURE: "true"
-  OPENTELEMETRY_ENDPOINT: {{ $tgGlobalColl.endpoint | quote }}
-  OPENTELEMETRY_OTLP_ENDPOINT: {{ $tgGlobalColl.endpoint | quote }}
+  OPENTELEMETRY_TRACES_ENDPOINT: {{ $tgGlobalColl.endpoint | quote }}
+  OPENTELEMETRY_METRICS_ENDPOINT: {{ $tgGlobalColl.endpoint | quote }}
   {{- else }}
   OPENTELEMETRY_ENABLED: "false"
   OPENTELEMETRY_INSECURE: "true"
