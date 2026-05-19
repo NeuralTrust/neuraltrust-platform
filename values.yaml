@@ -120,6 +120,28 @@ global:
   # install in air-gapped environments. Two flag-level opt-outs:
   #   - global.observability.enabled: false       # remove collector entirely
   #   - global.observability.hostedExport.enabled: false  # local-only collector
+  # ----------------------------------------------------------------------
+  # Single-switch self-monitoring (watchdog + curated default checks).
+  # ----------------------------------------------------------------------
+  # When `enabled: true`, the operator opts into the full self-monitoring
+  # stack: the watchdog subchart is turned on AND a curated subset of
+  # checks (control plane / data plane / trustgate / firewall HTTP
+  # probes, plus pod-health and deployment-health) flip from
+  # observe-only defaults to active.
+  #
+  # This flag is informational at the umbrella level — child-chart values
+  # cannot be mutated from here at render time. To opt in, merge
+  # `values-self-monitoring.yaml.example` into your install:
+  #
+  #     helm upgrade --install neuraltrust . \
+  #         -f values-self-monitoring.yaml.example \
+  #         -f accounts/<client>/values-<client>.yaml
+  #
+  # Healing actions (Deployment restarts, Kafka Connect task restarts)
+  # remain gated by `actions.dryRun: true` inside the watchdog config —
+  # operators flip them off per-check after parity has been validated.
+  selfMonitoring:
+    enabled: false
   # Optional integration with the Prometheus Operator. When enabled AND
   # the cluster ships the monitoring.coreos.com/v1 CRDs, every subchart
   # renders a ServiceMonitor + PrometheusRule under

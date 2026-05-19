@@ -2,7 +2,7 @@ apiVersion: v2
 name: neuraltrust-watchdog
 description: Multi-cloud self-monitoring and self-healing controller for the NeuralTrust platform.
 type: application
-version: 0.1.0
+version: 0.1.1
 appVersion: "0.1.0"
 home: https://github.com/NeuralTrust/watchdog
 sources:

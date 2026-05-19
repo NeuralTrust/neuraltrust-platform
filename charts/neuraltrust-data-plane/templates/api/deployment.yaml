@@ -195,10 +195,11 @@ spec:
         {{- end }}
         ports:
         - containerPort: 8000
+        {{- $dpApiExtraEnvFrom := list }}
         {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.extraEnvFrom }}
-        envFrom:
-          {{- toYaml .Values.dataPlane.components.api.extraEnvFrom | nindent 10 }}
+          {{- $dpApiExtraEnvFrom = .Values.dataPlane.components.api.extraEnvFrom }}
         {{- end }}
+        {{- include "data-plane.envFrom" (dict "component" "api" "extraEnvFrom" $dpApiExtraEnvFrom "context" .) | nindent 8 }}
         env:
           - name: PORT
             value: "8000"

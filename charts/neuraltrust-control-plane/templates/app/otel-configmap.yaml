@@ -1,0 +1,26 @@
+{{- /*
+  OTel routing for control-plane-app (Next.js).
+
+  Rendered only when an OTel collector endpoint is resolvable. When the
+  endpoint is empty the ConfigMap is omitted — `instrumentation.ts`
+  short-circuits to no-op providers if OTEL_EXPORTER_OTLP_ENDPOINT is
+  unset, so this matches the binary's expected behavior.
+*/ -}}
+{{- if and .Values.controlPlane .Values.controlPlane.enabled }}
+{{- $endpoint := include "control-plane.otelEndpoint" (dict "component" "app" "context" .) }}
+{{- if $endpoint }}
+{{- $appCfg := dict }}
+{{- if and .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.config }}
+  {{- $appCfg = .Values.controlPlane.components.app.config }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: control-plane-app-otel
+  labels:
+    app: control-plane-app
+data:
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ $endpoint | quote }}
+  OTEL_SERVICE_NAME: {{ default "control-plane-app" $appCfg.otelServiceName | quote }}
+{{- end }}
+{{- end }}

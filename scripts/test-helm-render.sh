@@ -117,9 +117,46 @@ render "$TMP/inchart.yaml" \
   --set global.observability.collector.endpoint=http://test-otel-collector.default.svc.cluster.local:4318
 assert_contains     "$TMP/inchart.yaml" "OTEL_EXPORTER_OTLP_ENDPOINT: \"http://test-otel-collector" "firewall picks up global collector endpoint"
 assert_contains     "$TMP/inchart.yaml" "OTEL_EXPORTER_ENDPOINT: \"http://test-otel-collector"      "aispm picks up global collector endpoint"
-assert_contains     "$TMP/inchart.yaml" "OPENTELEMETRY_ENDPOINT: \"http://test-otel-collector"      "trustgate picks up global collector endpoint"
+assert_contains     "$TMP/inchart.yaml" "OPENTELEMETRY_TRACES_ENDPOINT: \"http://test-otel-collector"  "trustgate writes OPENTELEMETRY_TRACES_ENDPOINT (read by TrustGate-EE)"
+assert_contains     "$TMP/inchart.yaml" "OPENTELEMETRY_METRICS_ENDPOINT: \"http://test-otel-collector" "trustgate writes OPENTELEMETRY_METRICS_ENDPOINT (read by TrustGate-EE)"
 assert_contains     "$TMP/inchart.yaml" "OPENTELEMETRY_ENABLED: \"true\""                            "trustgate auto-enables OTLP when global endpoint set"
+assert_not_contains "$TMP/inchart.yaml" "OPENTELEMETRY_ENDPOINT:"                                    "legacy OPENTELEMETRY_ENDPOINT key fully removed"
+assert_not_contains "$TMP/inchart.yaml" "OPENTELEMETRY_OTLP_ENDPOINT:"                               "legacy OPENTELEMETRY_OTLP_ENDPOINT key fully removed"
 assert_not_contains "$TMP/inchart.yaml" "OTEL_EXPORTER_OTLP_ENDPOINT: \"http://opentelemetry-collector.opentelemetry" "firewall no longer points at legacy default"
+
+# Scenario 6b: control-plane + data-plane OTel wiring. The chart was not
+# injecting OTel env into these subcharts before; this catches regressions
+# where the configmap or envFrom is silently dropped.
+blue "scenario 6b: control/data plane subcharts pick up the global collector endpoint"
+render "$TMP/cpdp-otel.yaml" \
+  --set neuraltrust-control-plane.controlPlane.enabled=true \
+  --set neuraltrust-data-plane.dataPlane.enabled=true \
+  --set global.observability.collector.endpoint=http://test-otel-collector.default.svc.cluster.local:4318
+assert_contains "$TMP/cpdp-otel.yaml" "name: control-plane-api-otel"  "control-plane-api OTel ConfigMap rendered"
+assert_contains "$TMP/cpdp-otel.yaml" "name: control-plane-app-otel"  "control-plane-app OTel ConfigMap rendered"
+assert_contains "$TMP/cpdp-otel.yaml" "name: data-plane-api-otel"     "data-plane-api OTel ConfigMap rendered"
+assert_contains "$TMP/cpdp-otel.yaml" "name: data-plane-worker-otel"  "data-plane-worker OTel ConfigMap rendered"
+# Each Deployment must envFrom its OTel ConfigMap. We assert "name:
+# <cm>-otel" appears at least twice in the render (once in the
+# ConfigMap metadata, once under a configMapRef in the Deployment).
+# Using grep -c which is portable on BSD/GNU.
+for cm in control-plane-api-otel control-plane-app-otel data-plane-api-otel data-plane-worker-otel; do
+  occurrences=$(grep -c "name: $cm" "$TMP/cpdp-otel.yaml" || true)
+  if [ "$occurrences" -lt 2 ]; then
+    red "FAIL: $cm referenced fewer than 2 times (ConfigMap + envFrom expected) — got $occurrences"
+    exit 1
+  fi
+  green "ok  - $cm referenced by a Deployment envFrom"
+done
+
+# Scenario 6c: backward-compat — without the global endpoint, the new
+# OTel ConfigMaps (and their envFrom refs) must NOT render.
+blue "scenario 6c: CP/DP OTel ConfigMaps omitted when global endpoint unset"
+render "$TMP/cpdp-noendpoint.yaml" \
+  --set neuraltrust-control-plane.controlPlane.enabled=true \
+  --set neuraltrust-data-plane.dataPlane.enabled=true
+assert_not_contains "$TMP/cpdp-noendpoint.yaml" "name: control-plane-api-otel"  "no control-plane-api OTel ConfigMap without global endpoint"
+assert_not_contains "$TMP/cpdp-noendpoint.yaml" "name: data-plane-worker-otel"  "no data-plane-worker OTel ConfigMap without global endpoint"
 
 # Scenario 7: backward compat — without the global override, every
 # component keeps its prior default. This test exists to catch a future
@@ -212,6 +249,39 @@ render "$TMP/wd-gmp-nocrd.yaml" \
   --set neuraltrust-watchdog.monitoring.gmpRules.enabled=true
 assert_not_contains "$TMP/wd-gmp-nocrd.yaml" "kind: PodMonitoring" "PodMonitoring omitted when GMP CRDs absent"
 assert_not_contains "$TMP/wd-gmp-nocrd.yaml" "^kind: Rules$"       "Rules omitted when GMP CRDs absent"
+
+# Scenario 14: self-monitoring overlay. With values-self-monitoring.yaml.example
+# layered on, the watchdog Deployment is up AND the curated checks flip to
+# enabled=true via the new enabledCheckIds overlay (without losing their
+# target / thresholds / actions definitions).
+blue "scenario 14: values-self-monitoring overlay enables curated checks"
+helm template test "$CHART_DIR" \
+  -f "$CHART_DIR/values-required.yaml" \
+  -f "$CHART_DIR/values-self-monitoring.yaml.example" \
+  --set neuraltrust-control-plane.controlPlane.enabled=true \
+  --set neuraltrust-data-plane.dataPlane.enabled=true > "$TMP/self-mon.yaml"
+assert_contains "$TMP/self-mon.yaml" "name: test-neuraltrust-watchdog\$"   "watchdog Deployment rendered by overlay"
+# Curated check ids are flipped on (regex tolerates surrounding YAML indent).
+assert_contains "$TMP/self-mon.yaml" "id: control-plane-synthetic"         "control-plane-synthetic check present in overlay"
+assert_contains "$TMP/self-mon.yaml" "id: data-plane-synthetic"            "data-plane-synthetic check present in overlay"
+assert_contains "$TMP/self-mon.yaml" "id: firewall-synthetic"              "firewall-synthetic check present in overlay"
+# The kafka-broker check must keep its target.bootstrapServers (overlay
+# flips enabled only — must NOT replace the check definition).
+assert_contains "$TMP/self-mon.yaml" "bootstrapServers:"                   "kafka-broker target preserved through overlay"
+# scheduler URL fix: control-plane-synthetic now hits /v1/health, not /health.
+assert_contains "$TMP/self-mon.yaml" "control-plane-scheduler:3000/v1/health" "scheduler URL fixed to /v1/health"
+
+# Scenario 15: overlay backward-compat. Without the overlay (or without
+# `enabledCheckIds`), no check is flipped on by the chart — operators have
+# to opt in explicitly, exactly as before.
+blue "scenario 15: no overlay => no curated-check flip"
+render "$TMP/no-overlay.yaml" --set neuraltrust-watchdog.enabled=true
+flipped=$(awk '/Source.*neuraltrust-watchdog\/templates\/configmap\.yaml/,/Source.*neuraltrust-watchdog\/templates\/[^c]/' "$TMP/no-overlay.yaml" | grep -c "enabled: true" || true)
+if [ "$flipped" != "0" ]; then
+  red "FAIL: watchdog enabled checks without overlay: expected 0, got $flipped"
+  exit 1
+fi
+green "ok  - no checks flipped without overlay (backward-compat preserved)"
 
 green ""
 green "All helm-render assertions passed."

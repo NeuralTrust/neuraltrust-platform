@@ -166,3 +166,58 @@ Usage: {{ include "control-plane.postgresql.deploy" . }}
 {{- if $deploy }}{{- "true" }}{{- end }}
 {{- end }}
 
+{{/*
+Helper that returns the resolved OTel collector endpoint for control-plane
+components. Resolution order:
+  1. global.observability.collector.endpoint (umbrella-wide override)
+  2. controlPlane.components.<name>.config.otelExporterOtlpEndpoint
+The returned string is empty when neither is set, in which case no OTel
+env vars should be rendered (preserves backward compat — the chart was
+never wiring these before).
+Usage: {{ include "control-plane.otelEndpoint" (dict "component" "api" "context" .) }}
+*/}}
+{{- define "control-plane.otelEndpoint" -}}
+{{- $ctx := .context -}}
+{{- $component := .component -}}
+{{- $endpoint := "" -}}
+{{- if and $ctx.Values.controlPlane $ctx.Values.controlPlane.components -}}
+  {{- $cmp := index $ctx.Values.controlPlane.components $component -}}
+  {{- if and $cmp $cmp.config $cmp.config.otelExporterOtlpEndpoint -}}
+    {{- $endpoint = $cmp.config.otelExporterOtlpEndpoint -}}
+  {{- end -}}
+{{- end -}}
+{{- $globalObs := default dict (default dict $ctx.Values.global).observability -}}
+{{- $globalColl := default dict $globalObs.collector -}}
+{{- if $globalColl.endpoint -}}
+  {{- $endpoint = $globalColl.endpoint -}}
+{{- end -}}
+{{- $endpoint -}}
+{{- end }}
+
+{{/*
+Helper that emits the merged envFrom list for a control-plane component:
+the OTel ConfigMap (when an endpoint is resolved) plus any per-component
+extraEnvFrom items. Emits nothing when the list is empty (so the
+deployment renders without a trailing `envFrom:` key).
+Usage: {{- include "control-plane.envFrom" (dict "component" "api" "extraEnvFrom" .Values.controlPlane.components.api.extraEnvFrom "context" .) | nindent 8 }}
+*/}}
+{{- define "control-plane.envFrom" -}}
+{{- $component := .component -}}
+{{- $extra := .extraEnvFrom -}}
+{{- $context := .context -}}
+{{- $items := list -}}
+{{- $endpoint := include "control-plane.otelEndpoint" (dict "component" $component "context" $context) -}}
+{{- if $endpoint -}}
+  {{- $items = append $items (dict "configMapRef" (dict "name" (printf "control-plane-%s-otel" $component))) -}}
+{{- end -}}
+{{- if $extra -}}
+  {{- range $extra -}}
+    {{- $items = append $items . -}}
+  {{- end -}}
+{{- end -}}
+{{- if $items -}}
+envFrom:
+{{ toYaml $items }}
+{{- end -}}
+{{- end }}
+

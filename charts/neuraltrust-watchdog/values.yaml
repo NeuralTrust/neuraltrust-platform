@@ -234,7 +234,21 @@ checks:
       urls:
         - { name: api, url: http://control-plane-api/health, expectedStatus: 200, latencyWarnMs: 500, latencyCriticalMs: 2000 }
         - { name: app, url: http://control-plane-app:3000/api/health, expectedStatus: 200 }
-        - { name: scheduler, url: http://control-plane-scheduler:3000/health, expectedStatus: 200 }
+        # scheduler exposes /v1/health (Express router prefix), not /health.
+        - { name: scheduler, url: http://control-plane-scheduler:3000/v1/health, expectedStatus: 200 }
+    actions: [notify.otlp, notify.slack]
+
+  - id: data-plane-synthetic
+    kind: httpsynthetic
+    enabled: false
+    target:
+      urls:
+        - { name: api, url: http://data-plane-api/health, expectedStatus: 200, latencyWarnMs: 500, latencyCriticalMs: 2000 }
+        - { name: ready, url: http://data-plane-api/health/ready, expectedStatus: 200 }
+        # /health/deep exercises downstream connections (ClickHouse, Kafka);
+        # keep it on a separate check entry so a flaky downstream doesn't
+        # mask a real API outage in the same alert.
+        - { name: deep, url: http://data-plane-api/health/deep, expectedStatus: 200, latencyWarnMs: 1000, latencyCriticalMs: 3000 }
     actions: [notify.otlp, notify.slack]
 
   - id: postgres-tcp

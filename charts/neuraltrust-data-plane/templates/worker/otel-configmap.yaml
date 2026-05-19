@@ -1,0 +1,23 @@
+{{- /*
+  OTel routing for the data-plane kafka worker pool. Same rendering
+  rules as data-plane-api — omitted when no endpoint is set.
+*/ -}}
+{{- $endpoint := include "data-plane.otelEndpoint" (dict "component" "worker" "context" .) }}
+{{- if $endpoint }}
+{{- $workerCfg := dict }}
+{{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.worker .Values.dataPlane.components.worker.config }}
+  {{- $workerCfg = .Values.dataPlane.components.worker.config }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: data-plane-worker-otel
+  labels:
+    app: worker
+    plane: data
+data:
+  OTEL_ENABLED: "true"
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ $endpoint | quote }}
+  OTEL_SERVICE_NAME: {{ default "data-plane-worker" $workerCfg.otelServiceName | quote }}
+  OTEL_ENVIRONMENT: {{ default "production" $workerCfg.otelEnvironment | quote }}
+{{- end }}

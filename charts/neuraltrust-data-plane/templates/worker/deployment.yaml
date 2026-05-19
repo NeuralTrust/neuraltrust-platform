@@ -33,10 +33,11 @@ spec:
         image: {{ include "data-plane.image" (dict "repository" "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/workers" "tag" "v1.6.3" "global" .Values.global) | quote }}
         imagePullPolicy: "Always"
         {{- end }}
+        {{- $dpWorkerExtraEnvFrom := list }}
         {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.worker .Values.dataPlane.components.worker.extraEnvFrom }}
-        envFrom:
-          {{- toYaml .Values.dataPlane.components.worker.extraEnvFrom | nindent 8 }}
+          {{- $dpWorkerExtraEnvFrom = .Values.dataPlane.components.worker.extraEnvFrom }}
         {{- end }}
+        {{- include "data-plane.envFrom" (dict "component" "worker" "extraEnvFrom" $dpWorkerExtraEnvFrom "context" .) | nindent 8 }}
         env:
         - name: ENV
           value: "prod"

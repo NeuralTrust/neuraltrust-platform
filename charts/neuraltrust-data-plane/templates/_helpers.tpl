@@ -137,3 +137,56 @@ Usage: {{ include "data-plane.getSecretValue" (dict "value" .Values.dataPlane.se
   {{- end }}
 {{- end }}
 {{- end }}
+
+{{/*
+Helper that returns the resolved OTel collector endpoint for data-plane
+components. Resolution order:
+  1. global.observability.collector.endpoint (umbrella-wide override)
+  2. dataPlane.components.<name>.config.otelExporterOtlpEndpoint
+Empty string when neither is set — caller skips the OTel ConfigMap and
+envFrom block to preserve backward compat.
+Usage: {{ include "data-plane.otelEndpoint" (dict "component" "api" "context" .) }}
+*/}}
+{{- define "data-plane.otelEndpoint" -}}
+{{- $ctx := .context -}}
+{{- $component := .component -}}
+{{- $endpoint := "" -}}
+{{- if and $ctx.Values.dataPlane $ctx.Values.dataPlane.components -}}
+  {{- $cmp := index $ctx.Values.dataPlane.components $component -}}
+  {{- if and $cmp $cmp.config $cmp.config.otelExporterOtlpEndpoint -}}
+    {{- $endpoint = $cmp.config.otelExporterOtlpEndpoint -}}
+  {{- end -}}
+{{- end -}}
+{{- $globalObs := default dict (default dict $ctx.Values.global).observability -}}
+{{- $globalColl := default dict $globalObs.collector -}}
+{{- if $globalColl.endpoint -}}
+  {{- $endpoint = $globalColl.endpoint -}}
+{{- end -}}
+{{- $endpoint -}}
+{{- end }}
+
+{{/*
+Helper that emits the merged envFrom list for a data-plane component:
+the OTel ConfigMap (when an endpoint is resolved) plus any per-component
+extraEnvFrom items. Emits nothing when the list is empty.
+Usage: {{- include "data-plane.envFrom" (dict "component" "api" "extraEnvFrom" .Values.dataPlane.components.api.extraEnvFrom "context" .) | nindent 8 }}
+*/}}
+{{- define "data-plane.envFrom" -}}
+{{- $component := .component -}}
+{{- $extra := .extraEnvFrom -}}
+{{- $context := .context -}}
+{{- $items := list -}}
+{{- $endpoint := include "data-plane.otelEndpoint" (dict "component" $component "context" $context) -}}
+{{- if $endpoint -}}
+  {{- $items = append $items (dict "configMapRef" (dict "name" (printf "data-plane-%s-otel" $component))) -}}
+{{- end -}}
+{{- if $extra -}}
+  {{- range $extra -}}
+    {{- $items = append $items . -}}
+  {{- end -}}
+{{- end -}}
+{{- if $items -}}
+envFrom:
+{{ toYaml $items }}
+{{- end -}}
+{{- end }}

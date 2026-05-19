@@ -1,0 +1,37 @@
+{{- /*
+  OTel routing for control-plane-api.
+
+  Rendered only when an OTel collector endpoint is resolvable from either
+  global.observability.collector.endpoint (umbrella-wide override) or the
+  per-component otelExporterOtlpEndpoint setting. When neither is set the
+  ConfigMap is omitted entirely — preserves backward compat (the chart
+  was not previously wiring OTel env into this Deployment).
+
+  The control-plane-api binary reads:
+    - OTEL_ENABLED              (gates the SDK init)
+    - OTEL_EXPORTER_OTLP_ENDPOINT
+    - OTEL_SERVICE_NAME
+    - OTEL_ENVIRONMENT
+  See control-plane-api/src/telemetry.py.
+*/ -}}
+{{- if and .Values.controlPlane .Values.controlPlane.enabled }}
+{{- $endpoint := include "control-plane.otelEndpoint" (dict "component" "api" "context" .) }}
+{{- if $endpoint }}
+{{- $apiCfg := dict }}
+{{- if and .Values.controlPlane.components .Values.controlPlane.components.api .Values.controlPlane.components.api.config }}
+  {{- $apiCfg = .Values.controlPlane.components.api.config }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: control-plane-api-otel
+  labels:
+    app: control-plane-api
+    plane: control
+data:
+  OTEL_ENABLED: "true"
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ $endpoint | quote }}
+  OTEL_SERVICE_NAME: {{ default "control-plane-api" $apiCfg.otelServiceName | quote }}
+  OTEL_ENVIRONMENT: {{ default "production" $apiCfg.otelEnvironment | quote }}
+{{- end }}
+{{- end }}

@@ -30,6 +30,19 @@ data:
       otlp:
         endpointEnv: {{ .Values.actions.otlp.endpointEnv | quote }}
     checks:
+      {{- /*
+        `enabledCheckIds` is an additive overlay: any check whose `id`
+        appears in this list is rendered with `enabled: true`, regardless
+        of the per-check default. Lets the umbrella chart (or operator)
+        flip the curated default set on without re-declaring every
+        target/threshold/actions block. Per-check `enabled: true/false`
+        in `.Values.checks` still wins — the overlay only flips off→on.
+      */ -}}
+      {{- $enabledIds := default (list) .Values.enabledCheckIds }}
       {{- range .Values.checks }}
-      - {{ toYaml . | nindent 8 | trim }}
+      {{- $c := . }}
+      {{- if has $c.id $enabledIds }}
+      {{- $c = merge (dict "enabled" true) $c }}
+      {{- end }}
+      - {{ toYaml $c | nindent 8 | trim }}
       {{- end }}

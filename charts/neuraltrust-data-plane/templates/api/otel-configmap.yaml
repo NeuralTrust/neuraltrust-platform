@@ -1,0 +1,27 @@
+{{- /*
+  OTel routing for data-plane-api.
+
+  Rendered only when an OTel collector endpoint is resolvable. Otherwise
+  the ConfigMap and the deployment's envFrom block are both omitted —
+  preserves backward compat (the chart was not wiring OTel into this
+  Deployment before).
+*/ -}}
+{{- $endpoint := include "data-plane.otelEndpoint" (dict "component" "api" "context" .) }}
+{{- if $endpoint }}
+{{- $apiCfg := dict }}
+{{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.config }}
+  {{- $apiCfg = .Values.dataPlane.components.api.config }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: data-plane-api-otel
+  labels:
+    app: api
+    plane: data
+data:
+  OTEL_ENABLED: "true"
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ $endpoint | quote }}
+  OTEL_SERVICE_NAME: {{ default "data-plane-api" $apiCfg.otelServiceName | quote }}
+  OTEL_ENVIRONMENT: {{ default "production" $apiCfg.otelEnvironment | quote }}
+{{- end }}
