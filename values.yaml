@@ -1063,6 +1063,45 @@ neuraltrust-data-plane:
         #     - secretRef:    { name: my-secret, optional: true }
         extraEnv: []
         extraEnvFrom: []
+        # Run evaluation workloads as Kubernetes Jobs spawned by data-plane-api
+        # (instead of FastAPI background tasks). Default ON.
+        #
+        # secretsMode: "inherit" (default) means the API process propagates its
+        # own env vars into each Job pod spec — no Secret object, no CSI mount,
+        # no SecretProviderClass needed. Works identically on Helm (on-prem) and
+        # Flux + Secret Manager (SaaS) because the API doesn't care how its own
+        # env was populated. Requires data-plane-api >= v1.25.0.
+        #
+        # To opt out (e.g. for older API images that hardcode CSI):
+        #   k8sJobs.enabled: false   OR   k8sJobs.secretsMode: csi
+        k8sJobs:
+          enabled: true
+          secretsMode: inherit # "inherit" | "csi"
+          # Namespace where Jobs are created. Empty = release namespace.
+          namespace: ""
+          serviceAccount:
+            create: true
+            name: "" # Empty = "data-plane-api"
+            annotations: {}
+          rbac:
+            create: true # Role data-plane-job-creator + RoleBinding
+          # Job container image. Empty fields fall back to the API image above.
+          jobImage:
+            repository: ""
+            tag: ""
+            pullPolicy: ""
+          # Per-Job pod resources.
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+          ttlSecondsAfterFinished: 3600
+          backoffLimit: 0
+          maxConcurrentJobs: 10
+          waitTimeoutSeconds: 1800
       worker:
         enabled: true
         replicas: 1

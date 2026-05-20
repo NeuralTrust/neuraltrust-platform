@@ -190,3 +190,87 @@ envFrom:
 {{ toYaml $items }}
 {{- end -}}
 {{- end }}
+
+{{/*
+================================================================================
+data-plane-api k8sJobs helpers
+================================================================================
+The data-plane-api process can spawn evaluation workloads as Kubernetes Jobs
+instead of FastAPI background tasks. The helpers below resolve the k8sJobs
+config block with safe defaults so the calling templates stay readable.
+*/}}
+
+{{/*
+Returns "true" when data-plane-api k8sJobs is enabled, empty string otherwise.
+Default: enabled.
+Usage: {{- if eq (include "data-plane.api.k8sJobs.enabled" .) "true" }}
+*/}}
+{{- define "data-plane.api.k8sJobs.enabled" -}}
+{{- $cfg := dict -}}
+{{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.k8sJobs -}}
+  {{- $cfg = .Values.dataPlane.components.api.k8sJobs -}}
+{{- end -}}
+{{- if hasKey $cfg "enabled" -}}
+  {{- if $cfg.enabled -}}true{{- end -}}
+{{- else -}}
+  true
+{{- end -}}
+{{- end }}
+
+{{/*
+Returns the ServiceAccount name for the data-plane-api Deployment and for
+the Job pods it spawns. Defaults to "data-plane-api".
+*/}}
+{{- define "data-plane.api.k8sJobs.serviceAccountName" -}}
+{{- $name := "data-plane-api" -}}
+{{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.k8sJobs .Values.dataPlane.components.api.k8sJobs.serviceAccount .Values.dataPlane.components.api.k8sJobs.serviceAccount.name -}}
+  {{- $name = .Values.dataPlane.components.api.k8sJobs.serviceAccount.name -}}
+{{- end -}}
+{{- $name -}}
+{{- end }}
+
+{{/*
+Returns the namespace where Jobs are created. Empty value in values.yaml
+falls back to the release namespace.
+*/}}
+{{- define "data-plane.api.k8sJobs.namespace" -}}
+{{- $ns := .Release.Namespace -}}
+{{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.k8sJobs .Values.dataPlane.components.api.k8sJobs.namespace -}}
+  {{- $ns = .Values.dataPlane.components.api.k8sJobs.namespace -}}
+{{- end -}}
+{{- $ns -}}
+{{- end }}
+
+{{/*
+Returns the secrets propagation mode. Default "inherit" — the API process
+forwards its own env vars to each Job pod (no Secret, no CSI mount needed).
+Set to "csi" for legacy SaaS/Flux installs that rely on a SecretProviderClass.
+*/}}
+{{- define "data-plane.api.k8sJobs.secretsMode" -}}
+{{- $mode := "inherit" -}}
+{{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.k8sJobs .Values.dataPlane.components.api.k8sJobs.secretsMode -}}
+  {{- $mode = .Values.dataPlane.components.api.k8sJobs.secretsMode -}}
+{{- end -}}
+{{- $mode -}}
+{{- end }}
+
+{{/*
+Returns the image string used by Job pods. Falls back to the API image when
+k8sJobs.jobImage.{repository,tag} is empty so a single image bump covers
+both the API Deployment and its Jobs.
+*/}}
+{{- define "data-plane.api.k8sJobs.image" -}}
+{{- $apiRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api" -}}
+{{- $apiTag := "v1.24.0" -}}
+{{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.image -}}
+  {{- if .Values.dataPlane.components.api.image.repository -}}{{- $apiRepo = .Values.dataPlane.components.api.image.repository -}}{{- end -}}
+  {{- if .Values.dataPlane.components.api.image.tag -}}{{- $apiTag = .Values.dataPlane.components.api.image.tag -}}{{- end -}}
+{{- end -}}
+{{- $repo := $apiRepo -}}
+{{- $tag := $apiTag -}}
+{{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.k8sJobs .Values.dataPlane.components.api.k8sJobs.jobImage -}}
+  {{- if .Values.dataPlane.components.api.k8sJobs.jobImage.repository -}}{{- $repo = .Values.dataPlane.components.api.k8sJobs.jobImage.repository -}}{{- end -}}
+  {{- if .Values.dataPlane.components.api.k8sJobs.jobImage.tag -}}{{- $tag = .Values.dataPlane.components.api.k8sJobs.jobImage.tag -}}{{- end -}}
+{{- end -}}
+{{- include "data-plane.image" (dict "repository" $repo "tag" $tag "global" .Values.global) -}}
+{{- end }}
