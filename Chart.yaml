@@ -8,7 +8,7 @@ icon: https://neuraltrust.ai/favicon.ico
 dependencies:
   # Optional add-on services (off by default, listed first for visibility)
   - name: neuraltrust-aispm
-    version: 1.0.2
+    version: 1.0.3
     repository: file://./charts/neuraltrust-aispm
     condition: neuraltrust-aispm.aispm.enabled
     tags:
@@ -23,7 +23,7 @@ dependencies:
       - optional
   # Infrastructure components (conditional deployment)
   - name: clickhouse
-    version: 1.0.0
+    version: 1.0.1
     repository: file://./charts/clickhouse
     condition: infrastructure.clickhouse.deploy
     tags:
@@ -36,13 +36,13 @@ dependencies:
       - infrastructure
   # NeuralTrust components
   - name: neuraltrust-data-plane
-    version: 1.2.22
+    version: 1.2.23
     condition: neuraltrust-data-plane.dataPlane.enabled
     repository: file://./charts/neuraltrust-data-plane
     tags:
       - neuraltrust
   - name: neuraltrust-control-plane
-    version: 1.2.23
+    version: 1.2.24
     repository: file://./charts/neuraltrust-control-plane
     # No condition: subchart always loads so PostgreSQL can deploy independently.
     # Control Plane components are guarded by controlPlane.enabled inside templates.
@@ -50,14 +50,14 @@ dependencies:
       - neuraltrust
   # TrustGate components
   - name: trustgate
-    version: 1.2.16
+    version: 1.2.17
     condition: trustgate.enabled
     repository: file://./charts/trustgate
     tags:
       - trustgate
   # Firewall API
   - name: neuraltrust-firewall
-    version: 2.0.4
+    version: 2.0.5
     condition: neuraltrust-firewall.firewall.enabled
     repository: file://./charts/neuraltrust-firewall
     tags:
