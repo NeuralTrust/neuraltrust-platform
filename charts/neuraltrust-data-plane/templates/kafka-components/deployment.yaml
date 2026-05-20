@@ -4,7 +4,7 @@ metadata:
   name: kafka-connect
   namespace: {{ .Release.Namespace }}
 spec:
-  {{- $defaultKafkaConnectTag := "v0.3.0" }}
+  {{- $defaultKafkaConnectTag := "v0.3.1" }}
   {{- $kafkaConnectReplicas := 1 }}
   {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect (hasKey .Values.dataPlane.components.kafka.connect "replicas") }}
     {{- $kafkaConnectReplicas = .Values.dataPlane.components.kafka.connect.replicas }}
