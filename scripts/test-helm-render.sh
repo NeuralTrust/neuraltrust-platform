@@ -283,5 +283,33 @@ if [ "$flipped" != "0" ]; then
 fi
 green "ok  - no checks flipped without overlay (backward-compat preserved)"
 
+# Scenario 16: data-plane-api k8sJobs is ON by default. SA + RBAC render,
+# the API Deployment uses the new SA, and the chart wires K8S_* env vars
+# with secretsMode=inherit (no Secret/CSI dependency).
+blue "scenario 16: data-plane-api k8sJobs enabled by default (inherit mode)"
+render "$TMP/dp-jobs-default.yaml" \
+  --set neuraltrust-data-plane.dataPlane.enabled=true
+assert_contains "$TMP/dp-jobs-default.yaml" "name: data-plane-api$"          "data-plane-api ServiceAccount rendered"
+assert_contains "$TMP/dp-jobs-default.yaml" "name: data-plane-job-creator$"  "data-plane-job-creator Role + RoleBinding rendered"
+assert_contains "$TMP/dp-jobs-default.yaml" "serviceAccountName: data-plane-api" "API Deployment uses the data-plane-api SA"
+assert_contains "$TMP/dp-jobs-default.yaml" 'name: K8S_JOBS_ENABLED'              "K8S_JOBS_ENABLED wired on API pod"
+assert_contains "$TMP/dp-jobs-default.yaml" 'name: K8S_JOB_SECRETS_MODE'          "K8S_JOB_SECRETS_MODE wired on API pod"
+assert_contains "$TMP/dp-jobs-default.yaml" 'value: "inherit"'                    "secretsMode defaults to inherit"
+assert_contains "$TMP/dp-jobs-default.yaml" 'name: K8S_JOB_IMAGE'                 "K8S_JOB_IMAGE wired on API pod"
+assert_contains "$TMP/dp-jobs-default.yaml" 'name: K8S_JOB_SERVICE_ACCOUNT'       "K8S_JOB_SERVICE_ACCOUNT wired on API pod"
+
+# Scenario 17: opt-out path. Setting k8sJobs.enabled=false must drop the
+# SA, the Role/RoleBinding, the serviceAccountName line on the Deployment,
+# and every K8S_* env var. This protects older API images that don't yet
+# support inherit mode.
+blue "scenario 17: data-plane-api k8sJobs explicit opt-out"
+render "$TMP/dp-jobs-off.yaml" \
+  --set neuraltrust-data-plane.dataPlane.enabled=true \
+  --set neuraltrust-data-plane.dataPlane.components.api.k8sJobs.enabled=false
+assert_not_contains "$TMP/dp-jobs-off.yaml" "name: data-plane-job-creator"        "no Role/RoleBinding when k8sJobs disabled"
+assert_not_contains "$TMP/dp-jobs-off.yaml" "serviceAccountName: data-plane-api"  "no serviceAccountName override when disabled"
+assert_not_contains "$TMP/dp-jobs-off.yaml" 'name: K8S_JOBS_ENABLED'              "no K8S_JOBS_ENABLED env when disabled"
+assert_not_contains "$TMP/dp-jobs-off.yaml" 'name: K8S_JOB_SECRETS_MODE'          "no K8S_JOB_SECRETS_MODE env when disabled"
+
 green ""
 green "All helm-render assertions passed."

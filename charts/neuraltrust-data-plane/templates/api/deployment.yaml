@@ -21,6 +21,9 @@ spec:
         plane: data
     spec:
       {{- include "data-plane.imagePullSecrets" . | nindent 6 }}
+      {{- if eq (include "data-plane.api.k8sJobs.enabled" .) "true" }}
+      serviceAccountName: {{ include "data-plane.api.k8sJobs.serviceAccountName" . }}
+      {{- end }}
       {{- if .Values.securityHardening }}
       securityContext:
         seccompProfile:
@@ -263,6 +266,55 @@ spec:
               secretKeyRef:
                 name: clickhouse
                 key: admin-password
+          {{- if eq (include "data-plane.api.k8sJobs.enabled" .) "true" }}
+          {{- $jobsCfg := .Values.dataPlane.components.api.k8sJobs }}
+          - name: K8S_JOBS_ENABLED
+            value: "true"
+          - name: K8S_JOB_SECRETS_MODE
+            value: {{ include "data-plane.api.k8sJobs.secretsMode" . | quote }}
+          - name: K8S_JOBS_NAMESPACE
+            value: {{ include "data-plane.api.k8sJobs.namespace" . | quote }}
+          - name: K8S_JOB_SERVICE_ACCOUNT
+            value: {{ include "data-plane.api.k8sJobs.serviceAccountName" . | quote }}
+          - name: K8S_JOB_IMAGE
+            value: {{ include "data-plane.api.k8sJobs.image" . | quote }}
+          {{- with $jobsCfg.ttlSecondsAfterFinished }}
+          - name: K8S_JOB_TTL_SECONDS_AFTER_FINISHED
+            value: {{ . | quote }}
+          {{- end }}
+          {{- with $jobsCfg.backoffLimit }}
+          - name: K8S_JOB_BACKOFF_LIMIT
+            value: {{ . | quote }}
+          {{- end }}
+          {{- with $jobsCfg.maxConcurrentJobs }}
+          - name: K8S_JOBS_MAX_CONCURRENT
+            value: {{ . | quote }}
+          {{- end }}
+          {{- with $jobsCfg.waitTimeoutSeconds }}
+          - name: K8S_JOB_WAIT_TIMEOUT_SECONDS
+            value: {{ . | quote }}
+          {{- end }}
+          {{- if and $jobsCfg.resources $jobsCfg.resources.requests }}
+          {{- with $jobsCfg.resources.requests.cpu }}
+          - name: K8S_JOB_CPU_REQUEST
+            value: {{ . | quote }}
+          {{- end }}
+          {{- with $jobsCfg.resources.requests.memory }}
+          - name: K8S_JOB_MEMORY_REQUEST
+            value: {{ . | quote }}
+          {{- end }}
+          {{- end }}
+          {{- if and $jobsCfg.resources $jobsCfg.resources.limits }}
+          {{- with $jobsCfg.resources.limits.cpu }}
+          - name: K8S_JOB_CPU_LIMIT
+            value: {{ . | quote }}
+          {{- end }}
+          {{- with $jobsCfg.resources.limits.memory }}
+          - name: K8S_JOB_MEMORY_LIMIT
+            value: {{ . | quote }}
+          {{- end }}
+          {{- end }}
+          {{- end }}
           {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.extraEnv }}
           {{- toYaml .Values.dataPlane.components.api.extraEnv | nindent 10 }}
           {{- end }}
