@@ -65,7 +65,7 @@ spec:
         - name: worker
           {{- $wImage := $workerCfg.image | default $defaults.image }}
           {{- $wRepo := $wImage.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu" }}
-          {{- $wTag := $wImage.tag | default "v2.9.0" }}
+          {{- $wTag := $wImage.tag | default "v2.9.4" }}
           image: {{ include "firewall.image" (dict "repository" $wRepo "tag" $wTag "global" $.Values.global) | quote }}
           imagePullPolicy: {{ $wImage.pullPolicy | default "IfNotPresent" }}
           args:

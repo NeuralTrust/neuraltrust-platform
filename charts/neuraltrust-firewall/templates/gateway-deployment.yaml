@@ -35,7 +35,7 @@ spec:
       containers:
         - name: gateway
           {{- $gwRepo := .Values.firewall.gateway.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu" }}
-          {{- $gwTag := .Values.firewall.gateway.image.tag | default "v2.9.0" }}
+          {{- $gwTag := .Values.firewall.gateway.image.tag | default "v2.9.4" }}
           image: {{ include "firewall.image" (dict "repository" $gwRepo "tag" $gwTag "global" .Values.global) | quote }}
           imagePullPolicy: {{ .Values.firewall.gateway.image.pullPolicy | default "IfNotPresent" }}
           args:
