@@ -41,7 +41,7 @@ spec:
           containers:
             - name: backup
               {{- $backupRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/curl" }}
-              {{- $backupTag := "8.19.0" }}
+              {{- $backupTag := "8.20.0" }}
               {{- if and $backupCfg.image $backupCfg.image.repository }}
                 {{- $backupRepo = $backupCfg.image.repository }}
               {{- end }}

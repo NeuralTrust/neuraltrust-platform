@@ -35,7 +35,7 @@ spec:
       containers:
         - name: api
           {{- $repo := .Values.aispm.api.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/aispm-api" }}
-          {{- $tag := .Values.aispm.api.image.tag | default "v0.21.2" }}
+          {{- $tag := .Values.aispm.api.image.tag | default "v0.21.3" }}
           image: {{ include "aispm.image" (dict "repository" $repo "tag" $tag "global" .Values.global) | quote }}
           imagePullPolicy: {{ .Values.aispm.api.image.pullPolicy | default "IfNotPresent" }}
           {{- /* Invoke the venv binary directly. The aispm image (>= the version that
