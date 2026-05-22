@@ -35,7 +35,7 @@ spec:
       containers:
         - name: worker
           {{- $repo := .Values.aispm.worker.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/aispm-worker" }}
-          {{- $tag := .Values.aispm.worker.image.tag | default "v0.21.2" }}
+          {{- $tag := .Values.aispm.worker.image.tag | default "v0.21.3" }}
           image: {{ include "aispm.image" (dict "repository" $repo "tag" $tag "global" .Values.global) | quote }}
           imagePullPolicy: {{ .Values.aispm.worker.image.pullPolicy | default "IfNotPresent" }}
           {{- /* See api-deployment.yaml for the rationale on direct venv exec. */}}
