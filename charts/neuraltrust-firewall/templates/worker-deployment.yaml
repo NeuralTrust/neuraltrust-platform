@@ -68,18 +68,12 @@ spec:
           {{- $wTag := $wImage.tag | default "v2.9.5" }}
           image: {{ include "firewall.image" (dict "repository" $wRepo "tag" $wTag "global" $.Values.global) | quote }}
           imagePullPolicy: {{ $wImage.pullPolicy | default "IfNotPresent" }}
+          {{- /* The firewall image CMD (`python -m src.serve`) dual-binds to 0.0.0.0
+                 and :: at startup and hardcodes the uvloop / httptools / backlog
+                 tuning every firewall pod uses. We still pass the per-worker app
+                 module as the first arg so the same image can serve any worker. */}}
           args:
             - {{ $workerCfg.module }}
-            - --host
-            - "0.0.0.0"
-            - --port
-            - "8000"
-            - --loop
-            - uvloop
-            - --http
-            - httptools
-            - --backlog
-            - "2048"
           ports:
             - containerPort: 8000
               name: http

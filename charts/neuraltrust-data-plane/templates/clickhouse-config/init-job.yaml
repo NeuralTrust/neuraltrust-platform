@@ -31,7 +31,7 @@ spec:
       containers:
         - name: clickhouse-init
           {{- $chInitRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickhouse-server" }}
-          {{- $chInitTag := "25.8" }}
+          {{- $chInitTag := "26.3" }}
           {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.clickhouse .Values.dataPlane.components.clickhouse.image }}
             {{- if .Values.dataPlane.components.clickhouse.image.repository }}{{- $chInitRepo = .Values.dataPlane.components.clickhouse.image.repository }}{{- end }}
             {{- if .Values.dataPlane.components.clickhouse.image.tag }}{{- $chInitTag = .Values.dataPlane.components.clickhouse.image.tag }}{{- end }}

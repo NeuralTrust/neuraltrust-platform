@@ -106,8 +106,10 @@ global:
   # ----------------------------------------------------------------------
   # In-chart OpenTelemetry Collector + optional hosted observability egress.
   # ----------------------------------------------------------------------
-  # When `global.observability.enabled` is true, the chart deploys a
-  # single-replica OTel Collector (Contrib) under the release namespace.
+  # When `global.observability.enabled` is true OR `neuraltrust-watchdog.enabled`
+  # is true, the chart deploys a single-replica OTel Collector (Contrib) under
+  # the release namespace. Default OFF — enable explicitly or via the watchdog
+  # subchart / `values-self-monitoring.yaml.example` overlay.
   # All component telemetry — Prometheus scrapes, OTLP traces from
   # TrustGate/Firewall/AISPM, K8s events, kubeletstats — is funnelled
   # through this collector. The hosted exporter ships infra metrics +
@@ -118,7 +120,9 @@ global:
   # tokenValue empty, lookup returns nothing), the hosted exporter is
   # silently OMITTED. The collector still runs locally and never blocks
   # install in air-gapped environments. Two flag-level opt-outs:
-  #   - global.observability.enabled: false       # remove collector entirely
+  #   - global.observability.enabled: true        # collector without watchdog
+  #   - neuraltrust-watchdog.enabled: true       # collector + watchdog together
+  #   - global.observability.enabled: false       # remove collector (unless watchdog on)
   #   - global.observability.hostedExport.enabled: false  # local-only collector
   # ----------------------------------------------------------------------
   # Single-switch self-monitoring (watchdog + curated default checks).
@@ -162,7 +166,7 @@ global:
     alertLabels:
       team: platform
   observability:
-    enabled: true
+    enabled: false
     tenantId: "" # Sent as nt.tenant_id resource attribute (optional).
     hostedExport:
       enabled: true
@@ -397,6 +401,10 @@ clickhouse:
       memory: 8Gi
       cpu: 4
   logLevel: "fatal"
+  # ClickHouse `<listen_host>`. Defaults to `::` so a single value works on
+  # IPv4-only, dual-stack, and IPv6-only clusters (Linux `bindv6only=0`).
+  # Set to "0.0.0.0" to force IPv4-only.
+  listenHost: "::"
   # ClickHouse backup configuration (optional)
   backup:
     enabled: false # Set to true to enable scheduled backups to object storage
@@ -802,6 +810,8 @@ neuraltrust-control-plane:
           limits:
             memory: 512Mi
             cpu: 200m
+        healthProbes:
+          path: "/v1/health" # Scheduler mounts routes under /v1; /health alone returns 401 from auth middleware
         # Extra env hooks — see neuraltrust-data-plane.dataPlane.components.api above
         # for syntax (EnvVar list and EnvFromSource list).
         extraEnv: []
@@ -827,7 +837,7 @@ neuraltrust-control-plane:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api"
-          tag: "v1.18.2"
+          tag: "v1.18.3"
           pullPolicy: "Always"
         config:
           # URLs will be auto-generated from OpenShift Routes if global.openshift=true and global.openshiftDomain is set
@@ -858,6 +868,10 @@ neuraltrust-control-plane:
         enabled: true
         host: "" # Optional: full hostname override. Empty = auto-derive as <hostPrefix>.<global.domain> when both are set, otherwise use ALB auto-generated URL.
         hostPrefix: "app" # Default subdomain prefix when host is empty and global.domain is set. Set to "" to disable auto-derive.
+        # Node.js HOSTNAME env (Next.js bind address). Defaults to `::` so a
+        # single value works on IPv4-only, dual-stack, and IPv6-only clusters
+        # (Linux `bindv6only=0`). Set to "0.0.0.0" to force IPv4-only.
+        hostname: "::"
         secondaryHost: ""
         service:
           type: ClusterIP
@@ -1022,7 +1036,7 @@ neuraltrust-data-plane:
         classifierModel: "gpt"
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.24.9
+          tag: v1.24.10
           pullPolicy: Always
         accessMode: ReadWriteOnce
         huggingfaceToken: ""
@@ -1066,17 +1080,16 @@ neuraltrust-data-plane:
         # Run evaluation workloads as Kubernetes Jobs spawned by data-plane-api
         # (instead of FastAPI background tasks). Default ON.
         #
-        # secretsMode: "inherit" (default) means the API process propagates its
-        # own env vars into each Job pod spec — no Secret object, no CSI mount,
-        # no SecretProviderClass needed. Works identically on Helm (on-prem) and
-        # Flux + Secret Manager (SaaS) because the API doesn't care how its own
-        # env was populated. Requires data-plane-api >= v1.25.0.
+        # The API process propagates its own env vars into each Job pod spec
+        # at job-creation time — no Secret object, no CSI mount, no
+        # SecretProviderClass needed. Works identically on Helm (on-prem,
+        # secretKeyRef-based) and Flux + Secret Manager (SaaS, CSI-based)
+        # because the API doesn't care how its own env was populated.
         #
-        # To opt out (e.g. for older API images that hardcode CSI):
-        #   k8sJobs.enabled: false   OR   k8sJobs.secretsMode: csi
+        # Requires data-plane-api >= v1.25.0. To opt out for older images,
+        # set k8sJobs.enabled: false.
         k8sJobs:
           enabled: true
-          secretsMode: inherit # "inherit" | "csi"
           # Namespace where Jobs are created. Empty = release namespace.
           namespace: ""
           serviceAccount:

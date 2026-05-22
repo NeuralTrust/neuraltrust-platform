@@ -242,19 +242,6 @@ falls back to the release namespace.
 {{- end }}
 
 {{/*
-Returns the secrets propagation mode. Default "inherit" — the API process
-forwards its own env vars to each Job pod (no Secret, no CSI mount needed).
-Set to "csi" for legacy SaaS/Flux installs that rely on a SecretProviderClass.
-*/}}
-{{- define "data-plane.api.k8sJobs.secretsMode" -}}
-{{- $mode := "inherit" -}}
-{{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.k8sJobs .Values.dataPlane.components.api.k8sJobs.secretsMode -}}
-  {{- $mode = .Values.dataPlane.components.api.k8sJobs.secretsMode -}}
-{{- end -}}
-{{- $mode -}}
-{{- end }}
-
-{{/*
 Returns the image string used by Job pods. Falls back to the API image when
 k8sJobs.jobImage.{repository,tag} is empty so a single image bump covers
 both the API Deployment and its Jobs.

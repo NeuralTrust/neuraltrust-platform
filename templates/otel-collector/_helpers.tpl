@@ -19,16 +19,20 @@ to avoid clashing with subchart helpers.
 {{- end -}}
 
 {{/*
-True/false-ish helper: returns "true" when observability is enabled.
-Defaults to enabled because the umbrella's default is `enabled: true`.
+True/false-ish helper: returns "true" when the in-chart OTel Collector
+should render. Default OFF (`global.observability.enabled: false`).
+Also turns on when `neuraltrust-watchdog.enabled` is true — the collector
+is the telemetry sink the watchdog stack expects (Prometheus scrapes,
+kubeletstats, optional hosted export). Explicit
+`global.observability.enabled: true` enables the collector without
+watchdog.
 */}}
 {{- define "neuraltrust-platform.otelCollector.enabled" -}}
 {{- $obs := default dict (default dict .Values.global).observability -}}
-{{- if hasKey $obs "enabled" -}}
-  {{- if $obs.enabled }}true{{- end -}}
-{{- else -}}
-true
-{{- end -}}
+{{- $watchdog := index .Values "neuraltrust-watchdog" | default dict -}}
+{{- $watchdogOn := default false $watchdog.enabled -}}
+{{- $obsOn := default false $obs.enabled -}}
+{{- if or $obsOn $watchdogOn -}}true{{- end -}}
 {{- end -}}
 
 {{/*

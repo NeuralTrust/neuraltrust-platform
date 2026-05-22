@@ -43,7 +43,7 @@ clickhouse:
   imagePullSecrets: "gcr-secret"
   image:
     repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickhouse-server
-    tag: "25.8"
+    tag: "26.3"
     pullPolicy: IfNotPresent
   global:
     imagePullSecrets: []

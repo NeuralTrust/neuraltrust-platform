@@ -32,7 +32,7 @@ spec:
       initContainers:
         - name: clickhouse-migrations
           {{- $chMigrationRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickhouse-server" }}
-          {{- $chMigrationTag := "25.8" }}
+          {{- $chMigrationTag := "26.3" }}
           {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.clickhouse .Values.dataPlane.components.clickhouse.image }}
             {{- if .Values.dataPlane.components.clickhouse.image.repository }}{{- $chMigrationRepo = .Values.dataPlane.components.clickhouse.image.repository }}{{- end }}
             {{- if .Values.dataPlane.components.clickhouse.image.tag }}{{- $chMigrationTag = .Values.dataPlane.components.clickhouse.image.tag }}{{- end }}
@@ -182,7 +182,7 @@ spec:
       - name: api
         {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.image }}
         {{- $apiRepo := .Values.dataPlane.components.api.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api" }}
-        {{- $apiTag := .Values.dataPlane.components.api.image.tag | default "v1.24.9" }}
+        {{- $apiTag := .Values.dataPlane.components.api.image.tag | default "v1.24.10" }}
         image: {{ include "data-plane.image" (dict "repository" $apiRepo "tag" $apiTag "global" .Values.global) | quote }}
         imagePullPolicy: {{ .Values.dataPlane.components.api.image.pullPolicy | default "Always" }}
         {{- else }}
@@ -270,8 +270,6 @@ spec:
           {{- $jobsCfg := .Values.dataPlane.components.api.k8sJobs }}
           - name: K8S_JOBS_ENABLED
             value: "true"
-          - name: K8S_JOB_SECRETS_MODE
-            value: {{ include "data-plane.api.k8sJobs.secretsMode" . | quote }}
           - name: K8S_JOBS_NAMESPACE
             value: {{ include "data-plane.api.k8sJobs.namespace" . | quote }}
           - name: K8S_JOB_SERVICE_ACCOUNT
