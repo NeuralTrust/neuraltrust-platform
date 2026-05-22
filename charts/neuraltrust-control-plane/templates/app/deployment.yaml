@@ -91,7 +91,7 @@ spec:
           fi
 
           echo "Running Prisma seed..."
-          if ! npx prisma db seed; then
+          if ! node prisma/seed.js; then
             echo "ERROR: Prisma seed failed!"
             exit 1
           fi
@@ -223,7 +223,7 @@ spec:
         - name: PORT
           value: "{{ $appPort }}"
         - name: HOSTNAME
-          value: "0.0.0.0"
+          value: {{ (((.Values.controlPlane).components).app).hostname | default "::" | quote }}
         - name: POSTGRES_HOST
           valueFrom:
             secretKeyRef:

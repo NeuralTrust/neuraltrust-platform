@@ -3,7 +3,8 @@
 #
 # Merge this on top of your customer values to turn on the full self-monitoring
 # stack:
-#   - in-chart OpenTelemetry Collector (already on by default — kept explicit here)
+#   - in-chart OpenTelemetry Collector (enabled via global.observability.enabled
+#     below; also auto-enabled when the watchdog subchart is on)
 #   - neuraltrust-watchdog subchart
 #   - curated default check set scoped to the platform's services
 #

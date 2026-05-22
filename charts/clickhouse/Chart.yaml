@@ -3,4 +3,4 @@ name: clickhouse
 description: Minimal ClickHouse chart using official clickhouse-server image
 type: application
 version: 1.0.1
-appVersion: "25.8"
+appVersion: "26.3"

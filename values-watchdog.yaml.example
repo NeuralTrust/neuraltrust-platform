@@ -17,6 +17,10 @@
 # The chart README contains the complete schema; this example shows the
 # fields most operators want to change.
 
+# When enabled, the in-chart OTel Collector is deployed automatically
+# (Prometheus scrapes, kubeletstats, optional hosted export). To run the
+# collector without watchdog, set global.observability.enabled: true.
+
 neuraltrust-watchdog:
   enabled: true
 

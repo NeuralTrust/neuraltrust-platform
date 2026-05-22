@@ -38,23 +38,9 @@ spec:
           {{- $tag := .Values.aispm.api.image.tag | default "v0.21.3" }}
           image: {{ include "aispm.image" (dict "repository" $repo "tag" $tag "global" .Values.global) | quote }}
           imagePullPolicy: {{ .Values.aispm.api.image.pullPolicy | default "IfNotPresent" }}
-          {{- /* Invoke the venv binary directly. The aispm image (>= the version that
-                 shipped the multi-stage Dockerfile) drops uv from the runtime layer and
-                 puts /app/.venv/bin on PATH, so `uvicorn` resolves to the bundled
-                 venv binary without any uv resolution step.
-                 Older aispm image tags (those still using `uv run` as CMD) ALSO have
-                 /app/.venv/bin/uvicorn — `uv sync` puts it there — so this invocation
-                 is backward-compatible across all current AISPM image tags.
-                 Direct exec avoids: the readOnlyRootFilesystem write failures, the
-                 PyPI lookups uv does on startup (fatal in air-gapped clusters), and
-                 ~200–500ms of uv project resolution latency per pod start. */}}
-          args:
-            - /app/.venv/bin/uvicorn
-            - app.main:app
-            - --host
-            - "0.0.0.0"
-            - --port
-            - "8000"
+          {{- /* No args override: the image CMD (`python -m app.serve`) dual-binds to
+                 0.0.0.0 and :: at startup, so the same image works on IPv4-only,
+                 IPv6-only, and dual-stack clusters with no per-cluster knob. */}}
           ports:
             - containerPort: 8000
               name: http

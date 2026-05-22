@@ -38,18 +38,9 @@ spec:
           {{- $gwTag := .Values.firewall.gateway.image.tag | default "v2.9.5" }}
           image: {{ include "firewall.image" (dict "repository" $gwRepo "tag" $gwTag "global" .Values.global) | quote }}
           imagePullPolicy: {{ .Values.firewall.gateway.image.pullPolicy | default "IfNotPresent" }}
-          args:
-            - src.gateway.app:app
-            - --host
-            - "0.0.0.0"
-            - --port
-            - "8000"
-            - --loop
-            - uvloop
-            - --http
-            - httptools
-            - --backlog
-            - "2048"
+          {{- /* No args override: the firewall image CMD (`python -m src.serve`)
+                 dual-binds to 0.0.0.0 and :: at startup and hardcodes the uvloop /
+                 httptools / backlog tuning the gateway always needs. */}}
           ports:
             - containerPort: 8000
               name: http
