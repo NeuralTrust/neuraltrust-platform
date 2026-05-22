@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v1.12.11] — 2026-05-22
+
 ### Added
 
 - **data-plane-api Kubernetes Job runner is now the default** (`dataPlane.components.api.k8sJobs.enabled: true`). The data-plane-api Deployment spawns evaluation workloads as ephemeral Jobs in the release namespace instead of running them as FastAPI background tasks — keeping the API pod responsive and bounding per-evaluation resource usage. A new namespaced `ServiceAccount data-plane-api`, `Role data-plane-job-creator`, and matching `RoleBinding` are rendered automatically; the API Deployment binds to the new SA and receives `K8S_JOBS_ENABLED`, `K8S_JOBS_NAMESPACE`, `K8S_JOB_IMAGE`, `K8S_JOB_SERVICE_ACCOUNT` plus tunable resource/TTL/concurrency env vars. The API process inherits its own env into each Job pod's `env:` block at job-creation time, so the same code path works on Helm (Kubernetes Secrets via `secretKeyRef`) and Flux + Secret Manager (CSI) — no separate Secret object, SecretProviderClass, or mount is needed for Jobs. **Requires `data-plane-api >= v1.25.0`**. To opt out on older images, set `dataPlane.components.api.k8sJobs.enabled: false`.
