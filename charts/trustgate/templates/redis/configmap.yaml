@@ -19,7 +19,7 @@ data:
 
     # Basic configuration
     port 6379
-    bind {{ .Values.redis.bind | default "::" }}
+    bind {{ .Values.redis.bind | default "0.0.0.0 -::" }}
 
     # No password required — internal cluster communication only.
     # protected-mode MUST be `no` here. As of Redis 7.2, protected-mode is triggered

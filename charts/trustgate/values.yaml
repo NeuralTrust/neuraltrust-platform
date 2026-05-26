@@ -194,10 +194,13 @@ actions:
 # Redis configuration
 redis:
   enabled: true
-  # Redis `bind` directive. Defaults to `::` so a single value works on
-  # IPv4-only, dual-stack, and IPv6-only clusters (Linux `bindv6only=0`).
-  # Set to "0.0.0.0" to force IPv4-only.
-  bind: "::"
+  # Redis `bind` directive (Redis 7.0+ syntax: prefix address with `-` to make it
+  # optional — Redis skips it instead of aborting when the socket cannot be created).
+  # Default `0.0.0.0 -::` binds IPv4 wildcard (required) and IPv6 wildcard
+  # (optional, skipped on IPv4-only nodes such as AWS EKS where `::` would bind
+  # a socket that rejects IPv4 probe connections).
+  # Override to `::` for IPv6-only clusters (no IPv4 addresses on pods).
+  bind: "0.0.0.0 -::"
   image:
     repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/redis-stack-server
     tag: 7.2.0-v20

@@ -180,7 +180,7 @@ trustgate:
 
 With `global.autoGenerateSecrets: true`, these are merged into `trustgate-secrets` from `trustgate.global.env`. With `global.preserveExistingSecrets: true`, add them to a pre-created `trustgate-secrets`.
 
-The Control Plane app's `FIREWALL_API_URL` follows the same auto-derivation rules from `control-plane-secrets/FIREWALL_API_URL`. See `accounts/bv/values-bv-pre.yaml` for a worked cross-namespace example.
+The Control Plane app's `FIREWALL_API_URL` follows the same auto-derivation rules from `control-plane-secrets/FIREWALL_API_URL`.
 
 After changing firewall secrets, **restart TrustGate** so pods pick up the new values:
 
