@@ -14,7 +14,7 @@
         "provider": "openai",
         "model": "gpt-5-mini",
         "extra_args": {
-            "reasoning_effort": "medium"
+            "reasoning_effort": "low"
         },
         "temperature": 0.0,
         "retry_config": {
@@ -22,9 +22,12 @@
         }
     },
     "translation": {
-        "provider": "google",
-        "model": "gemini-2.5-flash-lite",
+        "provider": "openai",
+        "model": "gpt-5-nano",
         "temperature": 0.0,
+        "extra_args": {
+            "reasoning_effort": "minimal"
+        },
         "retry_config": {
             "attempts": 3
         }
