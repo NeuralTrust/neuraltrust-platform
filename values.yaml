@@ -27,7 +27,6 @@ global:
   security:
     allowInsecureImages: true # Allow Bitnami charts to use their container images
   storageClass: "" # Global storage class for persistent volumes
-  # Outbound HTTP proxy for corporate environments (e.g. Santander).
   # When enabled, HTTP_PROXY/HTTPS_PROXY/NO_PROXY (upper+lowercase) are injected into every workload.
   proxy:
     enabled: false
@@ -1137,7 +1136,7 @@ neuraltrust-data-plane:
 # neuraltrust-firewall.firewall.enabled: false. To run workers on GPU, override
 # workerDefaults.image to firewall-gpu and add nvidia.com/gpu resources,
 # nodeSelector, tolerations, and hostIPC (see values-dataplane-gpu.yaml.example
-# and regions/values-us-prod.yaml for GPU patterns).
+# for GPU patterns).
 #
 # When firewall is enabled, the parent chart auto-populates:
 #   - trustgate-secrets/NEURAL_TRUST_FIREWALL_URL  → http://firewall.<release-namespace>.svc.cluster.local

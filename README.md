@@ -98,6 +98,50 @@ global:
   domain: "example.com"    # base domain for service URLs
 ```
 
+## Cluster networking (IPv4 / IPv6 / dual-stack)
+
+The chart works out of the box on IPv4-only and dual-stack clusters with **no override required**. IPv6-only clusters need a single override on the in-cluster Redis.
+
+| Component | Default | IPv4-only | Dual-stack | IPv6-only |
+|---|---|---|---|---|
+| `clickhouse.listenHost` | `::` | works (IPv4-mapped on `::` socket via `net.ipv6.bindv6only=0`) | works | works |
+| `controlPlane.components.app.hostname` (Next.js) | `::` | works | works | works |
+| `trustgate.redis.bind` | `0.0.0.0 -::` (multi-bind: IPv4 required, IPv6 optional) | works | works | **override to `::`** |
+| Firewall gateway / workers | dual-bind in entrypoint | works | works | works |
+| AISPM api / worker / beat | dual-bind in entrypoint | works | works | works |
+
+Why Redis is special: the kubelet `tcpSocket` liveness probe connects to the pod's IPv4 address. On certain IPv4-only nodes (notably AWS EKS) a Redis instance bound only to `::` accepts IPv6 fine but rejects the IPv4 probe, triggering a SIGTERM crash loop. The `0.0.0.0 -::` default explicitly takes the IPv4 wildcard and adds IPv6 opportunistically (Redis 7.0+ multi-bind syntax — the `-` prefix marks an address optional).
+
+**IPv6-only override:**
+
+```yaml
+trustgate:
+  redis:
+    bind: "::"               # no IPv4 wildcard on IPv6-only nodes
+clickhouse:
+  listenHost: "::"           # already the default
+neuraltrust-control-plane:
+  controlPlane:
+    components:
+      app:
+        hostname: "::"       # already the default
+```
+
+**Force IPv4-only** (rare — overrides every default to `0.0.0.0`):
+
+```yaml
+trustgate:
+  redis:
+    bind: "0.0.0.0"
+clickhouse:
+  listenHost: "0.0.0.0"
+neuraltrust-control-plane:
+  controlPlane:
+    components:
+      app:
+        hostname: "0.0.0.0"
+```
+
 ## Ingress hostnames
 
 When `global.domain` is set, every Ingress auto-fills its hostname as `<prefix>.<global.domain>`. No per-service host configuration is required for the common case.
@@ -173,7 +217,7 @@ Three escalating customization levels:
 | Same short names, custom tags | `global.imageRegistry` + per-component `image.tag` |
 | Renamed paths (e.g. `my-registry.corp/cp-api`) | `global.imageRegistry` + per-component `image.repository` and `image.tag` |
 
-For renamed paths, set `image.repository` to the **full path** starting with your registry host. The helper detects the host already matches and uses the value as-is. See `accounts/unicaja/values-unicaja-pre-v2.yaml` for a worked example with mixed namespaces (`docker-neuraltrust/...` plus `hub/postgres`, `hub/redislabs/...`).
+For renamed paths, set `image.repository` to the **full path** starting with your registry host. The helper detects the host already matches and uses the value as-is.
 
 Verify rendered images before rolling out:
 
@@ -378,6 +422,7 @@ Persistent volume claims are retained by default to prevent accidental data loss
 | `values-openshift-ingress.yaml.example` | OpenShift with Ingress instead of Routes |
 | `values-watchdog.yaml.example` | Self-monitoring + self-healing watchdog (dry-run defaults) |
 | `values-observability-self-hosted.yaml.example` | In-chart OTel Collector wired to your own Prometheus Operator (no egress) |
+| `values-aws-ipv6.yaml.example` | Minimal AWS EKS overrides for IPv6-only pod networking |
 
 ## Further reading
 

@@ -180,15 +180,21 @@ if [ "$scheduler_probe_paths" != "            path: \"/v1/health\"" ] && [ "$sch
 fi
 green "ok  - scheduler liveness/readiness probe path is /v1/health"
 
-# Scenario 6e: bind addresses default to `::` (IPv6 dual-stack).
-# ClickHouse `<listen_host>`, Trustgate Redis `bind`, and control-plane-app
-# `HOSTNAME` env all default to `::` so a single value works on IPv4-only,
-# dual-stack, and IPv6-only clusters (Linux `bindv6only=0`). Operators must
-# still be able to pin each to "0.0.0.0".
-blue "scenario 6e: bind addresses default to :: (IPv6 dual-stack)"
+# Scenario 6e: bind addresses default to working values across cluster topologies.
+# ClickHouse `<listen_host>` and control-plane-app `HOSTNAME` default to `::` —
+# a single socket bound to `::` accepts both IPv4 and IPv6 on Linux when
+# `net.ipv6.bindv6only=0` (the kernel default).
+# Trustgate Redis defaults to `0.0.0.0 -::` (Redis 7.0+ multi-bind syntax: the
+# `-` prefix marks the address optional, so Redis skips IPv6 silently when the
+# socket can't be created). This is Redis-specific because the kubelet
+# `tcpSocket` liveness probe connects to the pod's IPv4 address — on certain
+# IPv4-only nodes (e.g. AWS EKS), a Redis instance bound only to `::` answers
+# IPv6 fine but rejects the IPv4 probe, triggering a SIGTERM crash loop.
+# Operators must still be able to pin each setting to a specific address.
+blue "scenario 6e: bind addresses default to working cross-topology values"
 render "$TMP/bind-default.yaml"
 assert_contains "$TMP/bind-default.yaml" "<listen_host>::</listen_host>" "ClickHouse listen_host defaults to ::"
-assert_contains "$TMP/bind-default.yaml" "^    bind ::$"                 "Trustgate Redis bind defaults to ::"
+assert_contains "$TMP/bind-default.yaml" '^    bind 0\.0\.0\.0 -::$'    "Trustgate Redis bind defaults to 0.0.0.0 -:: (IPv4 required, IPv6 optional)"
 app_hostname=$(grep -A 1 "name: HOSTNAME$" "$TMP/bind-default.yaml" | grep "value:" | head -1 | tr -d '[:space:]')
 if [ "$app_hostname" != 'value:"::"' ]; then
   red "FAIL: control-plane-app HOSTNAME expected value \"::\", got: ${app_hostname}"
@@ -196,7 +202,7 @@ if [ "$app_hostname" != 'value:"::"' ]; then
 fi
 green "ok  - control-plane-app HOSTNAME defaults to ::"
 
-blue "scenario 6e (cont): bind addresses overridable to 0.0.0.0"
+blue "scenario 6e (cont): bind addresses overridable (IPv4-only and IPv6-only)"
 render "$TMP/bind-ipv4.yaml" \
   --set clickhouse.listenHost=0.0.0.0 \
   --set trustgate.redis.bind=0.0.0.0 \
@@ -209,6 +215,10 @@ if [ "$app_hostname_v4" != 'value:"0.0.0.0"' ]; then
   exit 1
 fi
 green "ok  - control-plane-app HOSTNAME overridable to 0.0.0.0"
+
+# IPv6-only clusters: operator must be able to pin Redis to `::` (no IPv4 wildcard).
+render "$TMP/bind-ipv6.yaml" --set trustgate.redis.bind=::
+assert_contains "$TMP/bind-ipv6.yaml" "^    bind ::$" "Trustgate Redis bind overridable to :: (IPv6-only)"
 
 # Scenario 7: backward compat — without the global override, every
 # component keeps its prior default. This test exists to catch a future

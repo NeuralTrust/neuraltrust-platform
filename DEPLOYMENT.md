@@ -196,7 +196,7 @@ trustgate:
       NEURAL_TRUST_FIREWALL_SECRET_KEY: ""  # set when firewall requires explicit auth
 ```
 
-The same pattern works for the Control Plane app via `controlPlane.components.app.config.firewallApiUrl`. See `accounts/bv/values-bv-pre.yaml` for a worked cross-namespace example.
+The same pattern works for the Control Plane app via `controlPlane.components.app.config.firewallApiUrl`.
 
 After changing firewall secrets, restart TrustGate to pick up the new values:
 
@@ -576,6 +576,36 @@ kubectl run -it --rm pg-test --image=postgres:17.2-alpine --restart=Never -n neu
   psql -h <host> -U neuraltrust -d neuraltrust
 ```
 
+### `trustgate-redis` CrashLoopBackOff on IPv4-only / IPv6-only clusters
+
+Symptom: `trustgate-redis-0` logs print "Ready to accept connections tcp" then receive `SIGTERM scheduling shutdown` ~58 seconds later, with `RESTARTS` climbing every minute. Other components stay healthy.
+
+```bash
+kubectl logs trustgate-redis-0 -n neuraltrust --previous | tail -10
+# 1:M ... * Ready to accept connections tcp
+# 1:signal-handler (...) Received SIGTERM scheduling shutdown...
+```
+
+This is the kubelet `tcpSocket` liveness probe failing. Redis is bound only to one address family but the probe connects on the other. Fix by setting the bind address that matches your cluster's pod-network family:
+
+```yaml
+# IPv6-only cluster
+trustgate:
+  redis:
+    bind: "::"
+```
+
+For AWS EKS specifically, see [`values-aws-ipv6.yaml.example`](./values-aws-ipv6.yaml.example) for a layered overlay (ALB ingress + Redis bind override) you can pass alongside `values-required.yaml`.
+
+```yaml
+# IPv4-only cluster pinned (the default `0.0.0.0 -::` already covers this — only set explicitly if you've seen issues)
+trustgate:
+  redis:
+    bind: "0.0.0.0"
+```
+
+See [Cluster networking](./README.md#cluster-networking-ipv4--ipv6--dual-stack) in the main README for the full topology matrix and equivalent settings for ClickHouse and `control-plane-app`.
+
 ### Kafka cluster ID mismatch
 
 If you see `Invalid cluster.id in: /bitnami/kafka/data/meta.properties`:
@@ -601,6 +631,7 @@ kubectl delete pod kafka-broker-0 -n neuraltrust
 | PostgreSQL connection fails | Wrong host or credentials | Verify `neuraltrust-control-plane.controlPlane.components.postgresql.secrets` |
 | Secret not found | Secrets not created | Check `kubectl get secrets -n neuraltrust`. See [SECRETS.md](./SECRETS.md) |
 | TrustGate firewall vars stale | Pods not restarted after secret change | `kubectl rollout restart deployment/trustgate-*` |
+| `trustgate-redis-0` SIGTERM every ~60s | `tcpSocket` liveness probe hits the wrong address family | Set `trustgate.redis.bind` to match cluster topology (see above) |
 
 ## Next steps
 

@@ -73,6 +73,20 @@ helm upgrade --install neuraltrust-platform . --namespace neuraltrust --create-n
 
 For CPU-only firewall, use chart defaults (`firewall-cpu` image, no GPU keys).
 
+### `values-aws-ipv6.yaml.example` — AWS EKS with IPv6-only pod networking
+
+Layered overlay for IPv6-only EKS clusters. Sets `global.platform=aws` (ALB ingress) and pins `trustgate.redis.bind` to `::` so the in-cluster Redis listens on IPv6 only — the chart default (`0.0.0.0 -::`) requires an IPv4 wildcard which fails on IPv6-only pods. Stack on top of `values-required.yaml`:
+
+```bash
+helm upgrade --install neuraltrust-platform . \
+  --namespace neuraltrust --create-namespace \
+  -f values-required.yaml \
+  -f values-aws-ipv6.yaml.example \
+  --set global.domain=example.com
+```
+
+Dual-stack EKS (the EKS default) needs no override — chart defaults work as-is. See [README.md → Cluster networking](./README.md#cluster-networking-ipv4--ipv6--dual-stack) for the full topology matrix.
+
 ---
 
 ## Configuration scenarios
@@ -329,3 +343,4 @@ See [SECRETS.md](./SECRETS.md) for the complete reference.
 | Everything on | `values-all-deployed.yaml.example` | Configurable | Yes | Configurable | Auto |
 | External infra | `values-external-services.yaml.example` | Configurable | Yes | Configurable | Auto |
 | GPU firewall | `values-dataplane-gpu.yaml.example` | Configurable | Yes | Configurable | Explicit |
+| AWS EKS (IPv6-only) | `values-aws-ipv6.yaml.example` (overlay on `values-required.yaml`) | `aws` | Yes (ALB) | No | Auto |
