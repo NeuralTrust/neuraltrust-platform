@@ -6,7 +6,7 @@ siemConnectors:
   replicas: 1
   image:
     repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/siem-connectors
-    tag: v0.2.1
+    tag: v0.2.2
     pullPolicy: IfNotPresent
   resources:
     requests:

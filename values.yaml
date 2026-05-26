@@ -462,7 +462,7 @@ kafka:
   imagePullSecrets: "gcr-secret"
   image:
     repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka
-    tag: "4.2.0"
+    tag: "4.3.0"
     pullPolicy: IfNotPresent
   global:
     imagePullSecrets: []
@@ -513,7 +513,7 @@ trustgate:
     image:
       pullPolicy: Always
       image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee"
-      tag: "v1.27.4"
+      tag: "v1.27.5"
       # imagePullSecrets: if not set, will fall back to parent chart's global.imagePullSecrets
       imagePullSecrets: ["gcr-secret"] # Set to array of secret names, e.g., ["secret-name"] or leave empty to use parent global.imagePullSecrets
     postgresql:
@@ -890,7 +890,7 @@ neuraltrust-control-plane:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.65.7"
+          tag: "v1.65.9"
           pullPolicy: "Always"
         config:
           nodeEnv: production
@@ -1036,7 +1036,7 @@ neuraltrust-data-plane:
         classifierModel: "gpt"
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.24.10
+          tag: v1.24.11
           pullPolicy: Always
         accessMode: ReadWriteOnce
         huggingfaceToken: ""
@@ -1120,7 +1120,7 @@ neuraltrust-data-plane:
         replicas: 1
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/workers
-          tag: v1.6.11
+          tag: v1.6.12
           pullPolicy: Always
         resources:
           requests:
@@ -1155,7 +1155,7 @@ neuraltrust-firewall:
       replicas: 2
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-        tag: "v2.9.5"
+        tag: "v2.9.6"
         pullPolicy: IfNotPresent
       resources:
         requests:
@@ -1188,7 +1188,7 @@ neuraltrust-firewall:
     workerDefaults:
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-        tag: "v2.9.5"
+        tag: "v2.9.6"
         pullPolicy: IfNotPresent
       replicas: 1
       resources:
