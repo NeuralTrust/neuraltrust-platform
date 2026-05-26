@@ -35,7 +35,7 @@ spec:
       containers:
         - name: siem-connectors
           {{- $repo := .Values.siemConnectors.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/siem-connectors" }}
-          {{- $tag := .Values.siemConnectors.image.tag | default "v0.2.1" }}
+          {{- $tag := .Values.siemConnectors.image.tag | default "v0.2.2" }}
           image: {{ include "siemConnectors.image" (dict "repository" $repo "tag" $tag "global" .Values.global) | quote }}
           imagePullPolicy: {{ .Values.siemConnectors.image.pullPolicy | default "IfNotPresent" }}
           args:

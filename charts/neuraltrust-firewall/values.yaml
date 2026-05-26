@@ -6,7 +6,7 @@ firewall:
     replicas: 2
     image:
       repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-      tag: v2.9.5
+      tag: v2.9.6
       pullPolicy: IfNotPresent
     resources:
       limits:
@@ -36,7 +36,7 @@ firewall:
   workerDefaults:
     image:
       repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-      tag: v2.9.5
+      tag: v2.9.6
       pullPolicy: IfNotPresent
     replicas: 1
     resources:
