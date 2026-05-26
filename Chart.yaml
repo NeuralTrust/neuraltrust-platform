@@ -15,7 +15,7 @@ dependencies:
       - neuraltrust
       - optional
   - name: neuraltrust-siem-connectors
-    version: 1.0.2
+    version: 1.0.3
     repository: file://./charts/neuraltrust-siem-connectors
     condition: neuraltrust-siem-connectors.siemConnectors.enabled
     tags:
@@ -29,20 +29,20 @@ dependencies:
     tags:
       - infrastructure
   - name: kafka
-    version: 1.0.0
+    version: 1.0.1
     repository: file://./charts/kafka
     condition: infrastructure.kafka.deploy
     tags:
       - infrastructure
   # NeuralTrust components
   - name: neuraltrust-data-plane
-    version: 1.2.25
+    version: 1.2.26
     condition: neuraltrust-data-plane.dataPlane.enabled
     repository: file://./charts/neuraltrust-data-plane
     tags:
       - neuraltrust
   - name: neuraltrust-control-plane
-    version: 1.2.26
+    version: 1.2.27
     repository: file://./charts/neuraltrust-control-plane
     # No condition: subchart always loads so PostgreSQL can deploy independently.
     # Control Plane components are guarded by controlPlane.enabled inside templates.
@@ -50,7 +50,7 @@ dependencies:
       - neuraltrust
   # TrustGate components
   - name: trustgate
-    version: 1.2.18
+    version: 1.2.19
     condition: trustgate.enabled
     repository: file://./charts/trustgate
     tags:
