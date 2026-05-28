@@ -9,14 +9,82 @@ Deploy the complete NeuralTrust AI governance and runtime security stack on any 
 | **TrustGate** | Low-latency AI gateway with plugin system and admin API |
 | **Control Plane** | Management API, product UI, and scheduler |
 | **Data Plane** | Telemetry and analytics API with Kafka workers |
-| **Firewall** *(optional)* | Prompt and response safety — gateway + ML worker pool (CPU or GPU) |
-| **AISPM** *(optional, off by default)* | AI Security Posture Management — FastAPI + Celery worker + beat scheduler |
-| **SIEM Connectors** *(optional, off by default)* | Kafka consumer that forwards audit / posture events to external SIEMs |
+| **Firewall** | Prompt and response safety — gateway + ML worker pool (CPU or GPU) |
+| **SIEM Connectors** *(optional, off by default)* | Kafka consumer that forwards audit events to external SIEMs |
 | **ClickHouse** | Analytics database (in-cluster or external) |
 | **Kafka** | Event streaming (in-cluster or external) |
 | **PostgreSQL** | Relational store (in-cluster or external) |
 
 Every component is independently toggleable via feature flags. Enable only what you need.
+
+## Deployment models
+
+The chart supports two main topologies. Both deploy from the same OCI chart — the difference is which subcharts you enable and where the Control Plane runs.
+
+| Model | Control Plane | Data Plane | TrustGate | Firewall | Best for |
+|---|---|---|---|---|---|
+| **Hybrid** *(chart default)* | NeuralTrust SaaS | Your cluster | Your cluster *(typical)* | Your cluster | Most customers — fastest to first dashboard |
+| **Self-hosted** | Your cluster | Your cluster | Your cluster | Your cluster | Air-gapped, sovereignty, full operational control |
+
+A zero-config `helm install` deploys the **hybrid-shaped** stack (Data Plane + TrustGate + Firewall + in-cluster infra, Control Plane **off**). To go self-hosted, set `neuraltrust-control-plane.controlPlane.enabled: true`.
+
+Full comparison with topology diagrams, sizing baselines, and connectivity requirements: [Deployment models](https://docs.neuraltrust.ai/neuraltrust/deployment/deployment-models).
+
+### Images deployed per model
+
+All NeuralTrust images live in `europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/<name>`. Set `global.imageRegistry` to mirror them to your internal registry. Tags below reflect the current chart `values.yaml` defaults — verify against your chart version before mirroring.
+
+<details>
+<summary><strong>Hybrid model</strong> — Data Plane in your cluster, Control Plane on NeuralTrust SaaS</summary>
+
+| Subchart | Image | Default tag | Default replicas |
+|---|---|---|---|
+| `neuraltrust-data-plane` | `data-plane-api` | `v1.24.11` | 2 |
+| `neuraltrust-data-plane` | `workers` | `v1.6.12` | 1 |
+| `neuraltrust-data-plane` | `kafka-connect` | `v0.3.1` | 1 |
+| `trustgate` | `trustgate-ee` (admin) | `v1.27.5` | 2 |
+| `trustgate` | `trustgate-ee` (gateway) | `v1.27.5` | 2 |
+| `trustgate` | `trustgate-ee` (actions) | `v1.27.5` | 2 |
+| `trustgate` | `redis-stack-server` | `7.2.0-v20` | 1 |
+| `neuraltrust-firewall` *(default on)* | `firewall-cpu` (gateway) | `v2.9.6` | 2 |
+| `neuraltrust-firewall` *(default on)* | `firewall-cpu` (5 workers) | `v2.9.6` | 5 (1 each: toxicity, toolguard, prompt-jailbreak, prompt-moderation, response-jailbreak) |
+| `clickhouse` *(or external)* | `clickhouse-server` | `26.3` | 1 |
+| `kafka` *(or external)* | `kafka` | `4.3.0` | 1 |
+| `neuraltrust-control-plane` (Postgres only) *(or external)* | `postgres` | `17-alpine` | 1 |
+
+**Footprint:** ~10 distinct image repositories, ~16 running pods on chart defaults. Cluster sizing baseline: **~20.5 vCPU / ~58.5 GiB requests / ~80 GiB PVC** — fits on **4 × (8 vCPU / 32 GiB)** worker nodes with HA. Switching the Firewall to GPU workers drops the CPU pool to **3 nodes** plus a **5-node GPU pool** (one GPU per default worker, or fewer with CUDA MPS).
+
+**Not deployed in hybrid:** Control Plane API / UI / Scheduler — they run on NeuralTrust SaaS.
+
+</details>
+
+<details>
+<summary><strong>Self-hosted model</strong> — everything in your cluster</summary>
+
+Includes everything above **plus** the Control Plane subchart:
+
+| Subchart | Image | Default tag | Default replicas |
+|---|---|---|---|
+| `neuraltrust-control-plane` | `control-plane-api` | `v1.18.3` | 2 |
+| `neuraltrust-control-plane` | `app` (UI) | `v1.65.9` | 2 |
+| `neuraltrust-control-plane` | `scheduler` | `v1.9.7` | 1 |
+
+**Footprint:** ~13 distinct image repositories, ~21 running pods on chart defaults. Cluster sizing baseline: **~23.1 vCPU / ~61.8 GiB requests / ~80 GiB PVC** — fits on **5 × (8 vCPU / 32 GiB)** worker nodes with HA. Switching the Firewall to GPU workers drops the CPU pool to **4 nodes** plus a **5-node GPU pool**.
+
+</details>
+
+<details>
+<summary><strong>Optional add-on subcharts</strong> (off by default in both models)</summary>
+
+| Subchart | Image(s) | Default tag | Toggle |
+|---|---|---|---|
+| `neuraltrust-siem-connectors` | `siem-connectors` | `v0.2.2` | `neuraltrust-siem-connectors.siemConnectors.enabled` |
+| `neuraltrust-watchdog` | `neuraltrust-watchdog` | Chart `appVersion` | `neuraltrust-watchdog.enabled` |
+| Umbrella OpenTelemetry Collector | `otel/opentelemetry-collector-contrib` | `0.110.0` | `global.observability.enabled` |
+
+</details>
+
+For per-component resource requests/limits, init containers, ephemeral Job pods, pull-policy defaults, and air-gapped mirroring instructions, see [Image catalog](https://docs.neuraltrust.ai/neuraltrust/deployment/images) in the docs.
 
 ## Quick start
 
@@ -108,7 +176,6 @@ The chart works out of the box on IPv4-only and dual-stack clusters with **no ov
 | `controlPlane.components.app.hostname` (Next.js) | `::` | works | works | works |
 | `trustgate.redis.bind` | `0.0.0.0 -::` (multi-bind: IPv4 required, IPv6 optional) | works | works | **override to `::`** |
 | Firewall gateway / workers | dual-bind in entrypoint | works | works | works |
-| AISPM api / worker / beat | dual-bind in entrypoint | works | works | works |
 
 Why Redis is special: the kubelet `tcpSocket` liveness probe connects to the pod's IPv4 address. On certain IPv4-only nodes (notably AWS EKS) a Redis instance bound only to `::` accepts IPv6 fine but rejects the IPv4 probe, triggering a SIGTERM crash loop. The `0.0.0.0 -::` default explicitly takes the IPv4 wildcard and adds IPv6 opportunistically (Redis 7.0+ multi-bind syntax — the `-` prefix marks an address optional).
 
@@ -310,16 +377,10 @@ neuraltrust-firewall:
   firewall:
     enabled: true       # Firewall gateway + workers (on by default, CPU image)
 
-neuraltrust-aispm:
-  aispm:
-    enabled: false      # AI Security Posture Management (off by default)
-
 neuraltrust-siem-connectors:
   siemConnectors:
     enabled: false      # SIEM forwarder (off by default)
 ```
-
-When `neuraltrust-aispm.aispm.enabled` is true, the parent chart auto-populates `control-plane-secrets/POSTURE_API_URL` so the Control Plane app talks to AISPM at `http://aispm-api-service.<release-namespace>.svc.cluster.local:80`. AISPM authenticates with the same JWT secret as the Data Plane (`data-plane-jwt-secret/DATA_PLANE_JWT_SECRET`) — no additional secret is required. Override with `neuraltrust-control-plane.controlPlane.components.app.config.postureApiUrl` to point the app at an external AISPM instance.
 
 ## Corporate proxy
 
@@ -356,7 +417,7 @@ neuraltrust-data-plane:
               name: my-feature-flags
 ```
 
-Available on: control plane (api, app, scheduler), data plane (api, worker), TrustGate (control-plane, data-plane, actions), firewall (gateway, workers), AISPM (api, worker, beat), and SIEM connectors.
+Available on: control plane (api, app, scheduler), data plane (api, worker), TrustGate (control-plane, data-plane, actions), firewall (gateway, workers), and SIEM connectors.
 
 ## ClickHouse backups
 
@@ -426,6 +487,8 @@ Persistent volume claims are retained by default to prevent accidental data loss
 
 ## Further reading
 
+### In this repository
+
 | Guide | Description |
 |---|---|
 | [Deployment Guide](./DEPLOYMENT.md) | Deployment scenarios, firewall setup, connection details, and troubleshooting |
@@ -433,6 +496,25 @@ Persistent volume claims are retained by default to prevent accidental data loss
 | [Secrets Guide](./SECRETS.md) | Secret names, keys, auto-generation behavior, and external secret managers |
 | [Values Scenarios](./VALUES_SCENARIOS.md) | Side-by-side comparison of all values files and configuration scenarios |
 | [Observability & Self-healing](./docs/observability.md) | In-chart OTel Collector, watchdog rollout, dry-run cutover playbook |
+
+### Online documentation
+
+User-facing deployment documentation with per-cloud walkthroughs lives at [docs.neuraltrust.ai](https://docs.neuraltrust.ai):
+
+| Guide | Description |
+|---|---|
+| [Deployment overview](https://docs.neuraltrust.ai/neuraltrust/deployment/overview) | Entry point — decision matrix, architecture, where each component runs |
+| [Deployment models](https://docs.neuraltrust.ai/neuraltrust/deployment/deployment-models) | Hybrid vs self-hosted in depth, with topology diagrams and connectivity requirements |
+| [Feature flags reference](https://docs.neuraltrust.ai/neuraltrust/deployment/feature-flags) | Every toggle that changes what gets deployed — Postgres / Redis / Kafka / ClickHouse local vs external, image registry, storage class, secrets |
+| [Image catalog](https://docs.neuraltrust.ai/neuraltrust/deployment/images) | Every image deployed in each model, per-subchart inventory, sizing, mirroring |
+| [GCP (GKE)](https://docs.neuraltrust.ai/neuraltrust/deployment/gcp/overview) | Hybrid + self-hosted walkthroughs |
+| [AWS (EKS)](https://docs.neuraltrust.ai/neuraltrust/deployment/aws/overview) | Hybrid + self-hosted walkthroughs |
+| [Azure (AKS)](https://docs.neuraltrust.ai/neuraltrust/deployment/azure/overview) | Hybrid + self-hosted walkthroughs |
+| [OpenShift](https://docs.neuraltrust.ai/neuraltrust/deployment/openshift/overview) | Hybrid + self-hosted walkthroughs, including air-gapped |
+| [Vanilla Kubernetes](https://docs.neuraltrust.ai/neuraltrust/deployment/kubernetes/overview) | Hybrid + self-hosted walkthroughs for any conformant cluster |
+| [Configuration scenarios](https://docs.neuraltrust.ai/neuraltrust/deployment/configuration) | External infrastructure, secrets, ingress modes |
+| [Secrets management](https://docs.neuraltrust.ai/neuraltrust/deployment/secrets) | Auto-generation, explicit values, External Secrets Operator |
+| [Firewall deployment](https://docs.neuraltrust.ai/neuraltrust/deployment/firewall) | CPU vs GPU workers, TrustGate integration, per-worker overrides |
 
 ## Support
 

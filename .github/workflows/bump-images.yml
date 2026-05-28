@@ -381,10 +381,6 @@ jobs:
             if [[ "$TEMPLATE_TAG_CHANGED" == "1" ]]; then
               BUMP_DATA_PLANE=true
             fi
-            update_template_tag "charts/kafka/templates/connector-monitor-cronjob.yaml" "defaultKafkaConnectTag" "$TAG"
-            if [[ "$TEMPLATE_TAG_CHANGED" == "1" ]]; then
-              BUMP_KAFKA=true
-            fi
           fi
 
           # =============================================
