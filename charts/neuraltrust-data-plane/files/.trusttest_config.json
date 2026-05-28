@@ -4,7 +4,7 @@
         "model": "gpt-5-mini",
         "temperature": 0.0,
         "extra_args": {
-            "reasoning_effort": "low"
+            "reasoning_effort": "high"
         },
         "retry_config": {
             "attempts": 3
