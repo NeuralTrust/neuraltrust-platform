@@ -195,6 +195,10 @@ checks:
       memoryUsageRatioMax: 0.85
       partsPerPartitionMax: 300
       maxErrorsPerInterval: 50
+      longQueryMaxSeconds: 900
+      maxLongQueries: 0
+      queryLogLookbackSeconds: 900
+      queryLogExceptionsMax: 0
     actions: [notify.otlp, notify.slack]
 
   - id: kafka-broker
@@ -265,6 +269,11 @@ checks:
     enabled: false
     target:
       dsnEnv: POSTGRES_DSN
+    thresholds:
+      connectionUsageRatioMax: 0.8
+      longQueryMaxAge: 10m
+      maxLongQueries: 0
+      replicationLagMaxSeconds: 60
     actions: [notify.otlp]
 
   - id: trustgate-synthetic
@@ -284,6 +293,10 @@ checks:
       host: trustgate-redis
       port: 6379
       passwordEnv: REDIS_PASSWORD
+    thresholds:
+      memoryUsageRatioMax: 0.85
+      connectedClientsRatioMax: 0.85
+      blockedClientsMax: 0
     actions: [notify.otlp]
 
   - id: firewall-synthetic

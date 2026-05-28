@@ -34,6 +34,10 @@ firewall:
   # Default: CPU image. For GPU, override image to firewall-gpu, add nvidia.com/gpu
   # resources, nodeSelector, tolerations, and hostIPC (see values-dataplane-gpu.yaml.example).
   workerDefaults:
+    # Recreate terminates the old pod before starting the new one. Prefer this over
+    # RollingUpdate for ML workers (heavy CPU/RAM): maxSurge: 1 doubles capacity
+    # during rollouts and leaves the new pod Pending on small clusters.
+    deploymentStrategy: Recreate # Recreate | RollingUpdate
     image:
       repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
       tag: v2.9.6

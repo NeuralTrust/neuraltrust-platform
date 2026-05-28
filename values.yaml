@@ -1185,6 +1185,7 @@ neuraltrust-firewall:
     #   workerDefaults.resources.requests/limits: nvidia.com/gpu: "1"
     #   workerDefaults.nodeSelector / tolerations / hostIPC: true
     workerDefaults:
+      deploymentStrategy: Recreate # Recreate | RollingUpdate — Recreate avoids 2× worker capacity during rollouts
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
         tag: "v2.9.6"

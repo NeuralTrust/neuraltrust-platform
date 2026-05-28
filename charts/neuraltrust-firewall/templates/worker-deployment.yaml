@@ -14,11 +14,14 @@ spec:
   selector:
     matchLabels:
       {{- include "firewall.worker.selectorLabels" (dict "name" $workerName) | nindent 6 }}
+  {{- $strategy := $defaults.deploymentStrategy | default "Recreate" }}
   strategy:
+    type: {{ $strategy }}
+    {{- if eq $strategy "RollingUpdate" }}
     rollingUpdate:
       maxSurge: 1
       maxUnavailable: 0
-    type: RollingUpdate
+    {{- end }}
   template:
     metadata:
       labels:
