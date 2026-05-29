@@ -889,7 +889,7 @@ neuraltrust-control-plane:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.67.2"
+          tag: "v1.67.3"
           pullPolicy: "Always"
         config:
           nodeEnv: production
