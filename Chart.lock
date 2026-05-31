@@ -1,10 +1,10 @@
 dependencies:
 - name: neuraltrust-aispm
   repository: file://./charts/neuraltrust-aispm
-  version: 1.0.4
+  version: 1.0.5
 - name: neuraltrust-siem-connectors
   repository: file://./charts/neuraltrust-siem-connectors
-  version: 1.0.4
+  version: 1.0.5
 - name: clickhouse
   repository: file://./charts/clickhouse
   version: 1.0.1
@@ -13,18 +13,18 @@ dependencies:
   version: 1.0.1
 - name: neuraltrust-data-plane
   repository: file://./charts/neuraltrust-data-plane
-  version: 1.2.27
+  version: 1.2.29
 - name: neuraltrust-control-plane
   repository: file://./charts/neuraltrust-control-plane
-  version: 1.2.28
+  version: 1.2.30
 - name: trustgate
   repository: file://./charts/trustgate
-  version: 1.2.20
+  version: 1.2.22
 - name: neuraltrust-firewall
   repository: file://./charts/neuraltrust-firewall
-  version: 2.0.7
+  version: 2.0.8
 - name: neuraltrust-watchdog
   repository: file://./charts/neuraltrust-watchdog
-  version: 0.1.1
-digest: sha256:d27b0b70aa611cc2463a35d26131a0d79fc33a6036c5f0c2429782184fc14f3c
-generated: "2026-05-28T12:38:31.323399347Z"
+  version: 0.1.2
+digest: sha256:67bcd4c5ed93a18ffabdf776dcfe7a1df1c83e90ba9761eab8cdbc0e0b6cddc7
+generated: "2026-05-31T17:18:01.423078+02:00"

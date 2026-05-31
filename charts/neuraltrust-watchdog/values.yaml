@@ -8,8 +8,8 @@
 enabled: false
 
 image:
-  repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/neuraltrust-watchdog
-  tag: ""                         # defaults to .Chart.AppVersion
+  repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/watchdog
+  tag: v0.2.1                     # defaults to .Chart.AppVersion
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
@@ -284,6 +284,31 @@ checks:
         - { name: control-plane, url: http://trustgate-control-plane:8080/health }
         - { name: data-plane, url: http://trustgate-data-plane:8081/health }
         - { name: actions, url: http://trustgate-actions:8080/health }
+    actions: [notify.otlp, notify.slack]
+
+  - id: trustgate-e2e-pipeline
+    kind: e2e_synthetic
+    enabled: false
+    target:
+      url: http://trustgate-data-plane:8081/v1/chat/completions
+      method: POST
+      probeHeader: X-NT-Watchdog-Probe-ID
+      probePrefix: trustgate-e2e
+      persistenceDelay: 10s
+      headerEnv:
+        Authorization: TRUSTGATE_SYNTHETIC_AUTH_HEADER
+      body: |
+        {"model":"watchdog-synthetic","messages":[{"role":"user","content":"watchdog synthetic probe {{probe_id}}"}],"metadata":{"nt_watchdog_probe":true,"probe_id":"{{probe_id}}"}}
+      clickhouse:
+        address: clickhouse:9000
+        database: neuraltrust
+        usernameEnv: CLICKHOUSE_USER
+        passwordEnv: CLICKHOUSE_PASSWORD
+      assertQuery: |
+        SELECT count()
+        FROM metrics
+        WHERE event_time >= now() - INTERVAL 15 MINUTE
+          AND position(toString(request_headers), ?) > 0
     actions: [notify.otlp, notify.slack]
 
   - id: trustgate-redis

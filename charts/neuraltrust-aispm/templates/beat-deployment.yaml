@@ -66,6 +66,7 @@ spec:
             {{- toYaml . | nindent 12 }}
             {{- end }}
             {{- include "neuraltrust-platform.proxy-env" . | nindent 12 }}
+            {{- include "neuraltrust-platform.appVersionEnv" (dict "tag" $tag) | nindent 12 }}
           {{- if .Values.aispm.beat.resources }}
           resources:
             {{- toYaml .Values.aispm.beat.resources | nindent 12 }}

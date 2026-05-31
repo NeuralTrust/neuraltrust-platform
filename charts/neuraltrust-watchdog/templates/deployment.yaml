@@ -61,6 +61,10 @@ spec:
               containerPort: 8080
               protocol: TCP
           env:
+            {{- if .Values.image.tag }}
+            - name: APPLICATION_VERSION
+              value: {{ .Values.image.tag | quote }}
+            {{- end }}
             - name: POD_NAMESPACE
               valueFrom:
                 fieldRef:

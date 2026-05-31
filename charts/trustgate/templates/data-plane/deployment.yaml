@@ -23,6 +23,7 @@ spec:
         emptyDir: {}
       - name: tmp
         emptyDir: {}
+      {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 6 }}
       containers:
       - name: data-plane
         image: {{ include "trustgate.image" (dict "repository" .Values.global.image.image "tag" .Values.global.image.tag "global" .Values.global) | quote }}
@@ -101,6 +102,8 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
         {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
+        {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "go" "ctx" .) | nindent 8 }}
+        {{- include "neuraltrust-platform.appVersionEnv" (dict "tag" .Values.global.image.tag) | nindent 8 }}
         {{- if .Values.securityHardening }}
         securityContext:
           allowPrivilegeEscalation: false
@@ -117,6 +120,7 @@ spec:
           mountPath: /app/logs
         - name: tmp
           mountPath: /tmp
+        {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 8 }}
         resources:
           {{- toYaml .Values.dataPlane.resources | nindent 10 }}
         readinessProbe:

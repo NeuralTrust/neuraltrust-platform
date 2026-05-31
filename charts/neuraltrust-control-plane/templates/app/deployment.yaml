@@ -37,10 +37,14 @@ spec:
       {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.postgresql .Values.controlPlane.components.postgresql.secrets .Values.controlPlane.components.postgresql.secrets.name }}
         {{- $pgSecretName = .Values.controlPlane.components.postgresql.secrets.name }}
       {{- end }}
+      {{- if include "neuraltrust-platform.customCaCert.enabled" . }}
+      volumes:
+      {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 6 }}
+      {{- end }}
       initContainers:
       - name: init-db
         {{- $initImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
-        {{- $initImageTag := "v1.67.2" }}
+        {{- $initImageTag := "v1.67.3" }}
         {{- $initPullPolicy := "Always" }}
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.image }}
           {{- if .Values.controlPlane.components.app.image.repository }}{{- $initImageRepo = .Values.controlPlane.components.app.image.repository }}{{- end }}
@@ -153,7 +157,7 @@ spec:
       containers:
       - name: app
         {{- $appImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
-        {{- $appImageTag := "v1.67.2" }}
+        {{- $appImageTag := "v1.67.3" }}
         {{- $appPullPolicy := "Always" }}
         {{- $appPort := 3000 }}
         {{- $nodeEnv := "production" }}
@@ -408,6 +412,12 @@ spec:
         {{- toYaml .Values.controlPlane.components.app.extraEnv | nindent 8 }}
         {{- end }}
         {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
+        {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "node" "ctx" .) | nindent 8 }}
+        {{- include "neuraltrust-platform.appVersionEnv" (dict "tag" $appImageTag) | nindent 8 }}
+        {{- if include "neuraltrust-platform.customCaCert.enabled" . }}
+        volumeMounts:
+        {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 8 }}
+        {{- end }}
         resources:
           {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.resources }}
           {{- toYaml .Values.controlPlane.components.app.resources | nindent 10 }}

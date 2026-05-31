@@ -53,6 +53,10 @@ spec:
           {{- end }}
         {{- end }}
       {{- end }}
+      {{- if include "neuraltrust-platform.customCaCert.enabled" . }}
+      volumes:
+      {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 6 }}
+      {{- end }}
       initContainers:
       - name: wait-for-postgresql
         {{- $pgWaitImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/postgres" }}
@@ -233,6 +237,12 @@ spec:
         {{- toYaml .Values.controlPlane.components.api.extraEnv | nindent 8 }}
         {{- end }}
         {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
+        {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "node" "ctx" .) | nindent 8 }}
+        {{- include "neuraltrust-platform.appVersionEnv" (dict "tag" $apiImageTag) | nindent 8 }}
+        {{- if include "neuraltrust-platform.customCaCert.enabled" . }}
+        volumeMounts:
+        {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 8 }}
+        {{- end }}
         readinessProbe:
           httpGet:
             path: /health

@@ -55,6 +55,10 @@ on:
         description: "siem-connectors tag (e.g. v0.1.0). Empty = latest from AR (no change if no semver tag is published)."
         required: false
         default: ""
+      watchdog_tag:
+        description: "watchdog tag (e.g. v0.1.0). Empty = latest from AR."
+        required: false
+        default: ""
       clickhouse_tag:
         description: "clickhouse-server tag (e.g. 25.8 or 25.10.1). Empty = latest from AR (matches X.Y, X.Y.Z, X.Y.Z.W)."
         required: false
@@ -179,6 +183,7 @@ jobs:
           FIREWALL=$(resolve_tag "firewall-cpu" "${{ inputs.firewall_tag }}")
           AISPM=$(resolve_tag "aispm-api" "${{ inputs.aispm_tag }}")
           SIEM_CONNECTORS=$(resolve_tag "siem-connectors" "${{ inputs.siem_connectors_tag }}")
+          WATCHDOG=$(resolve_tag "watchdog" "${{ inputs.watchdog_tag }}")
 
           # Infrastructure images (non-standard tag patterns, override default regex).
           CLICKHOUSE=$(resolve_tag "clickhouse-server" "${{ inputs.clickhouse_tag }}" '^[0-9]+\.[0-9]+(\.[0-9]+){0,2}$')
@@ -197,6 +202,7 @@ jobs:
           echo "firewall=${FIREWALL}" >> "$GITHUB_OUTPUT"
           echo "aispm=${AISPM}" >> "$GITHUB_OUTPUT"
           echo "siem_connectors=${SIEM_CONNECTORS}" >> "$GITHUB_OUTPUT"
+          echo "watchdog=${WATCHDOG}" >> "$GITHUB_OUTPUT"
           echo "clickhouse=${CLICKHOUSE}" >> "$GITHUB_OUTPUT"
           echo "kafka=${KAFKA}" >> "$GITHUB_OUTPUT"
           echo "redis=${REDIS}" >> "$GITHUB_OUTPUT"
@@ -216,6 +222,7 @@ jobs:
           echo "| firewall-cpu (tag shared with firewall-gpu) | \`${FIREWALL:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| aispm-api/worker/beat (shared tag) | \`${AISPM:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| siem-connectors | \`${SIEM_CONNECTORS:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| watchdog (neuraltrust-watchdog subchart) | \`${WATCHDOG:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| clickhouse-server | \`${CLICKHOUSE:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| kafka | \`${KAFKA:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| redis-stack-server | \`${REDIS:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
@@ -232,6 +239,7 @@ jobs:
           BUMP_FIREWALL=false
           BUMP_AISPM=false
           BUMP_SIEM_CONNECTORS=false
+          BUMP_WATCHDOG=false
           BUMP_CLICKHOUSE=false
           BUMP_KAFKA=false
 
@@ -435,7 +443,19 @@ jobs:
           fi
 
           # =============================================
-          # 11. Infrastructure: ClickHouse (clickhouse-server)
+          # 11. Watchdog
+          # The watchdog subchart image tag defaults to Chart.appVersion when
+          # empty, so keep both the explicit default tag and appVersion aligned.
+          # =============================================
+          TAG="${{ steps.tags.outputs.watchdog }}"
+          if update_values_tag '.image.tag' "$TAG" "watchdog" "charts/neuraltrust-watchdog/values.yaml"; then
+            BUMP_WATCHDOG=true
+            yq eval -i ".appVersion = \"${TAG}\"" charts/neuraltrust-watchdog/Chart.yaml
+            echo "  Synced charts/neuraltrust-watchdog/Chart.yaml appVersion"
+          fi
+
+          # =============================================
+          # 12. Infrastructure: ClickHouse (clickhouse-server)
           # No subchart values.yaml — parent values.yaml is the sole source.
           # No template fallback (charts/clickhouse uses .Values.image directly).
           # =============================================
@@ -445,7 +465,7 @@ jobs:
           fi
 
           # =============================================
-          # 12. Infrastructure: Kafka
+          # 13. Infrastructure: Kafka
           # No subchart values.yaml — parent values.yaml is the sole source.
           # =============================================
           TAG="${{ steps.tags.outputs.kafka }}"
@@ -454,7 +474,7 @@ jobs:
           fi
 
           # =============================================
-          # 13. Infrastructure: Redis (redis-stack-server, used by trustgate)
+          # 14. Infrastructure: Redis (redis-stack-server, used by trustgate)
           # Lives under .trustgate.redis.image — also mirrored in the trustgate
           # subchart's own values.yaml. No hardcoded template fallback.
           # =============================================
@@ -466,7 +486,7 @@ jobs:
           fi
 
           # =============================================
-          # 14. Infrastructure: Postgres (used by trustgate db-init job
+          # 15. Infrastructure: Postgres (used by trustgate db-init job
           # and the control-plane in-cluster postgres)
           # Two parent paths + three template fallbacks.
           # =============================================
@@ -484,7 +504,7 @@ jobs:
           fi
 
           # =============================================
-          # 15. Infrastructure: curl (ClickHouse backup cronjob)
+          # 16. Infrastructure: curl (ClickHouse backup cronjob)
           # The parent path under controlPlane.components.api.healthCheck is
           # documentation-only (no template references it) — kept in sync for
           # values.yaml accuracy. The functional usage is the data-plane
@@ -545,6 +565,12 @@ jobs:
             NEW_VER=$(bump_chart_version "charts/neuraltrust-siem-connectors/Chart.yaml")
             yq eval -i "(.dependencies[] | select(.name == \"neuraltrust-siem-connectors\")).version = \"${NEW_VER}\"" Chart.yaml
             echo "  Updated root Chart.yaml dep: neuraltrust-siem-connectors → ${NEW_VER}"
+          fi
+
+          if [[ "$BUMP_WATCHDOG" == "true" ]]; then
+            NEW_VER=$(bump_chart_version "charts/neuraltrust-watchdog/Chart.yaml")
+            yq eval -i "(.dependencies[] | select(.name == \"neuraltrust-watchdog\")).version = \"${NEW_VER}\"" Chart.yaml
+            echo "  Updated root Chart.yaml dep: neuraltrust-watchdog → ${NEW_VER}"
           fi
 
           if [[ "$BUMP_CLICKHOUSE" == "true" ]]; then
@@ -622,6 +648,8 @@ jobs:
             charts/neuraltrust-siem-connectors/values.yaml \
             charts/neuraltrust-siem-connectors/Chart.yaml \
             charts/neuraltrust-siem-connectors/templates/ \
+            charts/neuraltrust-watchdog/values.yaml \
+            charts/neuraltrust-watchdog/Chart.yaml \
             charts/clickhouse/Chart.yaml \
             charts/kafka/Chart.yaml \
             charts/kafka/templates/
