@@ -15,7 +15,7 @@ global:
     pullPolicy: Always
     image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee"
     repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee"
-    tag: "v1.27.7"
+    tag: "v1.27.9"
   env:
     SERVER_SECRET_KEY: ${SERVER_SECRET_KEY}
     SERVER_BASE_DOMAIN: ${SERVER_BASE_DOMAIN:-neuraltrust.ai}
@@ -211,6 +211,8 @@ redis:
     host: "" # External Redis host (set via trustgate.global.env.REDIS_HOST when redis.enabled=false)
     port: 6379 # External Redis port (set via trustgate.global.env.REDIS_PORT when redis.enabled=false)
     password: "" # External Redis password (set via trustgate.global.env.REDIS_PASSWORD when redis.enabled=false)
+    username: "" # Optional Redis 6+ ACL username (AUTH username password). Emits REDIS_USERNAME. Also settable via trustgate.global.env.REDIS_USERNAME
+    tls: "" # Set "true" for TLS-only external Redis (e.g. managed serverless Redis). Emits REDIS_TLS. Also settable via trustgate.global.env.REDIS_TLS
   master:
     service:
       port: 6379

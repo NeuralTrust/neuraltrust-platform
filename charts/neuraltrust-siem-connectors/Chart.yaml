@@ -2,5 +2,5 @@ apiVersion: v2
 name: neuraltrust-siem-connectors
 description: SIEM forwarder — Kafka consumer that ships audit/posture events to external SIEMs
 type: application
-version: 1.0.4
+version: 1.0.5
 appVersion: "v0.1.0"

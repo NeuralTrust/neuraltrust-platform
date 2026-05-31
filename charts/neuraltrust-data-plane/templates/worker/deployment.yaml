@@ -86,6 +86,8 @@ spec:
         {{- toYaml .Values.dataPlane.components.worker.extraEnv | nindent 8 }}
         {{- end }}
         {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
+        {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "python" "ctx" .) | nindent 8 }}
+        {{- include "neuraltrust-platform.appVersionEnv" (dict "tag" (dig "components" "worker" "image" "tag" "" (.Values.dataPlane | default dict))) | nindent 8 }}
         {{- if .Values.securityHardening }}
         securityContext:
           allowPrivilegeEscalation: false
@@ -96,6 +98,7 @@ spec:
         volumeMounts:
         - name: tmp
           mountPath: /tmp
+        {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 8 }}
         command: ["python", "-u", "src/listen.py"]
         resources:
           {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.worker .Values.dataPlane.components.worker.resources }}
@@ -129,3 +132,4 @@ spec:
       volumes:
       - name: tmp
         emptyDir: {}
+      {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 6 }}

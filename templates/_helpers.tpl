@@ -585,6 +585,109 @@ Usage: {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
 {{- end }}
 
 {{/*
+Custom corporate CA certificate trust.
+
+When global.customCaCert.enabled is true and a secretName is provided, the
+referenced secret key is mounted as a single file into every workload and the
+runtime-appropriate trust env var is injected. Default OFF — existing releases
+are unaffected. The secret is referenced, never created, by this chart
+(existingSecret pattern); create it out-of-band, e.g.
+  kubectl create secret generic <name> --from-file=ca.crt=<bundle>.pem
+
+These helpers are defined in the parent chart and called from every subchart
+deployment, mirroring the neuraltrust-platform.proxy-env pattern.
+*/}}
+
+{{/*
+Returns a non-empty string when the custom CA cert feature is active
+(enabled AND a secretName is set). Empty otherwise. Use as a guard around
+volumes:/volumeMounts: blocks in deployments that have no other volumes.
+Usage: {{- if include "neuraltrust-platform.customCaCert.enabled" . }}
+*/}}
+{{- define "neuraltrust-platform.customCaCert.enabled" -}}
+{{- $ca := (default dict (default dict .Values.global).customCaCert) -}}
+{{- if and $ca.enabled $ca.secretName -}}true{{- end -}}
+{{- end }}
+
+{{/*
+Resolved mount path for the CA bundle file. */}}
+{{- define "neuraltrust-platform.customCaCert.path" -}}
+{{- $ca := (default dict (default dict .Values.global).customCaCert) -}}
+{{- $ca.mountPath | default "/etc/ssl/certs/custom-ca.crt" -}}
+{{- end }}
+
+{{/*
+Pod-level volume for the CA bundle.
+Usage: {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 6 }}
+*/}}
+{{- define "neuraltrust-platform.customCaCert.volume" -}}
+{{- $ca := (default dict (default dict .Values.global).customCaCert) -}}
+{{- if and $ca.enabled $ca.secretName }}
+- name: custom-ca-cert
+  secret:
+    secretName: {{ $ca.secretName | quote }}
+    items:
+    - key: {{ $ca.key | default "ca.crt" | quote }}
+      path: ca.crt
+{{- end }}
+{{- end }}
+
+{{/*
+Container-level volume mount for the CA bundle.
+Usage: {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 8 }}
+*/}}
+{{- define "neuraltrust-platform.customCaCert.volumeMount" -}}
+{{- $ca := (default dict (default dict .Values.global).customCaCert) -}}
+{{- if and $ca.enabled $ca.secretName }}
+- name: custom-ca-cert
+  mountPath: {{ include "neuraltrust-platform.customCaCert.path" . | quote }}
+  subPath: ca.crt
+  readOnly: true
+{{- end }}
+{{- end }}
+
+{{/*
+Runtime-specific CA trust env vars.
+Usage: {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "go" "ctx" .) | nindent 8 }}
+runtime: node | go | python | java (defaults to go -> SSL_CERT_FILE).
+*/}}
+{{- define "neuraltrust-platform.customCaCert.env" -}}
+{{- $ctx := .ctx -}}
+{{- $ca := (default dict (default dict $ctx.Values.global).customCaCert) -}}
+{{- if and $ca.enabled $ca.secretName }}
+{{- $path := include "neuraltrust-platform.customCaCert.path" $ctx }}
+{{- $runtime := .runtime | default "go" }}
+{{- if eq $runtime "node" }}
+- name: NODE_EXTRA_CA_CERTS
+  value: {{ $path | quote }}
+{{- else if eq $runtime "python" }}
+- name: REQUESTS_CA_BUNDLE
+  value: {{ $path | quote }}
+- name: SSL_CERT_FILE
+  value: {{ $path | quote }}
+{{- else }}
+- name: SSL_CERT_FILE
+  value: {{ $path | quote }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
+APPLICATION_VERSION env var, paired with a component's resolved image tag so the
+deployed version can be confirmed at runtime (e.g. via a /health endpoint).
+Best-effort and additive: emits nothing when no tag is resolvable, so it never
+breaks a deployment and apps that don't read it simply ignore it.
+Usage: {{- include "neuraltrust-platform.appVersionEnv" (dict "tag" $imageTag) | nindent 8 }}
+*/}}
+{{- define "neuraltrust-platform.appVersionEnv" -}}
+{{- $tag := .tag | toString -}}
+{{- if and $tag (ne $tag "") -}}
+- name: APPLICATION_VERSION
+  value: {{ $tag | quote }}
+{{- end -}}
+{{- end }}
+
+{{/*
 Check if autoGenerateSecrets is enabled.
 Returns "true" (non-empty string) if enabled, empty string if disabled.
 Usage: {{- if include "neuraltrust-platform.autoGenerateSecrets" . }}

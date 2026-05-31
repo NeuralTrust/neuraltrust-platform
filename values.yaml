@@ -33,6 +33,26 @@ global:
     httpProxy: "" # e.g. "http://proxy.corp:3128"
     httpsProxy: "" # e.g. "http://proxy.corp:3128"
     noProxy: "localhost,127.0.0.1,.cluster.local,.svc"
+  # Corporate / internal CA trust. When enabled, the CA bundle stored in the
+  # referenced secret is mounted into every component and the runtime-correct
+  # trust env var is set (NODE_EXTRA_CA_CERTS for Node, SSL_CERT_FILE for Go/Java,
+  # REQUESTS_CA_BUNDLE + SSL_CERT_FILE for Python), so outbound HTTPS to internal
+  # endpoints using a private PKI is trusted. Default OFF.
+  #
+  # IMPORTANT: SSL_CERT_FILE / REQUESTS_CA_BUNDLE *replace* the system trust store
+  # (only NODE_EXTRA_CA_CERTS is additive). Components here also call public
+  # endpoints (LLM providers, HuggingFace), so the bundle MUST be a FULL bundle
+  # (public roots + your corporate CA), not the corporate CA alone, or public TLS
+  # will fail. Java/Kafka-Connect honors a JVM truststore, not SSL_CERT_FILE — the
+  # file is mounted but JVM trust must be configured separately if needed.
+  #
+  # The secret is referenced, never created (existingSecret pattern):
+  #   kubectl create secret generic <secretName> --from-file=ca.crt=<full-bundle>.pem
+  customCaCert:
+    enabled: false
+    secretName: "" # Required when enabled: existing secret holding the CA bundle
+    key: ca.crt # Key within the secret that holds the PEM bundle
+    mountPath: /etc/ssl/certs/custom-ca.crt # File path the bundle is mounted at
   # Private Service Connect (PSC) -- GCP only
   # Services listed in negNames get a standalone NEG (PSC-only, no public Ingress).
   # Services NOT listed keep their regular {"ingress": true} annotation.
@@ -512,7 +532,7 @@ trustgate:
     image:
       pullPolicy: Always
       image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee"
-      tag: "v1.27.7"
+      tag: "v1.27.9"
       # imagePullSecrets: if not set, will fall back to parent chart's global.imagePullSecrets
       imagePullSecrets: ["gcr-secret"] # Set to array of secret names, e.g., ["secret-name"] or leave empty to use parent global.imagePullSecrets
     postgresql:
@@ -889,7 +909,7 @@ neuraltrust-control-plane:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.67.2"
+          tag: "v1.67.3"
           pullPolicy: "Always"
         config:
           nodeEnv: production
@@ -1035,7 +1055,7 @@ neuraltrust-data-plane:
         classifierModel: "gpt"
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.27.1
+          tag: v1.29.0
           pullPolicy: Always
         accessMode: ReadWriteOnce
         huggingfaceToken: ""

@@ -103,6 +103,8 @@ spec:
             {{- toYaml . | nindent 12 }}
             {{- end }}
             {{- include "neuraltrust-platform.proxy-env" $ | nindent 12 }}
+            {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "python" "ctx" $) | nindent 12 }}
+            {{- include "neuraltrust-platform.appVersionEnv" (dict "tag" $wTag) | nindent 12 }}
           {{- $startupFailure := ($workerCfg.startupProbe).failureThreshold | default ($defaults.startupProbe).failureThreshold | default 36 }}
           startupProbe:
             httpGet:
@@ -149,11 +151,13 @@ spec:
               mountPath: /tmp
             - name: cache
               mountPath: /root/.cache
+            {{- include "neuraltrust-platform.customCaCert.volumeMount" $ | nindent 12 }}
       volumes:
         - name: tmp
           emptyDir: {}
         - name: cache
           emptyDir: {}
+        {{- include "neuraltrust-platform.customCaCert.volume" $ | nindent 8 }}
 {{- end }}
 {{- end }}
 {{- end }}

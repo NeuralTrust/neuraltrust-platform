@@ -2,5 +2,5 @@ apiVersion: v2
 name: neuraltrust-aispm
 description: AI Security Posture Management (FastAPI API + Celery worker + beat scheduler)
 type: application
-version: 1.0.4
+version: 1.0.5
 appVersion: "v0.15.0"
