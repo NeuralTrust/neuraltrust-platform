@@ -116,6 +116,12 @@ aispm:
     user: "aispm"
     name: "aispm"
     sslMode: "disable" # "disable" for in-cluster PG, "require" for external
+    # password | iam. IAM = AWS RDS IAM auth (password-less): the chart skips the
+    # DATABASE_PASSWORD requirement and the init Job, and emits DATABASE_AUTH_MODE
+    # / DATABASE_IAM_AUTH so the app can mint SigV4 tokens. Requires an
+    # IAM-capable AISPM image + IRSA (global.irsa) and external RDS (pre-created
+    # aispm user/db with `GRANT rds_iam`). Leave "password" until the app supports it.
+    authMode: "password"
   # --- PostgreSQL init Job (post-install / post-upgrade hook) ---
   # The job tries the AISPM credentials first; if it can connect, it exits 0.
   # Otherwise it falls back to admin credentials from postgresql-secrets to
@@ -134,6 +140,16 @@ aispm:
     host: ""
     port: "6379"
     database: "1"
+    # Optional auth for external/managed Redis (e.g. ElastiCache). All default to
+    # the current no-auth behavior; the chart only emits an env var when its value
+    # is set, so existing in-cluster TrustGate Redis usage is unchanged.
+    password: "" # Emitted as REDIS_PASSWORD via aispm-secrets key `redis-password`.
+    username: "" # Optional Redis 6+ ACL username. Emits REDIS_USERNAME.
+    tls: "" # Set "true" for TLS-only managed Redis. Emits REDIS_TLS.
+    # password | iam. IAM = ElastiCache IAM auth (password-less). Emits
+    # REDIS_AUTH_MODE / REDIS_IAM_AUTH. Requires an IAM-capable AISPM image +
+    # IRSA. Leave "password" until the app supports it.
+    authMode: "password"
   # --- Kafka ---
   # Empty bootstrapServers => parent chart helper fills it from infrastructure.kafka.
   kafka:

@@ -61,11 +61,6 @@ data:
   # "json: cannot unmarshal number into Go struct field ConfigMap.data".
   REDIS_HOST: {{ .Values.global.env.REDIS_HOST | default .Values.redis.external.host | default "trustgate-redis" | quote }}
   REDIS_PORT: {{ .Values.global.env.REDIS_PORT | default .Values.redis.external.port | default "6379" | quote }}
-  {{- if and .Values.global.env.REDIS_PASSWORD (ne .Values.global.env.REDIS_PASSWORD "") }}
-  REDIS_PASSWORD: {{ .Values.global.env.REDIS_PASSWORD | quote }}
-  {{- else if and .Values.redis.external.password (ne (.Values.redis.external.password | toString) "") }}
-  REDIS_PASSWORD: {{ .Values.redis.external.password | quote }}
-  {{- end }}
   REDIS_DB: {{ .Values.global.env.REDIS_DB | default "0" | quote }}
   {{- /* TLS + ACL username passthrough for Redis 6+ / managed services
          (e.g. TLS-only external Redis with AUTH username password). */}}
@@ -76,6 +71,11 @@ data:
   {{- $redisUsername := .Values.global.env.REDIS_USERNAME | default .Values.redis.external.username }}
   {{- if and $redisUsername (ne ($redisUsername | toString) "") }}
   REDIS_USERNAME: {{ $redisUsername | quote }}
+  {{- end }}
+  {{- $redisAuthMode := .Values.global.env.REDIS_AUTH_MODE | default .Values.redis.external.authMode }}
+  {{- if and $redisAuthMode (ne ($redisAuthMode | toString) "") }}
+  REDIS_AUTH_MODE: {{ $redisAuthMode | quote }}
+  REDIS_IAM_AUTH: {{ ternary "true" "false" (eq ($redisAuthMode | toString) "iam") | quote }}
   {{- end }}
   {{- end }}
   {{- if and .Values.global.env .Values.global.env.UPSTREAM_READ_TIMEOUT (ne .Values.global.env.UPSTREAM_READ_TIMEOUT "") }}

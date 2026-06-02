@@ -673,6 +673,76 @@ runtime: node | go | python | java (defaults to go -> SSL_CERT_FILE).
 {{- end }}
 
 {{/*
+Global AWS IRSA service account annotations.
+
+When global.irsa.roleArn is set and global.irsa.applyGlobally is true, every
+ServiceAccount template that includes this helper receives the role annotation.
+Leave applyGlobally false and set per-component serviceAccount.annotations for
+least privilege.
+*/}}
+{{- define "neuraltrust-platform.irsa.annotations" -}}
+{{- $irsa := (default dict (default dict .Values.global).irsa) -}}
+{{- if and $irsa.roleArn $irsa.applyGlobally }}
+eks.amazonaws.com/role-arn: {{ $irsa.roleArn | quote }}
+{{- end }}
+{{- end }}
+
+{{/*
+Merged ServiceAccount annotations (global IRSA + per-component), rendered as a
+clean YAML block with no leading blank line. Returns empty when there are none,
+so callers can guard the `annotations:` key with `with`. Per-component keys win
+over the global IRSA role (least privilege).
+Usage:
+  {{- $saAnn := include "neuraltrust-platform.serviceAccount.annotationsBlock" (dict "ctx" . "annotations" $annotations) }}
+  {{- with $saAnn }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
+*/}}
+{{- define "neuraltrust-platform.serviceAccount.annotationsBlock" -}}
+{{- $ctx := .ctx -}}
+{{- $irsa := (default dict (default dict $ctx.Values.global).irsa) -}}
+{{- $merged := dict -}}
+{{- if and $irsa.roleArn $irsa.applyGlobally -}}
+{{- $_ := set $merged "eks.amazonaws.com/role-arn" ($irsa.roleArn | toString) -}}
+{{- end -}}
+{{- range $k, $v := (default dict .annotations) -}}
+{{- $_ := set $merged $k $v -}}
+{{- end -}}
+{{- if $merged -}}
+{{- toYaml $merged -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+True when the neuraltrust-watchdog subchart is enabled at the umbrella level.
+Used to gate the OTel Collector's Prometheus exporter (the bundled or reused
+watchdog Prometheus is its only scraper).
+*/}}
+{{- define "neuraltrust-platform.watchdogEnabled" -}}
+{{- $wd := default dict (index .Values "neuraltrust-watchdog") -}}
+{{- if $wd.enabled -}}true{{- end -}}
+{{- end }}
+
+{{/*
+Render user-supplied pod volumes from component values.
+*/}}
+{{- define "neuraltrust-platform.extraVolumes" -}}
+{{- with .items }}
+{{- toYaml . }}
+{{- end }}
+{{- end }}
+
+{{/*
+Render user-supplied container volume mounts from component values.
+*/}}
+{{- define "neuraltrust-platform.extraVolumeMounts" -}}
+{{- with .items }}
+{{- toYaml . }}
+{{- end }}
+{{- end }}
+
+{{/*
 APPLICATION_VERSION env var, paired with a component's resolved image tag so the
 deployed version can be confirmed at runtime (e.g. via a /health endpoint).
 Best-effort and additive: emits nothing when no tag is resolvable, so it never

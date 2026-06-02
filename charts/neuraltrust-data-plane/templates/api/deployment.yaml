@@ -161,6 +161,7 @@ spec:
               secretKeyRef:
                 name: clickhouse-secrets
                 key: CLICKHOUSE_DATABASE
+          {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "go" "ctx" .) | nindent 10 }}
           resources:
             {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.initContainerResources }}
             {{- toYaml .Values.dataPlane.components.api.initContainerResources | nindent 12 }}
@@ -178,11 +179,12 @@ spec:
             readOnly: true
           - name: tmp
             mountPath: /tmp
+          {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 10 }}
       containers:
       - name: api
         {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.image }}
         {{- $apiRepo := .Values.dataPlane.components.api.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api" }}
-        {{- $apiTag := .Values.dataPlane.components.api.image.tag | default "v1.29.0" }}
+        {{- $apiTag := .Values.dataPlane.components.api.image.tag | default "v1.29.2" }}
         image: {{ include "data-plane.image" (dict "repository" $apiRepo "tag" $apiTag "global" .Values.global) | quote }}
         imagePullPolicy: {{ .Values.dataPlane.components.api.image.pullPolicy | default "Always" }}
         {{- else }}
@@ -328,6 +330,9 @@ spec:
           - name: tmp
             mountPath: /tmp
           {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 10 }}
+        {{- with .Values.dataPlane.components.api.extraVolumeMounts }}
+        {{- include "neuraltrust-platform.extraVolumeMounts" (dict "items" .) | nindent 10 }}
+        {{- end }}
         resources:
           {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.resources }}
           {{- toYaml .Values.dataPlane.components.api.resources | nindent 10 }}
@@ -379,6 +384,9 @@ spec:
       - name: tmp
         emptyDir: {}
       {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 6 }}
+      {{- with .Values.dataPlane.components.api.extraVolumes }}
+      {{- include "neuraltrust-platform.extraVolumes" (dict "items" .) | nindent 6 }}
+      {{- end }}
       - name: init-db
         configMap:
           name: {{ if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.clickhouse .Values.dataPlane.components.clickhouse.configmap }}{{ .Values.dataPlane.components.clickhouse.configmap.name | default "clickhouse-init-job" }}{{ else }}clickhouse-init-job{{ end }}

@@ -1,3 +1,4 @@
+{{- if .Values.redis.enabled }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -54,3 +55,4 @@ data:
     {{- if gt (.Values.redis.replica.replicaCount | int) 0 }}
     replica-read-only yes
     {{- end }} 
+{{- end }}

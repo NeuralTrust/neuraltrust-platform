@@ -87,6 +87,7 @@ Common env block injected into the api / worker / beat containers.
 Usage: {{ include "aispm.commonEnv" . | nindent 12 }}
 */}}
 {{- define "aispm.commonEnv" -}}
+{{- $dbIamAuth := eq (.Values.aispm.database.authMode | default "password") "iam" -}}
 - name: DATABASE_HOST
   value: {{ .Values.aispm.database.host | quote }}
 - name: DATABASE_PORT
@@ -97,11 +98,18 @@ Usage: {{ include "aispm.commonEnv" . | nindent 12 }}
   value: {{ .Values.aispm.database.name | quote }}
 - name: DATABASE_SSL_MODE
   value: {{ .Values.aispm.database.sslMode | quote }}
+- name: DATABASE_AUTH_MODE
+  value: {{ ternary "iam" "password" $dbIamAuth | quote }}
+- name: DATABASE_IAM_AUTH
+  value: {{ ternary "true" "false" $dbIamAuth | quote }}
+{{- /* In IAM mode there is no password; the app mints an RDS token. Marked
+       optional so the env stays valid whether or not the key was generated. */}}
 - name: DATABASE_PASSWORD
   valueFrom:
     secretKeyRef:
       name: aispm-secrets
       key: DATABASE_PASSWORD
+      optional: {{ $dbIamAuth }}
 - name: AUTH_ENCRYPTION_KEY
   valueFrom:
     secretKeyRef:
@@ -173,6 +181,33 @@ Usage: {{ include "aispm.commonEnv" . | nindent 12 }}
   value: {{ .Values.aispm.redis.port | quote }}
 - name: REDIS_DATABASE
   value: {{ .Values.aispm.redis.database | quote }}
+{{- /* Optional Redis auth (external/managed Redis). Each env var renders only
+       when its value is set, so the default in-cluster TrustGate Redis (no auth)
+       is unchanged. REDIS_PASSWORD is sourced from the aispm-secrets Secret. */}}
+{{- $redisAuthMode := .Values.aispm.redis.authMode | default "password" -}}
+{{- $redisIamAuth := eq $redisAuthMode "iam" -}}
+{{- if or (and .Values.aispm.redis.password (ne (.Values.aispm.redis.password | toString) "")) $redisIamAuth }}
+- name: REDIS_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: aispm-secrets
+      key: redis-password
+      optional: true
+{{- end }}
+{{- if and .Values.aispm.redis.username (ne (.Values.aispm.redis.username | toString) "") }}
+- name: REDIS_USERNAME
+  value: {{ .Values.aispm.redis.username | quote }}
+{{- end }}
+{{- if and .Values.aispm.redis.tls (ne (.Values.aispm.redis.tls | toString) "") }}
+- name: REDIS_TLS
+  value: {{ .Values.aispm.redis.tls | quote }}
+{{- end }}
+{{- if $redisIamAuth }}
+- name: REDIS_AUTH_MODE
+  value: "iam"
+- name: REDIS_IAM_AUTH
+  value: "true"
+{{- end }}
 - name: KAFKA_BOOTSTRAP_SERVERS
   value: {{ include "aispm.kafka.bootstrapServers" . | quote }}
 - name: AISPM_API_URL

@@ -49,7 +49,7 @@ spec:
       {{- end }}
       containers:
         - name: otel-collector
-          image: {{ printf "%s:%s" (default "otel/opentelemetry-collector-contrib" (default dict $coll.image).repository) (default "0.110.0" (default dict $coll.image).tag) | quote }}
+          image: {{ printf "%s:%s" (default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/opentelemetry-collector-contrib" (default dict $coll.image).repository) (default "0.153.0" (default dict $coll.image).tag) | quote }}
           imagePullPolicy: {{ default "IfNotPresent" (default dict $coll.image).pullPolicy }}
           args:
             - --config=/etc/otelcol/config.yaml
@@ -70,6 +70,7 @@ spec:
                   key: {{ default "token" $auth.tokenSecretKey }}
             {{- end }}
             {{- include "neuraltrust-platform.proxy-env" . | nindent 12 }}
+            {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "go" "ctx" .) | nindent 12 }}
           ports:
             - name: otlp-grpc
               containerPort: 4317
@@ -87,6 +88,15 @@ spec:
             - name: metrics
               containerPort: 8888
               protocol: TCP
+            {{- if include "neuraltrust-platform.watchdogEnabled" . }}
+            # Prometheus exporter for processed workload metrics. The
+            # watchdog-local Prometheus scrapes this endpoint for RED
+            # counters used by promql checks. Only rendered when the
+            # watchdog subchart is enabled.
+            - name: prom-export
+              containerPort: 8889
+              protocol: TCP
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /
@@ -117,6 +127,7 @@ spec:
             {{- end }}
             - name: tmp
               mountPath: /tmp
+            {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 12 }}
             {{- if and $renderHosted $auth.tlsCaSecretName }}
             - name: ca-bundle
               mountPath: /etc/otelcol/ca
@@ -129,6 +140,7 @@ spec:
         - name: tmp
           emptyDir:
             sizeLimit: 256Mi
+        {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 8 }}
         {{- if $bufEnabled }}
         - name: buffer
           persistentVolumeClaim:

@@ -53,6 +53,13 @@ global:
     secretName: "" # Required when enabled: existing secret holding the CA bundle
     key: ca.crt # Key within the secret that holds the PEM bundle
     mountPath: /etc/ssl/certs/custom-ca.crt # File path the bundle is mounted at
+  # AWS IAM Roles for Service Accounts (IRSA). When roleArn is set, service
+  # accounts that include the shared helper receive the
+  # eks.amazonaws.com/role-arn annotation. Per-component annotations can still
+  # add extra keys.
+  irsa:
+    roleArn: ""
+    applyGlobally: false
   # Private Service Connect (PSC) -- GCP only
   # Services listed in negNames get a standalone NEG (PSC-only, no public Ingress).
   # Services NOT listed keep their regular {"ingress": true} annotation.
@@ -221,8 +228,8 @@ global:
       # behaviour for upgrades).
       endpoint: ""
       image:
-        repository: otel/opentelemetry-collector-contrib
-        tag: "0.110.0"
+        repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/opentelemetry-collector-contrib
+        tag: "0.153.0"
         pullPolicy: IfNotPresent
       replicas: 1
       service:
@@ -309,7 +316,16 @@ neuraltrust-aispm:
     #   dbPassword: ""         # Auto-generated if empty
     #   openaiApiKey: ""       # Required at runtime; chart does not enforce
     # database: { host: "control-plane-postgresql", user: "aispm", name: "aispm", sslMode: "disable" }
+    #   authMode: "password"   # "iam" = AWS RDS IAM auth (password-less). Skips the
+    #                          # DATABASE_PASSWORD requirement + init Job and emits
+    #                          # DATABASE_AUTH_MODE/DATABASE_IAM_AUTH. Needs an
+    #                          # IAM-capable image + IRSA + external RDS. See SECRETS.md.
     # redis:    { host: "", port: "6379", database: "1" }   # Empty host shares TrustGate Redis
+    #   password: ""           # External Redis password (-> aispm-secrets `redis-password`)
+    #   username: ""           # Redis 6+ ACL username (-> REDIS_USERNAME)
+    #   tls: ""                # "true" for TLS-only managed Redis (-> REDIS_TLS)
+    #   authMode: "password"   # "iam" = ElastiCache IAM auth (password-less). Emits
+    #                          # REDIS_AUTH_MODE/REDIS_IAM_AUTH. Needs IAM-capable image + IRSA.
     # kafka:    { bootstrapServers: "", postureTopic: "posture_alerts" }
 # SIEM forwarder
 # Internal-only worker that consumes Kafka audit/posture events and forwards
@@ -532,7 +548,7 @@ trustgate:
     image:
       pullPolicy: Always
       image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee"
-      tag: "v1.27.9"
+      tag: "v1.28.0"
       # imagePullSecrets: if not set, will fall back to parent chart's global.imagePullSecrets
       imagePullSecrets: ["gcr-secret"] # Set to array of secret names, e.g., ["secret-name"] or leave empty to use parent global.imagePullSecrets
     postgresql:
@@ -575,7 +591,7 @@ trustgate:
   # Service Account configuration
   serviceAccount:
     create: true
-    name: ""
+    name: "trustgate"
     annotations: {}
   # Common configurations
   config:
@@ -780,6 +796,10 @@ neuraltrust-control-plane:
   controlPlane:
     enabled: false
     imagePullSecrets: "gcr-secret" # Set imagePullSecrets for all control-plane components (scheduler, api, app, postgresql)
+    serviceAccount:
+      create: true
+      name: control-plane
+      annotations: {}
     secrets:
       controlPlaneJWTSecret: "" # Auto-generated if empty
       openaiApiKey: ""
@@ -811,7 +831,7 @@ neuraltrust-control-plane:
         replicaCount: 1
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/scheduler"
-          tag: "v1.9.8"
+          tag: "v1.10.0"
           pullPolicy: "Always"
         config:
           # URLs will be auto-generated from OpenShift Routes if global.openshift=true and global.openshiftDomain is set
@@ -957,6 +977,12 @@ neuraltrust-control-plane:
         extraEnv: []
         extraEnvFrom: []
       postgresql:
+        # password | iam. "iam" = AWS RDS IAM auth (password-less): the chart emits
+        # a password-less DATABASE_URL + DATABASE_AUTH_MODE/DATABASE_IAM_AUTH so the
+        # api/app/scheduler can mint SigV4 tokens. Only honored for EXTERNAL Postgres
+        # (infrastructure.postgresql.deploy=false) — the bundled in-cluster PG always
+        # uses a password. Needs an IAM-capable image + IRSA. See SECRETS.md.
+        authMode: "password"
         secrets:
           name: "postgresql-secrets"
           user: "neuraltrust" # PostgreSQL user (default: "neuraltrust" for in-cluster, "postgres" for external)
@@ -994,6 +1020,10 @@ neuraltrust-data-plane:
   dataPlane:
     enabled: true
     imagePullSecrets: "gcr-secret" # Set imagePullSecrets for all data-plane components (api, worker, kafka-connect)
+    serviceAccount:
+      create: true
+      name: data-plane
+      annotations: {}
     secrets:
       openaiApiKeySecretName: "openai-secrets"
       openaiApiKey: ""
@@ -1055,7 +1085,7 @@ neuraltrust-data-plane:
         classifierModel: "gpt"
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.29.0
+          tag: v1.29.2
           pullPolicy: Always
         accessMode: ReadWriteOnce
         huggingfaceToken: ""
@@ -1174,7 +1204,7 @@ neuraltrust-firewall:
       replicas: 2
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-        tag: "v2.9.6"
+        tag: "v2.10.0"
         pullPolicy: IfNotPresent
       resources:
         requests:
@@ -1208,7 +1238,7 @@ neuraltrust-firewall:
       deploymentStrategy: Recreate # Recreate | RollingUpdate — Recreate avoids 2× worker capacity during rollouts
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-        tag: "v2.9.6"
+        tag: "v2.10.0"
         pullPolicy: IfNotPresent
       replicas: 1
       resources:

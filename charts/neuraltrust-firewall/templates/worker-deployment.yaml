@@ -68,7 +68,7 @@ spec:
         - name: worker
           {{- $wImage := $workerCfg.image | default $defaults.image }}
           {{- $wRepo := $wImage.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu" }}
-          {{- $wTag := $wImage.tag | default "v2.9.6" }}
+          {{- $wTag := $wImage.tag | default "v2.10.0" }}
           image: {{ include "firewall.image" (dict "repository" $wRepo "tag" $wTag "global" $.Values.global) | quote }}
           imagePullPolicy: {{ $wImage.pullPolicy | default "IfNotPresent" }}
           {{- /* The firewall image CMD (`python -m src.serve`) dual-binds to 0.0.0.0
@@ -152,12 +152,18 @@ spec:
             - name: cache
               mountPath: /root/.cache
             {{- include "neuraltrust-platform.customCaCert.volumeMount" $ | nindent 12 }}
+            {{- with $workerCfg.extraVolumeMounts }}
+            {{- include "neuraltrust-platform.extraVolumeMounts" (dict "items" .) | nindent 12 }}
+            {{- end }}
       volumes:
         - name: tmp
           emptyDir: {}
         - name: cache
           emptyDir: {}
         {{- include "neuraltrust-platform.customCaCert.volume" $ | nindent 8 }}
+        {{- with $workerCfg.extraVolumes }}
+        {{- include "neuraltrust-platform.extraVolumes" (dict "items" .) | nindent 8 }}
+        {{- end }}
 {{- end }}
 {{- end }}
 {{- end }}

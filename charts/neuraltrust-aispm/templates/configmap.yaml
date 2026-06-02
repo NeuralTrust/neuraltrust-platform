@@ -16,6 +16,11 @@ data:
   NOTIFICATION_EMAIL_MIN_SEVERITY: {{ .Values.aispm.config.notificationEmailMinSeverity | quote }}
   NOTIFICATION_SIEM_MIN_SEVERITY: {{ .Values.aispm.config.notificationSiemMinSeverity | quote }}
   OTEL_ENABLED: {{ .Values.aispm.config.otelEnabled | quote }}
+  {{- if eq (.Values.aispm.config.otelEnabled | toString) "true" }}
+  # Emit stable HTTP semconv (http.server.request.duration) so watchdog RED
+  # alerting sees the same series the collector and GMP expect.
+  OTEL_SEMCONV_STABILITY_OPT_IN: "http"
+  {{- end }}
   OTEL_SERVICE_NAME: {{ .Values.aispm.config.otelServiceName | quote }}
   {{- /*
     Endpoint resolution order:

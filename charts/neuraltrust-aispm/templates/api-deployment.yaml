@@ -58,6 +58,7 @@ spec:
             {{- end }}
             {{- include "neuraltrust-platform.proxy-env" . | nindent 12 }}
             {{- include "neuraltrust-platform.appVersionEnv" (dict "tag" $tag) | nindent 12 }}
+            {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "python" "ctx" .) | nindent 12 }}
           startupProbe:
             httpGet:
               path: /health
@@ -97,7 +98,15 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 12 }}
+            {{- with .Values.aispm.api.extraVolumeMounts }}
+            {{- include "neuraltrust-platform.extraVolumeMounts" (dict "items" .) | nindent 12 }}
+            {{- end }}
       volumes:
         - name: tmp
           emptyDir: {}
+        {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 8 }}
+        {{- with .Values.aispm.api.extraVolumes }}
+        {{- include "neuraltrust-platform.extraVolumes" (dict "items" .) | nindent 8 }}
+        {{- end }}
 {{- end }}

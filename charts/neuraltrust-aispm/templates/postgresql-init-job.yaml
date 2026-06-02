@@ -8,7 +8,10 @@ Job to initialize the AISPM PostgreSQL database and user.
    postgresql-secrets is optional when using external PostgreSQL — in that
    case the customer must pre-create the aispm user and database.
 */}}
-{{- if .Values.aispm.enabled }}
+{{- /* Skipped in IAM auth mode: the Job password-authenticates to create the
+       aispm user/database, which isn't possible without a static password. With
+       external RDS + IAM the operator pre-creates the user/db and GRANT rds_iam. */}}
+{{- if and .Values.aispm.enabled (ne (.Values.aispm.database.authMode | default "password") "iam") }}
 {{- $pgSecretName := "postgresql-secrets" }}
 {{- $aispmSecretName := "aispm-secrets" }}
 {{- $aispmDbHost := .Values.aispm.database.host | default "control-plane-postgresql" | toString }}

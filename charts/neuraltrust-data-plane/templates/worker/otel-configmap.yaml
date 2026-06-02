@@ -20,4 +20,6 @@ data:
   OTEL_EXPORTER_OTLP_ENDPOINT: {{ $endpoint | quote }}
   OTEL_SERVICE_NAME: {{ default "data-plane-worker" $workerCfg.otelServiceName | quote }}
   OTEL_ENVIRONMENT: {{ default "production" $workerCfg.otelEnvironment | quote }}
+  # Stable HTTP semconv, consistent with the rest of the platform's OTel wiring.
+  OTEL_SEMCONV_STABILITY_OPT_IN: "http"
 {{- end }}

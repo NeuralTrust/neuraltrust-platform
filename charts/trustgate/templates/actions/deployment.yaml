@@ -21,6 +21,7 @@ spec:
         {{- include "trustgate.actions.labels" . | nindent 8 }}
         component: actions
     spec:
+      serviceAccountName: {{ include "trustgate.serviceAccountName" . }}
       {{- include "trustgate.imagePullSecrets" . | nindent 6 }}
       {{- if .Values.securityHardening }}
       securityContext:
@@ -33,6 +34,9 @@ spec:
       - name: tmp
         emptyDir: {}
       {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 6 }}
+      {{- with .Values.actions.extraVolumes }}
+      {{- include "neuraltrust-platform.extraVolumes" (dict "items" .) | nindent 6 }}
+      {{- end }}
       containers:
       - name: actions
         image: {{ include "trustgate.image" (dict "repository" .Values.global.image.image "tag" .Values.global.image.tag "global" .Values.global) | quote }}
@@ -87,8 +91,19 @@ spec:
               name: trustgate-secrets
               key: DATABASE_SSL_MODE
               optional: true
-        # REDIS_PASSWORD is optional - can come from ConfigMap (trustgate-env-vars) or secret
-        # If provided in secret, it will override ConfigMap value
+        - name: DATABASE_AUTH_MODE
+          valueFrom:
+            secretKeyRef:
+              name: trustgate-secrets
+              key: DATABASE_AUTH_MODE
+              optional: true
+        - name: DATABASE_IAM_AUTH
+          valueFrom:
+            secretKeyRef:
+              name: trustgate-secrets
+              key: DATABASE_IAM_AUTH
+              optional: true
+        # REDIS_PASSWORD is optional and sourced only from trustgate-secrets when configured
         - name: REDIS_PASSWORD
           valueFrom:
             secretKeyRef:
@@ -130,6 +145,9 @@ spec:
         - name: tmp
           mountPath: /tmp
         {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 8 }}
+        {{- with .Values.actions.extraVolumeMounts }}
+        {{- include "neuraltrust-platform.extraVolumeMounts" (dict "items" .) | nindent 8 }}
+        {{- end }}
         resources:
           {{- toYaml .Values.actions.resources | nindent 10 }}
         readinessProbe:

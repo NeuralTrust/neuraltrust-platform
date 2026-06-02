@@ -374,5 +374,103 @@ assert_not_contains "$TMP/dp-jobs-off.yaml" "serviceAccountName: data-plane-api"
 assert_not_contains "$TMP/dp-jobs-off.yaml" 'name: K8S_JOBS_ENABLED'              "no K8S_JOBS_ENABLED env when disabled"
 assert_not_contains "$TMP/dp-jobs-off.yaml" 'name: K8S_JOB_IMAGE'                 "no K8S_JOB_IMAGE env when disabled"
 
+# Scenario 18: TrustGate IAM DB auth. With DATABASE_AUTH_MODE=iam the chart
+# must skip the postgresql-init Job (the chart can no longer password-auth as
+# admin) and emit DATABASE_IAM_AUTH=true. Default (password) keeps the Job.
+blue "scenario 18: TrustGate IAM Postgres auth skips the init Job"
+render "$TMP/tg-iam.yaml" \
+  --set trustgate.enabled=true \
+  --set trustgate.global.env.DATABASE_AUTH_MODE=iam
+assert_not_contains "$TMP/tg-iam.yaml" "app.kubernetes.io/component: postgresql-init" "postgresql-init Job skipped in IAM mode"
+# DATABASE_IAM_AUTH=true (base64 "dHJ1ZQ==") written into trustgate-secrets.
+assert_contains     "$TMP/tg-iam.yaml" "DATABASE_IAM_AUTH: \"dHJ1ZQ==\""               "DATABASE_IAM_AUTH=true in trustgate-secrets (IAM mode)"
+
+blue "scenario 18b: TrustGate password auth (default) keeps the init Job"
+assert_contains     "$TMP/default.yaml" "app.kubernetes.io/component: postgresql-init" "postgresql-init Job present in password mode"
+
+# Scenario 19: IRSA. applyGlobally annotates every component ServiceAccount with
+# the role; default (off) emits no role annotation. Guards the new
+# serviceAccount.annotationsBlock helper.
+blue "scenario 19: global IRSA annotates ServiceAccounts when applyGlobally=true"
+render "$TMP/irsa-on.yaml" \
+  --set trustgate.enabled=true \
+  --set global.irsa.roleArn=arn:aws:iam::111122223333:role/nt-platform \
+  --set global.irsa.applyGlobally=true
+assert_contains     "$TMP/irsa-on.yaml" "eks.amazonaws.com/role-arn: .?arn:aws:iam::111122223333:role/nt-platform" "IRSA role annotation applied to SAs"
+assert_not_contains "$TMP/default.yaml" "eks.amazonaws.com/role-arn"                                                  "no IRSA annotation by default (backward-compat)"
+
+# Scenario 20: TrustGate external Redis IAM auth. The ConfigMap exposes
+# REDIS_AUTH_MODE / REDIS_IAM_AUTH (plaintext, app-readable).
+blue "scenario 20: TrustGate Redis IAM auth flags in env ConfigMap"
+render "$TMP/tg-redis-iam.yaml" \
+  --set trustgate.enabled=true \
+  --set trustgate.redis.enabled=false \
+  --set trustgate.redis.external.host=cache.example.com \
+  --set trustgate.redis.external.authMode=iam
+assert_contains "$TMP/tg-redis-iam.yaml" "REDIS_AUTH_MODE: \"iam\""  "REDIS_AUTH_MODE emitted for external Redis IAM"
+assert_contains "$TMP/tg-redis-iam.yaml" "REDIS_IAM_AUTH: \"true\""  "REDIS_IAM_AUTH=true emitted for external Redis IAM"
+
+# Scenario 21: the OTel Collector Prometheus exporter (:8889) is gated on the
+# watchdog subchart. Present when watchdog is on (its Prometheus scrapes it),
+# absent otherwise even with the collector running.
+blue "scenario 21: collector Prometheus exporter gated on watchdog"
+assert_contains     "$TMP/watchdog.yaml"       "0.0.0.0:8889" "collector exposes :8889 Prometheus exporter when watchdog enabled"
+assert_not_contains "$TMP/default-obs-on.yaml" "0.0.0.0:8889" "collector omits :8889 exporter when watchdog disabled"
+
+# Scenario 22: Control-Plane IAM Postgres auth. IAM is only honored for external
+# PostgreSQL — the chart emits DATABASE_IAM_AUTH=true (base64 "dHJ1ZQ==") in
+# postgresql-secrets. With in-cluster PG it must stay password (false). TrustGate
+# is disabled here so the only DATABASE_IAM_AUTH key comes from control-plane.
+blue "scenario 22: Control-Plane IAM Postgres auth (external only)"
+render "$TMP/cp-iam.yaml" \
+  --set trustgate.enabled=false \
+  --set neuraltrust-control-plane.infrastructure.postgresql.deploy=false \
+  --set neuraltrust-control-plane.controlPlane.components.postgresql.secrets.host=db.example.com \
+  --set neuraltrust-control-plane.controlPlane.components.postgresql.authMode=iam
+assert_contains     "$TMP/cp-iam.yaml" "DATABASE_IAM_AUTH: \"dHJ1ZQ==\"" "control-plane DATABASE_IAM_AUTH=true for external IAM Postgres"
+assert_not_contains "$TMP/cp-iam.yaml" "DATABASE_IAM_AUTH: \"ZmFsc2U=\"" "no password-mode flag when control-plane IAM is active"
+
+blue "scenario 22b: Control-Plane IAM ignored for the in-cluster bundled PG"
+render "$TMP/cp-iam-incluster.yaml" \
+  --set trustgate.enabled=false \
+  --set neuraltrust-control-plane.controlPlane.components.postgresql.authMode=iam
+assert_contains     "$TMP/cp-iam-incluster.yaml" "DATABASE_IAM_AUTH: \"ZmFsc2U=\"" "in-cluster PG stays password even with authMode=iam"
+assert_not_contains "$TMP/cp-iam-incluster.yaml" "DATABASE_IAM_AUTH: \"dHJ1ZQ==\"" "IAM not activated for in-cluster PG"
+
+# Scenario 23: AISPM IAM Postgres auth. IAM skips the aispm-postgresql-init Job
+# (no static password to create the user/db) and empties DATABASE_PASSWORD in
+# aispm-secrets. Default (password) keeps the Job and a generated password.
+# TrustGate disabled so DATABASE_PASSWORD:"" can only come from aispm.
+blue "scenario 23: AISPM IAM Postgres auth skips the init Job"
+render "$TMP/aispm-iam.yaml" \
+  --set trustgate.enabled=false \
+  --set neuraltrust-aispm.aispm.enabled=true \
+  --set neuraltrust-aispm.aispm.database.authMode=iam
+assert_not_contains "$TMP/aispm-iam.yaml" "aispm-postgresql-init"   "aispm init Job skipped in IAM mode"
+assert_contains     "$TMP/aispm-iam.yaml" "DATABASE_PASSWORD: \"\"" "aispm DB password empty in IAM mode"
+
+blue "scenario 23b: AISPM password auth (default) keeps the init Job + password"
+render "$TMP/aispm-default.yaml" \
+  --set trustgate.enabled=false \
+  --set neuraltrust-aispm.aispm.enabled=true
+assert_contains     "$TMP/aispm-default.yaml" "aispm-postgresql-init"   "aispm init Job present in password mode"
+assert_not_contains "$TMP/aispm-default.yaml" "DATABASE_PASSWORD: \"\"" "aispm DB password generated in password mode"
+
+# Scenario 24: AISPM Redis auth plumbing. Each env renders only when its value is
+# set; the default (shared in-cluster TrustGate Redis) emits none. TrustGate is
+# disabled so these markers can only originate from the aispm workloads.
+blue "scenario 24: AISPM Redis auth env wired only when configured"
+render "$TMP/aispm-redis.yaml" \
+  --set trustgate.enabled=false \
+  --set neuraltrust-aispm.aispm.enabled=true \
+  --set neuraltrust-aispm.aispm.redis.password=s3cr3t \
+  --set neuraltrust-aispm.aispm.redis.username=aispm \
+  --set neuraltrust-aispm.aispm.redis.tls=true
+assert_contains     "$TMP/aispm-redis.yaml"   "key: redis-password" "aispm REDIS_PASSWORD wired from aispm-secrets when set"
+assert_contains     "$TMP/aispm-redis.yaml"   "REDIS_USERNAME"      "aispm REDIS_USERNAME emitted when set"
+assert_contains     "$TMP/aispm-redis.yaml"   "REDIS_TLS"           "aispm REDIS_TLS emitted when set"
+assert_not_contains "$TMP/aispm-default.yaml" "key: redis-password" "no aispm Redis password by default (backward-compat)"
+assert_not_contains "$TMP/aispm-default.yaml" "REDIS_USERNAME"      "no aispm REDIS_USERNAME by default (backward-compat)"
+
 green ""
 green "All helm-render assertions passed."

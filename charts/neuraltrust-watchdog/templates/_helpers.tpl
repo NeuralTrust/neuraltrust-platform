@@ -52,6 +52,51 @@ ServiceAccount name resolver.
 {{- end }}
 
 {{/*
+Fully qualified name for the bundled local Prometheus.
+*/}}
+{{- define "neuraltrust-watchdog.prometheusFullname" -}}
+{{- printf "%s-prometheus" (include "neuraltrust-watchdog.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+Selector labels for the bundled local Prometheus.
+*/}}
+{{- define "neuraltrust-watchdog.prometheusSelectorLabels" -}}
+app.kubernetes.io/name: {{ include "neuraltrust-watchdog.name" . }}-prometheus
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
+
+{{/*
+Common labels for the bundled local Prometheus.
+*/}}
+{{- define "neuraltrust-watchdog.prometheusLabels" -}}
+helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+{{ include "neuraltrust-watchdog.prometheusSelectorLabels" . }}
+app.kubernetes.io/component: local-prometheus
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+app.kubernetes.io/part-of: neuraltrust-platform
+{{- end }}
+
+{{/*
+ServiceAccount name for the bundled local Prometheus.
+*/}}
+{{- define "neuraltrust-watchdog.prometheusServiceAccountName" -}}
+{{- default (include "neuraltrust-watchdog.prometheusFullname" .) .Values.prometheus.serviceAccount.name }}
+{{- end }}
+
+{{/*
+Prometheus query endpoint injected into the watchdog container.
+*/}}
+{{- define "neuraltrust-watchdog.prometheusEndpoint" -}}
+{{- if .Values.prometheus.reuseExisting -}}
+{{- trimSuffix "/" .Values.prometheus.reuseExisting -}}
+{{- else -}}
+{{- printf "http://%s.%s.svc.cluster.local:%v" (include "neuraltrust-watchdog.prometheusFullname" .) .Release.Namespace (.Values.prometheus.service.port | default 9090) -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Resolved image reference. Honors umbrella global.imageRegistry if set.
 */}}
 {{- define "neuraltrust-watchdog.image" -}}
