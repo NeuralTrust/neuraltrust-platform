@@ -32,6 +32,7 @@ on:
       - 'SECURITY.md'
       - 'SUPPORT.md'
       - 'TESTING.md'
+      - 'scripts/**'
 
 permissions:
   contents: write
