@@ -30,6 +30,15 @@ spec:
       port: 8888
       targetPort: metrics
       protocol: TCP
+    {{- if include "neuraltrust-platform.watchdogEnabled" . }}
+    # Expose the collector's Prometheus exporter for local watchdog
+    # Prometheus. This is processed workload telemetry, not collector
+    # self-metrics. Only rendered when the watchdog subchart is enabled.
+    - name: prom-export
+      port: 8889
+      targetPort: prom-export
+      protocol: TCP
+    {{- end }}
   selector:
     {{- include "neuraltrust-platform.otelCollector.selectorLabels" . | nindent 4 }}
 {{- end }}

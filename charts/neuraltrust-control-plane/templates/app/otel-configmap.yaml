@@ -22,5 +22,8 @@ metadata:
 data:
   OTEL_EXPORTER_OTLP_ENDPOINT: {{ $endpoint | quote }}
   OTEL_SERVICE_NAME: {{ default "control-plane-app" $appCfg.otelServiceName | quote }}
+  # Emit stable HTTP semconv (http.server.request.duration) so watchdog RED
+  # alerting sees the same series the collector and GMP expect.
+  OTEL_SEMCONV_STABILITY_OPT_IN: "http"
 {{- end }}
 {{- end }}

@@ -101,10 +101,21 @@ All required secrets must exist in the namespace before deployment.
 | `postgresql-secrets` | `POSTGRES_HOST` | Yes (if pre-generating) | Database hostname |
 | `postgresql-secrets` | `POSTGRES_PORT` | Yes (if pre-generating) | Database port |
 | `postgresql-secrets` | `POSTGRES_USER` | Yes (if pre-generating) | Database username |
-| `postgresql-secrets` | `POSTGRES_PASSWORD` | Auto-generated | Database password |
+| `postgresql-secrets` | `POSTGRES_PASSWORD` | Auto-generated (password mode) | Database password. Empty when `controlPlane.components.postgresql.authMode: iam`. |
 | `postgresql-secrets` | `POSTGRES_DB` | Yes (if pre-generating) | Database name |
-| `postgresql-secrets` | `DATABASE_URL` | Yes (if pre-generating) | Connection URL (URL-encoded) |
-| `postgresql-secrets` | `POSTGRES_PRISMA_URL` | Yes (if pre-generating) | Prisma-compatible URL |
+| `postgresql-secrets` | `DATABASE_AUTH_MODE` | No | `password` (default) or `iam`. IAM is only honored for external Postgres (`infrastructure.postgresql.deploy: false`). |
+| `postgresql-secrets` | `DATABASE_IAM_AUTH` | No | `"true"`/`"false"` mirror of the auth mode, read by api/app/scheduler. |
+| `postgresql-secrets` | `DATABASE_URL` | Yes (if pre-generating) | Connection URL (URL-encoded). Password-less when `authMode: iam`. |
+| `postgresql-secrets` | `POSTGRES_PRISMA_URL` | Yes (if pre-generating) | Prisma-compatible URL. Password-less when `authMode: iam`. |
+
+> **IAM auth for Control-Plane Postgres (chart plumbing).** Setting
+> `neuraltrust-control-plane.controlPlane.components.postgresql.authMode: iam`
+> makes the chart emit a password-less `DATABASE_URL`/`POSTGRES_PRISMA_URL` and
+> the `DATABASE_AUTH_MODE`/`DATABASE_IAM_AUTH` flags, and stops generating
+> `POSTGRES_PASSWORD`. The api/app/scheduler must run an **IAM-capable image**
+> that mints an RDS SigV4 token at connect time, with `global.irsa` providing the
+> role. Until the images support it, leave `authMode: password` (default). IAM is
+> ignored for the bundled in-cluster PostgreSQL — it always uses a password.
 
 ### Infrastructure
 
@@ -131,11 +142,22 @@ Created only when explicitly enabled. None are auto-generated — operators brin
 | `trustgate-secrets` | `DATABASE_HOST` | No | PostgreSQL host (external DB) |
 | `trustgate-secrets` | `DATABASE_PORT` | No | PostgreSQL port (external DB) |
 | `trustgate-secrets` | `DATABASE_USER` | No | PostgreSQL user (external DB) |
-| `trustgate-secrets` | `DATABASE_PASSWORD` | Auto-generated | PostgreSQL password |
+| `trustgate-secrets` | `DATABASE_PASSWORD` | Auto-generated (password mode) | PostgreSQL password. Empty when `DATABASE_AUTH_MODE: iam`. |
 | `trustgate-secrets` | `DATABASE_NAME` | No | PostgreSQL database (external DB) |
-| `trustgate-secrets` | `DATABASE_URL` | No | Connection URL (external DB) |
+| `trustgate-secrets` | `DATABASE_URL` | No | Connection URL (external DB). Password-less when `DATABASE_AUTH_MODE: iam`. |
+| `trustgate-secrets` | `DATABASE_AUTH_MODE` | No | `password` (default) or `iam` (AWS RDS IAM auth). |
+| `trustgate-secrets` | `DATABASE_IAM_AUTH` | No | `"true"`/`"false"` mirror of the auth mode, for the app. |
+| `trustgate-secrets` | `redis-password` | No | External Redis password. Sourced from `trustgate.global.env.REDIS_PASSWORD` / `redis.external.password`. **Lives only in this Secret — no longer in the `trustgate-env-vars` ConfigMap.** |
 | `trustgate-secrets` | `NEURAL_TRUST_FIREWALL_URL` | No | Firewall base URL |
 | `trustgate-secrets` | `NEURAL_TRUST_FIREWALL_SECRET_KEY` | No | Firewall API key |
+
+> **Upgrade note (Redis password moved ConfigMap → Secret).** The TrustGate
+> Redis password is no longer emitted into the `trustgate-env-vars` ConfigMap; it
+> is read only from `trustgate-secrets` key `redis-password` (env `REDIS_PASSWORD`,
+> `optional: true`). With `global.autoGenerateSecrets: true` the chart writes the
+> key for you on upgrade. With `global.preserveExistingSecrets: true` you manage
+> `trustgate-secrets` yourself — **add a `redis-password` key** before upgrading,
+> otherwise `REDIS_PASSWORD` resolves empty and Redis auth fails at runtime.
 
 ### Firewall
 
@@ -147,6 +169,27 @@ Created when `neuraltrust-firewall.firewall.enabled: true`:
 | `firewall-secrets` | `HUGGINGFACE_TOKEN` | No | HF token for model weights |
 
 Align `controlPlane.secrets.firewallJwtSecret` (`FIREWALL_JWT_SECRET`) with `firewall-secrets` `JWT_SECRET` when the Control Plane validates firewall tokens.
+
+### AISPM
+
+Created when `neuraltrust-aispm.aispm.enabled: true`:
+
+| Kubernetes Secret | Key | Required | Description |
+|---|---|---|---|
+| `aispm-secrets` | `AUTH_ENCRYPTION_KEY` | Auto-generated | Fernet key (44-char urlsafe base64) |
+| `aispm-secrets` | `DATABASE_PASSWORD` | Auto-generated (password mode) | Postgres password. Empty when `aispm.database.authMode: iam`. |
+| `aispm-secrets` | `redis-password` | No | External Redis password. Sourced from `aispm.redis.password`. Emitted only when set. |
+| `aispm-secrets` | `OPENAI_API_KEY` … | No | Optional pass-through keys (GitHub App, Azure, Resend, admin). |
+
+> **IAM auth for AISPM (chart plumbing).** `aispm.database.authMode: iam` makes
+> the chart skip the `DATABASE_PASSWORD` requirement and the `aispm-postgresql-init`
+> Job, and emit `DATABASE_AUTH_MODE`/`DATABASE_IAM_AUTH` env so the app can mint
+> RDS tokens (external RDS only; pre-create the aispm user/db with `GRANT rds_iam`).
+> For Redis, `aispm.redis.authMode: iam` emits `REDIS_AUTH_MODE`/`REDIS_IAM_AUTH`;
+> `aispm.redis.password`/`username`/`tls` wire `REDIS_PASSWORD` (via `redis-password`),
+> `REDIS_USERNAME`, and `REDIS_TLS`. Each Redis env renders only when set, so the
+> default in-cluster TrustGate Redis (no auth) is unchanged. Both need an
+> IAM-capable AISPM image + `global.irsa`; leave `password` (default) until then.
 
 ### Docker registry
 

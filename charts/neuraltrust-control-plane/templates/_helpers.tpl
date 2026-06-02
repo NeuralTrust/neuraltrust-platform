@@ -25,6 +25,18 @@ Usage: {{ include "control-plane.image" (dict "repository" .Values.controlPlane.
 {{- end }}
 
 {{/*
+Create the name of the service account to use for control-plane workloads.
+*/}}
+{{- define "control-plane.serviceAccountName" -}}
+{{- $sa := default dict (default dict .Values.controlPlane).serviceAccount -}}
+{{- if hasKey $sa "name" -}}
+{{- default "control-plane" $sa.name -}}
+{{- else -}}
+control-plane
+{{- end -}}
+{{- end }}
+
+{{/*
 Helper to get secret value - supports both direct values and secret references
 Usage: {{ include "control-plane.getSecretValue" (dict "value" .Values.controlPlane.secrets.openaiApiKey "secretName" "my-secret" "secretKey" "OPENAI_API_KEY" "context" $) }}
 */}}

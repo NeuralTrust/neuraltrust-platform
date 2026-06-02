@@ -14,6 +14,7 @@ Job to initialize TrustGate PostgreSQL database and user.
 {{- $tgDbPassword := "" }}
 {{- $tgDbName := "trustgate" }}
 {{- $tgDbSslMode := "require" }}
+{{- $tgDbAuthMode := "password" }}
 {{- if and .Values.global.env .Values.global.env.DATABASE_HOST (ne .Values.global.env.DATABASE_HOST "") }}
   {{- $tgDbHost = .Values.global.env.DATABASE_HOST }}
 {{- end }}
@@ -32,6 +33,10 @@ Job to initialize TrustGate PostgreSQL database and user.
 {{- if and .Values.global.env .Values.global.env.DATABASE_SSL_MODE (ne .Values.global.env.DATABASE_SSL_MODE "") }}
   {{- $tgDbSslMode = .Values.global.env.DATABASE_SSL_MODE }}
 {{- end }}
+{{- if and .Values.global.env .Values.global.env.DATABASE_AUTH_MODE (ne .Values.global.env.DATABASE_AUTH_MODE "") }}
+  {{- $tgDbAuthMode = .Values.global.env.DATABASE_AUTH_MODE }}
+{{- end }}
+{{- $tgDbIamAuth := eq $tgDbAuthMode "iam" }}
 {{- /* Check if parent chart handles secret auto-generation */}}
 {{- $autoGenerate := false }}
 {{- if and .Values.global (hasKey .Values.global "autoGenerateSecrets") .Values.global.autoGenerateSecrets }}
@@ -39,7 +44,7 @@ Job to initialize TrustGate PostgreSQL database and user.
 {{- end }}
 {{- /* Create job if we have the required values OR if autoGenerateSecrets is enabled */}}
 {{- /* When autoGenerate is true, the parent chart creates trustgate-secrets with the password */}}
-{{- if or (and $tgDbHost $tgDbPassword $tgDbName $tgDbUser) (and $autoGenerate $tgDbHost) }}
+{{- if or (and $tgDbHost $tgDbPassword $tgDbName $tgDbUser) (and (not $tgDbIamAuth) $autoGenerate $tgDbHost) }}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -61,6 +66,7 @@ spec:
         {{- include "trustgate.labels" . | nindent 8 }}
         app.kubernetes.io/component: postgresql-init
     spec:
+      serviceAccountName: {{ include "trustgate.serviceAccountName" . }}
       restartPolicy: Never
       {{- include "trustgate.imagePullSecrets" . | nindent 6 }}
       containers:

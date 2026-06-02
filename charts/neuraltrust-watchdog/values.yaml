@@ -6,18 +6,14 @@
 # umbrella; in that mode the rest of these defaults still apply.
 
 enabled: false
-
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/watchdog
-  tag: v0.2.1                     # defaults to .Chart.AppVersion
+  tag: v0.3.0 # defaults to .Chart.AppVersion
   pullPolicy: IfNotPresent
-
 imagePullSecrets: []
-
 # replicaCount > 1 requires k8s Lease-based leader election; left to a
 # follow-up. Stick with 1 for now.
 replicaCount: 1
-
 resources:
   requests:
     cpu: 50m
@@ -25,12 +21,58 @@ resources:
   limits:
     cpu: 500m
     memory: 256Mi
-
 service:
   type: ClusterIP
   port: 8080
   metricsPort: 8080
-
+# Bundled short-retention Prometheus. When this chart is enabled the
+# local Prometheus is rendered by default and used as the watchdog's
+# PROMETHEUS_QUERY_URL. It is alerting-only: no Alertmanager, no
+# Prometheus rules, and no remote_write. Long-retention analytics stays
+# on the existing OTel Collector -> hosted observability pipeline.
+prometheus:
+  reuseExisting: "" # Set to an existing in-cluster Prometheus URL to skip the bundled instance.
+  # Optional host:port override for the Collector Prometheus exporter. When
+  # empty, bundled Prometheus discovers the in-chart Collector in the release
+  # namespace by label/port name.
+  collectorTarget: ""
+  image:
+    repository: prom/prometheus
+    tag: v2.54.1
+    pullPolicy: IfNotPresent
+  retentionTime: 3h
+  retentionSize: 512MB
+  scrapeInterval: 30s
+  scrapeTimeout: 10s
+  service:
+    port: 9090
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  serviceAccount:
+    name: ""
+    annotations: {}
+  podAnnotations: {}
+  podLabels: {}
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    runAsGroup: 65534
+    fsGroup: 65534
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
 # Monitoring resources. Five independent capability-gated toggles, so
 # every cluster can pick the combination its stack supports. The
 # annotation baseline is universal; the rest are opt-in CRD-bound
@@ -68,12 +110,10 @@ monitoring:
     additionalLabels: {}
     alertLabels:
       team: platform
-
 serviceAccount:
   create: true
   name: ""
   annotations: {}
-
 # RBAC defaults are minimal: read-only access to namespace resources.
 # Healing actions that mutate (k8s.restart_deployment) require explicit
 # opt-in via rbac.actions.restartDeployment.enabled below.
@@ -85,7 +125,6 @@ rbac:
   actions:
     restartDeployment:
       enabled: false
-
 # Pod-level overrides.
 podAnnotations: {}
 podLabels: {}
@@ -101,16 +140,13 @@ securityContext:
   readOnlyRootFilesystem: true
   capabilities:
     drop: [ALL]
-
 nodeSelector: {}
 tolerations: []
 affinity: {}
 priorityClassName: ""
-
 podDisruptionBudget:
   enabled: false
   minAvailable: 1
-
 networkPolicy:
   enabled: false
   # Allow ingress from these namespace selectors when networkPolicy.enabled.
@@ -120,7 +156,6 @@ networkPolicy:
     # extraEgress is appended verbatim; allows custom cluster-scoped
     # egress rules for the watchdog (e.g. to a managed Kafka SaaS).
     extraEgress: []
-
 # Telemetry: when otlp.endpoint is empty the watchdog falls back to
 # OTEL_EXPORTER_OTLP_ENDPOINT env at runtime; when both are empty the
 # OTel SDK is initialized with no-op providers (graceful no-egress).
@@ -132,7 +167,6 @@ telemetry:
   tenantId: ""
   enableTraces: true
   enableLogs: true
-
 # HTTP server.
 server:
   listenAddr: ":8080"
@@ -142,7 +176,6 @@ server:
     value: ""
     existingSecret: ""
     secretKey: token
-
 # Notification + healing action defaults.
 actions:
   # Global default for all mutating actions; per-check override allowed
@@ -155,7 +188,6 @@ actions:
     secretKey: webhook
   otlp:
     endpointEnv: OTEL_EXPORTER_OTLP_ENDPOINT
-
 # Connection envs sourced from existing cluster secrets.
 secretEnv:
   clickhouse:
@@ -166,7 +198,6 @@ secretEnv:
   redis:
     passwordSecret: ""
     passwordKey: password
-
 # Where the runner schedules checks. defaultInterval applies to checks
 # that omit `interval`. failureThreshold gates healing actions: only
 # fire after N consecutive non-OK results.
@@ -174,7 +205,6 @@ runner:
   defaultInterval: 60s
   defaultTimeout: 15s
   failureThreshold: 3
-
 # Default check set. Override / extend via the watchdog.checks key in
 # customer values. Each entry is passed to the Go watchdog as-is. Set
 # enabled: false to skip a check; the corresponding components do not
@@ -200,14 +230,12 @@ checks:
       queryLogLookbackSeconds: 900
       queryLogExceptionsMax: 0
     actions: [notify.otlp, notify.slack]
-
   - id: kafka-broker
     kind: kafka_broker
     enabled: false
     target:
       bootstrapServers: ["kafka:9092"]
     actions: [notify.otlp, notify.slack]
-
   - id: kafka-connect
     kind: kafka_connect
     enabled: false
@@ -215,7 +243,6 @@ checks:
     target:
       url: http://kafka-connect:8083
     actions: [notify.otlp, notify.slack, kafka_connect.restart_task]
-
   - id: data-plane-worker-lag
     kind: kafka_consumer_lag
     enabled: false
@@ -230,31 +257,100 @@ checks:
     thresholds:
       maxLag: 5000
     actions: [notify.otlp, notify.slack]
-
+  - id: red-request-rate
+    kind: promql
+    enabled: true
+    target:
+      endpointEnv: PROMETHEUS_QUERY_URL
+      query: |
+        max(
+          sum by (service_name) (
+            rate(http_server_request_duration_seconds_count{service_name=~".+"}[5m])
+          )
+        )
+        or vector(0)
+    thresholds:
+      operator: ">"
+      warning: 500
+      critical: 1000
+      noDataStatus: unknown
+    actions: [notify.otlp, notify.slack]
+  - id: red-error-rate
+    kind: promql
+    enabled: false
+    target:
+      endpointEnv: PROMETHEUS_QUERY_URL
+      query: |
+        max(
+          (
+            sum by (service_name) (
+              rate(http_server_request_duration_seconds_count{service_name=~".+",http_response_status_code=~"5.."}[5m])
+            )
+            /
+            clamp_min(
+              sum by (service_name) (
+                rate(http_server_request_duration_seconds_count{service_name=~".+"}[5m])
+              ),
+              0.1
+            )
+          )
+          *
+          (
+            sum by (service_name) (
+              increase(http_server_request_duration_seconds_count{service_name=~".+"}[5m])
+            ) >= bool 30
+          )
+        )
+        or vector(0)
+    thresholds:
+      operator: ">"
+      warning: 0.05
+      critical: 0.15
+      noDataStatus: unknown
+    actions: [notify.otlp, notify.slack]
+  - id: red-duration-p95
+    kind: promql
+    enabled: true
+    target:
+      endpointEnv: PROMETHEUS_QUERY_URL
+      query: |
+        max(
+          histogram_quantile(
+            0.95,
+            sum by (service_name, le) (
+              rate(http_server_request_duration_seconds_bucket{service_name=~".+"}[5m])
+            )
+          )
+        )
+        or vector(0)
+    thresholds:
+      operator: ">"
+      warning: 1
+      critical: 3
+      noDataStatus: unknown
+    actions: [notify.otlp, notify.slack]
   - id: control-plane-synthetic
     kind: httpsynthetic
     enabled: false
     target:
       urls:
-        - { name: api, url: http://control-plane-api/health, expectedStatus: 200, latencyWarnMs: 500, latencyCriticalMs: 2000 }
-        - { name: app, url: http://control-plane-app:3000/api/health, expectedStatus: 200 }
+        - {name: api, url: 'http://control-plane-api/health', expectedStatus: 200, latencyWarnMs: 500, latencyCriticalMs: 2000}
+        - {name: app, url: 'http://control-plane-app:3000/api/health', expectedStatus: 200}
         # scheduler exposes /v1/health (Express router prefix), not /health.
-        - { name: scheduler, url: http://control-plane-scheduler:3000/v1/health, expectedStatus: 200 }
+        - {name: scheduler, url: 'http://control-plane-scheduler:3000/v1/health', expectedStatus: 200}
     actions: [notify.otlp, notify.slack]
-
   - id: data-plane-synthetic
     kind: httpsynthetic
     enabled: false
     target:
       urls:
-        - { name: api, url: http://data-plane-api/health, expectedStatus: 200, latencyWarnMs: 500, latencyCriticalMs: 2000 }
-        - { name: ready, url: http://data-plane-api/health/ready, expectedStatus: 200 }
+        - {name: api, url: 'http://data-plane-api/health', expectedStatus: 200, latencyWarnMs: 500, latencyCriticalMs: 2000}
+        - {name: ready, url: 'http://data-plane-api/health/ready', expectedStatus: 200}
         # /health/deep exercises downstream connections (ClickHouse, Kafka);
         # keep it on a separate check entry so a flaky downstream doesn't
         # mask a real API outage in the same alert.
-        - { name: deep, url: http://data-plane-api/health/deep, expectedStatus: 200, latencyWarnMs: 1000, latencyCriticalMs: 3000 }
+        - {name: deep, url: 'http://data-plane-api/health/deep', expectedStatus: 200, latencyWarnMs: 1000, latencyCriticalMs: 3000}
     actions: [notify.otlp, notify.slack]
-
   - id: postgres-tcp
     kind: tcpsynthetic
     enabled: false
@@ -262,7 +358,6 @@ checks:
       host: postgresql.neuraltrust
       port: 5432
     actions: [notify.otlp, notify.slack]
-
   # Smoke probe — Cloud SQL CPU/memory/disk stays in cloud-infrastructure TF.
   - id: postgres-ping
     kind: postgres_ping
@@ -275,17 +370,15 @@ checks:
       maxLongQueries: 0
       replicationLagMaxSeconds: 60
     actions: [notify.otlp]
-
   - id: trustgate-synthetic
     kind: httpsynthetic
     enabled: false
     target:
       urls:
-        - { name: control-plane, url: http://trustgate-control-plane:8080/health }
-        - { name: data-plane, url: http://trustgate-data-plane:8081/health }
-        - { name: actions, url: http://trustgate-actions:8080/health }
+        - {name: control-plane, url: 'http://trustgate-control-plane:8080/health'}
+        - {name: data-plane, url: 'http://trustgate-data-plane:8081/health'}
+        - {name: actions, url: 'http://trustgate-actions:8080/health'}
     actions: [notify.otlp, notify.slack]
-
   - id: trustgate-e2e-pipeline
     kind: e2e_synthetic
     enabled: false
@@ -310,7 +403,6 @@ checks:
         WHERE event_time >= now() - INTERVAL 15 MINUTE
           AND position(toString(request_headers), ?) > 0
     actions: [notify.otlp, notify.slack]
-
   - id: trustgate-redis
     kind: redis
     enabled: false
@@ -323,15 +415,13 @@ checks:
       connectedClientsRatioMax: 0.85
       blockedClientsMax: 0
     actions: [notify.otlp]
-
   - id: firewall-synthetic
     kind: httpsynthetic
     enabled: false
     target:
       urls:
-        - { name: gateway, url: http://neuraltrust-firewall-gateway:8000/health }
+        - {name: gateway, url: 'http://neuraltrust-firewall-gateway:8000/health'}
     actions: [notify.otlp, notify.slack]
-
   - id: gateway-health
     kind: gateway_health
     enabled: false
@@ -342,7 +432,6 @@ checks:
     thresholds:
       minReadyPods: 1
     actions: [notify.otlp, notify.slack]
-
   # Watches cert-manager Certificates across the listed namespaces.
   - id: cert-renewal
     kind: cert_renewal
@@ -353,7 +442,6 @@ checks:
       renewalWarnDays: 14
       renewalCriticalDays: 3
     actions: [notify.otlp, notify.slack]
-
   - id: otel-collector
     kind: otel_collector
     enabled: false
@@ -364,7 +452,6 @@ checks:
     thresholds:
       minReadyPods: 1
     actions: [notify.otlp, notify.slack]
-
   # Replaces gcp/metric_based_alerts.tf pod_crash_alert.
   - id: pod-health
     kind: pod_health
@@ -375,7 +462,6 @@ checks:
     thresholds:
       maxFailingPods: 0
     actions: [notify.otlp, notify.slack]
-
   # Replaces gcp/metric_based_alerts.tf container_restart_rate.
   - id: deployment-health
     kind: deployment_health
@@ -386,8 +472,7 @@ checks:
     thresholds:
       maxRestartsPerInterval: 3
       minAvailableRatio: 1.0
-    actions: [notify.otlp, notify.slack]  # add k8s.restart_deployment when ready
-
+    actions: [notify.otlp, notify.slack] # add k8s.restart_deployment when ready
   # Multi-tenant SaaS coverage. Discovers tenant namespaces dynamically
   # via label selector — NeuralTrust SaaS uses this to cover tenants
   # created at runtime by trustgate-ee
@@ -408,7 +493,6 @@ checks:
       minAvailableRatio: 0.5
       maxUnhealthyTenants: 0
     actions: [notify.otlp, notify.slack]
-
 # Inherited from the umbrella chart. Local overrides win.
 global:
   proxy:

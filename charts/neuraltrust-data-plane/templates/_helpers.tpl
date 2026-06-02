@@ -88,6 +88,18 @@ imagePullSecrets:
 {{- end }}
 
 {{/*
+Create the name of the service account to use for data-plane workloads.
+*/}}
+{{- define "data-plane.serviceAccountName" -}}
+{{- $sa := default dict (default dict .Values.dataPlane).serviceAccount -}}
+{{- if hasKey $sa "name" -}}
+{{- default "data-plane" $sa.name -}}
+{{- else -}}
+data-plane
+{{- end -}}
+{{- end }}
+
+{{/*
 Helper to get secret value - supports both direct values and secret references
 Usage: {{ include "data-plane.getSecretValue" (dict "value" .Values.dataPlane.secrets.openaiApiKey "secretName" "my-secret" "secretKey" "OPENAI_API_KEY" "context" $) }}
 */}}

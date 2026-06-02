@@ -27,6 +27,7 @@ spec:
         app: control-plane-scheduler
         plane: control
     spec:
+      serviceAccountName: {{ include "control-plane.serviceAccountName" . }}
       {{- $imagePullSecret := "gcr-secret" }}
       {{- if .Values.imagePullSecrets }}
         {{- $imagePullSecret = .Values.imagePullSecrets }}
@@ -53,9 +54,12 @@ spec:
           {{- end }}
         {{- end }}
       {{- end }}
-      {{- if include "neuraltrust-platform.customCaCert.enabled" . }}
+      {{- if or (include "neuraltrust-platform.customCaCert.enabled" .) (and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.scheduler .Values.controlPlane.components.scheduler.extraVolumes) }}
       volumes:
       {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 6 }}
+      {{- with .Values.controlPlane.components.scheduler.extraVolumes }}
+      {{- include "neuraltrust-platform.extraVolumes" (dict "items" .) | nindent 6 }}
+      {{- end }}
       {{- end }}
       initContainers:
       - name: wait-for-postgresql
@@ -106,6 +110,11 @@ spec:
             secretKeyRef:
               name: {{ $pgSecretName }}
               key: POSTGRES_PORT
+        {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "go" "ctx" .) | nindent 8 }}
+        {{- if include "neuraltrust-platform.customCaCert.enabled" . }}
+        volumeMounts:
+        {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 8 }}
+        {{- end }}
         resources:
           {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.scheduler .Values.controlPlane.components.scheduler.initContainerResources }}
           {{- toYaml .Values.controlPlane.components.scheduler.initContainerResources | nindent 10 }}
@@ -120,7 +129,7 @@ spec:
       containers:
       - name: control-plane-scheduler
         {{- $imageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/scheduler" }}
-        {{- $imageTag := "v1.9.8" }}
+        {{- $imageTag := "v1.10.0" }}
         {{- $pullPolicy := "Always" }}
         {{- with .Values.controlPlane }}
           {{- with .components }}
@@ -155,8 +164,15 @@ spec:
         env:
         - name: PORT
           value: "3000"
+        {{- /* External Postgres (in-cluster PG disabled) forces SSL on managed
+               engines like Aurora/RDS; only the bundled in-cluster PG runs
+               without TLS. Mirror the api deployment's sslmode resolution. */}}
+        {{- $schedulerSslMode := "require" }}
+        {{- if include "control-plane.postgresql.deploy" . }}
+          {{- $schedulerSslMode = "disable" }}
+        {{- end }}
         - name: POSTGRES_SSL_MODE
-          value: "disable"
+          value: {{ $schedulerSslMode | quote }}
         - name: POSTGRES_HOST
           valueFrom:
             secretKeyRef:
@@ -182,6 +198,21 @@ spec:
             secretKeyRef:
               name: {{ $pgSecretName }}
               key: POSTGRES_PASSWORD
+              optional: true
+        {{- /* IAM (RDS) auth flags. Optional so existing/pre-provisioned
+               secrets without these keys keep working. */}}
+        - name: DATABASE_AUTH_MODE
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: DATABASE_AUTH_MODE
+              optional: true
+        - name: DATABASE_IAM_AUTH
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: DATABASE_IAM_AUTH
+              optional: true
         {{- /* Use internal Kubernetes service URLs for inter-service communication */}}
         {{- $dataPlaneApiUrl := "" }}
         {{- $controlPlaneApiUrl := "" }}
@@ -253,9 +284,12 @@ spec:
         {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
         {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "node" "ctx" .) | nindent 8 }}
         {{- include "neuraltrust-platform.appVersionEnv" (dict "tag" $imageTag) | nindent 8 }}
-        {{- if include "neuraltrust-platform.customCaCert.enabled" . }}
+        {{- if or (include "neuraltrust-platform.customCaCert.enabled" .) (and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.scheduler .Values.controlPlane.components.scheduler.extraVolumeMounts) }}
         volumeMounts:
         {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 8 }}
+        {{- with .Values.controlPlane.components.scheduler.extraVolumeMounts }}
+        {{- include "neuraltrust-platform.extraVolumeMounts" (dict "items" .) | nindent 8 }}
+        {{- end }}
         {{- end }}
         {{- /*
           Health probes. Default ON; scheduler exposes GET /v1/health (routes

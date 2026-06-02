@@ -197,6 +197,12 @@ data:
           max_interval: {{ (default dict $hosted.retry).maxInterval | default "30s" }}
           max_elapsed_time: {{ (default dict $hosted.retry).maxElapsedTime | default "0s" }}
       {{- end }}
+      {{- if include "neuraltrust-platform.watchdogEnabled" . }}
+      prometheus:
+        endpoint: 0.0.0.0:8889
+        resource_to_telemetry_conversion:
+          enabled: true
+      {{- end }}
       {{- with (default dict $coll.extraExporters) }}
       {{- toYaml . | nindent 6 }}
       {{- end }}
@@ -221,13 +227,17 @@ data:
           receivers: [prometheus, otlp, kubeletstats]
           processors: [memory_limiter, attributes/redact, resource, batch]
           exporters:
+            {{- $wdEnabled := include "neuraltrust-platform.watchdogEnabled" . }}
+            {{- if $wdEnabled }}
+            - prometheus
+            {{- end }}
             {{- if $renderHosted }}
             - otlphttp/neuraltrust
             {{- end }}
             {{- if $coll.debug }}
             - debug
             {{- end }}
-            {{- if not (or $renderHosted $coll.debug) }}
+            {{- if not (or $wdEnabled $renderHosted $coll.debug) }}
             - nop
             {{- end }}
         {{- if $obs.sendTraces }}

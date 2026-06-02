@@ -27,6 +27,7 @@ spec:
         app: control-plane-api
         plane: control
     spec:
+      serviceAccountName: {{ include "control-plane.serviceAccountName" . }}
       {{- $imagePullSecret := "gcr-secret" }}
       {{- if .Values.imagePullSecrets }}
         {{- $imagePullSecret = .Values.imagePullSecrets }}
@@ -53,9 +54,12 @@ spec:
           {{- end }}
         {{- end }}
       {{- end }}
-      {{- if include "neuraltrust-platform.customCaCert.enabled" . }}
+      {{- if or (include "neuraltrust-platform.customCaCert.enabled" .) (and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.api .Values.controlPlane.components.api.extraVolumes) }}
       volumes:
       {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 6 }}
+      {{- with .Values.controlPlane.components.api.extraVolumes }}
+      {{- include "neuraltrust-platform.extraVolumes" (dict "items" .) | nindent 6 }}
+      {{- end }}
       {{- end }}
       initContainers:
       - name: wait-for-postgresql
@@ -106,6 +110,11 @@ spec:
             secretKeyRef:
               name: {{ $pgSecretName }}
               key: POSTGRES_PORT
+        {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "go" "ctx" .) | nindent 8 }}
+        {{- if include "neuraltrust-platform.customCaCert.enabled" . }}
+        volumeMounts:
+        {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 8 }}
+        {{- end }}
         resources:
           {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.api .Values.controlPlane.components.api.initContainerResources }}
           {{- toYaml .Values.controlPlane.components.api.initContainerResources | nindent 10 }}
@@ -202,6 +211,21 @@ spec:
             secretKeyRef:
               name: {{ $pgSecretName }}
               key: POSTGRES_PASSWORD
+              optional: true
+        {{- /* IAM (RDS) auth flags. Optional so existing/pre-provisioned
+               secrets without these keys keep working. */}}
+        - name: DATABASE_AUTH_MODE
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: DATABASE_AUTH_MODE
+              optional: true
+        - name: DATABASE_IAM_AUTH
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: DATABASE_IAM_AUTH
+              optional: true
         {{- $postgresSslMode := "require" }}
         {{- if include "control-plane.postgresql.deploy" . }}
           {{- $postgresSslMode = "disable" }}
@@ -239,9 +263,12 @@ spec:
         {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
         {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "node" "ctx" .) | nindent 8 }}
         {{- include "neuraltrust-platform.appVersionEnv" (dict "tag" $apiImageTag) | nindent 8 }}
-        {{- if include "neuraltrust-platform.customCaCert.enabled" . }}
+        {{- if or (include "neuraltrust-platform.customCaCert.enabled" .) (and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.api .Values.controlPlane.components.api.extraVolumeMounts) }}
         volumeMounts:
         {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 8 }}
+        {{- with .Values.controlPlane.components.api.extraVolumeMounts }}
+        {{- include "neuraltrust-platform.extraVolumeMounts" (dict "items" .) | nindent 8 }}
+        {{- end }}
         {{- end }}
         readinessProbe:
           httpGet:

@@ -1,0 +1,44 @@
+{{- if and .Values.enabled (not .Values.prometheus.reuseExisting) }}
+# The bundled Prometheus only scrapes in-cluster pods (no AWS API calls), so it
+# intentionally does NOT use the shared IRSA annotation helper. Add cloud
+# annotations explicitly via prometheus.serviceAccount.annotations if ever needed.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "neuraltrust-watchdog.prometheusServiceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "neuraltrust-watchdog.prometheusLabels" . | nindent 4 }}
+  {{- with .Values.prometheus.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "neuraltrust-watchdog.prometheusFullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "neuraltrust-watchdog.prometheusLabels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "neuraltrust-watchdog.prometheusFullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "neuraltrust-watchdog.prometheusLabels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "neuraltrust-watchdog.prometheusFullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "neuraltrust-watchdog.prometheusServiceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

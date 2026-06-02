@@ -16,6 +16,7 @@ spec:
         app: worker
         plane: data
     spec:
+      serviceAccountName: {{ include "data-plane.serviceAccountName" . }}
       {{- include "data-plane.imagePullSecrets" . | nindent 6 }}
       {{- if .Values.securityHardening }}
       securityContext:
@@ -99,6 +100,9 @@ spec:
         - name: tmp
           mountPath: /tmp
         {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 8 }}
+        {{- with .Values.dataPlane.components.worker.extraVolumeMounts }}
+        {{- include "neuraltrust-platform.extraVolumeMounts" (dict "items" .) | nindent 8 }}
+        {{- end }}
         command: ["python", "-u", "src/listen.py"]
         resources:
           {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.worker .Values.dataPlane.components.worker.resources }}
@@ -133,3 +137,6 @@ spec:
       - name: tmp
         emptyDir: {}
       {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 6 }}
+      {{- with .Values.dataPlane.components.worker.extraVolumes }}
+      {{- include "neuraltrust-platform.extraVolumes" (dict "items" .) | nindent 6 }}
+      {{- end }}

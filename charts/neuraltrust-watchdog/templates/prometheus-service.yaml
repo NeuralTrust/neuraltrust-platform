@@ -1,0 +1,18 @@
+{{- if and .Values.enabled (not .Values.prometheus.reuseExisting) }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "neuraltrust-watchdog.prometheusFullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "neuraltrust-watchdog.prometheusLabels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ .Values.prometheus.service.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "neuraltrust-watchdog.prometheusSelectorLabels" . | nindent 4 }}
+{{- end }}

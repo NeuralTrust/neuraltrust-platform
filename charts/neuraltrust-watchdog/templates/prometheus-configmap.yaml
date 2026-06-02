@@ -1,0 +1,43 @@
+{{- if and .Values.enabled (not .Values.prometheus.reuseExisting) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "neuraltrust-watchdog.prometheusFullname" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "neuraltrust-watchdog.prometheusLabels" . | nindent 4 }}
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: {{ .Values.prometheus.scrapeInterval }}
+      scrape_timeout: {{ .Values.prometheus.scrapeTimeout }}
+      evaluation_interval: {{ .Values.prometheus.scrapeInterval }}
+
+    scrape_configs:
+      - job_name: otel-collector-red
+        honor_labels: true
+        {{- if .Values.prometheus.collectorTarget }}
+        static_configs:
+          - targets:
+              - {{ .Values.prometheus.collectorTarget }}
+        {{- else }}
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names:
+                - {{ .Release.Namespace }}
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_component]
+            action: keep
+            regex: otel-collector
+          - source_labels: [__meta_kubernetes_pod_container_port_name]
+            action: keep
+            regex: prom-export
+        {{- end }}
+        # RED checks derive rate, errors, and duration from the OTel
+        # semconv HTTP server duration histogram.
+        metric_relabel_configs:
+          - source_labels: [__name__]
+            action: keep
+            regex: 'http_server_request_duration_seconds_(bucket|sum|count)'
+{{- end }}
