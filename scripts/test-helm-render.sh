@@ -334,16 +334,23 @@ assert_contains "$TMP/self-mon.yaml" "bootstrapServers:"                   "kafk
 assert_contains "$TMP/self-mon.yaml" "control-plane-scheduler:3000/v1/health" "scheduler URL fixed to /v1/health"
 
 # Scenario 15: overlay backward-compat. Without the overlay (or without
-# `enabledCheckIds`), no check is flipped on by the chart — operators have
-# to opt in explicitly, exactly as before.
+# `enabledCheckIds`), the curated synthetic checks are not flipped on by the
+# overlay. Other checks may be enabled by default (for example the bundled RED
+# PromQL checks), so assert the overlay-controlled check IDs specifically.
 blue "scenario 15: no overlay => no curated-check flip"
 render "$TMP/no-overlay.yaml" --set neuraltrust-watchdog.enabled=true
-flipped=$(awk '/Source.*neuraltrust-watchdog\/templates\/configmap\.yaml/,/Source.*neuraltrust-watchdog\/templates\/[^c]/' "$TMP/no-overlay.yaml" | grep -c "enabled: true" || true)
-if [ "$flipped" != "0" ]; then
-  red "FAIL: watchdog enabled checks without overlay: expected 0, got $flipped"
-  exit 1
-fi
-green "ok  - no checks flipped without overlay (backward-compat preserved)"
+for check_id in control-plane-synthetic data-plane-synthetic firewall-synthetic; do
+  enabled=$(awk -v id="$check_id" '
+    $0 ~ "id: " id { print last_enabled; found=1; exit }
+    $0 ~ /^[[:space:]]*enabled:/ { last_enabled=$2 }
+    END { if (!found) print "missing" }
+  ' "$TMP/no-overlay.yaml")
+  if [ "$enabled" != "false" ]; then
+    red "FAIL: watchdog check $check_id without overlay: expected enabled=false, got $enabled"
+    exit 1
+  fi
+done
+green "ok  - curated checks stay disabled without overlay (backward-compat preserved)"
 
 # Scenario 16: data-plane-api k8sJobs is ON by default. SA + RBAC render,
 # the API Deployment uses the new SA, and the chart wires K8S_* env vars.
