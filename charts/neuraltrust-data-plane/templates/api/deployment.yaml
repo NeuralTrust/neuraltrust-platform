@@ -21,9 +21,7 @@ spec:
         plane: data
     spec:
       {{- include "data-plane.imagePullSecrets" . | nindent 6 }}
-      {{- if eq (include "data-plane.api.k8sJobs.enabled" .) "true" }}
-      serviceAccountName: {{ include "data-plane.api.k8sJobs.serviceAccountName" . }}
-      {{- end }}
+      serviceAccountName: {{ include "data-plane.serviceAccountName" . }}
       {{- if .Values.securityHardening }}
       securityContext:
         seccompProfile:
@@ -275,7 +273,7 @@ spec:
           - name: K8S_JOBS_NAMESPACE
             value: {{ include "data-plane.api.k8sJobs.namespace" . | quote }}
           - name: K8S_JOB_SERVICE_ACCOUNT
-            value: {{ include "data-plane.api.k8sJobs.serviceAccountName" . | quote }}
+            value: {{ include "data-plane.serviceAccountName" . | quote }}
           - name: K8S_JOB_IMAGE
             value: {{ include "data-plane.api.k8sJobs.image" . | quote }}
           {{- $jobPullSecret := include "data-plane.imagePullSecretName" . }}

@@ -361,24 +361,27 @@ green "ok  - curated checks stay disabled without overlay (backward-compat prese
 
 # Scenario 16: data-plane-api k8sJobs is OFF by default — matches
 # data-plane-api K8S_JOBS_ENABLED=false when unset. No job-creator RBAC,
-# no data-plane-api SA override, no K8S_* env vars on the API pod.
+# no K8S_* env vars on the API pod. The API still runs under the shared
+# `data-plane` SA (same as worker / kafka-connect), never a bespoke one.
 blue "scenario 16: data-plane-api k8sJobs disabled by default"
 render "$TMP/dp-jobs-default.yaml" \
   --set neuraltrust-data-plane.dataPlane.enabled=true
 assert_not_contains "$TMP/dp-jobs-default.yaml" "name: data-plane-job-creator"        "no Role/RoleBinding when k8sJobs disabled by default"
-assert_not_contains "$TMP/dp-jobs-default.yaml" "serviceAccountName: data-plane-api"  "no serviceAccountName override when k8sJobs disabled"
+assert_not_contains "$TMP/dp-jobs-default.yaml" "serviceAccountName: data-plane-api"  "API never pins a bespoke data-plane-api SA"
+assert_contains     "$TMP/dp-jobs-default.yaml" "serviceAccountName: data-plane$"     "API Deployment runs under the shared data-plane SA"
 assert_not_contains "$TMP/dp-jobs-default.yaml" 'name: K8S_JOBS_ENABLED'              "no K8S_JOBS_ENABLED env when k8sJobs disabled by default"
 assert_not_contains "$TMP/dp-jobs-default.yaml" 'name: K8S_JOB_IMAGE'                 "no K8S_JOB_IMAGE env when k8sJobs disabled by default"
 
-# Scenario 17: opt-in path. Setting k8sJobs.enabled=true renders SA + RBAC,
+# Scenario 17: opt-in path. Setting k8sJobs.enabled=true renders the
+# job-creator RBAC bound to the shared `data-plane` SA (NOT a new SA),
 # wires K8S_* env vars, and forwards the pull secret for spawned Job pods.
 blue "scenario 17: data-plane-api k8sJobs explicit opt-in"
 render "$TMP/dp-jobs-on.yaml" \
   --set neuraltrust-data-plane.dataPlane.enabled=true \
   --set neuraltrust-data-plane.dataPlane.components.api.k8sJobs.enabled=true
-assert_contains "$TMP/dp-jobs-on.yaml" "name: data-plane-api$"          "data-plane-api ServiceAccount rendered when k8sJobs enabled"
+assert_not_contains "$TMP/dp-jobs-on.yaml" "name: data-plane-api$"          "no separate data-plane-api ServiceAccount — the data-plane SA is reused"
 assert_contains "$TMP/dp-jobs-on.yaml" "name: data-plane-job-creator$"  "data-plane-job-creator Role + RoleBinding rendered when k8sJobs enabled"
-assert_contains "$TMP/dp-jobs-on.yaml" "serviceAccountName: data-plane-api" "API Deployment uses the data-plane-api SA when k8sJobs enabled"
+assert_contains "$TMP/dp-jobs-on.yaml" "serviceAccountName: data-plane$" "API Deployment uses the shared data-plane SA when k8sJobs enabled"
 assert_contains "$TMP/dp-jobs-on.yaml" 'name: K8S_JOBS_ENABLED'              "K8S_JOBS_ENABLED wired on API pod when k8sJobs enabled"
 assert_contains "$TMP/dp-jobs-on.yaml" 'name: K8S_JOB_IMAGE'                 "K8S_JOB_IMAGE wired on API pod when k8sJobs enabled"
 assert_contains "$TMP/dp-jobs-on.yaml" 'name: K8S_JOB_SERVICE_ACCOUNT'       "K8S_JOB_SERVICE_ACCOUNT wired on API pod when k8sJobs enabled"
