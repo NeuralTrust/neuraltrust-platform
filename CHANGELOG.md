@@ -4,13 +4,13 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v1.12.19] — 2026-06-03
+
 ### Changed
 
 - **data-plane-api evaluation Jobs reuse the shared `data-plane` ServiceAccount.** The chart no longer creates a separate `data-plane-api` ServiceAccount for the k8sJobs feature. The API Deployment now always runs under the existing `data-plane` SA (like the worker and kafka-connect components, and matching the app's own `K8S_JOB_SERVICE_ACCOUNT=data-plane` default and the SaaS manifests). When `k8sJobs.enabled: true`, the `data-plane-job-creator` Role/RoleBinding is bound to `data-plane`, and spawned Job pods also run under `data-plane`. Removed `dataPlane.components.api.k8sJobs.serviceAccount`.
   - **Why:** the bespoke SA was the only thing referencing `data-plane-api`, and flipping `k8sJobs` off pruned that SA while leaving the Deployment pinned to it — Helm's 3-way merge does not clear a field that is absent in both the previous and current rendered manifests, so the live Deployment kept a dangling `serviceAccountName: data-plane-api` and pods failed with `serviceaccount … not found`.
   - **Upgrade note:** a release that previously had `k8sJobs` enabled may carry a stale `serviceAccountName: data-plane-api` on the live `data-plane-api` Deployment. This upgrade re-renders the Deployment with `serviceAccountName: data-plane`, which produces a real diff and a clean rollout. If you upgraded across the earlier OFF→OFF window and pods are stuck, clear it once with `kubectl patch deploy data-plane-api -n <ns> -p '{"spec":{"template":{"spec":{"serviceAccountName":"data-plane"}}}}'`.
-
-## [v1.12.19] — 2026-06-03
 
 ### Fixed
 
