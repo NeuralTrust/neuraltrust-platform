@@ -937,7 +937,7 @@ neuraltrust-control-plane:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.67.3"
+          tag: "v1.69.0"
           pullPolicy: "Always"
         config:
           nodeEnv: production
@@ -1216,7 +1216,7 @@ neuraltrust-firewall:
       replicas: 2
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-        tag: "v2.10.0"
+        tag: "v2.11.0"
         pullPolicy: IfNotPresent
       resources:
         requests:
@@ -1250,7 +1250,7 @@ neuraltrust-firewall:
       deploymentStrategy: Recreate # Recreate | RollingUpdate — Recreate avoids 2× worker capacity during rollouts
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-        tag: "v2.10.0"
+        tag: "v2.11.0"
         pullPolicy: IfNotPresent
       replicas: 1
       resources:
