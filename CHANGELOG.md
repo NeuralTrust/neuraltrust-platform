@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v1.12.19] — 2026-06-03
+
 ### Fixed
 
 - **`ImagePullBackOff` on private images that lacked a pull secret.** Three workloads pulled private GCP Artifact Registry images without resolving the chart-wide `gcr-secret`:
