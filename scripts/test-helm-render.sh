@@ -68,15 +68,18 @@ assert_not_contains() {
 # the collector is enabled (via global.observability.enabled or watchdog).
 blue "scenario 1: defaults (observability off, no token)"
 render "$TMP/default.yaml"
-assert_not_contains "$TMP/default.yaml" "test-neuraltrust-platform-otel-collector-config" "otel collector ConfigMap omitted by default"
+assert_not_contains "$TMP/default.yaml" "name: otel-collector-config" "otel collector ConfigMap omitted by default"
 
 # Scenario 1b: collector on explicitly but no token — graceful degradation.
 blue "scenario 1b: observability on, no token (graceful degradation)"
 render "$TMP/default-obs-on.yaml" --set global.observability.enabled=true
-assert_contains     "$TMP/default-obs-on.yaml" "test-neuraltrust-platform-otel-collector-config" "otel collector ConfigMap is rendered when enabled"
+assert_contains     "$TMP/default-obs-on.yaml" "name: otel-collector-config" "otel collector ConfigMap is rendered when enabled"
+assert_not_contains "$TMP/default-obs-on.yaml" "test-neuraltrust-platform-otel-collector" "otel collector resource name carries no release-name prefix (fullnameOverride)"
 assert_not_contains "$TMP/default-obs-on.yaml" "otlphttp/neuraltrust:"                            "hosted exporter is omitted when no token"
 assert_contains     "$TMP/default-obs-on.yaml" "nop: \\{\\}"                                       "nop fallback exporter is present"
 assert_contains     "$TMP/default-obs-on.yaml" "attributes/redact"                                 "privacy-redact processor is present"
+assert_not_contains "$TMP/default-obs-on.yaml" "address: 0.0.0.0:8888"                              "otel internal metrics use readers (not deprecated address)"
+assert_contains     "$TMP/default-obs-on.yaml" "readers:"                                           "otel internal metrics readers block present"
 assert_contains     "$TMP/default-obs-on.yaml" "- key: prompt_text"                                "prompt_text redaction rule is present"
 
 # Scenario 2: explicit token. Hosted exporter should appear, secret
@@ -103,9 +106,13 @@ assert_not_contains "$TMP/off.yaml" "otel-collector"                            
 # AND the in-chart OTel Collector comes up (watchdog implies collector).
 blue "scenario 4: watchdog enabled"
 render "$TMP/watchdog.yaml" --set neuraltrust-watchdog.enabled=true
-assert_contains     "$TMP/watchdog.yaml" "name: test-neuraltrust-watchdog$" "watchdog resource (named test-neuraltrust-watchdog) is rendered"
-assert_contains     "$TMP/watchdog.yaml" "test-neuraltrust-watchdog-config" "watchdog ConfigMap is rendered"
-assert_contains     "$TMP/watchdog.yaml" "test-neuraltrust-platform-otel-collector-config" "otel collector ConfigMap rendered with watchdog"
+assert_contains     "$TMP/watchdog.yaml" "name: neuraltrust-watchdog$" "watchdog resource (named neuraltrust-watchdog, no release prefix) is rendered"
+assert_contains     "$TMP/watchdog.yaml" "neuraltrust-watchdog-config" "watchdog ConfigMap is rendered"
+assert_not_contains "$TMP/watchdog.yaml" "name: test-neuraltrust-watchdog$" "watchdog resource name carries no release-name prefix (fullnameOverride)"
+assert_contains     "$TMP/watchdog.yaml" "name: otel-collector-config" "otel collector ConfigMap rendered with watchdog"
+# Both the watchdog and the in-chart collector default to the gcr-secret pull
+# secret so their private images come up on a fresh install.
+assert_contains     "$TMP/watchdog.yaml" "name: gcr-secret" "watchdog + collector default to gcr-secret imagePullSecret"
 
 # Scenario 5: hosted explicitly disabled (local-only collector). Hosted
 # exporter omitted; collector still runs.
@@ -113,7 +120,7 @@ blue "scenario 5: hosted export explicitly disabled"
 render "$TMP/local.yaml" \
   --set global.observability.enabled=true \
   --set global.observability.hostedExport.enabled=false
-assert_contains     "$TMP/local.yaml" "test-neuraltrust-platform-otel-collector-config" "collector still runs locally"
+assert_contains     "$TMP/local.yaml" "name: otel-collector-config" "collector still runs locally"
 assert_not_contains "$TMP/local.yaml" "otlphttp/neuraltrust:"                            "hosted exporter omitted when hostedExport.enabled=false"
 assert_contains     "$TMP/local.yaml" "nop: \\{\\}"                                       "nop fallback present in local-only mode"
 
@@ -267,8 +274,8 @@ assert_contains "$TMP/mon-on.yaml" "name: firewall"                             
 assert_contains "$TMP/mon-on.yaml" "name: kafka"                                   "kafka PrometheusRule rendered"
 assert_contains "$TMP/mon-on.yaml" "name: trustgate"                               "trustgate PrometheusRule rendered"
 assert_contains "$TMP/mon-on.yaml" "name: trustgate-data-plane"                    "trustgate-data-plane PodMonitor rendered"
-assert_contains "$TMP/mon-on.yaml" "name: test-neuraltrust-watchdog-rules"         "watchdog PrometheusRule rendered"
-assert_contains "$TMP/mon-on.yaml" "name: test-neuraltrust-platform-otel-collector" "otel-collector ServiceMonitor + PrometheusRule rendered"
+assert_contains "$TMP/mon-on.yaml" "name: neuraltrust-watchdog-rules"              "watchdog PrometheusRule rendered"
+assert_contains "$TMP/mon-on.yaml" "name: otel-collector$" "otel-collector ServiceMonitor + PrometheusRule rendered"
 
 # Scenario 10: watchdog pod scrape annotations are baseline.
 # Universal scrape contract that works in every monitoring stack
@@ -322,7 +329,7 @@ helm template test "$CHART_DIR" \
   -f "$CHART_DIR/values-self-monitoring.yaml.example" \
   --set neuraltrust-control-plane.controlPlane.enabled=true \
   --set neuraltrust-data-plane.dataPlane.enabled=true > "$TMP/self-mon.yaml"
-assert_contains "$TMP/self-mon.yaml" "name: test-neuraltrust-watchdog\$"   "watchdog Deployment rendered by overlay"
+assert_contains "$TMP/self-mon.yaml" "name: neuraltrust-watchdog\$"   "watchdog Deployment rendered by overlay"
 # Curated check ids are flipped on (regex tolerates surrounding YAML indent).
 assert_contains "$TMP/self-mon.yaml" "id: control-plane-synthetic"         "control-plane-synthetic check present in overlay"
 assert_contains "$TMP/self-mon.yaml" "id: data-plane-synthetic"            "data-plane-synthetic check present in overlay"
@@ -352,34 +359,41 @@ for check_id in control-plane-synthetic data-plane-synthetic firewall-synthetic;
 done
 green "ok  - curated checks stay disabled without overlay (backward-compat preserved)"
 
-# Scenario 16: data-plane-api k8sJobs is ON by default. SA + RBAC render,
-# the API Deployment uses the new SA, and the chart wires K8S_* env vars.
-# The API process inherits its own env into Job pods at creation time
-# (no Secret object, no CSI mount needed), so the chart does not emit any
-# secret-mode toggle.
-blue "scenario 16: data-plane-api k8sJobs enabled by default"
+# Scenario 16: data-plane-api k8sJobs is OFF by default — matches
+# data-plane-api K8S_JOBS_ENABLED=false when unset. No job-creator RBAC,
+# no data-plane-api SA override, no K8S_* env vars on the API pod.
+blue "scenario 16: data-plane-api k8sJobs disabled by default"
 render "$TMP/dp-jobs-default.yaml" \
   --set neuraltrust-data-plane.dataPlane.enabled=true
-assert_contains "$TMP/dp-jobs-default.yaml" "name: data-plane-api$"          "data-plane-api ServiceAccount rendered"
-assert_contains "$TMP/dp-jobs-default.yaml" "name: data-plane-job-creator$"  "data-plane-job-creator Role + RoleBinding rendered"
-assert_contains "$TMP/dp-jobs-default.yaml" "serviceAccountName: data-plane-api" "API Deployment uses the data-plane-api SA"
-assert_contains "$TMP/dp-jobs-default.yaml" 'name: K8S_JOBS_ENABLED'              "K8S_JOBS_ENABLED wired on API pod"
-assert_contains "$TMP/dp-jobs-default.yaml" 'name: K8S_JOB_IMAGE'                 "K8S_JOB_IMAGE wired on API pod"
-assert_contains "$TMP/dp-jobs-default.yaml" 'name: K8S_JOB_SERVICE_ACCOUNT'       "K8S_JOB_SERVICE_ACCOUNT wired on API pod"
-assert_not_contains "$TMP/dp-jobs-default.yaml" 'name: K8S_JOB_SECRETS_MODE'      "no K8S_JOB_SECRETS_MODE env (mode toggle removed)"
+assert_not_contains "$TMP/dp-jobs-default.yaml" "name: data-plane-job-creator"        "no Role/RoleBinding when k8sJobs disabled by default"
+assert_not_contains "$TMP/dp-jobs-default.yaml" "serviceAccountName: data-plane-api"  "no serviceAccountName override when k8sJobs disabled"
+assert_not_contains "$TMP/dp-jobs-default.yaml" 'name: K8S_JOBS_ENABLED'              "no K8S_JOBS_ENABLED env when k8sJobs disabled by default"
+assert_not_contains "$TMP/dp-jobs-default.yaml" 'name: K8S_JOB_IMAGE'                 "no K8S_JOB_IMAGE env when k8sJobs disabled by default"
 
-# Scenario 17: opt-out path. Setting k8sJobs.enabled=false must drop the
-# SA, the Role/RoleBinding, the serviceAccountName line on the Deployment,
-# and every K8S_* env var. This protects older API images (< v1.25.0)
-# that don't yet support env-inheritance into Job pods.
-blue "scenario 17: data-plane-api k8sJobs explicit opt-out"
-render "$TMP/dp-jobs-off.yaml" \
+# Scenario 17: opt-in path. Setting k8sJobs.enabled=true renders SA + RBAC,
+# wires K8S_* env vars, and forwards the pull secret for spawned Job pods.
+blue "scenario 17: data-plane-api k8sJobs explicit opt-in"
+render "$TMP/dp-jobs-on.yaml" \
   --set neuraltrust-data-plane.dataPlane.enabled=true \
-  --set neuraltrust-data-plane.dataPlane.components.api.k8sJobs.enabled=false
-assert_not_contains "$TMP/dp-jobs-off.yaml" "name: data-plane-job-creator"        "no Role/RoleBinding when k8sJobs disabled"
-assert_not_contains "$TMP/dp-jobs-off.yaml" "serviceAccountName: data-plane-api"  "no serviceAccountName override when disabled"
-assert_not_contains "$TMP/dp-jobs-off.yaml" 'name: K8S_JOBS_ENABLED'              "no K8S_JOBS_ENABLED env when disabled"
-assert_not_contains "$TMP/dp-jobs-off.yaml" 'name: K8S_JOB_IMAGE'                 "no K8S_JOB_IMAGE env when disabled"
+  --set neuraltrust-data-plane.dataPlane.components.api.k8sJobs.enabled=true
+assert_contains "$TMP/dp-jobs-on.yaml" "name: data-plane-api$"          "data-plane-api ServiceAccount rendered when k8sJobs enabled"
+assert_contains "$TMP/dp-jobs-on.yaml" "name: data-plane-job-creator$"  "data-plane-job-creator Role + RoleBinding rendered when k8sJobs enabled"
+assert_contains "$TMP/dp-jobs-on.yaml" "serviceAccountName: data-plane-api" "API Deployment uses the data-plane-api SA when k8sJobs enabled"
+assert_contains "$TMP/dp-jobs-on.yaml" 'name: K8S_JOBS_ENABLED'              "K8S_JOBS_ENABLED wired on API pod when k8sJobs enabled"
+assert_contains "$TMP/dp-jobs-on.yaml" 'name: K8S_JOB_IMAGE'                 "K8S_JOB_IMAGE wired on API pod when k8sJobs enabled"
+assert_contains "$TMP/dp-jobs-on.yaml" 'name: K8S_JOB_SERVICE_ACCOUNT'       "K8S_JOB_SERVICE_ACCOUNT wired on API pod when k8sJobs enabled"
+assert_not_contains "$TMP/dp-jobs-on.yaml" 'name: K8S_JOB_SECRETS_MODE'      "no K8S_JOB_SECRETS_MODE env (mode toggle removed)"
+assert_contains "$TMP/dp-jobs-on.yaml" 'name: K8S_JOB_IMAGE_PULL_SECRET'    "K8S_JOB_IMAGE_PULL_SECRET wired when k8sJobs enabled (Job pods inherit pull secret)"
+
+# Scenario 17b: pull-secret opt-out for IAM / Workload Identity clusters.
+# With k8sJobs enabled, setting imagePullSecrets to "none" drops the
+# Deployment's imagePullSecrets AND the K8S_JOB_IMAGE_PULL_SECRET env.
+blue "scenario 17b: data-plane k8sJobs pull-secret opt-out (IAM / WIF)"
+render "$TMP/dp-jobs-noatch.yaml" \
+  --set neuraltrust-data-plane.dataPlane.enabled=true \
+  --set neuraltrust-data-plane.dataPlane.components.api.k8sJobs.enabled=true \
+  --set neuraltrust-data-plane.imagePullSecrets=none
+assert_not_contains "$TMP/dp-jobs-noatch.yaml" 'name: K8S_JOB_IMAGE_PULL_SECRET' "no K8S_JOB_IMAGE_PULL_SECRET env when pull secret opted out"
 
 # Scenario 18: TrustGate IAM DB auth. With DATABASE_AUTH_MODE=iam the chart
 # must skip the postgresql-init Job (the chart can no longer password-auth as

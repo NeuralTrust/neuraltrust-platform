@@ -217,12 +217,15 @@ global:
     sendLogs: false
     sendTraces: true
     collector:
+      # Stable resource name (no release prefix). Override only when external
+      # tooling still references the legacy <release>-otel-collector name.
+      fullnameOverride: "otel-collector"
       # Optional: route every component (TrustGate, Firewall, AISPM,
       # Control Plane, Data Plane) at this OTLP endpoint. When set, the
       # subchart configmaps OVERRIDE their per-component defaults so
       # operators don't have to touch each one. Recommended value when
       # using the in-chart collector:
-      #   http://<RELEASE>-otel-collector.<NAMESPACE>.svc.cluster.local:4318
+      #   http://otel-collector.<NAMESPACE>.svc.cluster.local:4318
       # Leave empty to keep each subchart pointing at whatever its own
       # `*.config.otel*Endpoint` already references (preserves the prior
       # behaviour for upgrades).
@@ -231,6 +234,11 @@ global:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/opentelemetry-collector-contrib
         tag: "0.153.0"
         pullPolicy: IfNotPresent
+      # Pull secret for the (private) collector image. Defaults to "gcr-secret"
+      # like the rest of the chart. global.imagePullSecrets (if set) takes
+      # precedence. Set to "none" (or "") on clusters that pull via IAM /
+      # Workload Identity and have no pull Secret.
+      imagePullSecret: "gcr-secret"
       replicas: 1
       service:
         type: ClusterIP
@@ -1127,18 +1135,19 @@ neuraltrust-data-plane:
         extraEnv: []
         extraEnvFrom: []
         # Run evaluation workloads as Kubernetes Jobs spawned by data-plane-api
-        # (instead of FastAPI background tasks). Default ON.
+        # (instead of FastAPI background tasks). Default OFF — matches
+        # data-plane-api's K8S_JOBS_ENABLED=false when unset. Red teaming
+        # runs in-process via FastAPI background tasks unless opted in here.
         #
-        # The API process propagates its own env vars into each Job pod spec
-        # at job-creation time — no Secret object, no CSI mount, no
+        # When enabled, the API propagates its own env vars into each Job pod
+        # spec at job-creation time — no Secret object, no CSI mount, no
         # SecretProviderClass needed. Works identically on Helm (on-prem,
         # secretKeyRef-based) and Flux + Secret Manager (SaaS, CSI-based)
         # because the API doesn't care how its own env was populated.
         #
-        # Requires data-plane-api >= v1.25.0. To opt out for older images,
-        # set k8sJobs.enabled: false.
+        # Requires data-plane-api >= v1.25.0. Set k8sJobs.enabled: true to opt in.
         k8sJobs:
-          enabled: true
+          enabled: false
           # Namespace where Jobs are created. Empty = release namespace.
           namespace: ""
           serviceAccount:

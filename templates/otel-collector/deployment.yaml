@@ -33,16 +33,7 @@ spec:
         {{- end }}
     spec:
       serviceAccountName: {{ include "neuraltrust-platform.otelCollector.serviceAccountName" . }}
-      {{- if and .Values.global .Values.global.imagePullSecrets }}
-      imagePullSecrets:
-        {{- range .Values.global.imagePullSecrets }}
-        {{- if kindIs "string" . }}
-        - name: {{ . }}
-        {{- else if kindIs "map" . }}
-        - {{ toYaml . | nindent 10 | trim }}
-        {{- end }}
-        {{- end }}
-      {{- end }}
+      {{- include "neuraltrust-platform.otelCollector.imagePullSecrets" . | nindent 6 }}
       {{- with $coll.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
