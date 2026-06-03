@@ -1,5 +1,9 @@
 {{- /*
-RBAC for the data-plane-api ServiceAccount, used when k8sJobs is enabled.
+RBAC for the shared `data-plane` ServiceAccount, used when k8sJobs is
+enabled. The API pod (which creates Jobs) and the Job pods it spawns both
+run under `data-plane` — the same SA used by the worker and kafka-connect
+components and the one the app defaults to (K8S_JOB_SERVICE_ACCOUNT). Only
+the API needs these verbs; Job pods don't create Jobs, so no extra SA.
 
 Scope is intentionally namespace-local (Role, not ClusterRole) so the API
 can only manage Jobs in its own namespace.
@@ -59,7 +63,7 @@ metadata:
     plane: data
 subjects:
   - kind: ServiceAccount
-    name: {{ include "data-plane.api.k8sJobs.serviceAccountName" . }}
+    name: {{ include "data-plane.serviceAccountName" . }}
     namespace: {{ .Release.Namespace }}
 roleRef:
   kind: Role

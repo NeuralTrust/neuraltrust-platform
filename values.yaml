@@ -1146,16 +1146,19 @@ neuraltrust-data-plane:
         # because the API doesn't care how its own env was populated.
         #
         # Requires data-plane-api >= v1.25.0. Set k8sJobs.enabled: true to opt in.
+        #
+        # The API pod and the Job pods it spawns both run under the existing
+        # `data-plane` ServiceAccount (dataPlane.serviceAccount, shared with
+        # the worker / kafka-connect components and the app's own
+        # K8S_JOB_SERVICE_ACCOUNT default). Enabling k8sJobs only adds the
+        # `data-plane-job-creator` Role + RoleBinding to that SA — no separate
+        # ServiceAccount is created.
         k8sJobs:
           enabled: false
           # Namespace where Jobs are created. Empty = release namespace.
           namespace: ""
-          serviceAccount:
-            create: true
-            name: "" # Empty = "data-plane-api"
-            annotations: {}
           rbac:
-            create: true # Role data-plane-job-creator + RoleBinding
+            create: true # Role data-plane-job-creator + RoleBinding on the data-plane SA
           # Job container image. Empty fields fall back to the API image above.
           jobImage:
             repository: ""

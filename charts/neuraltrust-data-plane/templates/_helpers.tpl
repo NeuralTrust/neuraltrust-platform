@@ -240,18 +240,6 @@ Usage: {{- if eq (include "data-plane.api.k8sJobs.enabled" .) "true" }}
 {{- end }}
 
 {{/*
-Returns the ServiceAccount name for the data-plane-api Deployment and for
-the Job pods it spawns. Defaults to "data-plane-api".
-*/}}
-{{- define "data-plane.api.k8sJobs.serviceAccountName" -}}
-{{- $name := "data-plane-api" -}}
-{{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.k8sJobs .Values.dataPlane.components.api.k8sJobs.serviceAccount .Values.dataPlane.components.api.k8sJobs.serviceAccount.name -}}
-  {{- $name = .Values.dataPlane.components.api.k8sJobs.serviceAccount.name -}}
-{{- end -}}
-{{- $name -}}
-{{- end }}
-
-{{/*
 Returns the namespace where Jobs are created. Empty value in values.yaml
 falls back to the release namespace.
 */}}
