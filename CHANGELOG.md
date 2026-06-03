@@ -4,6 +4,21 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Fixed
+
+- **`ImagePullBackOff` on private images that lacked a pull secret.** Three workloads pulled private GCP Artifact Registry images without resolving the chart-wide `gcr-secret`:
+  - **In-chart OTel Collector** only honored `global.imagePullSecrets` (empty by default). It now defaults to `gcr-secret` (`global.observability.collector.imagePullSecret`), still honoring `global.imagePullSecrets` first. Opt out with `"none"`/`""` on IAM / Workload Identity clusters.
+  - **`neuraltrust-watchdog`** subchart defaulted `imagePullSecrets: []`. It now defaults to `gcr-secret`. The bundled Prometheus uses a public image and is unaffected. Set `[]` to opt out.
+  - **data-plane-api evaluation Jobs** (`rt-eval-*`) are created at runtime by the API process and were created with no `imagePullSecrets`. The chart now forwards the resolved pull-secret name to the API as `K8S_JOB_IMAGE_PULL_SECRET`, so spawned Job pods inherit the same secret as the Deployment. Resolves to the same value (and opt-out) as `neuraltrust-data-plane.imagePullSecrets`; omitted entirely when suppressed.
+  - **In-chart OTel Collector CrashLoopBackOff on v0.153.x** — `service.telemetry.metrics.address` was removed in Collector v0.128+. Config now uses the `readers` / `pull` / `prometheus` block so the collector starts cleanly.
+
+### Changed
+
+- **GitHub Release notes** — `auto-release` (workflows `ai-release-bump`) writes **What changed** + **Commits**; `publish-chart.yml` appends a **Container images** table (`scripts/release-images-markdown.sh`) and **Installation** when the chart is published.
+- **`data-plane-api k8sJobs` default is now OFF** (`dataPlane.components.api.k8sJobs.enabled: false`). Matches data-plane-api's `K8S_JOBS_ENABLED=false` when unset — red teaming / evaluation workloads run as in-process FastAPI background tasks unless the operator opts in. Set `k8sJobs.enabled: true` (requires `data-plane-api >= v1.25.0`) to spawn evaluation workloads as Kubernetes Jobs with the bundled SA/RBAC and `K8S_*` env wiring. Clusters that relied on the prior default must add the explicit opt-in to their values overlay.
+- **`neuraltrust-watchdog` resources dropped the release-name prefix.** Set `fullnameOverride: "neuraltrust-watchdog"` so the Deployment/Service/ConfigMap/RBAC/PrometheusRule are named `neuraltrust-watchdog` (and `neuraltrust-watchdog-prometheus`) — matching `clickhouse`, `kafka`, `data-plane-api`, … — instead of `<release>-neuraltrust-watchdog`. The `app.kubernetes.io/name` label is unchanged, so OTel Collector label-based scraping and monitoring discovery are unaffected. On upgrade Helm replaces the prior `<release>-neuraltrust-watchdog` objects with the new names.
+- **In-chart OTel Collector resources dropped the release-name prefix.** Set `global.observability.collector.fullnameOverride: "otel-collector"` so the Deployment/Service/ConfigMap/RBAC/PVC/ServiceMonitor are named `otel-collector` (and `otel-collector-config`, `otel-collector-buffer`, …) instead of `<release>-otel-collector`. Label-based discovery (`app.kubernetes.io/component: otel-collector`) is unchanged. On upgrade Helm replaces the prior prefixed objects.
+
 ## [v1.12.11] — 2026-05-22
 
 ### Added

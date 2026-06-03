@@ -71,7 +71,12 @@ jobs:
         run: |
           gh release upload "${{ github.event.release.tag_name }}" "$CHART_FILE" --clobber
 
-      - name: Update release with installation instructions
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Append container images and installation to release notes
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
@@ -80,12 +85,21 @@ jobs:
           REPO="${{ github.repository }}"
           OCI_URL="oci://europe-west1-docker.pkg.dev/neuraltrust-app-prod/helm-charts/neuraltrust-platform"
 
-          # Fetch the existing release body (AI-generated notes)
-          EXISTING_BODY=$(gh release view "$TAG" --json body -q '.body')
+          # auto-release (NeuralTrust/workflows ai-release-bump) creates the release with
+          # "What changed" + "Commits". This step appends chart-specific sections below.
+          RELEASE_NOTES=$(gh release view "$TAG" --json body -q '.body')
+          IMAGES_TABLE=$(./scripts/release-images-markdown.sh)
 
-          # Build combined body: AI notes + installation instructions
           cat > updated_body.md << BODYEOF
-          ${EXISTING_BODY}
+          ${RELEASE_NOTES}
+
+          ---
+
+          ## Container images
+
+          Default image tags shipped in this release (\`values.yaml\` and subchart defaults):
+
+          ${IMAGES_TABLE}
 
           ---
 

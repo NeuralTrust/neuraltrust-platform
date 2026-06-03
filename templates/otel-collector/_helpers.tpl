@@ -5,7 +5,9 @@ to avoid clashing with subchart helpers.
 */}}
 
 {{- define "neuraltrust-platform.otelCollector.fullname" -}}
-{{- printf "%s-otel-collector" (include "neuraltrust-platform.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- $obs := default dict (default dict .Values.global).observability -}}
+{{- $coll := default dict $obs.collector -}}
+{{- default "otel-collector" $coll.fullnameOverride | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
 {{- define "neuraltrust-platform.otelCollector.serviceAccountName" -}}
@@ -104,6 +106,38 @@ app.kubernetes.io/component: otel-collector
 {{- define "neuraltrust-platform.otelCollector.selectorLabels" -}}
 {{ include "neuraltrust-platform.selectorLabels" . }}
 app.kubernetes.io/component: otel-collector
+{{- end -}}
+
+{{/*
+Resolve imagePullSecrets for the in-chart OTel Collector. Priority:
+  1. observability.collector.imagePullSecret == "none"/"" -> suppress entirely
+     (nodes pull the private image via IAM / Workload Identity, no Secret).
+  2. global.imagePullSecrets (list of strings or {name: ...} maps) -> umbrella-wide override.
+  3. observability.collector.imagePullSecret (string) / default "gcr-secret" -> matches the rest of the chart.
+Returns an "imagePullSecrets:" YAML block ready to inline, or empty.
+Usage:
+  spec:
+    {{- include "neuraltrust-platform.otelCollector.imagePullSecrets" . | nindent 6 }}
+*/}}
+{{- define "neuraltrust-platform.otelCollector.imagePullSecrets" -}}
+{{- $global := default dict .Values.global -}}
+{{- $obs := default dict $global.observability -}}
+{{- $coll := default dict $obs.collector -}}
+{{- if and (hasKey $coll "imagePullSecret") (or (eq ($coll.imagePullSecret | toString) "none") (eq ($coll.imagePullSecret | toString) "")) -}}
+{{- /* explicit opt-out: render nothing */ -}}
+{{- else if $global.imagePullSecrets -}}
+imagePullSecrets:
+{{- range $global.imagePullSecrets }}
+{{- if kindIs "string" . }}
+  - name: {{ . }}
+{{- else if kindIs "map" . }}
+  - {{ toYaml . | nindent 4 | trim }}
+{{- end }}
+{{- end }}
+{{- else -}}
+imagePullSecrets:
+  - name: {{ default "gcr-secret" $coll.imagePullSecret }}
+{{- end -}}
 {{- end -}}
 
 {{/*

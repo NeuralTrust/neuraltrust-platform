@@ -6,11 +6,20 @@
 # umbrella; in that mode the rest of these defaults still apply.
 
 enabled: false
+# Drop the release-name prefix so resources are named "neuraltrust-watchdog"
+# (matching clickhouse, kafka, data-plane-api, …) instead of
+# "<release>-neuraltrust-watchdog". Stable, predictable names that external
+# tooling (monitoring, network policies) can rely on.
+fullnameOverride: "neuraltrust-watchdog"
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/watchdog
   tag: v0.3.0 # defaults to .Chart.AppVersion
   pullPolicy: IfNotPresent
-imagePullSecrets: []
+# Pull secret(s) for private nt-docker images (watchdog + bundled Prometheus).
+# Defaults to gcr-secret like the rest of the chart. Set to [] on clusters that
+# pull via IAM / Workload Identity and have no pull Secret.
+imagePullSecrets:
+  - name: gcr-secret
 # replicaCount > 1 requires k8s Lease-based leader election; left to a
 # follow-up. Stick with 1 for now.
 replicaCount: 1
@@ -37,8 +46,9 @@ prometheus:
   # namespace by label/port name.
   collectorTarget: ""
   image:
-    repository: prom/prometheus
-    tag: v2.54.1
+    # Mirrored from prom/prometheus via crane into nt-docker (not Docker Hub).
+    repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/prometheus
+    tag: v3.12.0
     pullPolicy: IfNotPresent
   retentionTime: 3h
   retentionSize: 512MB

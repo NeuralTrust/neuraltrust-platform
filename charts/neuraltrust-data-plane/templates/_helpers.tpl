@@ -61,18 +61,16 @@ Usage: {{ include "data-plane.image" (dict "repository" .Values.dataPlane.compon
 {{- end }}
 
 {{/*
-Resolve data-plane imagePullSecrets in priority order:
+Resolve the single data-plane image pull secret NAME in priority order:
   1. .Values.imagePullSecrets             (subchart root, set via parent's `neuraltrust-data-plane.imagePullSecrets`)
   2. .Values.dataPlane.imagePullSecrets   (component-tier override)
   3. "gcr-secret"                          (hardcoded default for backward compat)
-The literal string "none" or "" suppresses the block entirely (used to opt out
-when nodes have IAM-level pull permissions and no Secret exists).
-Returns an "imagePullSecrets:" YAML block ready to be inlined, or empty.
-Usage:
-  spec:
-    {{- include "data-plane.imagePullSecrets" . | nindent 6 }}
+The literal string "none" or "" suppresses it entirely (used to opt out when
+nodes pull via IAM / Workload Identity and no Secret exists).
+Returns the resolved secret name, or empty string when suppressed.
+Usage: {{ include "data-plane.imagePullSecretName" . }}
 */}}
-{{- define "data-plane.imagePullSecrets" -}}
+{{- define "data-plane.imagePullSecretName" -}}
 {{- $imagePullSecret := "gcr-secret" -}}
 {{- if .Values.imagePullSecrets -}}
   {{- $imagePullSecret = .Values.imagePullSecrets -}}
@@ -82,8 +80,22 @@ Usage:
   {{- end -}}
 {{- end -}}
 {{- if and $imagePullSecret (ne $imagePullSecret "none") (ne $imagePullSecret "") -}}
+{{- $imagePullSecret -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Resolve data-plane imagePullSecrets as an inlineable YAML block. Wraps
+`data-plane.imagePullSecretName` and renders nothing when suppressed.
+Usage:
+  spec:
+    {{- include "data-plane.imagePullSecrets" . | nindent 6 }}
+*/}}
+{{- define "data-plane.imagePullSecrets" -}}
+{{- $name := include "data-plane.imagePullSecretName" . -}}
+{{- if $name -}}
 imagePullSecrets:
-  - name: {{ $imagePullSecret }}
+  - name: {{ $name }}
 {{- end -}}
 {{- end }}
 
@@ -214,7 +226,7 @@ config block with safe defaults so the calling templates stay readable.
 
 {{/*
 Returns "true" when data-plane-api k8sJobs is enabled, empty string otherwise.
-Default: enabled.
+Default: disabled (matches data-plane-api K8S_JOBS_ENABLED=false when unset).
 Usage: {{- if eq (include "data-plane.api.k8sJobs.enabled" .) "true" }}
 */}}
 {{- define "data-plane.api.k8sJobs.enabled" -}}
@@ -224,8 +236,6 @@ Usage: {{- if eq (include "data-plane.api.k8sJobs.enabled" .) "true" }}
 {{- end -}}
 {{- if hasKey $cfg "enabled" -}}
   {{- if $cfg.enabled -}}true{{- end -}}
-{{- else -}}
-  true
 {{- end -}}
 {{- end }}
 
