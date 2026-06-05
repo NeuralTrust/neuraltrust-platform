@@ -108,3 +108,42 @@ air-gapped setups all honour it.
 - `GET /checks` — last result per check.
 - `POST /checks/{id}/run` — force-run; protected by bearer token if
   `server.authToken.value` (or `server.authToken.existingSecret`) is set.
+
+## Log bridge (ERROR/WARNING export)
+
+The watchdog can bridge customer-cluster logs to the SRE team without
+asking operators to run `kubectl logs`. It tails `pods/log` via the
+Kubernetes API, keeps only ERROR/WARN, redacts secrets, and ships records
+over three transports. **Default OFF and double-gated.**
+
+Enable it by flipping BOTH gates:
+
+1. `rbac.logExport.enabled: true` — grants the SA the `pods/log` verb.
+2. `logExport.enabled: true` — turns the subsystem on and selects sources.
+
+```yaml
+rbac:
+  logExport:
+    enabled: true
+logExport:
+  enabled: true
+  sources:
+    - { namespace: neuraltrust, podSelector: "app in (control-plane-api, data-plane-api, trustgate, firewall)" }
+  transports:
+    otlp:   { enabled: true }              # push into the umbrella OTel collector
+    pull:   { enabled: true, bufferSize: 1000 }  # GET /logs ring buffer
+    bundle: { enabled: false }             # air-gapped POST /logs/export
+```
+
+Notes:
+
+- **Push (OTLP)** reuses the umbrella collector → hosted-export pipeline.
+  It additionally needs the collector's logs pipeline on
+  (`global.observability.sendLogs: true`) + hosted export configured.
+- **Pull / bundle** endpoints (`GET /logs`, `POST /logs/export`) are
+  **always** bearer-gated — set `server.authToken` to use them.
+- `namespaceSelector:` sources require `rbac.watchAllNamespaces: true`; in
+  namespace-scoped mode use explicit `namespace:` entries.
+- Redaction masks bearer tokens, passwords, DSNs, API keys, and emails
+  before any record leaves memory. Add `logExport.redaction.extraPatterns`
+  for site-specific regexes.

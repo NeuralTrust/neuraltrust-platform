@@ -135,6 +135,10 @@ rbac:
   actions:
     restartDeployment:
       enabled: false
+  # RBAC half of the log-bridge double-gate. When true the SA gets the
+  # `pods/log` get verb. Tailing still also requires logExport.enabled=true.
+  logExport:
+    enabled: false
 # Pod-level overrides.
 podAnnotations: {}
 podLabels: {}
@@ -198,6 +202,29 @@ actions:
     secretKey: webhook
   otlp:
     endpointEnv: OTEL_EXPORTER_OTLP_ENDPOINT
+# Log bridge (AUT-236): tail ERROR/WARN from selected workloads, redact
+# secrets, and ship over OTLP push / HTTP pull / air-gapped bundle. Default
+# OFF and double-gated — tailing also requires rbac.logExport.enabled=true so
+# the SA gets the pods/log verb. The OTLP push path additionally needs the
+# umbrella collector's logs pipeline (global.observability.sendLogs=true) +
+# hosted export. GET /logs and POST /logs/export are always bearer-gated, so
+# set server.authToken when using the pull transport. See README.md.
+logExport:
+  enabled: false
+  severities: [error, warn]
+  # Workloads to tail. Use an explicit `namespace:` in namespace-scoped RBAC
+  # mode; `namespaceSelector:` requires rbac.watchAllNamespaces=true.
+  sources: []
+  #  - { namespace: neuraltrust, podSelector: "app in (control-plane-api, data-plane-api, trustgate, firewall)" }
+  sinceSeconds: 300
+  maxLinesPerPodPerMinute: 120
+  redaction:
+    builtins: [bearer, password, dsn, apikey, email]
+    extraPatterns: []
+  transports:
+    otlp: { enabled: true }
+    pull: { enabled: true, bufferSize: 1000 }
+    bundle: { enabled: false, outputDir: /var/run/watchdog/logbundles }
 # Connection envs sourced from existing cluster secrets.
 secretEnv:
   clickhouse:

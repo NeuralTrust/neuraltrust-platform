@@ -152,11 +152,21 @@ spec:
             - name: config
               mountPath: /etc/watchdog
               readOnly: true
+            {{- if and .Values.logExport.enabled .Values.logExport.transports.bundle.enabled }}
+            {{- /* Writable scratch for the air-gapped log bundle; required
+                   because the root FS is read-only. */}}
+            - name: logbundles
+              mountPath: /var/run/watchdog
+            {{- end }}
             {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 12 }}
       volumes:
         - name: config
           configMap:
             name: {{ include "neuraltrust-watchdog.fullname" . }}-config
+        {{- if and .Values.logExport.enabled .Values.logExport.transports.bundle.enabled }}
+        - name: logbundles
+          emptyDir: {}
+        {{- end }}
         {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 8 }}
       {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" . "local" .Values.nodeSelector) | nindent 6 }}
       {{- include "neuraltrust-platform.tolerations" (dict "ctx" . "local" .Values.tolerations) | nindent 6 }}
