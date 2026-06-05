@@ -281,6 +281,25 @@ neuraltrust-data-plane:
 
 Available on every main service container. See [DEPLOYMENT.md](./DEPLOYMENT.md#custom-environment-variables) for the full list of supported components.
 
+### Scenario 12: Pin the whole platform to a dedicated node pool
+
+**File:** Custom values
+
+```yaml
+global:
+  nodeSelector:
+    dedicated: neuraltrust
+  # Only needed if the pool is tainted (exclusive). A nodeSelector alone
+  # won't keep other tenants off a tainted pool.
+  tolerations:
+    - key: dedicated
+      operator: Equal
+      value: neuraltrust
+      effect: NoSchedule
+```
+
+`global.nodeSelector` / `global.tolerations` apply to **every** workload across all subcharts. Per-component `nodeSelector` (e.g. `clickhouse.nodeSelector`) still works and wins on conflicting keys. Both default to empty (no pinning). See [DEPLOYMENT.md](./DEPLOYMENT.md#dedicated-node-pool).
+
 ---
 
 ## Firewall: CPU and GPU

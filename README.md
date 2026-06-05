@@ -395,6 +395,28 @@ global:
     noProxy: "localhost,127.0.0.1,.cluster.local,.svc"
 ```
 
+## Dedicated node pool
+
+Pin **every** platform workload to a dedicated node pool with a single setting — no need to configure each component. `global.nodeSelector` merges into every pod across all subcharts (and parent-chart workloads); per-component `nodeSelector` still works and wins on key conflicts. Both default to empty, so existing releases are unaffected.
+
+```yaml
+global:
+  nodeSelector:
+    dedicated: neuraltrust
+  # For an *exclusive* (tainted) pool, add matching tolerations — a nodeSelector
+  # alone will not keep other tenants off a tainted pool.
+  tolerations:
+    - key: dedicated
+      operator: Equal
+      value: neuraltrust
+      effect: NoSchedule
+```
+
+Notes:
+
+- Per-component overrides still apply (e.g. `clickhouse.nodeSelector`, `trustgate.dataPlane.nodeSelector`, `neuraltrust-watchdog.nodeSelector`) and take precedence on conflicting keys.
+- Firewall **GPU workers** keep expressing their pool selection via `nodeAffinity` (see [DEPLOYMENT.md](./DEPLOYMENT.md#dedicated-node-pool) and `values-dataplane-gpu.yaml.example`); `global.nodeSelector` is added there as a plain `nodeSelector`, so a GPU pool can sit under a broader dedicated pool.
+
 ## Custom environment variables
 
 Inject extra environment variables into any service container without forking the chart. Every main service exposes `extraEnv` and `extraEnvFrom`:

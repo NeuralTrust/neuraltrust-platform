@@ -76,14 +76,8 @@ spec:
             name: {{ include "neuraltrust-watchdog.prometheusFullname" . }}-config
         - name: data
           emptyDir: {}
-      {{- with .Values.prometheus.nodeSelector }}
-      nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.prometheus.tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+      {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" . "local" .Values.prometheus.nodeSelector) | nindent 6 }}
+      {{- include "neuraltrust-platform.tolerations" (dict "ctx" . "local" .Values.prometheus.tolerations) | nindent 6 }}
       {{- with .Values.prometheus.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}

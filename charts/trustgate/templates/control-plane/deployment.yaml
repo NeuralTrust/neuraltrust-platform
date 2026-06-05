@@ -162,6 +162,8 @@ spec:
             port: http
           initialDelaySeconds: 15
           periodSeconds: 20
+      {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" . "local" .Values.controlPlane.nodeSelector) | nindent 6 }}
+      {{- include "neuraltrust-platform.tolerations" (dict "ctx" . "local" .Values.controlPlane.tolerations) | nindent 6 }}
 ---
 {{- $gkeBackendConfigName := include "neuraltrust-platform.service.gkeBackendConfigName" (dict "global" .Values.global "localName" "trustgate-control-plane-backendconfig") }}
 {{- $gcp := default dict (default dict .Values.global.ingress).gcp }}

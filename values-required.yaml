@@ -34,6 +34,18 @@ global:
   #   The bundled ingress defaults also enable HTTPS by default.
   #   If you leave per-ingress tls.secretName empty, those ingresses use the shared secret automatically.
   #   Configure this behavior in values.yaml under global.ingress.tls when needed.
+  # Pin EVERY platform workload to a dedicated node pool with one setting.
+  # Per-component nodeSelector still works and is merged on top (per-component
+  # keys win). Leave unset (default {}) to schedule anywhere. For an *exclusive*
+  # (tainted) pool, also set global.tolerations — a nodeSelector alone won't keep
+  # other tenants off a tainted pool.
+  # nodeSelector:
+  #   dedicated: neuraltrust
+  # tolerations:
+  #   - key: dedicated
+  #     operator: Equal
+  #     value: neuraltrust
+  #     effect: NoSchedule
 
 # Infrastructure Components
 infrastructure:

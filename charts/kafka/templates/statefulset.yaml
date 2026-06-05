@@ -28,14 +28,8 @@ spec:
         - name: {{ . }}
         {{- end }}
       {{- end }}
-      {{- if .Values.nodeSelector }}
-      nodeSelector:
-        {{- toYaml .Values.nodeSelector | nindent 8 }}
-      {{- end }}
-      {{- if .Values.tolerations }}
-      tolerations:
-        {{- toYaml .Values.tolerations | nindent 8 }}
-      {{- end }}
+      {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" . "local" .Values.nodeSelector) | nindent 6 }}
+      {{- include "neuraltrust-platform.tolerations" (dict "ctx" . "local" .Values.tolerations) | nindent 6 }}
       {{- if .Values.affinity }}
       affinity:
         {{- toYaml .Values.affinity | nindent 8 }}

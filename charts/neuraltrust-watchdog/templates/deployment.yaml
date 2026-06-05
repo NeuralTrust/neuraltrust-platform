@@ -158,14 +158,8 @@ spec:
           configMap:
             name: {{ include "neuraltrust-watchdog.fullname" . }}-config
         {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 8 }}
-      {{- with .Values.nodeSelector }}
-      nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+      {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" . "local" .Values.nodeSelector) | nindent 6 }}
+      {{- include "neuraltrust-platform.tolerations" (dict "ctx" . "local" .Values.tolerations) | nindent 6 }}
       {{- with .Values.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}
