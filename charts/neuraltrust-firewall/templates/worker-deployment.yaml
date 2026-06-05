@@ -51,11 +51,12 @@ spec:
                     {{- end }}
                 {{- end }}
       {{- end }}
+      {{- /* global.nodeSelector applies as a plain nodeSelector (ANDed with the
+             per-worker GPU-pool nodeAffinity above). Per-worker selection stays
+             expressed via nodeAffinity because its values are lists. */}}
+      {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" $) | nindent 6 }}
       {{- $tolerations := $workerCfg.tolerations | default $defaults.tolerations }}
-      {{- if $tolerations }}
-      tolerations:
-        {{- toYaml $tolerations | nindent 8 }}
-      {{- end }}
+      {{- include "neuraltrust-platform.tolerations" (dict "ctx" $ "local" $tolerations) | nindent 6 }}
       {{- $hostIPC := $workerCfg.hostIPC | default $defaults.hostIPC }}
       {{- if $hostIPC }}
       hostIPC: {{ $hostIPC }}

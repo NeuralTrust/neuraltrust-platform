@@ -155,18 +155,12 @@ spec:
           periodSeconds: 20
       securityContext:
         {{- toYaml .Values.dataPlane.podSecurityContext | nindent 8 }}
-      {{- with .Values.dataPlane.nodeSelector }}
-      nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+      {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" . "local" .Values.dataPlane.nodeSelector) | nindent 6 }}
       {{- with .Values.dataPlane.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.dataPlane.tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }} 
+      {{- include "neuraltrust-platform.tolerations" (dict "ctx" . "local" .Values.dataPlane.tolerations) | nindent 6 }}
 
 ---
 {{- $gkeBackendConfigName := include "neuraltrust-platform.service.gkeBackendConfigName" (dict "global" .Values.global "localName" "trustgate-data-plane-backendconfig") }}

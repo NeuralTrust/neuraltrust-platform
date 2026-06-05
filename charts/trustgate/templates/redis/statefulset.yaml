@@ -90,6 +90,8 @@ spec:
           items:
           - key: redis.conf
             path: redis.conf
+      {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" . "local" .Values.redis.nodeSelector) | nindent 6 }}
+      {{- include "neuraltrust-platform.tolerations" (dict "ctx" . "local" .Values.redis.tolerations) | nindent 6 }}
   volumeClaimTemplates:
   - metadata:
       name: redis-data

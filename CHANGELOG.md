@@ -4,6 +4,14 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Added
+
+- **Global node pinning via `global.nodeSelector` and `global.tolerations`.** Operators can now pin **every** platform workload to a dedicated node pool with a single setting instead of configuring each component separately. Both default to empty (`{}` / `[]`), so existing releases are unaffected.
+  - `global.nodeSelector` is merged into every pod spec across all subcharts (TrustGate, Control Plane, Data Plane, Firewall, AISPM, SIEM connectors, ClickHouse, Kafka, Watchdog) and the parent-chart workloads (OTel Collector, init/cron Jobs). Per-component `nodeSelector` still works and **wins on key conflicts**.
+  - `global.tolerations` is concatenated onto every pod spec (companion for an *exclusive*, tainted pool — a `nodeSelector` alone won't keep other tenants off). Per-component tolerations are preserved and merged.
+  - The Firewall workers keep expressing their per-worker GPU-pool selection as `nodeAffinity` (its values are lists); `global.nodeSelector` is added there as a plain `nodeSelector` (ANDed with the affinity), so a GPU pool can still be pinned under a broader dedicated pool.
+  - Implemented via the shared helpers `neuraltrust-platform.nodeSelector` / `neuraltrust-platform.tolerations` in `templates/_helpers.tpl`. Render coverage added to `scripts/test-helm-render.sh` (scenario 25).
+
 ## [v1.12.19] — 2026-06-03
 
 ### Changed
