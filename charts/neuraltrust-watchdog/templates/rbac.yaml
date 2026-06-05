@@ -2,6 +2,7 @@
 {{- $name := include "neuraltrust-watchdog.fullname" . -}}
 {{- $sa := include "neuraltrust-watchdog.serviceAccountName" . -}}
 {{- $allowRestart := .Values.rbac.actions.restartDeployment.enabled -}}
+{{- $allowLogExport := and .Values.rbac.logExport .Values.rbac.logExport.enabled -}}
 {{- if .Values.rbac.watchAllNamespaces }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -36,6 +37,13 @@ rules:
   - apiGroups: [apps]
     resources: [deployments/scale]
     verbs: [patch, update]
+  {{- end }}
+  {{- if $allowLogExport }}
+  # RBAC half of the log-bridge double-gate. Tailing also requires
+  # logExport.enabled=true in config.
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
   {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -77,6 +85,15 @@ rules:
   - apiGroups: [apps]
     resources: [deployments/scale]
     verbs: [patch, update]
+  {{- end }}
+  {{- if $allowLogExport }}
+  # RBAC half of the log-bridge double-gate. Tailing also requires
+  # logExport.enabled=true in config. Note: namespaceSelector sources need
+  # rbac.watchAllNamespaces=true; in namespace-scoped mode use explicit
+  # `namespace:` entries within this release namespace.
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
   {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1

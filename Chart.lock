@@ -25,6 +25,6 @@ dependencies:
   version: 2.0.11
 - name: neuraltrust-watchdog
   repository: file://./charts/neuraltrust-watchdog
-  version: 0.1.4
+  version: 0.1.5
 digest: sha256:d1ba531f5a0afed0134aa094c729e7d181de9682ce3e6caad6be020141a05734
 generated: "2026-06-05T10:53:24.820807012Z"

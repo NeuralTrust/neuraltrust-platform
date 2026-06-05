@@ -29,6 +29,10 @@ data:
         webhookUrlEnv: SLACK_WEBHOOK_URL
       otlp:
         endpointEnv: {{ .Values.actions.otlp.endpointEnv | quote }}
+    {{- with .Values.logExport }}
+    logExport:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
     checks:
       {{- /*
         `enabledCheckIds` is an additive overlay: any check whose `id`
