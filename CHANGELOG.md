@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v1.13.0] — 2026-06-05
+
 ### Added
 
 - **Global node pinning via `global.nodeSelector` and `global.tolerations`.** Operators can now pin **every** platform workload to a dedicated node pool with a single setting instead of configuring each component separately. Both default to empty (`{}` / `[]`), so existing releases are unaffected.
