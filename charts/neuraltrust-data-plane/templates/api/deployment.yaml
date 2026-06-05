@@ -404,3 +404,5 @@ spec:
         configMap:
           name: data-plane-trusttest-config
       {{- end }}
+      {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" .) | nindent 6 }}
+      {{- include "neuraltrust-platform.tolerations" (dict "ctx" .) | nindent 6 }}

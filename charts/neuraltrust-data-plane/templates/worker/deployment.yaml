@@ -140,3 +140,5 @@ spec:
       {{- with .Values.dataPlane.components.worker.extraVolumes }}
       {{- include "neuraltrust-platform.extraVolumes" (dict "items" .) | nindent 6 }}
       {{- end }}
+      {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" .) | nindent 6 }}
+      {{- include "neuraltrust-platform.tolerations" (dict "ctx" .) | nindent 6 }}
