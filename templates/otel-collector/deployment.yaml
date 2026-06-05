@@ -145,14 +145,8 @@ spec:
               - key: ca.crt
                 path: ca.crt
         {{- end }}
-      {{- with $coll.nodeSelector }}
-      nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with $coll.tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+      {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" . "local" $coll.nodeSelector) | nindent 6 }}
+      {{- include "neuraltrust-platform.tolerations" (dict "ctx" . "local" $coll.tolerations) | nindent 6 }}
       {{- with $coll.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}

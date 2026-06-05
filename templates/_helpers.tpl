@@ -725,6 +725,58 @@ watchdog Prometheus is its only scraper).
 {{- end }}
 
 {{/*
+Merged pod nodeSelector (global.nodeSelector + per-component nodeSelector).
+Lets operators pin the entire platform to a dedicated node pool with a single
+global.nodeSelector, while per-component values still work and win on key
+conflicts. Default OFF — when both are empty nothing is emitted, so existing
+releases are unaffected.
+
+Emits the full `nodeSelector:` block (key + values) or nothing.
+Usage: {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" . "local" .Values.x.nodeSelector) | nindent 6 }}
+*/}}
+{{- define "neuraltrust-platform.nodeSelector" -}}
+{{- $global := (default dict (default dict .ctx.Values.global).nodeSelector) -}}
+{{- $local := default dict .local -}}
+{{- $merged := merge (deepCopy $local) $global -}}
+{{- with $merged }}
+nodeSelector:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- end -}}
+
+{{/*
+Merged pod tolerations (global.tolerations + per-component tolerations).
+A truly exclusive node pool is usually tainted, so global.tolerations is the
+companion to global.nodeSelector. Global tolerations are concatenated with any
+per-component tolerations (both apply). Default OFF — empty emits nothing.
+
+Emits the full `tolerations:` block or nothing.
+Usage: {{- include "neuraltrust-platform.tolerations" (dict "ctx" . "local" .Values.x.tolerations) | nindent 6 }}
+*/}}
+{{- define "neuraltrust-platform.tolerations" -}}
+{{- $global := (default (list) (default dict .ctx.Values.global).tolerations) -}}
+{{- $local := default (list) .local -}}
+{{- $merged := concat $global $local -}}
+{{- with $merged }}
+tolerations:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- end -}}
+
+{{/*
+Merged map of nodeSelector keys (global + per-component), per-component wins.
+For workloads that express node selection as nodeAffinity (e.g. firewall
+workers) rather than a plain nodeSelector field. Returns the merged dict (or an
+empty dict) for the caller to range over.
+Usage: {{- $sel := include "neuraltrust-platform.nodeSelectorMap" (dict "ctx" . "local" $cfg.nodeSelector) | fromYaml }}
+*/}}
+{{- define "neuraltrust-platform.nodeSelectorMap" -}}
+{{- $global := (default dict (default dict .ctx.Values.global).nodeSelector) -}}
+{{- $local := default dict .local -}}
+{{- merge (deepCopy $local) $global | toYaml -}}
+{{- end -}}
+
+{{/*
 Render user-supplied pod volumes from component values.
 */}}
 {{- define "neuraltrust-platform.extraVolumes" -}}

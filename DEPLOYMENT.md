@@ -404,6 +404,36 @@ neuraltrust-data-plane:
 
 `extraEnvFrom` entries are **appended** to the chart's existing `envFrom` list (e.g. `trustgate-env-vars`, `firewall-config`); they don't replace it.
 
+## Dedicated node pool
+
+Run the whole platform on a dedicated node pool with one setting instead of configuring each component. `global.nodeSelector` and `global.tolerations` are applied to **every** workload — across all subcharts (TrustGate, Control Plane, Data Plane, Firewall, AISPM, SIEM connectors, ClickHouse, Kafka, Watchdog) and the parent-chart workloads (OTel Collector, init/cron Jobs). Both default to empty, so existing releases are unaffected.
+
+```yaml
+global:
+  nodeSelector:
+    dedicated: neuraltrust
+  # Only needed if the pool is tainted (exclusive). A nodeSelector alone won't
+  # keep other tenants off a tainted pool — the pods also need a toleration.
+  tolerations:
+    - key: dedicated
+      operator: Equal
+      value: neuraltrust
+      effect: NoSchedule
+```
+
+### Merge semantics
+
+| Setting | How global + per-component combine |
+|---|---|
+| `global.nodeSelector` | Merged with each component's `nodeSelector`; **per-component keys win** on conflicts |
+| `global.tolerations` | **Concatenated** with each component's `tolerations` (both apply) |
+
+Per-component fields are unchanged — e.g. `clickhouse.nodeSelector`, `kafka.tolerations`, `trustgate.dataPlane.nodeSelector`, `neuraltrust-watchdog.nodeSelector`, `neuraltrust-control-plane`/`neuraltrust-data-plane` component values, etc.
+
+### Firewall GPU workers
+
+Firewall workers express their per-worker pool selection as `nodeAffinity` (its values are lists — see [GPU worker configuration](#gpu-worker-configuration)). `global.nodeSelector` is added to those pods as a **plain `nodeSelector`** that is ANDed with the GPU `nodeAffinity`, so a GPU pool can sit under a broader dedicated pool.
+
 ## ClickHouse backups
 
 The in-cluster ClickHouse subchart can run scheduled backups to object storage via a Kubernetes CronJob. Backups are **off by default**.

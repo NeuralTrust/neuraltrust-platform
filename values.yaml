@@ -27,6 +27,18 @@ global:
   security:
     allowInsecureImages: true # Allow Bitnami charts to use their container images
   storageClass: "" # Global storage class for persistent volumes
+  # Pin EVERY platform workload (all subcharts + parent-chart workloads) to a
+  # node pool with one setting. Per-component nodeSelector still works and is
+  # merged on top (per-component keys win on conflicts). Default {} = no pinning,
+  # so existing releases are unaffected.
+  # Example (dedicated pool): nodeSelector: { dedicated: neuraltrust }
+  nodeSelector: {}
+  # Tolerations applied to EVERY platform workload. Companion to
+  # global.nodeSelector for an *exclusive* (tainted) node pool — a nodeSelector
+  # alone won't keep other tenants off a tainted pool. Global tolerations are
+  # concatenated with any per-component tolerations. Default [] = none.
+  # Example: tolerations: [ { key: dedicated, operator: Equal, value: neuraltrust, effect: NoSchedule } ]
+  tolerations: []
   # When enabled, HTTP_PROXY/HTTPS_PROXY/NO_PROXY (upper+lowercase) are injected into every workload.
   proxy:
     enabled: false

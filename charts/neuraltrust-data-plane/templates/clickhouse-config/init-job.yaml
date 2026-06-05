@@ -140,4 +140,6 @@ spec:
             items:
               - key: init-db.sql
                 path: init-db.sql
+      {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" .) | nindent 6 }}
+      {{- include "neuraltrust-platform.tolerations" (dict "ctx" .) | nindent 6 }}
 {{- end }}

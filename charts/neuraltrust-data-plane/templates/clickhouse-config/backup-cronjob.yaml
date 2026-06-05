@@ -102,4 +102,6 @@ spec:
                   cpu: 200m
                 {{- end }}
           restartPolicy: OnFailure
+          {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" .) | nindent 10 }}
+          {{- include "neuraltrust-platform.tolerations" (dict "ctx" .) | nindent 10 }}
 {{- end }}

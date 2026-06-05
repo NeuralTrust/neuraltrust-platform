@@ -69,6 +69,8 @@ spec:
       serviceAccountName: {{ include "trustgate.serviceAccountName" . }}
       restartPolicy: Never
       {{- include "trustgate.imagePullSecrets" . | nindent 6 }}
+      {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" .) | nindent 6 }}
+      {{- include "neuraltrust-platform.tolerations" (dict "ctx" .) | nindent 6 }}
       containers:
       - name: postgresql-init
         {{- $postgresImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/postgres" }}

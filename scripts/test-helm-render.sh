@@ -496,5 +496,59 @@ assert_contains     "$TMP/aispm-redis.yaml"   "REDIS_TLS"           "aispm REDIS
 assert_not_contains "$TMP/aispm-default.yaml" "key: redis-password" "no aispm Redis password by default (backward-compat)"
 assert_not_contains "$TMP/aispm-default.yaml" "REDIS_USERNAME"      "no aispm REDIS_USERNAME by default (backward-compat)"
 
+# Scenario 25: global.nodeSelector / global.tolerations pin EVERY workload to a
+# dedicated (optionally tainted) node pool with a single setting. Default OFF —
+# default render must inject no nodeSelector. Per-component nodeSelector still
+# merges on top (per-component keys win on conflicts).
+blue "scenario 25: global.nodeSelector + global.tolerations pin all workloads"
+render "$TMP/global-nodeselector.yaml" \
+  --set trustgate.enabled=true \
+  --set firewall.enabled=true \
+  --set neuraltrust-aispm.aispm.enabled=true \
+  --set neuraltrust-watchdog.enabled=true \
+  --set neuraltrust-control-plane.controlPlane.enabled=true \
+  --set neuraltrust-data-plane.dataPlane.enabled=true \
+  --set global.nodeSelector.dedicated=neuraltrust \
+  --set 'global.tolerations[0].key=dedicated' \
+  --set 'global.tolerations[0].operator=Equal' \
+  --set 'global.tolerations[0].value=neuraltrust' \
+  --set 'global.tolerations[0].effect=NoSchedule'
+assert_contains "$TMP/global-nodeselector.yaml" "dedicated: neuraltrust"  "global.nodeSelector key rendered on workloads"
+# Applied broadly, not just one pod (control-plane, data-plane, trustgate,
+# firewall, aispm, watchdog all consume the helper).
+ns_count=$(grep -c "dedicated: neuraltrust" "$TMP/global-nodeselector.yaml" || true)
+if [ "$ns_count" -lt 6 ]; then
+  red "FAIL: global.nodeSelector applied to only $ns_count pod specs (expected >= 6)"
+  exit 1
+fi
+green "ok  - global.nodeSelector applied to $ns_count workload pod specs"
+assert_contains "$TMP/global-nodeselector.yaml" "key: dedicated"          "global.tolerations rendered on workloads"
+assert_contains "$TMP/global-nodeselector.yaml" "effect: NoSchedule"      "global.tolerations effect rendered"
+
+# Scenario 25b: backward-compat — without global.nodeSelector/tolerations and no
+# per-component overrides, the default render injects no nodeSelector at all.
+blue "scenario 25b: no nodeSelector injected by default (backward-compat)"
+assert_not_contains "$TMP/default.yaml" "nodeSelector:" "default render carries no nodeSelector"
+
+# Scenario 25c: per-component nodeSelector still wins on key conflicts. With a
+# global key AND the same key set on clickhouse, the clickhouse StatefulSet must
+# carry the per-component value.
+blue "scenario 25c: per-component nodeSelector overrides global on conflict"
+render "$TMP/nodeselector-override.yaml" \
+  --set global.nodeSelector.dedicated=platform-pool \
+  --set clickhouse.nodeSelector.dedicated=clickhouse-pool
+# Scope to the clickhouse StatefulSet (a Service is also named clickhouse, so
+# match on kind + name together) and read its nodeSelector value.
+chouse_sel=$(awk '
+  /^kind:/{k=$2}
+  /^  name:/{n=$2}
+  /dedicated:/ && k=="StatefulSet" && n=="clickhouse" {print $2; exit}
+' "$TMP/nodeselector-override.yaml")
+if [ "$chouse_sel" != "clickhouse-pool" ]; then
+  red "FAIL: clickhouse nodeSelector expected clickhouse-pool (per-component wins), got: ${chouse_sel:-<none>}"
+  exit 1
+fi
+green "ok  - per-component nodeSelector wins over global on key conflict"
+
 green ""
 green "All helm-render assertions passed."
