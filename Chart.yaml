@@ -36,7 +36,7 @@ dependencies:
       - infrastructure
   # NeuralTrust components
   - name: neuraltrust-data-plane
-    version: 1.2.34
+    version: 1.2.35
     condition: neuraltrust-data-plane.dataPlane.enabled
     repository: file://./charts/neuraltrust-data-plane
     tags:
