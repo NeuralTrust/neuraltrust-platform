@@ -11,7 +11,13 @@ Job to initialize the AISPM PostgreSQL database and user.
 {{- /* Skipped in IAM auth mode: the Job password-authenticates to create the
        aispm user/database, which isn't possible without a static password. With
        external RDS + IAM the operator pre-creates the user/db and GRANT rds_iam. */}}
-{{- if and .Values.aispm.enabled (ne (.Values.aispm.database.authMode | default "password") "iam") }}
+{{- /* Skip the init Job entirely when PostgreSQL is external (global.postgresql.deploy=false):
+       the operator pre-creates the aispm user/database, so the postgres image is never pulled. */}}
+{{- $pgDeploy := true }}
+{{- if and .Values.global .Values.global.postgresql (hasKey .Values.global.postgresql "deploy") }}
+  {{- $pgDeploy = .Values.global.postgresql.deploy }}
+{{- end }}
+{{- if and $pgDeploy .Values.aispm.enabled (ne (.Values.aispm.database.authMode | default "password") "iam") }}
 {{- $pgSecretName := "postgresql-secrets" }}
 {{- $aispmSecretName := "aispm-secrets" }}
 {{- $aispmDbHost := .Values.aispm.database.host | default "control-plane-postgresql" | toString }}

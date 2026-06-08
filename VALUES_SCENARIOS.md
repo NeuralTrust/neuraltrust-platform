@@ -132,6 +132,14 @@ trustgate:
 **File:** Based on `values-external-services.yaml.example`
 
 ```yaml
+global:
+  # Single switch for external PostgreSQL across all subcharts (control-plane,
+  # TrustGate, AISPM). Skips the in-cluster PG Deployment, the wait-for-postgresql
+  # initContainers, and the TrustGate/AISPM postgresql-init Jobs — so the postgres
+  # image is never pulled. Pre-create the users/databases on the external server.
+  postgresql:
+    deploy: false
+
 infrastructure:
   clickhouse:
     deploy: false
@@ -143,9 +151,6 @@ infrastructure:
       bootstrapServers: "kafka.example.com:9092"
 
 neuraltrust-control-plane:
-  infrastructure:
-    postgresql:
-      deploy: false
   controlPlane:
     components:
       postgresql:

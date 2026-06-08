@@ -61,6 +61,7 @@ spec:
       {{- include "neuraltrust-platform.extraVolumes" (dict "items" .) | nindent 6 }}
       {{- end }}
       {{- end }}
+      {{- if include "control-plane.postgresql.deploy" . }}
       initContainers:
       - name: wait-for-postgresql
         {{- $pgWaitImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/postgres" }}
@@ -126,6 +127,7 @@ spec:
             cpu: 500m
             memory: 128Mi
           {{- end }}
+      {{- end }}
       containers:
       - name: control-plane-scheduler
         {{- $imageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/scheduler" }}

@@ -48,7 +48,7 @@ matches nothing and the scrape is a no-op.
 
 ```sh
 helm upgrade --install neuraltrust . \
-  -f accounts/<client>/values-<client>.yaml \
+  -f my-values.yaml \
   -f values-self-monitoring.yaml.example
 ```
 
@@ -109,6 +109,13 @@ Deploy this for one full on-call rotation. Compare:
   watchdog notification or in-chart alert?
 - Watchdog `/checks` HTTP endpoint: which checks reported `failed` /
   `critical` and would have actioned (`dryRun: true`)?
+
+**First rollout:** start observe-only in a single values overlay
+(`my-values.yaml`) — `actions.dryRun: true`, no `rbac.actions.*`
+mutating verbs, and a curated `enabledCheckIds` subset. To roll out the
+next environment, copy that `neuraltrust-watchdog` block into its
+`values.yaml` and keep it observe-only until a parity rotation proves
+the checks are stable.
 
 ### Phase 2 — Per-check cutover, smallest blast first
 

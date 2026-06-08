@@ -52,7 +52,7 @@ All NeuralTrust images live in `europe-west1-docker.pkg.dev/neuraltrust-app-prod
 | `kafka` *(or external)* | `kafka` | `4.3.0` | 1 |
 | `neuraltrust-control-plane` (Postgres only) *(or external)* | `postgres` | `17-alpine` | 1 |
 
-**Footprint:** ~10 distinct image repositories, ~16 running pods on chart defaults. Cluster sizing baseline: **~20.5 vCPU / ~58.5 GiB requests / ~80 GiB PVC** — fits on **4 × (8 vCPU / 32 GiB)** worker nodes with HA. Switching the Firewall to GPU workers drops the CPU pool to **3 nodes** plus a **5-node GPU pool** (one GPU per default worker, or fewer with CUDA MPS).
+**Footprint:** ~10 distinct image repositories, ~16 running pods on chart defaults. Cluster sizing baseline: **~12.25 vCPU / ~40.5 GiB requests / ~80 GiB PVC** — fits on **4 × (8 vCPU / 16 GiB)** worker nodes with HA. Switching the Firewall to GPU workers moves the 5 ML workers to a GPU pool (one GPU per default worker, or fewer with CUDA MPS) and shrinks the CPU pool further.
 
 **Not deployed in hybrid:** Control Plane API / UI / Scheduler — they run on NeuralTrust SaaS.
 
@@ -69,7 +69,7 @@ Includes everything above **plus** the Control Plane subchart:
 | `neuraltrust-control-plane` | `app` (UI) | `v1.65.9` | 2 |
 | `neuraltrust-control-plane` | `scheduler` | `v1.9.7` | 1 |
 
-**Footprint:** ~13 distinct image repositories, ~21 running pods on chart defaults. Cluster sizing baseline: **~23.1 vCPU / ~61.8 GiB requests / ~80 GiB PVC** — fits on **5 × (8 vCPU / 32 GiB)** worker nodes with HA. Switching the Firewall to GPU workers drops the CPU pool to **4 nodes** plus a **5-node GPU pool**.
+**Footprint:** ~13 distinct image repositories, ~21 running pods on chart defaults. Cluster sizing baseline: **~14.85 vCPU / ~43.75 GiB requests / ~80 GiB PVC** — fits on **5 × (8 vCPU / 16 GiB)** worker nodes with HA. Enabling the optional AISPM add-on raises this to **~15.45 vCPU / ~45 GiB**, fitting on **6 × (8 vCPU / 16 GiB)**. Switching the Firewall to GPU workers moves the 5 ML workers to a GPU pool.
 
 </details>
 

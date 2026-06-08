@@ -312,10 +312,10 @@ trustgate:
         cpu: 200m
         memory: 2Gi
     podDisruptionBudget:
-      enabled: true
+      enabled: false
       minAvailable: 1
     autoscaling:
-      enabled: true
+      enabled: false
       minReplicas: 1
       maxReplicas: 10
       targetCPUUtilizationPercentage: 80
@@ -352,10 +352,10 @@ trustgate:
     ports:
       http: 8081
     podDisruptionBudget:
-      enabled: true
+      enabled: false
       minAvailable: 2
     autoscaling:
-      enabled: true
+      enabled: false
       minReplicas: 1
       maxReplicas: 20
       targetCPUUtilizationPercentage: 75
@@ -392,10 +392,10 @@ trustgate:
         cpu: 200m
         memory: 2Gi
     podDisruptionBudget:
-      enabled: true
+      enabled: false
       minAvailable: 1
     autoscaling:
-      enabled: true
+      enabled: false
       minReplicas: 1
       maxReplicas: 5
       targetCPUUtilizationPercentage: 80

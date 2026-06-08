@@ -177,7 +177,7 @@ global:
   #
   #     helm upgrade --install neuraltrust . \
   #         -f values-self-monitoring.yaml.example \
-  #         -f accounts/<client>/values-<client>.yaml
+  #         -f my-values.yaml
   #
   # Healing actions (Deployment restarts, Kafka Connect task restarts)
   # remain gated by `actions.dryRun: true` inside the watchdog config —
@@ -252,6 +252,15 @@ global:
       # Workload Identity and have no pull Secret.
       imagePullSecret: "gcr-secret"
       replicas: 1
+      autoscaling:
+        enabled: false
+        minReplicas: 1
+        maxReplicas: 3
+        targetCPUUtilizationPercentage: 80
+        targetMemoryUtilizationPercentage: 85
+      podDisruptionBudget:
+        enabled: false
+        minAvailable: 1
       service:
         type: ClusterIP
       resources:
@@ -320,8 +329,8 @@ neuraltrust-aispm:
     #   replicas: 1
     #   image: { repository: "...", tag: "v0.15.0", pullPolicy: IfNotPresent }
     #   resources: { requests: {...}, limits: {...} }
-    #   autoscaling: { enabled: true, minReplicas: 1, maxReplicas: 4 }
-    #   podDisruptionBudget: { enabled: true, minAvailable: 1 }
+    #   autoscaling: { enabled: false, minReplicas: 1, maxReplicas: 4 }
+    #   podDisruptionBudget: { enabled: false, minAvailable: 1 }
     #   extraEnv: []
     #   extraEnvFrom: []
     # worker: { replicas: 1, image: {...}, resources: {...}, autoscaling: { enabled: false } }
@@ -359,7 +368,7 @@ neuraltrust-siem-connectors:
     # image: { repository: "...", tag: "latest", pullPolicy: IfNotPresent }
     # resources: { requests: {...}, limits: {...} }
     # autoscaling: { enabled: false, minReplicas: 1, maxReplicas: 4 }
-    # podDisruptionBudget: { enabled: true, minAvailable: 1 }
+    # podDisruptionBudget: { enabled: false, minAvailable: 1 }
     # config:
     #   kafkaTopics: "audit_events,posture_alerts"
     #   logLevel: "info"
@@ -404,9 +413,18 @@ infrastructure:
       # Values are passed via root-level 'kafka:' section below
   # PostgreSQL Configuration
   postgresql:
-    # Note: PostgreSQL deployment is controlled by neuraltrust-control-plane.infrastructure.postgresql.deploy below
-    # Set deploy: true/false in that section to enable/disable in-cluster PostgreSQL deployment
-    # External PostgreSQL configuration (used when neuraltrust-control-plane.infrastructure.postgresql.deploy=false)
+    # Single switch for in-cluster vs external PostgreSQL across ALL subcharts
+    # (control-plane, TrustGate, AISPM). When false, the chart skips: the
+    # in-cluster PostgreSQL Deployment, the control-plane wait-for-postgresql
+    # initContainers, and the TrustGate/AISPM postgresql-init Jobs — so the
+    # heavy postgres image is never pulled. The operator must pre-create the
+    # users and databases on the external server.
+    # Legacy neuraltrust-control-plane.infrastructure.postgresql.deploy is still
+    # honored; this flag is the recommended single override for external Postgres.
+    deploy: true
+    # Note: in-cluster PostgreSQL deployment is also controlled by neuraltrust-control-plane.infrastructure.postgresql.deploy below
+    # Set deploy: true/false in either place to enable/disable in-cluster PostgreSQL deployment
+    # External PostgreSQL configuration (used when deploy=false)
     external:
       host: "postgresql.postgresql.svc.cluster.local" # e.g., "postgresql.postgresql.svc.cluster.local"
       port: "5432"
@@ -450,10 +468,10 @@ clickhouse:
   affinity: {}
   resources:
     requests:
-      memory: 4Gi
-      cpu: 2
+      memory: 4Gi # Do NOT lower: ClickHouse has no in-chart memory caps; <4Gi risks MEMORY_LIMIT_EXCEEDED / OOM.
+      cpu: 1 # CPU request relaxed (2->1) to ease bin-packing on small nodes; bursts to the 4-core limit.
     limits:
-      memory: 8Gi
+      memory: 8Gi # Hard floor for the limit — internal infra runs 8-26Gi. Keep at 8Gi minimum.
       cpu: 4
   logLevel: "fatal"
   # ClickHouse `<listen_host>`. Defaults to `::` so a single value works on
@@ -550,7 +568,7 @@ kafka:
   #   2. Add (or keep) the `kafka-connect` check in the watchdog's checks
   #      list pointing at your Kafka Connect URL.
   # The values block below is intentionally left as an empty placeholder so
-  # existing accounts/<client>/values.yaml files referencing
+  # existing values.yaml files referencing
   # `kafka.connectorMonitor.*` do not fail Helm rendering. Helm garbage-
   # collects the old CronJob + Secret on the next upgrade.
   connectorMonitor: {}
@@ -628,16 +646,16 @@ trustgate:
       fsGroup: 1001
     resources:
       requests:
+        cpu: 250m
+        memory: 1Gi
+      limits:
         cpu: 500m
         memory: 2Gi
-      limits:
-        cpu: 1000m
-        memory: 4Gi
     podDisruptionBudget:
-      enabled: true
+      enabled: false
       minAvailable: 1
     autoscaling:
-      enabled: true
+      enabled: false
       minReplicas: 1
       maxReplicas: 10
       targetCPUUtilizationPercentage: 80
@@ -670,18 +688,18 @@ trustgate:
     replicas: 2
     resources:
       requests:
-        cpu: 2000m
-        memory: 4Gi
+        cpu: 1000m
+        memory: 3Gi
       limits:
-        cpu: 4000m
-        memory: 8Gi
+        cpu: 2000m
+        memory: 6Gi
     ports:
       http: 8081
     podDisruptionBudget:
-      enabled: true
+      enabled: false
       minAvailable: 1
     autoscaling:
-      enabled: true
+      enabled: false
       minReplicas: 1
       maxReplicas: 20
       targetCPUUtilizationPercentage: 75
@@ -716,16 +734,16 @@ trustgate:
       fsGroup: 1001
     resources:
       requests:
+        cpu: 250m
+        memory: 1Gi
+      limits:
         cpu: 500m
         memory: 2Gi
-      limits:
-        cpu: 1000m
-        memory: 4Gi
     podDisruptionBudget:
-      enabled: true
+      enabled: false
       minAvailable: 1
     autoscaling:
-      enabled: true
+      enabled: false
       minReplicas: 1
       maxReplicas: 5
       targetCPUUtilizationPercentage: 80
@@ -871,6 +889,15 @@ neuraltrust-control-plane:
             cpu: 200m
         healthProbes:
           path: "/v1/health" # Scheduler mounts routes under /v1; /health alone returns 401 from auth middleware
+        autoscaling:
+          enabled: false
+          minReplicas: 1
+          maxReplicas: 5
+          targetCPUUtilizationPercentage: 80
+          targetMemoryUtilizationPercentage: 80
+        podDisruptionBudget:
+          enabled: false
+          minAvailable: 1
         # Extra env hooks — see neuraltrust-data-plane.dataPlane.components.api above
         # for syntax (EnvVar list and EnvFromSource list).
         extraEnv: []
@@ -914,11 +941,15 @@ neuraltrust-control-plane:
           limits:
             memory: 2Gi
             cpu: 2000m
-        healthCheck:
-          # Health check job image (used for post-install/post-upgrade health checks)
-          image:
-            repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/curl"
-            tag: "8.20.0"
+        autoscaling:
+          enabled: false
+          minReplicas: 1
+          maxReplicas: 10
+          targetCPUUtilizationPercentage: 80
+          targetMemoryUtilizationPercentage: 80
+        podDisruptionBudget:
+          enabled: false
+          minAvailable: 1
         # Extra env hooks — see neuraltrust-data-plane.dataPlane.components.api above
         # for syntax (EnvVar list and EnvFromSource list).
         extraEnv: []
@@ -992,6 +1023,15 @@ neuraltrust-control-plane:
             limits:
               memory: 1Gi
               cpu: 500m
+        autoscaling:
+          enabled: false
+          minReplicas: 1
+          maxReplicas: 10
+          targetCPUUtilizationPercentage: 80
+          targetMemoryUtilizationPercentage: 80
+        podDisruptionBudget:
+          enabled: false
+          minAvailable: 1
         # Extra env hooks — see neuraltrust-data-plane.dataPlane.components.api above
         # for syntax (EnvVar list and EnvFromSource list).
         extraEnv: []
@@ -1084,6 +1124,15 @@ neuraltrust-data-plane:
             requests:
               cpu: 500m
               memory: 2Gi
+          autoscaling:
+            enabled: false
+            minReplicas: 1
+            maxReplicas: 4
+            targetCPUUtilizationPercentage: 80
+            targetMemoryUtilizationPercentage: 85
+          podDisruptionBudget:
+            enabled: false
+            minAvailable: 1
       api:
         enabled: true
         host: "" # Optional: full hostname override. Empty = auto-derive as <hostPrefix>.<global.domain> when both are set, otherwise use ALB auto-generated URL.
@@ -1114,16 +1163,25 @@ neuraltrust-data-plane:
         # The ConfigMap content is generated from charts/neuraltrust-data-plane/files/.trusttest_config.json
         trustTestConfig: {}
         replicas: 2
+        autoscaling:
+          enabled: false
+          minReplicas: 1
+          maxReplicas: 10
+          targetCPUUtilizationPercentage: 80
+          targetMemoryUtilizationPercentage: 85
+        podDisruptionBudget:
+          enabled: false
+          minAvailable: 1
         # initContainerResources: override for clickhouse-migrations initContainer (default: requests 250m/256Mi, limits 500m/512Mi)
         # initContainerResources:
         #   requests: { cpu: 250m, memory: 256Mi }
         #   limits: { cpu: 500m, memory: 512Mi }
         resources:
           requests:
-            cpu: 2
-            memory: 4Gi
+            cpu: 1
+            memory: 3Gi
           limits:
-            cpu: 4
+            cpu: 2
             memory: 6Gi
         # Per-component env injection hooks (available on every main service container
         # across the NT charts: control-plane api/app/scheduler, data-plane api/worker,
@@ -1191,16 +1249,25 @@ neuraltrust-data-plane:
       worker:
         enabled: true
         replicas: 1
+        autoscaling:
+          enabled: false
+          minReplicas: 1
+          maxReplicas: 10
+          targetCPUUtilizationPercentage: 80
+          targetMemoryUtilizationPercentage: 85
+        podDisruptionBudget:
+          enabled: false
+          minAvailable: 1
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/workers
           tag: v1.6.12
           pullPolicy: Always
         resources:
           requests:
-            memory: 4Gi
-            cpu: 1000m
+            memory: 3Gi # Loads SetFit + spaCy en_core_web_lg in-process; keep >=3Gi headroom.
+            cpu: 750m
           limits:
-            memory: 8Gi
+            memory: 6Gi
             cpu: 2000m
         # See api.extraEnv / api.extraEnvFrom above for syntax and semantics.
         extraEnv: []
@@ -1240,13 +1307,13 @@ neuraltrust-firewall:
       startupProbe:
         failureThreshold: 12
       autoscaling:
-        enabled: true
+        enabled: false
         minReplicas: 1
         maxReplicas: 4
         targetCPUUtilizationPercentage: 80
         targetMemoryUtilizationPercentage: 85
       podDisruptionBudget:
-        enabled: true
+        enabled: false
         minAvailable: 1
       # Extra env hooks — see neuraltrust-data-plane.dataPlane.components.api above
       # for syntax. extraEnvFrom is appended to the existing
@@ -1265,26 +1332,29 @@ neuraltrust-firewall:
         tag: "v2.12.0"
         pullPolicy: IfNotPresent
       replicas: 1
+      # CPU-worker default: one HF transformer (~86M-class) per pod via ONNX.
+      # 2Gi/3Gi matches the firewall repo dev/GPU-prod overlays. The heavier
+      # prompt-moderation worker (e5-base embedder + 13 LightGBM) overrides this below.
       resources:
         requests:
-          cpu: "1"
-          memory: 4Gi
+          cpu: 500m
+          memory: 2Gi
         limits:
-          cpu: "1.5"
-          memory: 6Gi
+          cpu: "1"
+          memory: 3Gi
       nodeSelector: {}
       tolerations: []
       hostIPC: false
       startupProbe:
         failureThreshold: 36
       autoscaling:
-        enabled: true
+        enabled: false
         minReplicas: 1
         maxReplicas: 6
         targetCPUUtilizationPercentage: 80
         targetMemoryUtilizationPercentage: 85
       podDisruptionBudget:
-        enabled: true
+        enabled: false
         minAvailable: 1
     # --- Workers ---
     # Per-worker extraEnv / extraEnvFrom default to empty; add them under a worker
@@ -1309,6 +1379,15 @@ neuraltrust-firewall:
       prompt-moderation:
         enabled: true
         module: src.workers.prompt_moderation.app:app
+        # Heaviest CPU worker: loads intfloat/multilingual-e5-base embedder + 13
+        # LightGBM classifiers. Override workerDefaults with a larger floor.
+        resources:
+          requests:
+            cpu: 500m
+            memory: 3Gi
+          limits:
+            cpu: "1"
+            memory: 4Gi
         extraEnv: []
         extraEnvFrom: []
       response-jailbreak:

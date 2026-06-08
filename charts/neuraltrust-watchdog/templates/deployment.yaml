@@ -1,6 +1,10 @@
 {{- if .Values.enabled }}
+{{- /* Watchdog is a stateful singleton: it owns a small SQLite config overlay
+       on a PVC (internal/configstore) and must stay at 1 replica (no HA, no
+       leader election). A StatefulSet gives it a stable identity + an optional
+       volumeClaimTemplate for the overlay DB — parity with k8s/base. */ -}}
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: {{ include "neuraltrust-watchdog.fullname" . }}
   namespace: {{ .Release.Namespace }}
@@ -8,14 +12,13 @@ metadata:
     {{- include "neuraltrust-watchdog.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
+  serviceName: {{ include "neuraltrust-watchdog.fullname" . }}
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
   selector:
     matchLabels:
       {{- include "neuraltrust-watchdog.selectorLabels" . | nindent 6 }}
-  strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
   template:
     metadata:
       labels:
@@ -158,6 +161,12 @@ spec:
             - name: logbundles
               mountPath: /var/run/watchdog
             {{- end }}
+            {{- if .Values.overlay.enabled }}
+            {{- /* SQLite config overlay PVC (internal/configstore). Only
+                   mounted + provisioned when the live config overlay is on. */}}
+            - name: overlay
+              mountPath: /var/lib/watchdog
+            {{- end }}
             {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 12 }}
       volumes:
         - name: config
@@ -174,4 +183,24 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+  {{- if .Values.overlay.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: overlay
+        labels:
+          {{- include "neuraltrust-watchdog.selectorLabels" . | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with .Values.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            {{- /* Cloud-agnostic default: 1Gi is ample for an overlay DB.
+                   storageClass omitted => cluster default provisioner (GKE
+                   pd-balanced, EKS gp3, AKS managed-csi, bare-metal). Clusters
+                   that forbid dynamic PVCs must pre-create the PVC or keep
+                   overlay.enabled=false. */}}
+            storage: {{ .Values.persistence.size | default "1Gi" }}
+  {{- end }}
 {{- end }}

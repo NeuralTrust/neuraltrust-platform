@@ -61,6 +61,3 @@ emit_row "aispm-api" "$(yq_get "$AISPM" '.aispm.api.image.repository')" "$(yq_ge
 emit_row "aispm-worker" "$(yq_get "$AISPM" '.aispm.worker.image.repository')" "$(yq_get "$AISPM" '.aispm.worker.image.tag')"
 emit_row "aispm-beat" "$(yq_get "$AISPM" '.aispm.beat.image.repository')" "$(yq_get "$AISPM" '.aispm.beat.image.tag')"
 emit_row "siem-connectors" "$(yq_get "$SIEM" '.siemConnectors.image.repository')" "$(yq_get "$SIEM" '.siemConnectors.image.tag')"
-
-# Optional / commented defaults in parent values (include when set).
-emit_row "curl (health-check jobs)" "$(yq_get "$V" '.["neuraltrust-control-plane"].controlPlane.components.api.healthCheck.image.repository')" "$(yq_get "$V" '.["neuraltrust-control-plane"].controlPlane.components.api.healthCheck.image.tag')"

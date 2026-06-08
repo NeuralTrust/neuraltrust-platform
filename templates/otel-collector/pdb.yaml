@@ -1,0 +1,23 @@
+{{- if include "neuraltrust-platform.otelCollector.enabled" . }}
+{{- $coll := default dict (default dict (default dict .Values.global).observability).collector -}}
+{{- $pdb := default dict $coll.podDisruptionBudget -}}
+{{- $replicas := default 1 $coll.replicas -}}
+{{- if and $pdb.enabled (gt ($replicas | int) 1) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "neuraltrust-platform.otelCollector.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "neuraltrust-platform.otelCollector.labels" . | nindent 4 }}
+spec:
+  {{- if hasKey $pdb "maxUnavailable" }}
+  maxUnavailable: {{ $pdb.maxUnavailable }}
+  {{- else }}
+  minAvailable: {{ default 1 $pdb.minAvailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "neuraltrust-platform.otelCollector.selectorLabels" . | nindent 6 }}
+{{- end }}
+{{- end }}

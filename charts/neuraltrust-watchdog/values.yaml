@@ -20,8 +20,13 @@ image:
 # pull via IAM / Workload Identity and have no pull Secret.
 imagePullSecrets:
   - name: gcr-secret
-# replicaCount > 1 requires k8s Lease-based leader election; left to a
-# follow-up. Stick with 1 for now.
+# Watchdog is a singleton controller, not a stateless service: HPA is
+# unsupported and replicaCount stays 1. A second replica would duplicate
+# healing actions/notifications, tail every pod twice, and double per-check
+# metric series. Scale vertically (resources below) and by scoping logExport
+# sources / the enabled check set. Active/passive HA via k8s Lease leader
+# election is an optional, deferrable follow-up — not load-based
+# scaling — so replicaCount > 1 is unsafe until that lands.
 replicaCount: 1
 resources:
   requests:
@@ -30,6 +35,31 @@ resources:
   limits:
     cpu: 500m
     memory: 256Mi
+# Live config overlay (internal/configstore): an embedded SQLite store on a PVC
+# that holds operator/UI policy edits, layered over the ConfigMap seed
+# (effective = seed ⊕ overlay). OFF by default — customers stay pure GitOps/Helm.
+# When enabled, the watchdog renders as a StatefulSet with a volumeClaimTemplate
+# (see persistence) and exposes the bearer-gated /config write API.
+overlay:
+  enabled: false
+  # SQLite file path on the overlay PVC.
+  dbPath: /var/lib/watchdog/overlay.db
+  # true (default) = local edits win at runtime (air-gapped-friendly,
+  # local-authoritative). false = strict mode: write API is read-only and the
+  # cluster tracks pure seed/GitOps.
+  allowLocalOverride: true
+  # Gate on the two highest-blast-radius policy fields (dryRun, actions). false
+  # (default) means a UI user can tune thresholds/intervals but cannot arm
+  # healing — that stays an operator change in the seed. Mutation ALSO still
+  # requires the RBAC verb regardless; this is defense in depth.
+  allowActionEdits: false
+# PVC for the config overlay. Only provisioned when overlay.enabled: true.
+persistence:
+  # Empty => cluster default StorageClass (cloud-agnostic: GKE pd-balanced,
+  # EKS gp3, AKS managed-csi, bare-metal local-path). Set explicitly for
+  # locked-down clusters or to pin a class.
+  storageClass: ""
+  size: 1Gi
 service:
   type: ClusterIP
   port: 8080
@@ -202,7 +232,7 @@ actions:
     secretKey: webhook
   otlp:
     endpointEnv: OTEL_EXPORTER_OTLP_ENDPOINT
-# Log bridge (AUT-236): tail ERROR/WARN from selected workloads, redact
+# Log bridge: tail ERROR/WARN from selected workloads, redact
 # secrets, and ship over OTLP push / HTTP pull / air-gapped bundle. Default
 # OFF and double-gated — tailing also requires rbac.logExport.enabled=true so
 # the SA gets the pods/log verb. The OTLP push path additionally needs the
@@ -216,8 +246,16 @@ logExport:
   # mode; `namespaceSelector:` requires rbac.watchAllNamespaces=true.
   sources: []
   #  - { namespace: neuraltrust, podSelector: "app in (control-plane-api, data-plane-api, trustgate, firewall)" }
+  # Replay window on FIRST connect / cold restart only. Stream reconnects
+  # resume from an in-memory checkpoint (SinceTime) and drop the boundary
+  # overlap, so reconnects do not re-export the same lines.
   sinceSeconds: 300
   maxLinesPerPodPerMinute: 120
+  # Max simultaneous pod-log streams. Targets beyond the cap are skipped and
+  # counted (watchdog_logexport_tail_cap_skipped_total; discovered vs active
+  # gauges) so coverage gaps are visible, not silent.
+  maxConcurrentTails: 100
+  resyncInterval: 30s
   redaction:
     builtins: [bearer, password, dsn, apikey, email]
     extraPatterns: []
@@ -237,7 +275,15 @@ secretEnv:
     passwordKey: password
 # Where the runner schedules checks. defaultInterval applies to checks
 # that omit `interval`. failureThreshold gates healing actions: only
-# fire after N consecutive non-OK results.
+# fire after N consecutive non-OK results. Actions/notifications then fire
+# ONCE per incident (alerting edge / severity escalation) plus a single
+# recovery notice — never every failing tick. Set a per-check `reAlertAfter`
+# (e.g. 30m) to re-notify a sustained incident on a backoff.
+#
+# A check may override this global with its own `failureThreshold` — combined
+# with its `interval` that is the watchdog's "for duration" (e.g. interval 60s +
+# failureThreshold 5 = alert only after ~5 min of sustained breach). The RED
+# checks below use 5 so a short, self-recovering spike never pages.
 runner:
   defaultInterval: 60s
   defaultTimeout: 15s
@@ -294,18 +340,22 @@ checks:
     thresholds:
       maxLag: 5000
     actions: [notify.otlp, notify.slack]
+  # The three red-* checks use the built-in `red` kind: the PromQL is compiled
+  # in the watchdog binary from `target.signal` (requestRate | errorRatio |
+  # latencyP95), so there is no hand-written query to drift or mistype, and the
+  # query always groups by service_name so the alert names the offending
+  # service. Tune thresholds and the "for duration" (failureThreshold) here;
+  # the query itself is not customer-editable by design.
   - id: red-request-rate
-    kind: promql
+    kind: red
     enabled: true
+    # "for duration": interval (60s) x failureThreshold = the breach must
+    # persist ~5 min before paging, so a short traffic burst that self-recovers
+    # never alerts.
+    failureThreshold: 5
     target:
       endpointEnv: PROMETHEUS_QUERY_URL
-      query: |
-        max(
-          sum by (service_name) (
-            rate(http_server_request_duration_seconds_count{service_name=~".+"}[5m])
-          )
-        )
-        or vector(0)
+      signal: requestRate
     thresholds:
       operator: ">"
       warning: 500
@@ -313,32 +363,12 @@ checks:
       noDataStatus: unknown
     actions: [notify.otlp, notify.slack]
   - id: red-error-rate
-    kind: promql
+    kind: red
     enabled: false
+    failureThreshold: 5 # ~5 min sustained before paging (see red-request-rate)
     target:
       endpointEnv: PROMETHEUS_QUERY_URL
-      query: |
-        max(
-          (
-            sum by (service_name) (
-              rate(http_server_request_duration_seconds_count{service_name=~".+",http_response_status_code=~"5.."}[5m])
-            )
-            /
-            clamp_min(
-              sum by (service_name) (
-                rate(http_server_request_duration_seconds_count{service_name=~".+"}[5m])
-              ),
-              0.1
-            )
-          )
-          *
-          (
-            sum by (service_name) (
-              increase(http_server_request_duration_seconds_count{service_name=~".+"}[5m])
-            ) >= bool 30
-          )
-        )
-        or vector(0)
+      signal: errorRatio
     thresholds:
       operator: ">"
       warning: 0.05
@@ -346,25 +376,33 @@ checks:
       noDataStatus: unknown
     actions: [notify.otlp, notify.slack]
   - id: red-duration-p95
-    kind: promql
+    kind: red
     enabled: true
+    failureThreshold: 5 # ~5 min sustained before paging (see red-request-rate)
     target:
       endpointEnv: PROMETHEUS_QUERY_URL
-      query: |
-        max(
-          histogram_quantile(
-            0.95,
-            sum by (service_name, le) (
-              rate(http_server_request_duration_seconds_bucket{service_name=~".+"}[5m])
-            )
-          )
-        )
-        or vector(0)
+      signal: latencyP95
     thresholds:
       operator: ">"
       warning: 1
       critical: 3
       noDataStatus: unknown
+    actions: [notify.otlp, notify.slack]
+  # Watchdog self-metric staleness. The bundled local Prometheus
+  # scrapes watchdog's own /metrics (job watchdog-self), so an absent
+  # watchdog_checks_runs_total means the monitor itself has gone silent — the
+  # one signal a process-local liveness probe can never catch. Observe-only:
+  # notify actions only, never a self-restart. Disable only if you point
+  # prometheus.reuseExisting at a Prometheus that does not scrape watchdog.
+  - id: watchdog-self-staleness
+    kind: scrape_staleness
+    enabled: true
+    target:
+      endpointEnv: PROMETHEUS_QUERY_URL
+      series: watchdog_checks_runs_total
+      window: 10m
+    thresholds:
+      staleStatus: critical
     actions: [notify.otlp, notify.slack]
   - id: control-plane-synthetic
     kind: httpsynthetic

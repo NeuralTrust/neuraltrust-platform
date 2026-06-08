@@ -40,4 +40,19 @@ data:
           - source_labels: [__name__]
             action: keep
             regex: 'http_server_request_duration_seconds_(bucket|sum|count)'
+
+      # Watchdog's own /metrics, so the watchdog-self-staleness check
+      # can prove the monitor is still emitting. Without this scrape a
+      # silently-dead watchdog would never trip an alert. Keep only watchdog_*
+      # series to bound cardinality in the short-retention local Prometheus.
+      - job_name: watchdog-self
+        honor_labels: true
+        metrics_path: /metrics
+        static_configs:
+          - targets:
+              - {{ printf "%s.%s.svc.cluster.local:%v" (include "neuraltrust-watchdog.fullname" .) .Release.Namespace .Values.service.port }}
+        metric_relabel_configs:
+          - source_labels: [__name__]
+            action: keep
+            regex: 'watchdog_.*'
 {{- end }}
