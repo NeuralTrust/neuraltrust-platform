@@ -1,0 +1,37 @@
+{{- if include "neuraltrust-platform.otelCollector.enabled" . }}
+{{- $coll := default dict (default dict (default dict .Values.global).observability).collector -}}
+{{- $as := default dict $coll.autoscaling -}}
+{{- if and $as $as.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "neuraltrust-platform.otelCollector.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "neuraltrust-platform.otelCollector.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "neuraltrust-platform.otelCollector.fullname" . }}
+  minReplicas: {{ default 1 $as.minReplicas }}
+  maxReplicas: {{ default 3 $as.maxReplicas }}
+  metrics:
+    {{- if $as.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $as.targetCPUUtilizationPercentage }}
+    {{- end }}
+    {{- if $as.targetMemoryUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ $as.targetMemoryUtilizationPercentage }}
+    {{- end }}
+{{- end }}
+{{- end }}

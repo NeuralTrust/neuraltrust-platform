@@ -42,9 +42,15 @@ Job to initialize TrustGate PostgreSQL database and user.
 {{- if and .Values.global (hasKey .Values.global "autoGenerateSecrets") .Values.global.autoGenerateSecrets }}
   {{- $autoGenerate = true }}
 {{- end }}
+{{- /* Skip the init Job entirely when PostgreSQL is external (global.postgresql.deploy=false). */}}
+{{- /* The operator pre-creates the trustgate user/database, so the postgres image is never pulled. */}}
+{{- $pgDeploy := true }}
+{{- if and .Values.global .Values.global.postgresql (hasKey .Values.global.postgresql "deploy") }}
+  {{- $pgDeploy = .Values.global.postgresql.deploy }}
+{{- end }}
 {{- /* Create job if we have the required values OR if autoGenerateSecrets is enabled */}}
 {{- /* When autoGenerate is true, the parent chart creates trustgate-secrets with the password */}}
-{{- if or (and $tgDbHost $tgDbPassword $tgDbName $tgDbUser) (and (not $tgDbIamAuth) $autoGenerate $tgDbHost) }}
+{{- if and $pgDeploy (or (and $tgDbHost $tgDbPassword $tgDbName $tgDbUser) (and (not $tgDbIamAuth) $autoGenerate $tgDbHost)) }}
 apiVersion: batch/v1
 kind: Job
 metadata:

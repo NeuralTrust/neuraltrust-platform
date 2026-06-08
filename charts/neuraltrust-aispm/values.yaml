@@ -20,13 +20,13 @@ aispm:
     startupProbe:
       failureThreshold: 24
     autoscaling:
-      enabled: true
+      enabled: false
       minReplicas: 1
       maxReplicas: 4
       targetCPUUtilizationPercentage: 80
       targetMemoryUtilizationPercentage: 85
     podDisruptionBudget:
-      enabled: true
+      enabled: false
       minAvailable: 1
     extraEnv: []
     extraEnvFrom: []

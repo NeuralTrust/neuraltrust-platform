@@ -24,7 +24,7 @@ siemConnectors:
     targetCPUUtilizationPercentage: 80
     targetMemoryUtilizationPercentage: 85
   podDisruptionBudget:
-    enabled: true
+    enabled: false
     minAvailable: 1
   # --- ServiceAccount ---
   serviceAccount:

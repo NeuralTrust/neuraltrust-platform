@@ -4,6 +4,23 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Changed
+
+- **Right-sized default resource requests/limits to fit 16 GiB worker nodes.** Reduced inflated umbrella defaults toward the values NeuralTrust runs in SaaS prod, so the documented sizing baselines now target **8 vCPU / 16 GiB** nodes instead of 8 vCPU / 32 GiB: hybrid fits **4 nodes** (~12.25 vCPU / ~40.5 GiB requests, down from ~58.5 GiB), self-hosted **5 nodes** (~43.75 GiB), self-hosted + AISPM **6 nodes** (~45 GiB). Changes (req/lim memory): TrustGate gateway `4Gi→8Gi` ⇒ `3Gi→6Gi`; TrustGate admin & actions `2Gi→4Gi` ⇒ `1Gi→2Gi`; Data Plane API `4Gi→6Gi` ⇒ `3Gi→6Gi`; Data Plane worker `4Gi→8Gi` ⇒ `3Gi→6Gi`; Firewall worker defaults `4Gi→6Gi` ⇒ `2Gi→3Gi`, with a per-worker override keeping the heavier `prompt-moderation` worker at `3Gi→4Gi`. **ClickHouse memory is intentionally unchanged at `4Gi`/`8Gi`** (the chart ships no in-chart memory caps, so lowering it risks `MEMORY_LIMIT_EXCEEDED`/OOM) — only its CPU *request* was relaxed `2→1` (limit stays `4`) to improve bin-packing. Control Plane API (`1Gi`/`2Gi`), PostgreSQL (`2Gi`/`4Gi`), Kafka (`1Gi`/`2Gi`), Redis (`1Gi`/`2Gi`, tied to the hardcoded `maxmemory 1gb`) and Kafka Connect (`2Gi`, JVM heap floor) are unchanged. All values remain operator-overridable; HPAs still scale components above these baselines under load.
+- **HPA and PDB off by default across all Deployments.** `autoscaling.enabled` and `podDisruptionBudget.enabled` now default to `false` on every workload that supports them (TrustGate, Control Plane api/app/scheduler, Data Plane api/worker/kafka-connect, Firewall, AISPM, SIEM connectors, OTel Collector). New optional HPA/PDB templates were added for Control Plane and Data Plane components that previously lacked them. Fixed replica counts come from each component's `replicas` / `replicaCount` value. Opt in per component when your cluster has a metrics server (HPA) or you want voluntary-disruption guards during node drains (PDB).
+
+### Added
+
+- **`global.postgresql.deploy` — single switch for external PostgreSQL.** A new umbrella-wide flag (default `true`) controls in-cluster vs external PostgreSQL across **all** subcharts (Control Plane, TrustGate, AISPM). When set to `false`, the chart skips every consumer of the heavy `postgres` image so it is never pulled:
+  - the in-cluster `control-plane-postgresql` Deployment,
+  - the Control Plane API/scheduler `wait-for-postgresql` initContainers,
+  - the TrustGate and AISPM `postgresql-init` Jobs.
+  - The operator must pre-create the users/databases on the external server. The Control Plane app `init-db` initContainer (Prisma migrations, app image) still runs. The legacy `neuraltrust-control-plane.infrastructure.postgresql.deploy` remains honored and takes precedence; `global.postgresql.deploy` is the recommended single override. Defaults preserve existing behavior. Render coverage added to `scripts/test-helm-render.sh` (scenario 26).
+
+### Removed
+
+- **Dead `controlPlane.components.api.healthCheck.image` (curl) value.** No template referenced it; removed from `values.yaml`, the `release-images-markdown.sh` image table, and the `bump-images.yml` doc-only bump. The functional `curl` usage (ClickHouse backup CronJob, gated by `backup.enabled`) is unchanged.
+
 ## [v1.13.0] — 2026-06-05
 
 ### Added

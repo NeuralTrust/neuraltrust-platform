@@ -2,13 +2,13 @@ apiVersion: v2
 name: neuraltrust-platform
 description: Unified Helm chart for NeuralTrust platform including Data Plane, Control Plane, TrustGate, and infrastructure components
 type: application
-version: 1.14.0
+version: 1.16.0
 appVersion: "1.0.0"
 icon: https://neuraltrust.ai/favicon.ico
 dependencies:
   # Optional add-on services (off by default, listed first for visibility)
   - name: neuraltrust-aispm
-    version: 1.0.5
+    version: 1.0.6
     repository: file://./charts/neuraltrust-aispm
     condition: neuraltrust-aispm.aispm.enabled
     tags:
@@ -42,7 +42,7 @@ dependencies:
     tags:
       - neuraltrust
   - name: neuraltrust-control-plane
-    version: 1.2.32
+    version: 1.2.33
     repository: file://./charts/neuraltrust-control-plane
     # No condition: subchart always loads so PostgreSQL can deploy independently.
     # Control Plane components are guarded by controlPlane.enabled inside templates.
@@ -50,14 +50,14 @@ dependencies:
       - neuraltrust
   # TrustGate components
   - name: trustgate
-    version: 1.2.24
+    version: 1.2.25
     condition: trustgate.enabled
     repository: file://./charts/trustgate
     tags:
       - trustgate
   # Firewall API
   - name: neuraltrust-firewall
-    version: 2.0.11
+    version: 2.0.12
     condition: neuraltrust-firewall.firewall.enabled
     repository: file://./charts/neuraltrust-firewall
     tags:

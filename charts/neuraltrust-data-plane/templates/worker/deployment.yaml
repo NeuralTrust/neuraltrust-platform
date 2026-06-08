@@ -6,7 +6,11 @@ metadata:
     app: worker
     plane: data
 spec:
+  {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.worker (hasKey .Values.dataPlane.components.worker "replicas") }}
+  replicas: {{ .Values.dataPlane.components.worker.replicas }}
+  {{- else }}
   replicas: 1
+  {{- end }}
   selector:
     matchLabels:
       app: worker 

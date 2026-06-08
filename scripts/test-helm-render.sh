@@ -550,5 +550,54 @@ if [ "$chouse_sel" != "clickhouse-pool" ]; then
 fi
 green "ok  - per-component nodeSelector wins over global on key conflict"
 
+# Scenario 26: external PostgreSQL via global.postgresql.deploy=false. The chart
+# must skip every postgres-image consumer so the heavy image is never pulled:
+#   - in-cluster control-plane-postgresql Deployment,
+#   - control-plane API/scheduler wait-for-postgresql initContainers,
+#   - TrustGate + AISPM postgresql-init Jobs.
+# The control-plane app init-db (Prisma migrations, app image) MUST stay.
+blue "scenario 26: global.postgresql.deploy=false skips all postgres-image consumers"
+render "$TMP/pg-external.yaml" \
+  --set trustgate.enabled=true \
+  --set neuraltrust-aispm.aispm.enabled=true \
+  --set neuraltrust-control-plane.controlPlane.enabled=true \
+  --set neuraltrust-data-plane.dataPlane.enabled=true \
+  --set global.postgresql.deploy=false
+assert_not_contains "$TMP/pg-external.yaml" "name: control-plane-postgresql"                "in-cluster PostgreSQL Deployment skipped (external)"
+assert_not_contains "$TMP/pg-external.yaml" "name: wait-for-postgresql"                      "wait-for-postgresql initContainers skipped (external)"
+assert_not_contains "$TMP/pg-external.yaml" "app.kubernetes.io/component: postgresql-init"   "TrustGate postgresql-init Job skipped (external)"
+assert_not_contains "$TMP/pg-external.yaml" "aispm-postgresql-init"                          "AISPM postgresql-init Job skipped (external)"
+assert_contains     "$TMP/pg-external.yaml" "name: init-db"                                  "control-plane app init-db (Prisma) still present (external)"
+
+# Scenario 26b: default (deploy=true) keeps every consumer (backward-compat).
+blue "scenario 26b: global.postgresql.deploy=true (default) keeps postgres-image consumers"
+render "$TMP/pg-incluster.yaml" \
+  --set trustgate.enabled=true \
+  --set neuraltrust-aispm.aispm.enabled=true \
+  --set neuraltrust-control-plane.controlPlane.enabled=true
+assert_contains "$TMP/pg-incluster.yaml" "name: control-plane-postgresql"              "in-cluster PostgreSQL Deployment present by default"
+assert_contains "$TMP/pg-incluster.yaml" "name: wait-for-postgresql"                   "wait-for-postgresql initContainers present by default"
+assert_contains "$TMP/pg-incluster.yaml" "app.kubernetes.io/component: postgresql-init" "TrustGate postgresql-init Job present by default"
+assert_contains "$TMP/pg-incluster.yaml" "aispm-postgresql-init"                       "AISPM postgresql-init Job present by default"
+
+# Scenario 27: HPA and PDB are opt-in (default OFF). A plain install must not
+# render any HorizontalPodAutoscaler or PodDisruptionBudget. Opting in per
+# component must render the matching resources.
+blue "scenario 27: HPA and PDB default off; opt-in renders resources"
+assert_not_contains "$TMP/default.yaml" "kind: HorizontalPodAutoscaler" "no HPA by default"
+assert_not_contains "$TMP/default.yaml" "kind: PodDisruptionBudget"   "no PDB by default"
+render "$TMP/hpa-pdb-on.yaml" \
+  --set neuraltrust-control-plane.controlPlane.enabled=true \
+  --set neuraltrust-control-plane.controlPlane.components.api.autoscaling.enabled=true \
+  --set neuraltrust-control-plane.controlPlane.components.api.podDisruptionBudget.enabled=true \
+  --set neuraltrust-data-plane.dataPlane.components.api.autoscaling.enabled=true \
+  --set neuraltrust-data-plane.dataPlane.components.api.podDisruptionBudget.enabled=true \
+  --set trustgate.controlPlane.autoscaling.enabled=true \
+  --set trustgate.controlPlane.podDisruptionBudget.enabled=true
+assert_contains "$TMP/hpa-pdb-on.yaml" "name: control-plane-api" "control-plane-api HPA rendered when opted in"
+assert_contains "$TMP/hpa-pdb-on.yaml" "name: data-plane-api"    "data-plane-api HPA rendered when opted in"
+assert_contains "$TMP/hpa-pdb-on.yaml" "name: trustgate-control-plane" "trustgate-control-plane HPA rendered when opted in"
+assert_contains "$TMP/hpa-pdb-on.yaml" "kind: PodDisruptionBudget" "PDB rendered when opted in"
+
 green ""
 green "All helm-render assertions passed."

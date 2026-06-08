@@ -174,6 +174,12 @@ Usage: {{ include "control-plane.postgresql.deploy" . }}
 {{- if and (not $found) .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.postgresql (hasKey .Values.controlPlane.components.postgresql "installInCluster") }}
   {{- $deploy = .Values.controlPlane.components.postgresql.installInCluster }}
 {{- end }}
+{{- /* Umbrella-wide override (propagated to subcharts): an explicit global.postgresql.deploy=false
+       forces external Postgres regardless of the infrastructure default, so the postgres image is
+       never pulled. Either flag set to false disables in-cluster Postgres. */}}
+{{- if and .Values.global .Values.global.postgresql (hasKey .Values.global.postgresql "deploy") (not .Values.global.postgresql.deploy) }}
+  {{- $deploy = false }}
+{{- end }}
 {{- /* Return empty string for false, non-empty for true - Helm's include returns strings, and empty string is falsy */}}
 {{- if $deploy }}{{- "true" }}{{- end }}
 {{- end }}

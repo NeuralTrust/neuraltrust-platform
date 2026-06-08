@@ -76,7 +76,7 @@ on:
         required: false
         default: ""
       curl_tag:
-        description: "curl tag (e.g. 8.19.0). Empty = latest bare semver from AR (used by ClickHouse backup cronjob and the api healthCheck job placeholder)."
+        description: "curl tag (e.g. 8.19.0). Empty = latest bare semver from AR (used by the ClickHouse backup cronjob)."
         required: false
         default: ""
       fetch_latest:
@@ -505,17 +505,11 @@ jobs:
 
           # =============================================
           # 16. Infrastructure: curl (ClickHouse backup cronjob)
-          # The parent path under controlPlane.components.api.healthCheck is
-          # documentation-only (no template references it) — kept in sync for
-          # values.yaml accuracy. The functional usage is the data-plane
-          # backup-cronjob template fallback.
+          # The only functional curl usage is the data-plane backup-cronjob
+          # template fallback (gated by backup.enabled).
           # =============================================
           TAG="${{ steps.tags.outputs.curl }}"
           if [[ -n "$TAG" ]]; then
-            if update_values_tag '.["neuraltrust-control-plane"].controlPlane.components.api.healthCheck.image.tag' "$TAG" "curl (control-plane healthCheck doc)"; then
-              BUMP_CONTROL_PLANE=true
-            fi
-            # The backup-cronjob fallback is the only functional curl usage.
             update_template_tag "charts/neuraltrust-data-plane/templates/clickhouse-config/backup-cronjob.yaml" "backupTag" "$TAG"
             if [[ "$TEMPLATE_TAG_CHANGED" == "1" ]]; then
               CHANGES+=("curl (clickhouse backup-cronjob fallback): → ${TAG}")

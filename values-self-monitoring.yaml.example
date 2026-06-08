@@ -14,7 +14,7 @@
 # Usage:
 #
 #   helm upgrade --install neuraltrust . \
-#       -f accounts/<client>/values-<client>.yaml \
+#       -f my-values.yaml \
 #       -f values-self-monitoring.yaml.example
 #
 # Notes

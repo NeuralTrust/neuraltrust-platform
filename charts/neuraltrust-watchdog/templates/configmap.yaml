@@ -33,6 +33,16 @@ data:
     logExport:
       {{- toYaml . | nindent 6 }}
     {{- end }}
+    {{- if .Values.overlay.enabled }}
+    {{- /* Live config overlay: SQLite on the StatefulSet PVC. allowLocalOverride
+           false pins the cluster to pure GitOps/seed (write API read-only);
+           allowActionEdits gates dryRun/actions edits (RBAC still also required). */}}
+    overlay:
+      enabled: true
+      dbPath: {{ .Values.overlay.dbPath | quote }}
+      allowLocalOverride: {{ .Values.overlay.allowLocalOverride }}
+      allowActionEdits: {{ .Values.overlay.allowActionEdits }}
+    {{- end }}
     checks:
       {{- /*
         `enabledCheckIds` is an additive overlay: any check whose `id`

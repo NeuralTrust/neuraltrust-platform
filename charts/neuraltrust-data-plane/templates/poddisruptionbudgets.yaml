@@ -1,0 +1,82 @@
+{{- /*
+  Optional PodDisruptionBudgets for data-plane api, worker, and kafka-connect.
+  All default OFF — enable per component:
+
+    dataPlane.components.<component>.podDisruptionBudget:
+      enabled: true
+      minAvailable: 1
+*/ -}}
+{{- if and .Values.dataPlane .Values.dataPlane.enabled }}
+{{- $dp := .Values.dataPlane }}
+{{- if and $dp.components $dp.components.api $dp.components.api.enabled }}
+{{- $pdb := default dict $dp.components.api.podDisruptionBudget }}
+{{- $replicas := default 2 $dp.components.api.replicas }}
+{{- if and $pdb.enabled (gt ($replicas | int) 1) }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: data-plane-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: api
+    plane: data
+spec:
+  {{- if hasKey $pdb "maxUnavailable" }}
+  maxUnavailable: {{ $pdb.maxUnavailable }}
+  {{- else }}
+  minAvailable: {{ default 1 $pdb.minAvailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app: api
+{{- end }}
+{{- end }}
+{{- if and $dp.components $dp.components.worker $dp.components.worker.enabled }}
+{{- $pdb := default dict $dp.components.worker.podDisruptionBudget }}
+{{- $replicas := default 1 $dp.components.worker.replicas }}
+{{- if and $pdb.enabled (gt ($replicas | int) 1) }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: data-plane-worker
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: worker
+    plane: data
+spec:
+  {{- if hasKey $pdb "maxUnavailable" }}
+  maxUnavailable: {{ $pdb.maxUnavailable }}
+  {{- else }}
+  minAvailable: {{ default 1 $pdb.minAvailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app: worker
+{{- end }}
+{{- end }}
+{{- if and $dp.components $dp.components.kafka $dp.components.kafka.enabled $dp.components.kafka.connect }}
+{{- $pdb := default dict $dp.components.kafka.connect.podDisruptionBudget }}
+{{- $replicas := default 1 $dp.components.kafka.connect.replicas }}
+{{- if and $pdb.enabled (gt ($replicas | int) 1) }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: kafka-connect
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: kafka-connect
+spec:
+  {{- if hasKey $pdb "maxUnavailable" }}
+  maxUnavailable: {{ $pdb.maxUnavailable }}
+  {{- else }}
+  minAvailable: {{ default 1 $pdb.minAvailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app: kafka-connect
+{{- end }}
+{{- end }}
+{{- end }}

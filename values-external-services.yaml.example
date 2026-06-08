@@ -20,6 +20,13 @@ global:
   imageRegistry: ""             # Optional: set to your private/mirrored registry to rebrand all images.
   preserveExistingSecrets: false  # Set to true if secrets are pre-generated
   storageClass: ""              # Global storage class for persistent volumes
+  postgresql:
+    # Single switch for external PostgreSQL across ALL subcharts. With deploy: false
+    # the chart skips the in-cluster PostgreSQL Deployment, the control-plane
+    # wait-for-postgresql initContainers, and the TrustGate/AISPM postgresql-init
+    # Jobs — so the heavy postgres image is never pulled. Pre-create the users and
+    # databases (trustgate, aispm, neuraltrust) on the external server beforehand.
+    deploy: false
   ingress:
     tls:
       autoGenerate: true  # Create the shared self-signed TLS secret by default.
@@ -50,15 +57,15 @@ infrastructure:
       # secretKey: ""  # Optional
 
   postgresql:
-    # Note: PostgreSQL deployment is controlled by neuraltrust-control-plane.infrastructure.postgresql.deploy below
+    # Note: in-cluster PostgreSQL deployment is controlled by global.postgresql.deploy above
+    # (and the legacy neuraltrust-control-plane.infrastructure.postgresql.deploy below).
     # External PostgreSQL connection details are configured in neuraltrust-control-plane.controlPlane.components.postgresql.secrets below
-    # The infrastructure.postgresql.external section is no longer used - all PostgreSQL configuration is in the control-plane section
 
 # NeuralTrust Control Plane - Use external PostgreSQL
 neuraltrust-control-plane:
   infrastructure:
     postgresql:
-      deploy: false  # Use external PostgreSQL (configured in controlPlane.components.postgresql.secrets below)
+      deploy: false  # Redundant with global.postgresql.deploy=false; kept for clarity. Configured in controlPlane.components.postgresql.secrets below
   controlPlane:
     enabled: true
     components:

@@ -18,13 +18,13 @@ firewall:
     startupProbe:
       failureThreshold: 12
     autoscaling:
-      enabled: true
+      enabled: false
       minReplicas: 1
       maxReplicas: 4
       targetCPUUtilizationPercentage: 80
       targetMemoryUtilizationPercentage: 85
     podDisruptionBudget:
-      enabled: true
+      enabled: false
       minAvailable: 1
     # Extra env vars appended to the gateway container (list of EnvVar).
     extraEnv: []
@@ -43,26 +43,29 @@ firewall:
       tag: v2.12.0
       pullPolicy: IfNotPresent
     replicas: 1
+    # CPU-worker default: one HF transformer (~86M-class) per pod via ONNX.
+    # 2Gi/3Gi matches the dev/GPU-prod overlays. The heavier prompt-moderation
+    # worker (e5-base embedder + 13 LightGBM) overrides this below.
     resources:
       limits:
-        cpu: "1.5"
-        memory: 6Gi
-      requests:
         cpu: "1"
-        memory: 4Gi
+        memory: 3Gi
+      requests:
+        cpu: 500m
+        memory: 2Gi
     nodeSelector: {}
     tolerations: []
     hostIPC: false
     startupProbe:
       failureThreshold: 36
     autoscaling:
-      enabled: true
+      enabled: false
       minReplicas: 1
       maxReplicas: 6
       targetCPUUtilizationPercentage: 80
       targetMemoryUtilizationPercentage: 85
     podDisruptionBudget:
-      enabled: true
+      enabled: false
       minAvailable: 1
   # --- Workers (each gets Deployment, Service, HPA, PDB) ---
   # Per-worker extraEnv / extraEnvFrom default to empty; add them under a worker entry
@@ -95,6 +98,15 @@ firewall:
     prompt-moderation:
       enabled: true
       module: src.workers.prompt_moderation.app:app
+      # Heaviest CPU worker: loads intfloat/multilingual-e5-base embedder + 13
+      # LightGBM classifiers. Override workerDefaults with a larger floor.
+      resources:
+        requests:
+          cpu: 500m
+          memory: 3Gi
+        limits:
+          cpu: "1"
+          memory: 4Gi
       extraEnv: []
       extraEnvFrom: []
     response-jailbreak:
