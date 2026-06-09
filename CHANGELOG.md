@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v1.14.1] — 2026-06-09
+
 ### Changed
 
 - **Right-sized default resource requests/limits to fit 16 GiB worker nodes.** Reduced inflated umbrella defaults toward the values NeuralTrust runs in SaaS prod, so the documented sizing baselines now target **8 vCPU / 16 GiB** nodes instead of 8 vCPU / 32 GiB: hybrid fits **4 nodes** (~12.25 vCPU / ~40.5 GiB requests, down from ~58.5 GiB), self-hosted **5 nodes** (~43.75 GiB), self-hosted + AISPM **6 nodes** (~45 GiB). Changes (req/lim memory): TrustGate gateway `4Gi→8Gi` ⇒ `3Gi→6Gi`; TrustGate admin & actions `2Gi→4Gi` ⇒ `1Gi→2Gi`; Data Plane API `4Gi→6Gi` ⇒ `3Gi→6Gi`; Data Plane worker `4Gi→8Gi` ⇒ `3Gi→6Gi`; Firewall worker defaults `4Gi→6Gi` ⇒ `2Gi→3Gi`, with a per-worker override keeping the heavier `prompt-moderation` worker at `3Gi→4Gi`. **ClickHouse memory is intentionally unchanged at `4Gi`/`8Gi`** (the chart ships no in-chart memory caps, so lowering it risks `MEMORY_LIMIT_EXCEEDED`/OOM) — only its CPU *request* was relaxed `2→1` (limit stays `4`) to improve bin-packing. Control Plane API (`1Gi`/`2Gi`), PostgreSQL (`2Gi`/`4Gi`), Kafka (`1Gi`/`2Gi`), Redis (`1Gi`/`2Gi`, tied to the hardcoded `maxmemory 1gb`) and Kafka Connect (`2Gi`, JVM heap floor) are unchanged. All values remain operator-overridable; HPAs still scale components above these baselines under load.
