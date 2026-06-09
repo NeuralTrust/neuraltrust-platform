@@ -13,7 +13,7 @@ enabled: false
 fullnameOverride: "neuraltrust-watchdog"
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/watchdog
-  tag: v0.3.0 # defaults to .Chart.AppVersion
+  tag: v0.5.0 # defaults to .Chart.AppVersion
   pullPolicy: IfNotPresent
 # Pull secret(s) for private nt-docker images (watchdog + bundled Prometheus).
 # Defaults to gcr-secret like the rest of the chart. Set to [] on clusters that
@@ -260,9 +260,9 @@ logExport:
     builtins: [bearer, password, dsn, apikey, email]
     extraPatterns: []
   transports:
-    otlp: { enabled: true }
-    pull: { enabled: true, bufferSize: 1000 }
-    bundle: { enabled: false, outputDir: /var/run/watchdog/logbundles }
+    otlp: {enabled: true}
+    pull: {enabled: true, bufferSize: 1000}
+    bundle: {enabled: false, outputDir: /var/run/watchdog/logbundles}
 # Connection envs sourced from existing cluster secrets.
 secretEnv:
   clickhouse:
