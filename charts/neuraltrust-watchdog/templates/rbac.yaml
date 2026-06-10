@@ -2,7 +2,7 @@
 {{- $name := include "neuraltrust-watchdog.fullname" . -}}
 {{- $sa := include "neuraltrust-watchdog.serviceAccountName" . -}}
 {{- $allowRestart := .Values.rbac.actions.restartDeployment.enabled -}}
-{{- $allowLogExport := and .Values.rbac.logExport .Values.rbac.logExport.enabled -}}
+{{- $allowLogExport := or (and .Values.rbac.logExport .Values.rbac.logExport.enabled) (and .Values.logExport.autoEnabled (include "neuraltrust-watchdog.hostedExportEnabled" .)) -}}
 {{- if .Values.rbac.watchAllNamespaces }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole

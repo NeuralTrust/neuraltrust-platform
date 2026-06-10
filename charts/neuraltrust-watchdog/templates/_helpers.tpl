@@ -97,6 +97,68 @@ Prometheus query endpoint injected into the watchdog container.
 {{- end }}
 
 {{/*
+Whether the bundled local Prometheus should render. The customer-minimal path
+does not need it: direct checks and OTLP-pushed check status work without a
+local query engine. Render it only when the operator explicitly enables it or
+when an enabled check needs a Prometheus-compatible query API.
+*/}}
+{{- define "neuraltrust-watchdog.prometheusEnabled" -}}
+{{- if .Values.prometheus.reuseExisting -}}
+{{- /* An external Prometheus is being reused; do not render bundled Prom. */ -}}
+{{- else if .Values.prometheus.enabled -}}
+true
+{{- else -}}
+{{- $enabledIds := default (list) .Values.enabledCheckIds -}}
+{{- $needs := dict "enabled" false -}}
+{{- range .Values.checks }}
+{{- $enabled := default false .enabled -}}
+{{- if has .id $enabledIds -}}{{- $enabled = true -}}{{- end -}}
+{{- if and $enabled (or (eq .kind "red") (eq .kind "promql") (eq .kind "scrape_staleness")) -}}{{- $_ := set $needs "enabled" true -}}{{- end -}}
+{{- end -}}
+{{- if get $needs "enabled" -}}true{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Resolve the hosted OTLP endpoint from the umbrella observability block. This is
+used by the collector-less customer profile so watchdog can push directly to
+NeuralTrust SaaS without an in-cluster collector.
+*/}}
+{{- define "neuraltrust-watchdog.hostedEndpoint" -}}
+{{- $obs := default dict (default dict .Values.global).observability -}}
+{{- $hosted := default dict $obs.hostedExport -}}
+{{- default "https://collector.neuraltrust.ai" $hosted.endpoint -}}
+{{- end }}
+
+{{/*
+Whether the collector-less hosted OTLP path is configured for watchdog. The
+umbrella default is true; operators can set hostedExport.enabled=false for
+purely in-cluster / air-gapped installs.
+*/}}
+{{- define "neuraltrust-watchdog.hostedExportEnabled" -}}
+{{- $obs := default dict (default dict .Values.global).observability -}}
+{{- $hosted := default dict $obs.hostedExport -}}
+{{- if default true $hosted.enabled -}}true{{- end -}}
+{{- end }}
+
+{{/*
+Name/key of the hosted-export token Secret consumed by watchdog when pushing
+directly to SaaS. The Secret is owned by the operator (or rendered by the
+umbrella tokenValue path); watchdog only references it.
+*/}}
+{{- define "neuraltrust-watchdog.hostedTokenSecretName" -}}
+{{- $obs := default dict (default dict .Values.global).observability -}}
+{{- $auth := default dict (default dict $obs.hostedExport).auth -}}
+{{- default "neuraltrust-observability-token" $auth.tokenSecretName -}}
+{{- end }}
+
+{{- define "neuraltrust-watchdog.hostedTokenSecretKey" -}}
+{{- $obs := default dict (default dict .Values.global).observability -}}
+{{- $auth := default dict (default dict $obs.hostedExport).auth -}}
+{{- default "token" $auth.tokenSecretKey -}}
+{{- end }}
+
+{{/*
 Resolved image reference. Honors umbrella global.imageRegistry if set.
 */}}
 {{- define "neuraltrust-watchdog.image" -}}

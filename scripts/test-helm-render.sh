@@ -102,17 +102,40 @@ render "$TMP/off.yaml" \
   --set neuraltrust-watchdog.enabled=false
 assert_not_contains "$TMP/off.yaml" "otel-collector"                                          "no otel-collector resources when disabled"
 
-# Scenario 4: watchdog subchart enabled. Deployment + ConfigMap render,
-# AND the in-chart OTel Collector comes up (watchdog implies collector).
-blue "scenario 4: watchdog enabled"
+# Scenario 4: watchdog subchart enabled (collector-less default). Deployment +
+# ConfigMap render; in-chart collector stays OFF unless explicitly enabled.
+blue "scenario 4: watchdog enabled (collector-less)"
 render "$TMP/watchdog.yaml" --set neuraltrust-watchdog.enabled=true
 assert_contains     "$TMP/watchdog.yaml" "name: neuraltrust-watchdog$" "watchdog resource (named neuraltrust-watchdog, no release prefix) is rendered"
 assert_contains     "$TMP/watchdog.yaml" "neuraltrust-watchdog-config" "watchdog ConfigMap is rendered"
 assert_not_contains "$TMP/watchdog.yaml" "name: test-neuraltrust-watchdog$" "watchdog resource name carries no release-name prefix (fullnameOverride)"
-assert_contains     "$TMP/watchdog.yaml" "name: otel-collector-config" "otel collector ConfigMap rendered with watchdog"
-# Both the watchdog and the in-chart collector default to the gcr-secret pull
-# secret so their private images come up on a fresh install.
-assert_contains     "$TMP/watchdog.yaml" "name: gcr-secret" "watchdog + collector default to gcr-secret imagePullSecret"
+assert_not_contains "$TMP/watchdog.yaml" "name: otel-collector-config" "otel collector omitted in collector-less watchdog profile"
+assert_contains     "$TMP/watchdog.yaml" "control-plane-api-service/health" "synthetic checks use umbrella Service DNS names"
+assert_contains     "$TMP/watchdog.yaml" "name: CLICKHOUSE_USER" "watchdog wires ClickHouse user from clickhouse-secrets"
+assert_contains     "$TMP/watchdog.yaml" "name: gcr-secret" "watchdog defaults to gcr-secret imagePullSecret"
+
+# Scenario 4b: collector-less watchdog + explicit hosted token => Secret +
+# required OPENTELEMETRY_AUTH_TOKEN env (no optional: true).
+blue "scenario 4b: watchdog + hosted token"
+render "$TMP/watchdog-token.yaml" \
+  --set neuraltrust-watchdog.enabled=true \
+  --set global.observability.hostedExport.auth.tokenValue=secrettoken123
+assert_contains     "$TMP/watchdog-token.yaml" "name: neuraltrust-observability-token" "hosted token Secret rendered for watchdog"
+assert_contains     "$TMP/watchdog-token.yaml" "name: OPENTELEMETRY_AUTH_TOKEN" "watchdog Deployment wires OPENTELEMETRY_AUTH_TOKEN"
+if awk '
+  /- name: OPENTELEMETRY_AUTH_TOKEN/ { capture=1; lines=0; next }
+  capture {
+    lines++
+    if (/optional: true/) { fail=1 }
+    if (lines > 8 || /^            - name:/) { capture=0 }
+  }
+  END { exit fail ? 0 : 1 }
+' "$TMP/watchdog-token.yaml"; then
+  red "FAIL: hosted token SecretRef is required when wired"
+  red "  OPENTELEMETRY_AUTH_TOKEN must not use optional: true"
+  exit 1
+fi
+green "ok  - hosted token SecretRef is required when wired"
 
 # Scenario 5: hosted explicitly disabled (local-only collector). Hosted
 # exporter omitted; collector still runs.
@@ -275,7 +298,7 @@ assert_contains "$TMP/mon-on.yaml" "name: kafka"                                
 assert_contains "$TMP/mon-on.yaml" "name: trustgate"                               "trustgate PrometheusRule rendered"
 assert_contains "$TMP/mon-on.yaml" "name: trustgate-data-plane"                    "trustgate-data-plane PodMonitor rendered"
 assert_contains "$TMP/mon-on.yaml" "name: neuraltrust-watchdog-rules"              "watchdog PrometheusRule rendered"
-assert_contains "$TMP/mon-on.yaml" "name: otel-collector$" "otel-collector ServiceMonitor + PrometheusRule rendered"
+assert_not_contains "$TMP/mon-on.yaml" "name: otel-collector-config" "otel collector omitted unless global.observability.enabled"
 
 # Scenario 10: watchdog pod scrape annotations are baseline.
 # Universal scrape contract that works in every monitoring stack
@@ -337,8 +360,8 @@ assert_contains "$TMP/self-mon.yaml" "id: firewall-synthetic"              "fire
 # The kafka-broker check must keep its target.bootstrapServers (overlay
 # flips enabled only — must NOT replace the check definition).
 assert_contains "$TMP/self-mon.yaml" "bootstrapServers:"                   "kafka-broker target preserved through overlay"
-# scheduler URL fix: control-plane-synthetic now hits /v1/health, not /health.
-assert_contains "$TMP/self-mon.yaml" "control-plane-scheduler:3000/v1/health" "scheduler URL fixed to /v1/health"
+# scheduler URL: control-plane-synthetic hits /v1/health on the chart Service.
+assert_contains "$TMP/self-mon.yaml" "control-plane-scheduler-service/v1/health" "scheduler URL fixed to /v1/health on chart Service"
 
 # Scenario 15: overlay backward-compat. Without the overlay (or without
 # `enabledCheckIds`), the curated synthetic checks are not flipped on by the
@@ -434,12 +457,16 @@ render "$TMP/tg-redis-iam.yaml" \
 assert_contains "$TMP/tg-redis-iam.yaml" "REDIS_AUTH_MODE: \"iam\""  "REDIS_AUTH_MODE emitted for external Redis IAM"
 assert_contains "$TMP/tg-redis-iam.yaml" "REDIS_IAM_AUTH: \"true\""  "REDIS_IAM_AUTH=true emitted for external Redis IAM"
 
-# Scenario 21: the OTel Collector Prometheus exporter (:8889) is gated on the
-# watchdog subchart. Present when watchdog is on (its Prometheus scrapes it),
-# absent otherwise even with the collector running.
-blue "scenario 21: collector Prometheus exporter gated on watchdog"
-assert_contains     "$TMP/watchdog.yaml"       "0.0.0.0:8889" "collector exposes :8889 Prometheus exporter when watchdog enabled"
-assert_not_contains "$TMP/default-obs-on.yaml" "0.0.0.0:8889" "collector omits :8889 exporter when watchdog disabled"
+# Scenario 21: the OTel Collector Prometheus exporter (:8889) is gated on BOTH
+# the collector AND the watchdog subchart (local RED path). Collector-less
+# watchdog installs omit :8889 entirely.
+blue "scenario 21: collector Prometheus exporter gated on collector+watchdog"
+assert_not_contains "$TMP/watchdog.yaml"       "0.0.0.0:8889" "collector-less watchdog omits :8889 exporter"
+render "$TMP/watchdog-collector.yaml" \
+  --set neuraltrust-watchdog.enabled=true \
+  --set global.observability.enabled=true
+assert_contains     "$TMP/watchdog-collector.yaml" "0.0.0.0:8889" "collector exposes :8889 when collector+watchdog both enabled"
+assert_not_contains "$TMP/default-obs-on.yaml" "0.0.0.0:8889" "collector omits :8889 when watchdog disabled"
 
 # Scenario 22: Control-Plane IAM Postgres auth. IAM is only honored for external
 # PostgreSQL — the chart emits DATABASE_IAM_AUTH=true (base64 "dHJ1ZQ==") in

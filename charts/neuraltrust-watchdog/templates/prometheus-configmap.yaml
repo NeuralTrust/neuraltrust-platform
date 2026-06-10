@@ -1,4 +1,4 @@
-{{- if and .Values.enabled (not .Values.prometheus.reuseExisting) }}
+{{- if and .Values.enabled (eq (include "neuraltrust-watchdog.prometheusEnabled" . | trim) "true") }}
 apiVersion: v1
 kind: ConfigMap
 metadata:

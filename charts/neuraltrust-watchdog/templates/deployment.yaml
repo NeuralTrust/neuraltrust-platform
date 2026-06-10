@@ -1,8 +1,19 @@
 {{- if .Values.enabled }}
-{{- /* Watchdog is a stateful singleton: it owns a small SQLite config overlay
-       on a PVC (internal/configstore) and must stay at 1 replica (no HA, no
-       leader election). A StatefulSet gives it a stable identity + an optional
-       volumeClaimTemplate for the overlay DB — parity with k8s/base. */ -}}
+{{- /* Watchdog is a stateful singleton: it owns a small SQLite database on a
+       PVC (internal/sqlitedb) backing both the config overlay
+       (internal/configstore) and persisted operational state
+       (internal/statestore), and must stay at 1 replica (no HA, no leader
+       election). A StatefulSet gives it a stable identity + an optional
+       volumeClaimTemplate for that DB — parity with k8s/base. The PVC is
+       provisioned whenever persistence OR the overlay is enabled. */ -}}
+{{- $persist := or .Values.persistence.enabled .Values.overlay.enabled -}}
+{{- $obs := default dict (default dict .Values.global).observability -}}
+{{- $hostedEnabled := include "neuraltrust-watchdog.hostedExportEnabled" . -}}
+{{- $tenantID := default $obs.tenantId .Values.telemetry.tenantId -}}
+{{- $otlpEndpoint := .Values.telemetry.otlp.endpoint -}}
+{{- if and (not $otlpEndpoint) $hostedEnabled -}}
+{{- $otlpEndpoint = include "neuraltrust-watchdog.hostedEndpoint" . -}}
+{{- end -}}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -76,17 +87,24 @@ spec:
               value: {{ default "unknown" (default "" (default dict .Values.global).environment) | quote }}
             - name: PROMETHEUS_QUERY_URL
               value: {{ include "neuraltrust-watchdog.prometheusEndpoint" . | quote }}
-            {{- if .Values.telemetry.tenantId }}
+            {{- if $tenantID }}
             - name: NT_TENANT_ID
-              value: {{ .Values.telemetry.tenantId | quote }}
+              value: {{ $tenantID | quote }}
             {{- end }}
-            {{- if .Values.telemetry.otlp.endpoint }}
+            {{- if $otlpEndpoint }}
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: {{ .Values.telemetry.otlp.endpoint | quote }}
+              value: {{ $otlpEndpoint | quote }}
             {{- end }}
             {{- if .Values.telemetry.otlp.headers }}
             - name: OTEL_EXPORTER_OTLP_HEADERS
               value: {{ .Values.telemetry.otlp.headers | quote }}
+            {{- end }}
+            {{- if $hostedEnabled }}
+            - name: OPENTELEMETRY_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "neuraltrust-watchdog.hostedTokenSecretName" . }}
+                  key: {{ include "neuraltrust-watchdog.hostedTokenSecretKey" . }}
             {{- end }}
             {{- if or .Values.server.authToken.value .Values.server.authToken.existingSecret }}
             - name: WATCHDOG_API_TOKEN
@@ -110,7 +128,6 @@ spec:
                 secretKeyRef:
                   name: {{ .userSecret }}
                   key: {{ .userKey | default "username" }}
-                  optional: true
             {{- end }}
             {{- if .passwordSecret }}
             - name: CLICKHOUSE_PASSWORD
@@ -118,7 +135,6 @@ spec:
                 secretKeyRef:
                   name: {{ .passwordSecret }}
                   key: {{ .passwordKey | default "password" }}
-                  optional: true
             {{- end }}
             {{- end }}
             {{- with .Values.secretEnv.redis }}
@@ -161,9 +177,10 @@ spec:
             - name: logbundles
               mountPath: /var/run/watchdog
             {{- end }}
-            {{- if .Values.overlay.enabled }}
-            {{- /* SQLite config overlay PVC (internal/configstore). Only
-                   mounted + provisioned when the live config overlay is on. */}}
+            {{- if $persist }}
+            {{- /* Shared SQLite DB PVC (internal/sqlitedb): config overlay +
+                   persisted operational state. Mounted + provisioned when
+                   persistence OR the overlay is enabled. */}}
             - name: overlay
               mountPath: /var/lib/watchdog
             {{- end }}
@@ -183,7 +200,7 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-  {{- if .Values.overlay.enabled }}
+  {{- if $persist }}
   volumeClaimTemplates:
     - metadata:
         name: overlay
@@ -196,11 +213,11 @@ spec:
         {{- end }}
         resources:
           requests:
-            {{- /* Cloud-agnostic default: 1Gi is ample for an overlay DB.
+            {{- /* Cloud-agnostic default: 1Gi is ample for the watchdog DB.
                    storageClass omitted => cluster default provisioner (GKE
                    pd-balanced, EKS gp3, AKS managed-csi, bare-metal). Clusters
                    that forbid dynamic PVCs must pre-create the PVC or keep
-                   overlay.enabled=false. */}}
+                   persistence + overlay disabled. */}}
             storage: {{ .Values.persistence.size | default "1Gi" }}
   {{- end }}
 {{- end }}

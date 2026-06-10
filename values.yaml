@@ -144,23 +144,24 @@ global:
   # ----------------------------------------------------------------------
   # In-chart OpenTelemetry Collector + optional hosted observability egress.
   # ----------------------------------------------------------------------
-  # When `global.observability.enabled` is true OR `neuraltrust-watchdog.enabled`
-  # is true, the chart deploys a single-replica OTel Collector (Contrib) under
-  # the release namespace. Default OFF — enable explicitly or via the watchdog
-  # subchart / `values-self-monitoring.yaml.example` overlay.
-  # All component telemetry — Prometheus scrapes, OTLP traces from
-  # TrustGate/Firewall/AISPM, K8s events, kubeletstats — is funnelled
-  # through this collector. The hosted exporter ships infra metrics +
-  # K8s events to NeuralTrust's managed observability endpoint when a
-  # bearer token is provided (see `hostedExport` below).
+  # When `global.observability.enabled` is true, the chart deploys a
+  # single-replica OTel Collector (Contrib) under the release namespace.
+  # Default OFF. `neuraltrust-watchdog.enabled` no longer renders this collector
+  # by itself; the customer-minimal path has watchdog push check-status metrics
+  # and ERROR/WARN logs directly to `hostedExport`.
+  # In full-stack mode, component telemetry — Prometheus scrapes, OTLP traces
+  # from TrustGate/Firewall/AISPM, K8s events, kubeletstats — is funnelled
+  # through this collector. The hosted exporter ships collector-side telemetry
+  # to NeuralTrust's managed observability endpoint when a bearer token is
+  # provided (see `hostedExport` below).
   #
   # GRACEFUL DEGRADATION: if no token is resolvable (Secret missing,
   # tokenValue empty, lookup returns nothing), the hosted exporter is
   # silently OMITTED. The collector still runs locally and never blocks
   # install in air-gapped environments. Two flag-level opt-outs:
-  #   - global.observability.enabled: true        # collector without watchdog
-  #   - neuraltrust-watchdog.enabled: true       # collector + watchdog together
-  #   - global.observability.enabled: false       # remove collector (unless watchdog on)
+  #   - global.observability.enabled: true        # render full local collector
+  #   - neuraltrust-watchdog.enabled: true        # render watchdog only
+  #   - global.observability.enabled: false       # remove collector
   #   - global.observability.hostedExport.enabled: false  # local-only collector
   # ----------------------------------------------------------------------
   # Single-switch self-monitoring (watchdog + curated default checks).
@@ -204,11 +205,14 @@ global:
     alertLabels:
       team: platform
   observability:
+    # Full in-cluster OTel Collector stack. Keep false for the customer-minimal
+    # path: watchdog can push check-status metrics and ERROR/WARN logs directly
+    # to hostedExport without rendering the collector or bundled Prometheus.
     enabled: false
     tenantId: "" # Sent as nt.tenant_id resource attribute (optional).
     hostedExport:
       enabled: true
-      endpoint: "https://collector.neuraltrust.ai:4318" # OTLP/HTTP
+      endpoint: "https://collector.neuraltrust.ai" # OTLP/HTTP via external Gateway (443)
       auth:
         # Bearer token. resolveSecret order: tokenValue > existingSecret > lookup.
         # When all three are empty, the otlphttp/neuraltrust exporter is omitted.
