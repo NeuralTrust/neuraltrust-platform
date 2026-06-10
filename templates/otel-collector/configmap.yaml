@@ -174,7 +174,7 @@ data:
       {{- end }}
       {{- if $renderHosted }}
       otlphttp/neuraltrust:
-        endpoint: {{ $hosted.endpoint | default "https://collector.neuraltrust.ai:4318" | quote }}
+        endpoint: {{ $hosted.endpoint | default "https://collector.neuraltrust.ai" | quote }}
         compression: gzip
         headers:
           authorization: "Bearer ${env:NT_OBSERVABILITY_TOKEN}"

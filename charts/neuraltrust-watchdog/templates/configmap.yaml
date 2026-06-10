@@ -11,6 +11,9 @@ data:
       defaultInterval: {{ .Values.runner.defaultInterval }}
       defaultTimeout: {{ .Values.runner.defaultTimeout }}
       failureThreshold: {{ .Values.runner.failureThreshold }}
+      {{- with .Values.runner.prometheusQueryEnv }}
+      prometheusQueryEnv: {{ . | quote }}
+      {{- end }}
     server:
       listenAddr: "{{ .Values.server.listenAddr }}"
       {{- if or .Values.server.authToken.value .Values.server.authToken.existingSecret }}
@@ -20,26 +23,59 @@ data:
       serviceName: {{ .Values.telemetry.serviceName | quote }}
       otlpEndpointEnv: OTEL_EXPORTER_OTLP_ENDPOINT
       otlpHeadersEnv: OTEL_EXPORTER_OTLP_HEADERS
+      otlpAuthTokenEnv: OPENTELEMETRY_AUTH_TOKEN
       tenantIdEnv: NT_TENANT_ID
       enableTraces: {{ .Values.telemetry.enableTraces }}
       enableLogs: {{ .Values.telemetry.enableLogs }}
+      enableMetrics: {{ .Values.telemetry.enableMetrics }}
     actions:
       dryRun: {{ .Values.actions.dryRun }}
+      {{- with .Values.actions.defaultActions }}
+      defaultActions: {{ toYaml . | nindent 8 }}
+      {{- end }}
       slack:
         webhookUrlEnv: SLACK_WEBHOOK_URL
       otlp:
         endpointEnv: {{ .Values.actions.otlp.endpointEnv | quote }}
-    {{- with .Values.logExport }}
-    logExport:
+    {{- with .Values.kindDefaults }}
+    kindDefaults:
       {{- toYaml . | nindent 6 }}
     {{- end }}
+    {{- $hostedLogExport := and .Values.logExport.autoEnabled (include "neuraltrust-watchdog.hostedExportEnabled" .) }}
+    {{- if or .Values.logExport.enabled $hostedLogExport }}
+    logExport:
+      enabled: true
+      severities:
+        {{- toYaml .Values.logExport.severities | nindent 8 }}
+      sources:
+        {{- if .Values.logExport.sources }}
+        {{- toYaml .Values.logExport.sources | nindent 8 }}
+        {{- else }}
+        - namespace: {{ .Release.Namespace | quote }}
+        {{- end }}
+      sinceSeconds: {{ .Values.logExport.sinceSeconds }}
+      maxLinesPerPodPerMinute: {{ .Values.logExport.maxLinesPerPodPerMinute }}
+      maxConcurrentTails: {{ .Values.logExport.maxConcurrentTails }}
+      resyncInterval: {{ .Values.logExport.resyncInterval }}
+      redaction:
+        {{- toYaml .Values.logExport.redaction | nindent 8 }}
+      transports:
+        {{- toYaml .Values.logExport.transports | nindent 8 }}
+    {{- end }}
+    {{- if or .Values.persistence.enabled .Values.overlay.enabled }}
+    {{- /* Shared SQLite DB (internal/sqlitedb) on the StatefulSet PVC. Backs
+           persisted operational state (statestore) and, when overlay.enabled,
+           the config overlay. overlay.enabled implies persistence in-binary. */}}
+    persistence:
+      enabled: true
+      dbPath: {{ .Values.persistence.dbPath | quote }}
+    {{- end }}
     {{- if .Values.overlay.enabled }}
-    {{- /* Live config overlay: SQLite on the StatefulSet PVC. allowLocalOverride
+    {{- /* Live config overlay (shares persistence.dbPath). allowLocalOverride
            false pins the cluster to pure GitOps/seed (write API read-only);
            allowActionEdits gates dryRun/actions edits (RBAC still also required). */}}
     overlay:
       enabled: true
-      dbPath: {{ .Values.overlay.dbPath | quote }}
       allowLocalOverride: {{ .Values.overlay.allowLocalOverride }}
       allowActionEdits: {{ .Values.overlay.allowActionEdits }}
     {{- end }}

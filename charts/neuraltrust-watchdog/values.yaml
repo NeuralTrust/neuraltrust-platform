@@ -13,7 +13,7 @@ enabled: false
 fullnameOverride: "neuraltrust-watchdog"
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/watchdog
-  tag: v0.5.0 # defaults to .Chart.AppVersion
+  tag: v0.7.0 # defaults to .Chart.AppVersion
   pullPolicy: IfNotPresent
 # Pull secret(s) for private nt-docker images (watchdog + bundled Prometheus).
 # Defaults to gcr-secret like the rest of the chart. Set to [] on clusters that
@@ -35,15 +35,30 @@ resources:
   limits:
     cpu: 500m
     memory: 256Mi
-# Live config overlay (internal/configstore): an embedded SQLite store on a PVC
-# that holds operator/UI policy edits, layered over the ConfigMap seed
-# (effective = seed ⊕ overlay). OFF by default — customers stay pure GitOps/Helm.
-# When enabled, the watchdog renders as a StatefulSet with a volumeClaimTemplate
-# (see persistence) and exposes the bearer-gated /config write API.
+# Persisted operational state (internal/sqlitedb + internal/statestore): the
+# shared embedded SQLite DB on a PVC that survives pod restarts — incident dedup
+# (no duplicate pages), recovery notifications, log tail checkpoints, delta-check
+# priming, and a warm GET /logs ring buffer. ON by default so a restart never
+# re-pages or loses incident state; the watchdog then renders as a StatefulSet
+# with the volumeClaimTemplate below. Set to false for ephemeral/PVC-less
+# clusters (the binary degrades gracefully to pure in-memory). overlay.enabled
+# implies persistence; persistence can also stand alone (durable incident state
+# without the live config overlay).
+persistence:
+  enabled: true
+  # Shared SQLite file path on the PVC. Backs both statestore and the overlay.
+  dbPath: /var/lib/watchdog/watchdog.db
+  # Empty => cluster default StorageClass (cloud-agnostic: GKE pd-balanced,
+  # EKS gp3, AKS managed-csi, bare-metal local-path). Set explicitly for
+  # locked-down clusters or to pin a class.
+  storageClass: ""
+  size: 1Gi
+# Live config overlay (internal/configstore): operator/UI policy edits, layered
+# over the ConfigMap seed (effective = seed ⊕ overlay). OFF by default — customers
+# stay pure GitOps/Helm. Enabling it implies persistence (shares persistence.dbPath)
+# and exposes the bearer-gated /config write API.
 overlay:
   enabled: false
-  # SQLite file path on the overlay PVC.
-  dbPath: /var/lib/watchdog/overlay.db
   # true (default) = local edits win at runtime (air-gapped-friendly,
   # local-authoritative). false = strict mode: write API is read-only and the
   # cluster tracks pure seed/GitOps.
@@ -53,23 +68,18 @@ overlay:
   # healing — that stays an operator change in the seed. Mutation ALSO still
   # requires the RBAC verb regardless; this is defense in depth.
   allowActionEdits: false
-# PVC for the config overlay. Only provisioned when overlay.enabled: true.
-persistence:
-  # Empty => cluster default StorageClass (cloud-agnostic: GKE pd-balanced,
-  # EKS gp3, AKS managed-csi, bare-metal local-path). Set explicitly for
-  # locked-down clusters or to pin a class.
-  storageClass: ""
-  size: 1Gi
 service:
   type: ClusterIP
   port: 8080
   metricsPort: 8080
-# Bundled short-retention Prometheus. When this chart is enabled the
-# local Prometheus is rendered by default and used as the watchdog's
-# PROMETHEUS_QUERY_URL. It is alerting-only: no Alertmanager, no
-# Prometheus rules, and no remote_write. Long-retention analytics stays
-# on the existing OTel Collector -> hosted observability pipeline.
+# Bundled short-retention Prometheus. Customer-minimal installs do NOT render it:
+# watchdog now pushes check-status gauges over OTLP directly, and direct-probe
+# checks do not need a local query engine. It renders only when:
+#   - prometheus.enabled=true, OR
+#   - an enabled check has kind red/promql/scrape_staleness.
+# It is alerting-only: no Alertmanager, no rules, no remote_write.
 prometheus:
+  enabled: false
   reuseExisting: "" # Set to an existing in-cluster Prometheus URL to skip the bundled instance.
   # Optional host:port override for the Collector Prometheus exporter. When
   # empty, bundled Prometheus discovers the in-chart Collector in the release
@@ -200,9 +210,9 @@ networkPolicy:
     # extraEgress is appended verbatim; allows custom cluster-scoped
     # egress rules for the watchdog (e.g. to a managed Kafka SaaS).
     extraEgress: []
-# Telemetry: when otlp.endpoint is empty the watchdog falls back to
-# OTEL_EXPORTER_OTLP_ENDPOINT env at runtime; when both are empty the
-# OTel SDK is initialized with no-op providers (graceful no-egress).
+# Telemetry: when otlp.endpoint is empty the umbrella can inject the hosted OTLP
+# endpoint from global.observability.hostedExport. When both are empty the OTel
+# SDK is initialized with no-op providers (graceful no-egress).
 telemetry:
   serviceName: neuraltrust-watchdog
   otlp:
@@ -211,6 +221,10 @@ telemetry:
   tenantId: ""
   enableTraces: true
   enableLogs: true
+  # Push curated check-status gauges (watchdog.check.status,
+  # watchdog.check.consecutive_failures, watchdog.up) over OTLP so a remote
+  # backend can answer "is everything running?" without scraping /metrics.
+  enableMetrics: true
 # HTTP server.
 server:
   listenAddr: ":8080"
@@ -225,6 +239,10 @@ actions:
   # Global default for all mutating actions; per-check override allowed
   # via checks[].dryRun.
   dryRun: true
+  # Applied to every check that declares no actions of its own. Notifiers only —
+  # mutating/healing actions (e.g. kafka_connect.restart_task) are never
+  # defaulted on and stay explicit per check (safety rule).
+  defaultActions: [notify.otlp, notify.slack]
   slack:
     # When webhookUrl is empty, notify.slack is a silent no-op.
     webhookUrl: ""
@@ -232,14 +250,26 @@ actions:
     secretKey: webhook
   otlp:
     endpointEnv: OTEL_EXPORTER_OTLP_ENDPOINT
-# Log bridge: tail ERROR/WARN from selected workloads, redact
-# secrets, and ship over OTLP push / HTTP pull / air-gapped bundle. Default
-# OFF and double-gated — tailing also requires rbac.logExport.enabled=true so
-# the SA gets the pods/log verb. The OTLP push path additionally needs the
-# umbrella collector's logs pipeline (global.observability.sendLogs=true) +
-# hosted export. GET /logs and POST /logs/export are always bearer-gated, so
-# set server.authToken when using the pull transport. See README.md.
+# Per-kind presets deep-merged UNDER each check of that kind (per-check value
+# wins). Declares shared thresholds/timing once instead of on every check.
+kindDefaults:
+  red:
+    # "for duration": interval (60s) x failureThreshold = breach must persist
+    # ~5 min before paging, so a short self-recovering spike never alerts.
+    failureThreshold: 5
+  deployment_health:
+    thresholds: {maxRestartsPerInterval: 3, minAvailableRatio: 1.0}
+# Log bridge: tail ERROR/WARN from selected workloads, redact secrets, and ship
+# over OTLP push / HTTP pull / air-gapped bundle. For customer-minimal installs,
+# hosted export auto-renders this block as enabled and defaults sources to the
+# release namespace, so ERROR/WARN logs reach SaaS with no extra values. Set
+# global.observability.hostedExport.enabled=false for pure in-cluster/no-egress
+# installs. GET /logs and POST /logs/export are always bearer-gated, so set
+# server.authToken when using the pull transport. See README.md.
 logExport:
+  # When true, hostedExport automatically enables ERROR/WARN OTLP log export.
+  # Set false to keep hosted check-status metrics while disabling remote logs.
+  autoEnabled: true
   enabled: false
   severities: [error, warn]
   # Workloads to tail. Use an explicit `namespace:` in namespace-scoped RBAC
@@ -266,10 +296,11 @@ logExport:
 # Connection envs sourced from existing cluster secrets.
 secretEnv:
   clickhouse:
-    userSecret: ""
-    userKey: username
-    passwordSecret: ""
-    passwordKey: password
+    # Reuse platform ClickHouse secrets (see create-secrets.sh / data-plane hook).
+    userSecret: clickhouse-secrets
+    userKey: CLICKHOUSE_USER
+    passwordSecret: clickhouse
+    passwordKey: admin-password
   redis:
     passwordSecret: ""
     passwordKey: password
@@ -288,6 +319,24 @@ runner:
   defaultInterval: 60s
   defaultTimeout: 15s
   failureThreshold: 3
+  # Env var holding the Prometheus query-API base URL. Applied as the default
+  # target.endpointEnv for red/promql/scrape_staleness checks that omit it, so
+  # the address is declared once. The bundled local Prometheus sets this.
+  prometheusQueryEnv: PROMETHEUS_QUERY_URL
+# Customer-minimal default: direct probes only (no local Prometheus required).
+# These checks answer "are the main services running?" and the watchdog pushes
+# their status over OTLP metrics. Adding any red/promql/scrape_staleness id here
+# later renders the bundled local Prometheus.
+enabledCheckIds:
+  - clickhouse
+  - kafka-broker
+  - kafka-connect
+  - control-plane-synthetic
+  - data-plane-synthetic
+  - trustgate-synthetic
+  - firewall-synthetic
+  - pod-health
+  - deployment-health
 # Default check set. Override / extend via the watchdog.checks key in
 # customer values. Each entry is passed to the Go watchdog as-is. Set
 # enabled: false to skip a check; the corresponding components do not
@@ -312,19 +361,17 @@ checks:
       maxLongQueries: 0
       queryLogLookbackSeconds: 900
       queryLogExceptionsMax: 0
-    actions: [notify.otlp, notify.slack]
   - id: kafka-broker
     kind: kafka_broker
     enabled: false
     target:
       bootstrapServers: ["kafka:9092"]
-    actions: [notify.otlp, notify.slack]
   - id: kafka-connect
     kind: kafka_connect
     enabled: false
     dryRun: true
     target:
-      url: http://kafka-connect:8083
+      url: http://kafka-connect-svc:8083
     actions: [notify.otlp, notify.slack, kafka_connect.restart_task]
   - id: data-plane-worker-lag
     kind: kafka_consumer_lag
@@ -339,7 +386,6 @@ checks:
       k8sNamespace: data-plane-workers
     thresholds:
       maxLag: 5000
-    actions: [notify.otlp, notify.slack]
   # The three red-* checks use the built-in `red` kind: the PromQL is compiled
   # in the watchdog binary from `target.signal` (requestRate | errorRatio |
   # latencyP95), so there is no hand-written query to drift or mistype, and the
@@ -348,7 +394,7 @@ checks:
   # the query itself is not customer-editable by design.
   - id: red-request-rate
     kind: red
-    enabled: true
+    enabled: false
     # "for duration": interval (60s) x failureThreshold = the breach must
     # persist ~5 min before paging, so a short traffic burst that self-recovers
     # never alerts.
@@ -361,7 +407,6 @@ checks:
       warning: 500
       critical: 1000
       noDataStatus: unknown
-    actions: [notify.otlp, notify.slack]
   - id: red-error-rate
     kind: red
     enabled: false
@@ -374,10 +419,9 @@ checks:
       warning: 0.05
       critical: 0.15
       noDataStatus: unknown
-    actions: [notify.otlp, notify.slack]
   - id: red-duration-p95
     kind: red
-    enabled: true
+    enabled: false
     failureThreshold: 5 # ~5 min sustained before paging (see red-request-rate)
     target:
       endpointEnv: PROMETHEUS_QUERY_URL
@@ -387,7 +431,6 @@ checks:
       warning: 1
       critical: 3
       noDataStatus: unknown
-    actions: [notify.otlp, notify.slack]
   # Watchdog self-metric staleness. The bundled local Prometheus
   # scrapes watchdog's own /metrics (job watchdog-self), so an absent
   # watchdog_checks_runs_total means the monitor itself has gone silent — the
@@ -396,43 +439,39 @@ checks:
   # prometheus.reuseExisting at a Prometheus that does not scrape watchdog.
   - id: watchdog-self-staleness
     kind: scrape_staleness
-    enabled: true
+    enabled: false
     target:
       endpointEnv: PROMETHEUS_QUERY_URL
       series: watchdog_checks_runs_total
       window: 10m
     thresholds:
       staleStatus: critical
-    actions: [notify.otlp, notify.slack]
   - id: control-plane-synthetic
     kind: httpsynthetic
     enabled: false
     target:
       urls:
-        - {name: api, url: 'http://control-plane-api/health', expectedStatus: 200, latencyWarnMs: 500, latencyCriticalMs: 2000}
-        - {name: app, url: 'http://control-plane-app:3000/api/health', expectedStatus: 200}
-        # scheduler exposes /v1/health (Express router prefix), not /health.
-        - {name: scheduler, url: 'http://control-plane-scheduler:3000/v1/health', expectedStatus: 200}
-    actions: [notify.otlp, notify.slack]
+        - {name: api, url: 'http://control-plane-api-service/health', expectedStatus: 200, latencyWarnMs: 500, latencyCriticalMs: 2000}
+        - {name: app, url: 'http://control-plane-app-service/api/health', expectedStatus: 200}
+        # scheduler exposes /v1/health on the chart Service (port 80).
+        - {name: scheduler, url: 'http://control-plane-scheduler-service/v1/health', expectedStatus: 200}
   - id: data-plane-synthetic
     kind: httpsynthetic
     enabled: false
     target:
       urls:
-        - {name: api, url: 'http://data-plane-api/health', expectedStatus: 200, latencyWarnMs: 500, latencyCriticalMs: 2000}
-        - {name: ready, url: 'http://data-plane-api/health/ready', expectedStatus: 200}
+        - {name: api, url: 'http://data-plane-api-service/health', expectedStatus: 200, latencyWarnMs: 500, latencyCriticalMs: 2000}
+        - {name: ready, url: 'http://data-plane-api-service/health/ready', expectedStatus: 200}
         # /health/deep exercises downstream connections (ClickHouse, Kafka);
         # keep it on a separate check entry so a flaky downstream doesn't
         # mask a real API outage in the same alert.
-        - {name: deep, url: 'http://data-plane-api/health/deep', expectedStatus: 200, latencyWarnMs: 1000, latencyCriticalMs: 3000}
-    actions: [notify.otlp, notify.slack]
+        - {name: deep, url: 'http://data-plane-api-service/health/deep', expectedStatus: 200, latencyWarnMs: 1000, latencyCriticalMs: 3000}
   - id: postgres-tcp
     kind: tcpsynthetic
     enabled: false
     target:
       host: postgresql.neuraltrust
       port: 5432
-    actions: [notify.otlp, notify.slack]
   # Smoke probe — Cloud SQL CPU/memory/disk stays in cloud-infrastructure TF.
   - id: postgres-ping
     kind: postgres_ping
@@ -450,10 +489,9 @@ checks:
     enabled: false
     target:
       urls:
-        - {name: control-plane, url: 'http://trustgate-control-plane:8080/health'}
-        - {name: data-plane, url: 'http://trustgate-data-plane:8081/health'}
-        - {name: actions, url: 'http://trustgate-actions:8080/health'}
-    actions: [notify.otlp, notify.slack]
+        - {name: control-plane, url: 'http://trustgate-control-plane/health'}
+        - {name: data-plane, url: 'http://trustgate-data-plane/health'}
+        - {name: actions, url: 'http://trustgate-actions/health'}
   - id: trustgate-e2e-pipeline
     kind: e2e_synthetic
     enabled: false
@@ -477,7 +515,6 @@ checks:
         FROM metrics
         WHERE event_time >= now() - INTERVAL 15 MINUTE
           AND position(toString(request_headers), ?) > 0
-    actions: [notify.otlp, notify.slack]
   - id: trustgate-redis
     kind: redis
     enabled: false
@@ -495,18 +532,16 @@ checks:
     enabled: false
     target:
       urls:
-        - {name: gateway, url: 'http://neuraltrust-firewall-gateway:8000/health'}
-    actions: [notify.otlp, notify.slack]
+        - {name: gateway, url: 'http://firewall/health'}
   - id: gateway-health
     kind: gateway_health
     enabled: false
     target:
-      url: http://neuraltrust-firewall-gateway:8000/health
+      url: http://firewall/health
       namespace: gateway
-      labelSelector: app.kubernetes.io/name=neuraltrust-firewall-gateway
+      labelSelector: app.kubernetes.io/name=firewall
     thresholds:
       minReadyPods: 1
-    actions: [notify.otlp, notify.slack]
   # Watches cert-manager Certificates across the listed namespaces.
   - id: cert-renewal
     kind: cert_renewal
@@ -516,7 +551,6 @@ checks:
     thresholds:
       renewalWarnDays: 14
       renewalCriticalDays: 3
-    actions: [notify.otlp, notify.slack]
   - id: otel-collector
     kind: otel_collector
     enabled: false
@@ -526,7 +560,6 @@ checks:
       labelSelector: app.kubernetes.io/name=opentelemetry-collector
     thresholds:
       minReadyPods: 1
-    actions: [notify.otlp, notify.slack]
   # Replaces gcp/metric_based_alerts.tf pod_crash_alert.
   - id: pod-health
     kind: pod_health
@@ -536,7 +569,6 @@ checks:
       reasons: [CrashLoopBackOff, OOMKilled, ImagePullBackOff, ErrImagePull, CreateContainerConfigError]
     thresholds:
       maxFailingPods: 0
-    actions: [notify.otlp, notify.slack]
   # Replaces gcp/metric_based_alerts.tf container_restart_rate.
   - id: deployment-health
     kind: deployment_health
@@ -544,10 +576,8 @@ checks:
     target:
       namespace: neuraltrust
       deployments: [trustgate-control-plane, trustgate-data-plane]
-    thresholds:
-      maxRestartsPerInterval: 3
-      minAvailableRatio: 1.0
-    actions: [notify.otlp, notify.slack] # add k8s.restart_deployment when ready
+    # thresholds come from kindDefaults.deployment_health; notify actions from
+    # actions.defaultActions. Add k8s.restart_deployment here when ready to heal.
   # Multi-tenant SaaS coverage. Discovers tenant namespaces dynamically
   # via label selector — NeuralTrust SaaS uses this to cover tenants
   # created at runtime by trustgate-ee
@@ -567,7 +597,6 @@ checks:
       maxRestartsPerInterval: 5
       minAvailableRatio: 0.5
       maxUnhealthyTenants: 0
-    actions: [notify.otlp, notify.slack]
 # Inherited from the umbrella chart. Local overrides win.
 global:
   proxy:

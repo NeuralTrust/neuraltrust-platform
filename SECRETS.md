@@ -130,7 +130,7 @@ Created only when explicitly enabled. None are auto-generated — operators brin
 
 | Kubernetes Secret | Key | Required | Description |
 |---|---|---|---|
-| `neuraltrust-observability-token` | `token` | Only when `global.observability.hostedExport.enabled: true` AND data should leave the cluster | Bearer token for `collector.neuraltrust.ai`. Without it the in-chart OTel Collector still runs locally — the `otlphttp/neuraltrust` exporter is silently omitted (graceful degradation; install never fails). |
+| `neuraltrust-observability-token` | `token` | When `neuraltrust-watchdog.enabled: true` or `global.observability.enabled: true` with hosted export | Bearer token for `collector.neuraltrust.ai`. **Never auto-generated randomly.** Supply via `global.observability.hostedExport.auth.tokenValue`, pre-create with `./create-secrets.sh` (`OBSERVABILITY_TOKEN` env), or let Helm preserve an existing Secret via `lookup` on upgrade. Without it, hosted OTLP export is omitted and `watchdog_otlp_connectivity{*}==0`. |
 | `<your-name>` (caller-controlled) | `webhook` | Only when `neuraltrust-watchdog.actions.slack.existingSecret` is set | Slack webhook URL for watchdog notifications. The chart never logs the URL. Set `neuraltrust-watchdog.actions.slack.existingSecret` to this Secret's name and `secretKey` to the data key (default `webhook`). Alternatively, set `actions.slack.webhookUrl` inline and the chart renders a managed Secret for you. |
 | `<your-name>` (caller-controlled) | `token` | Only when `neuraltrust-watchdog.server.authToken.existingSecret` is set | Bearer token guarding the watchdog `POST /checks/{id}/run` force-run endpoint. Optional — the read-only endpoints (`/healthz`, `/readyz`, `/metrics`, `/checks`) stay unauthenticated. The chart can render a Secret from `server.authToken.value` instead. |
 
@@ -283,6 +283,9 @@ export POSTGRES_DB="neuraltrust"
 
 # TrustGate
 export SERVER_SECRET_KEY="your-secret"
+
+# Hosted observability (collector-less watchdog / hosted OTLP export)
+export OBSERVABILITY_TOKEN="your-customer-token"
 
 ./create-secrets.sh --namespace neuraltrust
 ```

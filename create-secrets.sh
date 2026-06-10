@@ -259,6 +259,7 @@ while [[ $# -gt 0 ]]; do
             echo "  - TRUSTGATE_JWT_SECRET"
             echo "  - FIREWALL_JWT_SECRET"
             echo "  - SERVER_SECRET_KEY (TrustGate)"
+            echo "  - OBSERVABILITY_TOKEN (hosted OTLP bearer for collector.neuraltrust.ai)"
             echo "  - And more..."
             echo ""
             echo "  REPLACE_EXISTING        Set to 'true' or 'false' to control replacement"
@@ -559,6 +560,33 @@ else
         -n "$NAMESPACE" \
         --dry-run=client -o yaml | kubectl apply -f -
     echo -e "${GREEN}✓ ClickHouse connection secret created${NC}"
+fi
+echo ""
+
+# Hosted observability token (collector.neuraltrust.ai bearer)
+echo "--- Hosted Observability Token ---"
+OBSERVABILITY_SECRET_NAME="neuraltrust-observability-token"
+OBSERVABILITY_SECRET_KEY="token"
+
+if kubectl get secret "$OBSERVABILITY_SECRET_NAME" -n "$NAMESPACE" &>/dev/null; then
+    if should_replace_secret "$OBSERVABILITY_SECRET_NAME"; then
+        OBSERVABILITY_TOKEN=$(prompt_secret "OBSERVABILITY_TOKEN" "Enter hosted OTLP bearer token (shared customer token from SaaS collector)")
+        if [ -z "$OBSERVABILITY_TOKEN" ]; then
+            echo -e "${RED}Error: OBSERVABILITY_TOKEN is required for hosted export${NC}"
+            exit 1
+        fi
+        create_secret "$OBSERVABILITY_SECRET_NAME" "$OBSERVABILITY_SECRET_KEY" "$OBSERVABILITY_TOKEN" "Hosted OTLP bearer token"
+    else
+        echo -e "${GREEN}Skipping ${OBSERVABILITY_SECRET_NAME} (already exists)${NC}"
+    fi
+else
+    OBSERVABILITY_TOKEN=$(prompt_secret "OBSERVABILITY_TOKEN" "Enter hosted OTLP bearer token (shared customer token from SaaS collector)")
+    if [ -z "$OBSERVABILITY_TOKEN" ]; then
+        echo -e "${YELLOW}No OBSERVABILITY_TOKEN provided — skipping ${OBSERVABILITY_SECRET_NAME}.${NC}"
+        echo -e "${YELLOW}Watchdog hosted export stays offline until this Secret exists.${NC}"
+    else
+        create_secret "$OBSERVABILITY_SECRET_NAME" "$OBSERVABILITY_SECRET_KEY" "$OBSERVABILITY_TOKEN" "Hosted OTLP bearer token"
+    fi
 fi
 echo ""
 

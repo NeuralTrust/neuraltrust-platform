@@ -1,4 +1,4 @@
-{{- if and .Values.enabled (not .Values.prometheus.reuseExisting) }}
+{{- if and .Values.enabled (eq (include "neuraltrust-watchdog.prometheusEnabled" . | trim) "true") }}
 # The bundled Prometheus only scrapes in-cluster pods (no AWS API calls), so it
 # intentionally does NOT use the shared IRSA annotation helper. Add cloud
 # annotations explicitly via prometheus.serviceAccount.annotations if ever needed.
