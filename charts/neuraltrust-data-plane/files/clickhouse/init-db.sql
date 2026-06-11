@@ -253,6 +253,66 @@ SETTINGS index_granularity = 8192;
 
 
 -- ============================================================================
+-- GATEWAY_METRICS TABLE: Consolidated AgentGateway request events (schema_version 2)
+-- Source: Kafka topic "agentgateway_requests" (one row per gateway request).
+-- Written by Kafka Connect (ClickHouse sink) directly from the JSON event.
+-- Root-level scalar fields map to columns; nested objects/arrays (consumer,
+-- status, request, response, usage, cost, latency, attempts, policy_chain) are
+-- stored as JSON strings and parsed at query time with JSONExtract* functions.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS agentgateway_requests
+(
+    -- Schema / identity
+    schema_version Int32 DEFAULT 2,
+    trace_id String,
+    gateway_id String DEFAULT '',
+    team_id String DEFAULT '',
+
+    -- Timing
+    -- occurred_on: when the request started (arrives as epoch milliseconds).
+    -- event_on: when the row is persisted into ClickHouse (ingestion time).
+    occurred_on DateTime64(3, 'UTC') DEFAULT 0,
+    event_on DateTime64(3, 'UTC') DEFAULT now64(3, 'UTC'),
+
+    -- Session / actor
+    session_id String DEFAULT '',
+    turn_id String DEFAULT '',
+    fingerprint_id String DEFAULT '',
+    ip String DEFAULT '',
+
+    -- Outcome
+    is_flagged UInt8 DEFAULT 0,
+    `security` String DEFAULT '[]',
+
+    -- Nested objects stored as JSON strings
+    consumer String DEFAULT '{}',
+    status String DEFAULT '{}',
+    request String DEFAULT '{}',
+    response String DEFAULT '{}',
+    `usage` String DEFAULT '{}',
+    cost String DEFAULT '{}',
+    latency String DEFAULT '{}',
+
+    -- Nested arrays stored as JSON strings
+    attempts String DEFAULT '[]',
+    policy_chain String DEFAULT '[]',
+
+    -- Indexes for common filters
+    INDEX idx_team_id (team_id) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_gateway_id (gateway_id) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_trace_id (trace_id) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_session_id (session_id) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_turn_id (turn_id) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_fingerprint_id (fingerprint_id) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_is_flagged (is_flagged) TYPE minmax GRANULARITY 1
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMM(occurred_on)
+ORDER BY (toStartOfHour(occurred_on), team_id, gateway_id, trace_id)
+TTL toDate(occurred_on) + INTERVAL 12 MONTH
+SETTINGS index_granularity = 8192;
+
+
+-- ============================================================================
 -- DETECTIONS TABLE: Detection events emitted to the detections topic
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS detections
