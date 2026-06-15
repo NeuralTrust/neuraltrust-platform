@@ -31,6 +31,10 @@
 #     -f values-required.yaml \
 #     -f values-watchdog.yaml \
 #     -f values-watchdog-gmp.yaml
+#
+# Kafka checks assume in-cluster kafka:9092. External Kafka: configure
+# global.kafka and align watchdog check bootstrapServers — see
+# values-external-services.yaml.example.
 
 neuraltrust-watchdog:
   enabled: true

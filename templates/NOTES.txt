@@ -16,7 +16,7 @@ Using external ClickHouse at {{ .Values.infrastructure.clickhouse.external.host 
 {{- if .Values.infrastructure.kafka.deploy }}
 Kafka has been deployed in this release.
 {{- else }}
-Using external Kafka at {{ .Values.infrastructure.kafka.external.bootstrapServers }}
+Using external Kafka at {{ .Values.global.kafka.bootstrapServers }}
 {{- end }}
 
 {{- $postgresql := false }}

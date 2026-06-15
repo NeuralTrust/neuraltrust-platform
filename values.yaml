@@ -58,6 +58,9 @@ global:
   # will fail. Java/Kafka-Connect honors a JVM truststore, not SSL_CERT_FILE — the
   # file is mounted but JVM trust must be configured separately if needed.
   #
+  # Does NOT enable Kafka broker TLS. In-cluster Kafka stays PLAINTEXT on
+  # kafka:9092 unless global.kafka.tls.enabled is set explicitly.
+  #
   # The secret is referenced, never created (existingSecret pattern):
   #   kubectl create secret generic <secretName> --from-file=ca.crt=<full-bundle>.pem
   customCaCert:
@@ -65,6 +68,27 @@ global:
     secretName: "" # Required when enabled: existing secret holding the CA bundle
     key: ca.crt # Key within the secret that holds the PEM bundle
     mountPath: /etc/ssl/certs/custom-ca.crt # File path the bundle is mounted at
+  # External Kafka connection (visible to all subcharts via global merge).
+  # Leave bootstrapServers and brokers empty for in-cluster Kafka (kafka:9092).
+  # When using a pre-installed broker, set infrastructure.kafka.deploy: false
+  # and configure bootstrapServers (plus auth/tls when required) here.
+  kafka:
+    bootstrapServers: "" # e.g. "kafka-bootstrap.kafka.svc.cluster.local:9093"
+    brokers: [] # Alternative to bootstrapServers: ["broker-0:9093", "broker-1:9093"]
+    auth:
+      enabled: false
+      mechanism: "SCRAM-SHA-512" # SCRAM-SHA-512 | SCRAM-SHA-256 | PLAIN
+      username: "" # Optional inline username (prefer existingSecret in production)
+      password: "" # Optional inline password (prefer existingSecret in production)
+      existingSecret: "" # Pre-created Secret with username/password (or jaasConfigKey)
+      usernameKey: "username"
+      passwordKey: "password"
+      jaasConfigKey: "" # Optional: read full sasl.jaas.config from this key instead
+    tls:
+      enabled: false
+      existingSecret: "" # Broker CA bundle; when enabled and empty, may reuse global.customCaCert.secretName
+      caKey: "ca.crt"
+      mountPath: "" # Empty = /etc/kafka/ssl/ca.crt (or global.customCaCert.mountPath when TLS enabled + customCa set)
   # AWS IAM Roles for Service Accounts (IRSA). When roleArn is set, service
   # accounts that include the shared helper receive the
   # eks.amazonaws.com/role-arn annotation. Per-component annotations can still
@@ -377,7 +401,7 @@ neuraltrust-siem-connectors:
     #   kafkaTopics: "audit_events,posture_alerts"
     #   logLevel: "info"
     #   port: "3000"
-    # kafka:      { brokers: "" }     # Empty => resolved via parent infrastructure helper
+    # kafka:      { brokers: "" }     # Empty => resolved from global.kafka.bootstrapServers
     # clickhouse: { host: "", database: "neuraltrust", user: "neuraltrust",
     #               secretName: "clickhouse-secrets", secretKey: "admin-password" }
 # Infrastructure Components
@@ -402,19 +426,11 @@ infrastructure:
       # Values are passed via root-level 'clickhouse:' section below
   # Kafka Configuration
   kafka:
-    # Set to true to deploy Kafka, false to use pre-installed instance
+    # Set to true to deploy Kafka, false to use a pre-installed broker.
+    # When false, configure global.kafka.bootstrapServers (and auth/tls if needed).
     # Default: true (deploy)
     deploy: true
-    # External Kafka configuration (used when deploy: false)
-    external:
-      bootstrapServers: "" # e.g., "kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
-      # Or individual brokers:
-      brokers: [] # e.g., ["kafka-0.kafka-headless:9092", "kafka-1.kafka-headless:9092"]
-      # Secret reference for external Kafka credentials (if using SASL)
-      secretName: "" # Optional
-      secretKey: "" # Optional
-      # Kafka chart values (used when deploy: true)
-      # Values are passed via root-level 'kafka:' section below
+    # Kafka chart values (used when deploy: true) are in the root-level 'kafka:' section below.
   # PostgreSQL Configuration
   postgresql:
     # Single switch for in-cluster vs external PostgreSQL across ALL subcharts
@@ -927,7 +943,7 @@ neuraltrust-control-plane:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api"
-          tag: "v1.20.0"
+          tag: "v1.21.0"
           pullPolicy: "Always"
         config:
           # URLs will be auto-generated from OpenShift Routes if global.openshift=true and global.openshiftDomain is set
@@ -1116,7 +1132,9 @@ neuraltrust-data-plane:
         enabled: true
         connect:
           replicas: 1
-          bootstrapServers: "kafka:9092"
+          bootstrapServers: "" # Empty = resolved from global.kafka.bootstrapServers
+          extraEnv: []
+          extraEnvFrom: []
           image:
             repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect
             tag: v0.3.1
@@ -1158,7 +1176,7 @@ neuraltrust-data-plane:
         classifierModel: "gpt"
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.32.0
+          tag: v1.33.0
           pullPolicy: Always
         accessMode: ReadWriteOnce
         huggingfaceToken: ""

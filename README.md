@@ -326,7 +326,27 @@ neuraltrust-control-plane:
 
 ### External services
 
+Set `infrastructure.kafka.deploy: false` and configure the broker under **`global.kafka`** (merged into every subchart). Leave `global.kafka.bootstrapServers` empty for in-cluster Kafka (`kafka:9092`, PLAINTEXT).
+
+`global.customCaCert` is for HTTP/TLS egress only — it does **not** enable Kafka TLS on in-cluster brokers.
+
 ```yaml
+global:
+  postgresql:
+    deploy: false
+  kafka:
+    bootstrapServers: "kafka.example.com:9093"
+    auth:
+      enabled: true
+      mechanism: "SCRAM-SHA-512"
+      existingSecret: "kafka-credentials"
+      usernameKey: "username"
+      passwordKey: "password"
+    tls:
+      enabled: true
+      existingSecret: "kafka-broker-ca"
+      caKey: "ca.crt"
+
 infrastructure:
   clickhouse:
     deploy: false
@@ -339,8 +359,6 @@ infrastructure:
 
   kafka:
     deploy: false
-    external:
-      bootstrapServers: "kafka.example.com:9092"
 
 neuraltrust-control-plane:
   infrastructure:
@@ -356,6 +374,8 @@ neuraltrust-control-plane:
           password: ""  # use --set or pre-created secret
           database: "neuraltrust"
 ```
+
+Pre-create Kafka credentials before install when using SASL/TLS — see [SECRETS.md](./SECRETS.md) and [`values-external-services.yaml.example`](./values-external-services.yaml.example).
 
 ## Component toggles
 

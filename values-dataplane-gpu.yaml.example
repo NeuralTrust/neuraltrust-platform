@@ -8,6 +8,8 @@
 # - Gateway uses `firewall-cpu`, workers use `firewall-gpu` (same tag).
 # - You must set nodeSelector and tolerations under workerDefaults to match your GPU pool.
 # - Set CUDA MPS keys under `firewall.config` for GPU; omit them for CPU-only (see VALUES_SCENARIOS.md).
+# - Default infrastructure deploys in-cluster Kafka (kafka:9092). External Kafka:
+#   see values-external-services.yaml.example (global.kafka + infrastructure.kafka.deploy: false).
 #
 # Usage:
 #   cp values-dataplane-gpu.yaml.example my-dataplane-gpu.yaml

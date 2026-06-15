@@ -151,7 +151,7 @@ aispm:
     # IRSA. Leave "password" until the app supports it.
     authMode: "password"
   # --- Kafka ---
-  # Empty bootstrapServers => parent chart helper fills it from infrastructure.kafka.
+  # Empty bootstrapServers => parent chart helper fills it from global.kafka.
   kafka:
     bootstrapServers: ""
     postureTopic: "posture_alerts"

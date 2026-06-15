@@ -86,24 +86,7 @@ Returns host, port, user, database based on whether ClickHouse is deployed or ex
 {{- end }}
 {{- end }}
 
-{{/*
-Get Kafka connection details
-*/}}
-{{- define "neuraltrust-platform.kafka.bootstrapServers" -}}
-{{- if .Values.infrastructure.kafka.deploy }}
-{{/* Service name is `kafka` (no release prefix) because values.yaml pins
-     kafka.fullnameOverride: "kafka". Keep these in sync. */}}
-{{- "kafka:9092" }}
-{{- else }}
-{{- if .Values.infrastructure.kafka.external.bootstrapServers }}
-{{- .Values.infrastructure.kafka.external.bootstrapServers }}
-{{- else if .Values.infrastructure.kafka.external.brokers }}
-{{- join "," .Values.infrastructure.kafka.external.brokers }}
-{{- else }}
-{{- "kafka:9092" }}
-{{- end }}
-{{- end }}
-{{- end }}
+{{/* Kafka connection helpers live in templates/_kafka_helpers.tpl */}}
 
 {{/*
 Get PostgreSQL connection details

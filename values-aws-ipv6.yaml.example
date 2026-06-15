@@ -23,6 +23,8 @@
 #   - clickhouse.listenHost defaults to "::"
 #   - controlPlane.components.app.hostname (Next.js) defaults to "::"
 #   - firewall gateway/workers and AISPM dual-bind from their entrypoints
+#   - in-cluster Kafka (kafka:9092, PLAINTEXT) — external Kafka is unchanged;
+#     see values-external-services.yaml.example (global.kafka)
 #
 # Dual-stack EKS clusters (the EKS default) need NO override at all — the
 # chart's stock defaults work. Only use this overlay for IPv6-only.

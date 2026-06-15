@@ -50,7 +50,7 @@ must also set `siemConnectors.kafka.brokers` to point at the right hostname.
 {{- if and .Values.siemConnectors.kafka .Values.siemConnectors.kafka.brokers (ne (.Values.siemConnectors.kafka.brokers | toString) "") -}}
 {{- .Values.siemConnectors.kafka.brokers -}}
 {{- else -}}
-{{- "kafka:9092" -}}
+{{- include "neuraltrust-platform.kafka.bootstrapServers" . -}}
 {{- end -}}
 {{- end }}
 

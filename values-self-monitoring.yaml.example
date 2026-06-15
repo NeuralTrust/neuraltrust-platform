@@ -22,7 +22,9 @@
 #     enabled=true without replacing their target / thresholds / actions
 #     blocks. Per-check overrides in your own values still win.
 #   - Add/remove ids freely; missing ids are silently ignored.
-
+#   - Kafka checks assume in-cluster kafka:9092 unless you override watchdog
+#     check targets to match global.kafka.bootstrapServers (external Kafka).
+#
 global:
   selfMonitoring:
     enabled: true

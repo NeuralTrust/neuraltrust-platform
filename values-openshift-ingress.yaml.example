@@ -207,19 +207,10 @@ infrastructure:
 
   # Kafka Configuration
   kafka:
-    # Set to true to deploy Kafka, false to use pre-installed instance
-    # Default: true (deploy)
+    # Set to true to deploy Kafka, false to use a pre-installed broker.
+    # When false, configure global.kafka.bootstrapServers (and auth/tls if needed).
     deploy: true
-    # External Kafka configuration (used when deploy: false)
-    external:
-      bootstrapServers: "" # e.g., "kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
-      # Or individual brokers:
-      brokers: [] # e.g., ["kafka-0.kafka-headless:9092", "kafka-1.kafka-headless:9092"]
-      # Secret reference for external Kafka credentials (if using SASL)
-      secretName: "" # Optional
-      secretKey: "" # Optional
-    # Kafka chart values (used when deploy: true)
-    # Values are passed via root-level 'kafka:' section above
+    # Kafka chart values (used when deploy: true) are in the root-level 'kafka:' section above.
 
   # PostgreSQL Configuration
   postgresql:

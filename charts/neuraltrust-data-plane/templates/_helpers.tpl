@@ -204,6 +204,9 @@ Usage: {{- include "data-plane.envFrom" (dict "component" "api" "extraEnvFrom" .
 {{- if $endpoint -}}
   {{- $items = append $items (dict "configMapRef" (dict "name" (printf "data-plane-%s-otel" $component))) -}}
 {{- end -}}
+{{- if eq (include "neuraltrust-platform.kafka.useExternal" $context) "true" -}}
+  {{- $items = append $items (dict "configMapRef" (dict "name" "kafka-connection" "optional" true)) -}}
+{{- end -}}
 {{- if $extra -}}
   {{- range $extra -}}
     {{- $items = append $items . -}}

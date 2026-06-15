@@ -13,6 +13,10 @@
 # full on-call rotation of dry-run parity. See `docs/observability.md`
 # for the rollout playbook.
 #
+# Kafka checks below assume in-cluster Kafka (kafka:9092). When using external
+# Kafka, align bootstrapServers with global.kafka.bootstrapServers and set
+# infrastructure.kafka.deploy: false — see values-external-services.yaml.example.
+#
 # Keys here mirror `charts/neuraltrust-watchdog/values.yaml` exactly.
 # The chart README contains the complete schema; this example shows the
 # fields most operators want to change.
