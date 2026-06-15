@@ -56,6 +56,21 @@ config:
 #     requests: { cpu: 250m, memory: 64Mi }
 #     limits: { cpu: 500m, memory: 128Mi }
 
+# Optional pre-existing Secret containing only TrustGate PostgreSQL connection
+# fields. The chart still renders trustgate-secrets and can auto-generate
+# SERVER_SECRET_KEY and optional integration keys when the parent chart manages
+# secrets.
+postgresql:
+  existingSecret: ""
+  existingSecretKeys:
+    host: DATABASE_HOST
+    port: DATABASE_PORT
+    user: DATABASE_USER
+    password: DATABASE_PASSWORD
+    database: DATABASE_NAME
+    sslMode: DATABASE_SSL_MODE
+    authMode: DATABASE_AUTH_MODE
+
 # Control Plane settings
 controlPlane:
   name: trustgate-control-plane

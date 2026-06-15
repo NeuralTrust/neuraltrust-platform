@@ -108,6 +108,19 @@ neuraltrust-data-plane:
 
 trustgate:
   enabled: true
+  # Optional: source only TrustGate PostgreSQL fields from a pre-created Secret
+  # while the chart still generates SERVER_SECRET_KEY, firewall keys, Redis
+  # internals, and other platform secrets.
+  # postgresql:
+  #   existingSecret: "trustgate-postgres"
+  #   existingSecretKeys:
+  #     host: DATABASE_HOST
+  #     port: DATABASE_PORT
+  #     user: DATABASE_USER
+  #     password: DATABASE_PASSWORD
+  #     database: DATABASE_NAME
+  #     sslMode: DATABASE_SSL_MODE
+  #     authMode: DATABASE_AUTH_MODE
   global:
     env:
       DATABASE_HOST: "postgresql.postgresql.svc.cluster.local"

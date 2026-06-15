@@ -646,6 +646,20 @@ trustgate:
   # PostgreSQL initialization job resource overrides
   postgresqlInit:
     resources: {} # Override init job container resources (default: requests 250m/64Mi, limits 500m/128Mi)
+  # Optional pre-existing Secret containing only TrustGate PostgreSQL connection
+  # fields. The parent chart still renders trustgate-secrets and auto-generates
+  # SERVER_SECRET_KEY, firewall keys, Redis internals, etc. Leave empty to use
+  # trustgate.global.env values and normal secret generation.
+  postgresql:
+    existingSecret: ""
+    existingSecretKeys:
+      host: DATABASE_HOST
+      port: DATABASE_PORT
+      user: DATABASE_USER
+      password: DATABASE_PASSWORD
+      database: DATABASE_NAME
+      sslMode: DATABASE_SSL_MODE
+      authMode: DATABASE_AUTH_MODE
   # Service Account configuration
   serviceAccount:
     create: true
