@@ -626,5 +626,43 @@ assert_contains "$TMP/hpa-pdb-on.yaml" "name: data-plane-api"    "data-plane-api
 assert_contains "$TMP/hpa-pdb-on.yaml" "name: trustgate-control-plane" "trustgate-control-plane HPA rendered when opted in"
 assert_contains "$TMP/hpa-pdb-on.yaml" "kind: PodDisruptionBudget" "PDB rendered when opted in"
 
+# Scenario 28: external Kafka with SASL/TLS credentials from an existing Secret.
+blue "scenario 28: external Kafka auth/TLS wiring"
+render "$TMP/kafka-external.yaml" \
+  -f values-required.yaml \
+  --set infrastructure.kafka.deploy=false \
+  --set global.kafka.bootstrapServers=kafka.example.svc:9093 \
+  --set global.kafka.auth.enabled=true \
+  --set global.kafka.auth.existingSecret=kafka-credentials \
+  --set global.kafka.tls.enabled=true \
+  --set global.kafka.tls.existingSecret=kafka-broker-ca \
+  --set neuraltrust-data-plane.dataPlane.enabled=true \
+  --set neuraltrust-control-plane.controlPlane.enabled=true \
+  --set trustgate.enabled=true
+assert_contains     "$TMP/kafka-external.yaml" "name: kafka-connection"              "kafka-connection ConfigMap rendered for external Kafka"
+assert_contains     "$TMP/kafka-external.yaml" "KAFKA_SECURITY_PROTOCOL"            "KAFKA_SECURITY_PROTOCOL emitted"
+assert_contains     "$TMP/kafka-external.yaml" "KAFKA_SASL_USERNAME"                "KAFKA_SASL_USERNAME sourced from existing Secret"
+assert_contains     "$TMP/kafka-external.yaml" "CONNECT_SECURITY_PROTOCOL"          "Kafka Connect worker security protocol set"
+assert_contains     "$TMP/kafka-external.yaml" "CONNECT_SSL_TRUSTSTORE_LOCATION"  "Kafka Connect TLS truststore configured"
+assert_contains     "$TMP/kafka-external.yaml" "kafka-credentials"                  "Kafka credential Secret referenced by name"
+assert_not_contains "$TMP/kafka-external.yaml" "password: your-"                    "no inline Kafka passwords in rendered manifests"
+awk '/^kind: Deployment/{d=0} /name: trustgate-data-plane$/{d=1} d' "$TMP/kafka-external.yaml" > "$TMP/tg-dp-kafka.yaml"
+assert_contains "$TMP/tg-dp-kafka.yaml" "name: KAFKA_HOST"              "TrustGate data-plane receives KAFKA_HOST from global.kafka"
+assert_contains "$TMP/tg-dp-kafka.yaml" "name: KAFKA_SECURITY_PROTOCOL" "TrustGate data-plane receives SASL/TLS env vars"
+assert_contains "$TMP/tg-dp-kafka.yaml" "name: kafka-broker-ca"         "TrustGate data-plane mounts Kafka broker CA for TLS"
+
+# Scenario 29: customCaCert for HTTP egress must not enable Kafka TLS on in-cluster broker.
+blue "scenario 29: customCaCert does not enable Kafka TLS"
+render "$TMP/kafka-customca-incluster.yaml" \
+  -f values-required.yaml \
+  --set global.customCaCert.enabled=true \
+  --set global.customCaCert.secretName=corp-ca \
+  --set neuraltrust-data-plane.dataPlane.enabled=true \
+  --set neuraltrust-control-plane.controlPlane.enabled=true \
+  --set trustgate.enabled=true
+assert_not_contains "$TMP/kafka-customca-incluster.yaml" "name: KAFKA_SECURITY_PROTOCOL" "no Kafka SSL protocol when only customCaCert is enabled"
+assert_not_contains "$TMP/kafka-customca-incluster.yaml" "name: KAFKA_SSL_CA_LOCATION"   "no Kafka SSL CA env when only customCaCert is enabled"
+assert_not_contains "$TMP/kafka-customca-incluster.yaml" "name: kafka-broker-ca"         "no dedicated Kafka broker CA volume when only customCaCert is enabled"
+
 green ""
 green "All helm-render assertions passed."

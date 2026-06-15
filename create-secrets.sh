@@ -255,6 +255,8 @@ while [[ $# -gt 0 ]]; do
             echo "  - RESEND_API_KEY"
             echo "  - HUGGINGFACE_TOKEN"
             echo "  - CLICKHOUSE_PASSWORD"
+            echo "  - KAFKA_USERNAME / KAFKA_PASSWORD (external Kafka SASL; optional)"
+            echo "  - KAFKA_BROKER_CA_FILE (external Kafka TLS CA; optional)"
             echo "  - POSTGRES_PASSWORD"
             echo "  - TRUSTGATE_JWT_SECRET"
             echo "  - FIREWALL_JWT_SECRET"
@@ -560,6 +562,60 @@ else
         -n "$NAMESPACE" \
         --dry-run=client -o yaml | kubectl apply -f -
     echo -e "${GREEN}✓ ClickHouse connection secret created${NC}"
+fi
+echo ""
+
+# External Kafka credentials (optional — only when global.kafka.auth/tls is configured)
+echo "--- External Kafka Credentials (optional) ---"
+KAFKA_CREDENTIALS_SECRET_NAME="${KAFKA_CREDENTIALS_SECRET_NAME:-kafka-credentials}"
+KAFKA_BROKER_CA_SECRET_NAME="${KAFKA_BROKER_CA_SECRET_NAME:-kafka-broker-ca}"
+
+if [ -n "${KAFKA_USERNAME:-}" ] && [ -n "${KAFKA_PASSWORD:-}" ]; then
+    if kubectl get secret "$KAFKA_CREDENTIALS_SECRET_NAME" -n "$NAMESPACE" &>/dev/null; then
+        if should_replace_secret "$KAFKA_CREDENTIALS_SECRET_NAME"; then
+            kubectl create secret generic "$KAFKA_CREDENTIALS_SECRET_NAME" \
+                --from-literal=username="$(trim_value "$KAFKA_USERNAME")" \
+                --from-literal=password="$(trim_value "$KAFKA_PASSWORD")" \
+                -n "$NAMESPACE" \
+                --dry-run=client -o yaml | kubectl apply -f -
+            echo -e "${GREEN}✓ Kafka credentials secret updated${NC}"
+        else
+            echo -e "${GREEN}Skipping ${KAFKA_CREDENTIALS_SECRET_NAME} (already exists)${NC}"
+        fi
+    else
+        kubectl create secret generic "$KAFKA_CREDENTIALS_SECRET_NAME" \
+            --from-literal=username="$(trim_value "$KAFKA_USERNAME")" \
+            --from-literal=password="$(trim_value "$KAFKA_PASSWORD")" \
+            -n "$NAMESPACE" \
+            --dry-run=client -o yaml | kubectl apply -f -
+        echo -e "${GREEN}✓ Kafka credentials secret created (${KAFKA_CREDENTIALS_SECRET_NAME})${NC}"
+    fi
+else
+    echo -e "${YELLOW}No KAFKA_USERNAME/KAFKA_PASSWORD — skipping ${KAFKA_CREDENTIALS_SECRET_NAME}.${NC}"
+    echo -e "${YELLOW}Required when global.kafka.auth.enabled and using an external broker.${NC}"
+fi
+
+if [ -n "${KAFKA_BROKER_CA_FILE:-}" ] && [ -f "$KAFKA_BROKER_CA_FILE" ]; then
+    if kubectl get secret "$KAFKA_BROKER_CA_SECRET_NAME" -n "$NAMESPACE" &>/dev/null; then
+        if should_replace_secret "$KAFKA_BROKER_CA_SECRET_NAME"; then
+            kubectl create secret generic "$KAFKA_BROKER_CA_SECRET_NAME" \
+                --from-file=ca.crt="$KAFKA_BROKER_CA_FILE" \
+                -n "$NAMESPACE" \
+                --dry-run=client -o yaml | kubectl apply -f -
+            echo -e "${GREEN}✓ Kafka broker CA secret updated${NC}"
+        else
+            echo -e "${GREEN}Skipping ${KAFKA_BROKER_CA_SECRET_NAME} (already exists)${NC}"
+        fi
+    else
+        kubectl create secret generic "$KAFKA_BROKER_CA_SECRET_NAME" \
+            --from-file=ca.crt="$KAFKA_BROKER_CA_FILE" \
+            -n "$NAMESPACE" \
+            --dry-run=client -o yaml | kubectl apply -f -
+        echo -e "${GREEN}✓ Kafka broker CA secret created (${KAFKA_BROKER_CA_SECRET_NAME})${NC}"
+    fi
+else
+    echo -e "${YELLOW}No KAFKA_BROKER_CA_FILE — skipping ${KAFKA_BROKER_CA_SECRET_NAME}.${NC}"
+    echo -e "${YELLOW}Required when global.kafka.tls.enabled and using an external broker.${NC}"
 fi
 echo ""
 

@@ -122,7 +122,13 @@ All required secrets must exist in the namespace before deployment.
 | Kubernetes Secret | Key | Required | Description |
 |---|---|---|---|
 | `clickhouse` | `admin-password` | Auto-generated | ClickHouse admin password |
+| `kafka-credentials` | `username`, `password` | External Kafka + SASL only | Pre-created; referenced by `global.kafka.auth.existingSecret` (default key names). Chart never renders this Secret. |
+| `kafka-broker-ca` | `ca.crt` | External Kafka + TLS only | Broker CA bundle; referenced by `global.kafka.tls.existingSecret`. Chart never renders this Secret. |
 | ~~`kafka-connect-monitor-secrets`~~ | ~~`SLACK_WEBHOOK_URL`~~ | Removed in chart v1.13.0 | Use the `neuraltrust-watchdog` subchart instead — set `neuraltrust-watchdog.actions.slack.existingSecret` (and `secretKey`) to a pre-created Secret you control, OR set `actions.slack.webhookUrl` inline and the chart will render a managed Secret. The standalone `kafka-connect-monitor-secrets` Secret is no longer rendered. |
+
+> **External Kafka credentials.** When `infrastructure.kafka.deploy: false` and `global.kafka.auth.enabled: true`, create `kafka-credentials` (or your chosen name matching `global.kafka.auth.existingSecret`) before `helm install`. For TLS, create `kafka-broker-ca` with key `ca.crt` (or match `global.kafka.tls.{existingSecret,caKey}`). Use `./create-secrets.sh` with `KAFKA_USERNAME`, `KAFKA_PASSWORD`, and optional `KAFKA_BROKER_CA_FILE`, or the `kubectl` commands in [`values-external-services.yaml.example`](./values-external-services.yaml.example).
+>
+> **`global.customCaCert` is not Kafka TLS.** It mounts a corporate CA bundle for HTTP/TLS egress (LLM APIs, etc.). In-cluster Kafka stays PLAINTEXT on `kafka:9092` unless you explicitly set `global.kafka.tls.enabled: true`.
 
 ### Observability (chart v1.13.0+)
 
@@ -280,6 +286,13 @@ export POSTGRES_PORT="5432"
 export POSTGRES_USER="postgres"
 export POSTGRES_PASSWORD="your-password"
 export POSTGRES_DB="neuraltrust"
+
+# External Kafka (when infrastructure.kafka.deploy=false and global.kafka.auth/tls enabled)
+export KAFKA_USERNAME="neuraltrust"
+export KAFKA_PASSWORD="your-kafka-password"
+export KAFKA_BROKER_CA_FILE="/path/to/broker-ca-bundle.pem"  # optional; creates kafka-broker-ca
+export KAFKA_CREDENTIALS_SECRET_NAME="kafka-credentials"     # optional override
+export KAFKA_BROKER_CA_SECRET_NAME="kafka-broker-ca"          # optional override
 
 # TrustGate
 export SERVER_SECRET_KEY="your-secret"

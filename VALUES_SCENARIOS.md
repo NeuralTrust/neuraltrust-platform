@@ -59,7 +59,7 @@ All infrastructure and services deployed. Use as a reference for what a complete
 
 ### `values-external-services.yaml.example` — External infrastructure
 
-ClickHouse, Kafka, and PostgreSQL provided externally. Only NeuralTrust services and TrustGate are deployed in-cluster.
+ClickHouse, Kafka, and PostgreSQL provided externally. Only NeuralTrust services and TrustGate are deployed in-cluster. Kafka connection, SASL, and TLS are configured under **`global.kafka`** (not `infrastructure.kafka.external`). Set `infrastructure.kafka.deploy: false` to skip the in-cluster Kafka subchart.
 
 ### `values-dataplane-gpu.yaml.example` — Data Plane + GPU firewall
 
@@ -139,6 +139,15 @@ global:
   # image is never pulled. Pre-create the users/databases on the external server.
   postgresql:
     deploy: false
+  # External Kafka — all subcharts read bootstrap/auth/TLS from here.
+  kafka:
+    bootstrapServers: "kafka.example.com:9093"
+    auth:
+      enabled: true
+      existingSecret: "kafka-credentials"
+    tls:
+      enabled: true
+      existingSecret: "kafka-broker-ca"
 
 infrastructure:
   clickhouse:
@@ -147,8 +156,6 @@ infrastructure:
       host: "clickhouse.example.com"
   kafka:
     deploy: false
-    external:
-      bootstrapServers: "kafka.example.com:9092"
 
 neuraltrust-control-plane:
   controlPlane:

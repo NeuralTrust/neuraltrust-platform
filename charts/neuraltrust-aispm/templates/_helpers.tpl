@@ -66,7 +66,7 @@ Usage: {{ include "aispm.kafka.bootstrapServers" . }}
 {{- if and .Values.aispm.kafka .Values.aispm.kafka.bootstrapServers (ne (.Values.aispm.kafka.bootstrapServers | toString) "") -}}
 {{- .Values.aispm.kafka.bootstrapServers -}}
 {{- else -}}
-{{- "kafka:9092" -}}
+{{- include "neuraltrust-platform.kafka.bootstrapServers" . -}}
 {{- end -}}
 {{- end }}
 
@@ -210,6 +210,7 @@ Usage: {{ include "aispm.commonEnv" . | nindent 12 }}
 {{- end }}
 - name: KAFKA_BOOTSTRAP_SERVERS
   value: {{ include "aispm.kafka.bootstrapServers" . | quote }}
+{{- include "neuraltrust-platform.kafka.authEnv" . }}
 - name: AISPM_API_URL
   value: {{ include "aispm.apiUrl" . | quote }}
 {{- end }}

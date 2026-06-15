@@ -207,3 +207,15 @@ Actions selector labels (for immutable selector fields)
 {{ include "trustgate.selectorLabels" . }}
 app.kubernetes.io/component: actions
 {{- end }}
+
+{{/*
+Kafka broker env for TrustGate (host/port shape + shared SASL/TLS from global.kafka).
+Usage: {{- include "trustgate.kafkaEnv" . | nindent 8 }}
+*/}}
+{{- define "trustgate.kafkaEnv" -}}
+- name: KAFKA_HOST
+  value: {{ include "neuraltrust-platform.kafka.host" . | quote }}
+- name: KAFKA_PORT
+  value: {{ include "neuraltrust-platform.kafka.port" . | quote }}
+{{- include "neuraltrust-platform.kafka.authEnv" . }}
+{{- end -}}

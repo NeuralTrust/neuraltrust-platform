@@ -16,6 +16,9 @@
 #   helm upgrade --install neuraltrust-platform . \
 #     -f values-required.yaml \
 #     -f values-observability-self-hosted.yaml
+#
+# Assumes in-cluster Kafka (kafka:9092) for bundled kafka-* watchdog checks.
+# External Kafka: configure global.kafka — see values-external-services.yaml.example.
 
 global:
   # Master switch for the in-chart OTel Collector. Stays ON so the

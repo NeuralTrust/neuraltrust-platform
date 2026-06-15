@@ -184,8 +184,8 @@ spec:
         {{- $trustgateActionsUrl := "" }}
         {{- $nextAuthUrl := "" }}
         {{- $modelScannerApiUrl := "" }}
-        {{- $kafkaHost := "kafka" }}
-        {{- $kafkaPort := "9092" }}
+        {{- $kafkaHost := include "neuraltrust-platform.kafka.host" . }}
+        {{- $kafkaPort := include "neuraltrust-platform.kafka.port" . }}
         {{- $openshiftDomain := include "neuraltrust-platform.domain" . }}
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.config }}
           {{- if .Values.controlPlane.components.app.config.port }}{{- $appPort = .Values.controlPlane.components.app.config.port }}{{- end }}
@@ -432,6 +432,7 @@ spec:
           value: "{{ $kafkaHost }}"
         - name: KAFKA_PORT
           value: "{{ $kafkaPort }}"
+        {{- include "neuraltrust-platform.kafka.authEnv" . | nindent 8 }}
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.extraEnv }}
         {{- toYaml .Values.controlPlane.components.app.extraEnv | nindent 8 }}
         {{- end }}

@@ -82,7 +82,7 @@ neuraltrust-data-plane:
         enabled: true  # ClickHouse will be deployed via infrastructure.clickhouse.deploy
         host: "clickhouse"  # Internal service name
       kafka:
-        enabled: true  # Kafka will be deployed via infrastructure.kafka.deploy
+        enabled: true  # Kafka Connect; broker from infrastructure.kafka.deploy + global.kafka
       api:
         enabled: true
         ingress:

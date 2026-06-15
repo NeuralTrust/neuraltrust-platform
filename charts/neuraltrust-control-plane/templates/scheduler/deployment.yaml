@@ -218,7 +218,7 @@ spec:
         {{- /* Use internal Kubernetes service URLs for inter-service communication */}}
         {{- $dataPlaneApiUrl := "" }}
         {{- $controlPlaneApiUrl := "" }}
-        {{- $kafkaBrokers := "kafka:9092" }}
+        {{- $kafkaBrokers := include "neuraltrust-platform.kafka.bootstrapServers" . }}
         {{- $kafkaTopic := "audit_events" }}
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.scheduler .Values.controlPlane.components.scheduler.config }}
           {{- if .Values.controlPlane.components.scheduler.config.dataPlaneApiUrl }}
@@ -245,6 +245,7 @@ spec:
           value: {{ $kafkaBrokers | quote }}
         - name: KAFKA_TOPIC
           value: {{ $kafkaTopic | quote }}
+        {{- include "neuraltrust-platform.kafka.authEnv" . | nindent 8 }}
         - name: DATA_PLANE_API_URL
           value: {{ $dataPlaneApiUrl | quote }}
         - name: DATA_PLANE_JWT_SECRET

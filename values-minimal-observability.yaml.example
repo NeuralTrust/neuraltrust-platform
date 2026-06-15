@@ -17,6 +17,9 @@
 #     -n <namespace> --create-namespace \
 #     -f values-required.yaml \
 #     -f values-minimal-observability.yaml
+#
+# Assumes in-cluster Kafka (kafka:9092) for any kafka-* watchdog checks you
+# enable separately. External Kafka: see values-external-services.yaml.example.
 
 global:
   observability:

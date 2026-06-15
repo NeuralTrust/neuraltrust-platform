@@ -60,6 +60,20 @@ global:
   # image is never pulled. Pre-create the users/databases on the external server.
   postgresql:
     deploy: false
+  # External Kafka — visible to all subcharts. Leave bootstrapServers empty for
+  # in-cluster Kafka. global.customCaCert does NOT enable Kafka TLS by itself.
+  kafka:
+    bootstrapServers: "kafka.example.com:9093"
+    auth:
+      enabled: true
+      mechanism: "SCRAM-SHA-512"
+      existingSecret: "kafka-credentials"
+      usernameKey: "username"
+      passwordKey: "password"
+    tls:
+      enabled: true
+      existingSecret: "kafka-broker-ca"
+      caKey: "ca.crt"
 
 infrastructure:
   clickhouse:
@@ -73,8 +87,6 @@ infrastructure:
 
   kafka:
     deploy: false
-    external:
-      bootstrapServers: "kafka.example.com:9092"
 
 neuraltrust-control-plane:
   controlPlane:
@@ -234,7 +246,7 @@ When AISPM is enabled, defaults reuse platform infrastructure:
 |---|---|---|
 | PostgreSQL | `control-plane-postgresql` (db `aispm`, user `aispm`) | `neuraltrust-aispm.aispm.database.{host,port,user,name,sslMode}` |
 | Redis | `<release>-redis-master:6379` db `1` (TrustGate uses db `0`) | `neuraltrust-aispm.aispm.redis.{host,port,database}` |
-| Kafka | `kafka:9092` topic `posture_alerts` | `neuraltrust-aispm.aispm.kafka.{bootstrapServers,postureTopic}` |
+| Kafka | `kafka:9092` topic `posture_alerts` | `global.kafka.bootstrapServers` or `neuraltrust-aispm.aispm.kafka.{bootstrapServers,postureTopic}` |
 | JWT secret | `data-plane-jwt-secret/DATA_PLANE_JWT_SECRET` | n/a — intentionally shared with the data plane |
 
 The `aispm` user/database in the in-cluster PostgreSQL is **not** auto-created by the chart today. Provision it with the standard PostgreSQL bootstrap (or point AISPM at an external instance) before enabling.
@@ -274,7 +286,7 @@ The SIEM Connectors subchart is **off by default** (`neuraltrust-siem-connectors
 
 | Resource | Default | Override |
 |---|---|---|
-| Kafka | `kafka:9092` | `neuraltrust-siem-connectors.siemConnectors.kafka.brokers` |
+| Kafka | `kafka:9092` | `global.kafka.bootstrapServers` or `neuraltrust-siem-connectors.siemConnectors.kafka.brokers` |
 | ClickHouse | `http://clickhouse:8123`, db `neuraltrust`, user `neuraltrust` | `neuraltrust-siem-connectors.siemConnectors.clickhouse.{host,database,user}` |
 | ClickHouse password | `clickhouse-secrets/admin-password` | `neuraltrust-siem-connectors.siemConnectors.clickhouse.{secretName,secretKey}` |
 
@@ -537,10 +549,50 @@ History is bounded by `backup.successfulJobsHistoryLimit` (default 3) and `backu
 | Component | In-cluster service name | External config path |
 |---|---|---|
 | ClickHouse | `clickhouse` | `infrastructure.clickhouse.external.host` |
-| Kafka | `kafka:9092` | `infrastructure.kafka.external.bootstrapServers` |
+| Kafka | `kafka:9092` | `global.kafka.bootstrapServers` when `infrastructure.kafka.deploy: false` |
 | PostgreSQL | `control-plane-postgresql` | `neuraltrust-control-plane.controlPlane.components.postgresql.secrets.host` |
 
 The `_helpers.tpl` template resolves these automatically based on `deploy: true/false`.
+
+### External Kafka authentication and TLS
+
+When the broker requires SASL and/or TLS, configure **`global.kafka`** (all subcharts read this via Helm's global merge) and set `infrastructure.kafka.deploy: false`:
+
+```yaml
+global:
+  kafka:
+    bootstrapServers: "kafka-bootstrap.kafka.svc.cluster.local:9093"
+    auth:
+      enabled: true
+      mechanism: "SCRAM-SHA-512"
+      existingSecret: "kafka-credentials"  # pre-created; chart never renders it
+      usernameKey: "username"
+      passwordKey: "password"
+    tls:
+      enabled: true
+      existingSecret: "kafka-broker-ca"
+      caKey: "ca.crt"
+
+infrastructure:
+  kafka:
+    deploy: false
+```
+
+The chart injects matching `KAFKA_*` env vars into data-plane api/worker, TrustGate gateway/admin/actions, control-plane app/scheduler, AISPM, SIEM connectors, and `CONNECT_*` vars into Kafka Connect (including its init container for topic setup). See [`values-external-services.yaml.example`](./values-external-services.yaml.example).
+
+> **`global.customCaCert` is not Kafka TLS.** It mounts a corporate CA bundle for HTTP/TLS egress only. In-cluster Kafka stays PLAINTEXT on `kafka:9092` unless `global.kafka.tls.enabled: true`.
+
+Pre-create the Secret before install:
+
+```bash
+kubectl create secret generic kafka-credentials \
+  --from-literal=username='neuraltrust' \
+  --from-literal=password='<password>'
+kubectl create secret generic kafka-broker-ca \
+  --from-file=ca.crt=/path/to/ca-bundle.pem
+
+# Or: KAFKA_USERNAME=... KAFKA_PASSWORD=... KAFKA_BROKER_CA_FILE=... ./create-secrets.sh
+```
 
 ## Secrets auto-generation
 
@@ -662,7 +714,8 @@ kubectl delete pod kafka-broker-0 -n neuraltrust
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | ClickHouse connection fails | Wrong host in data plane config | Verify `neuraltrust-data-plane.dataPlane.components.clickhouse.host` |
-| Kafka connection fails | Wrong bootstrap servers | Check `KAFKA_BOOTSTRAP_SERVERS` env in data plane pods |
+| Kafka connection fails | Wrong bootstrap servers | Verify `global.kafka.bootstrapServers` and `KAFKA_BOOTSTRAP_SERVERS` in data plane pods |
+| Kafka SSL on in-cluster broker | `global.customCaCert` mistaken for Kafka TLS | `customCaCert` is HTTP egress only; leave `global.kafka.tls.enabled: false` for PLAINTEXT in-cluster Kafka |
 | PostgreSQL connection fails | Wrong host or credentials | Verify `neuraltrust-control-plane.controlPlane.components.postgresql.secrets` |
 | Secret not found | Secrets not created | Check `kubectl get secrets -n neuraltrust`. See [SECRETS.md](./SECRETS.md) |
 | TrustGate firewall vars stale | Pods not restarted after secret change | `kubectl rollout restart deployment/trustgate-*` |

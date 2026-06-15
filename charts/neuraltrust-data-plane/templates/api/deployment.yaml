@@ -178,11 +178,12 @@ spec:
           - name: tmp
             mountPath: /tmp
           {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 10 }}
+          {{- include "neuraltrust-platform.kafka.tlsVolumeMount" . | nindent 10 }}
       containers:
       - name: api
         {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.image }}
         {{- $apiRepo := .Values.dataPlane.components.api.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api" }}
-        {{- $apiTag := .Values.dataPlane.components.api.image.tag | default "v1.32.0" }}
+        {{- $apiTag := .Values.dataPlane.components.api.image.tag | default "v1.33.0" }}
         image: {{ include "data-plane.image" (dict "repository" $apiRepo "tag" $apiTag "global" .Values.global) | quote }}
         imagePullPolicy: {{ .Values.dataPlane.components.api.image.pullPolicy | default "Always" }}
         {{- else }}
@@ -229,8 +230,7 @@ spec:
                 name: {{ if and .Values.dataPlane .Values.dataPlane.secrets .Values.dataPlane.secrets.resendApiKeySecretName }}{{ .Values.dataPlane.secrets.resendApiKeySecretName }}{{ else }}resend-secrets{{ end }}
                 key: RESEND_API_KEY
                 optional: true
-          - name: KAFKA_BOOTSTRAP_SERVERS
-            value: "kafka:9092"
+          {{- include "neuraltrust-platform.kafka.clientEnv" . | nindent 10 }}
           - name: HF_HOME
             value: "/root/.cache/huggingface"
           - name: HUGGINGFACE_TOKEN
@@ -336,6 +336,7 @@ spec:
           - name: tmp
             mountPath: /tmp
           {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 10 }}
+          {{- include "neuraltrust-platform.kafka.tlsVolumeMount" . | nindent 10 }}
         {{- with .Values.dataPlane.components.api.extraVolumeMounts }}
         {{- include "neuraltrust-platform.extraVolumeMounts" (dict "items" .) | nindent 10 }}
         {{- end }}
@@ -390,6 +391,7 @@ spec:
       - name: tmp
         emptyDir: {}
       {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 6 }}
+      {{- include "neuraltrust-platform.kafka.tlsVolume" . | nindent 6 }}
       {{- with .Values.dataPlane.components.api.extraVolumes }}
       {{- include "neuraltrust-platform.extraVolumes" (dict "items" .) | nindent 6 }}
       {{- end }}

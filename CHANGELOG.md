@@ -4,7 +4,15 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
-## [v1.14.1] — 2026-06-09
+### Added
+
+- **External Kafka auth/TLS wiring** — `global.kafka` configures bootstrap servers, SASL credentials via an existing Secret (`auth.existingSecret` + `usernameKey`/`passwordKey`, or `jaasConfigKey`), and broker CA trust (`tls.existingSecret`). All Kafka consumers receive consistent `KAFKA_*` / `CONNECT_*` env vars. Renders a shared `kafka-connection` ConfigMap when `global.kafka.bootstrapServers` (or `brokers`) is set. `global.customCaCert` does not enable Kafka TLS unless `global.kafka.tls.enabled` is true.
+
+### Changed
+
+- **Kafka bootstrap resolution** — components no longer hardcode `kafka:9092` when `global.kafka.bootstrapServers` is configured (with `infrastructure.kafka.deploy: false`). Override per component only when needed (e.g. `neuraltrust-data-plane.dataPlane.components.kafka.connect.bootstrapServers`).
+- **Removed `infrastructure.kafka.external`** — external broker settings live only under `global.kafka` (visible to all subcharts). No clients had adopted the old alias path.
+
 
 ### Changed
 

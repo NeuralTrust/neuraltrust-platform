@@ -46,6 +46,11 @@ global:
   #     operator: Equal
   #     value: neuraltrust
   #     effect: NoSchedule
+  #
+  # In-cluster Kafka (default): leave global.kafka.bootstrapServers empty.
+  # External Kafka: set infrastructure.kafka.deploy: false and configure
+  # global.kafka.{bootstrapServers,auth,tls} — see values-external-services.yaml.example.
+  # global.customCaCert is for HTTP egress only; it does not enable Kafka TLS.
 
 # Infrastructure Components
 infrastructure:

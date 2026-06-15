@@ -58,6 +58,7 @@ spec:
                   name: {{ .Values.siemConnectors.clickhouse.secretName | default "clickhouse-secrets" }}
                   key: {{ .Values.siemConnectors.clickhouse.secretKey | default "admin-password" }}
                   optional: true
+            {{- include "neuraltrust-platform.kafka.authEnv" . | nindent 12 }}
             {{- with .Values.siemConnectors.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

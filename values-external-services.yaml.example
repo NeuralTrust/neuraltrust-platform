@@ -4,134 +4,117 @@
 # Usage:
 #   helm install neuraltrust-platform . -f values-external-services.yaml.example
 #
-# This example shows:
-# - Using external infrastructure services (ClickHouse, Kafka, PostgreSQL)
-# - Deploying NeuralTrust components (Control Plane and Data Plane)
-# - Deploying TrustGate
-# - Using Helm-managed secrets (preserveExistingSecrets: false)
-# - Using Ingress for external access (Kubernetes) or Routes (OpenShift)
-# - Creating the chart's shared self-signed TLS secret by default
-# - Using that shared secret automatically whenever an ingress enables TLS without a secretName
+# Pre-create Kafka credentials in the release namespace when using SASL:
+#   kubectl create secret generic kafka-credentials \
+#     --from-literal=username='neuraltrust' \
+#     --from-literal=password='<password>'
+#   kubectl create secret generic kafka-broker-ca \
+#     --from-file=ca.crt=/path/to/broker-ca-bundle.pem
+#
+# Or use ./create-secrets.sh with KAFKA_USERNAME, KAFKA_PASSWORD, and
+# KAFKA_BROKER_CA_FILE — see SECRETS.md.
 
 # Global settings
 global:
-  platform: "kubernetes"        # "aws" | "gcp" | "azure" | "openshift" | "kubernetes"
-  domain: "yourdomain.com"      # Set to your base domain. Ingresses auto-derive as <prefix>.<domain>.
-  imageRegistry: ""             # Optional: set to your private/mirrored registry to rebrand all images.
-  preserveExistingSecrets: false  # Set to true if secrets are pre-generated
-  storageClass: ""              # Global storage class for persistent volumes
+  platform: "kubernetes"
+  domain: "yourdomain.com"
+  imageRegistry: ""
+  preserveExistingSecrets: false
+  storageClass: ""
   postgresql:
-    # Single switch for external PostgreSQL across ALL subcharts. With deploy: false
-    # the chart skips the in-cluster PostgreSQL Deployment, the control-plane
-    # wait-for-postgresql initContainers, and the TrustGate/AISPM postgresql-init
-    # Jobs — so the heavy postgres image is never pulled. Pre-create the users and
-    # databases (trustgate, aispm, neuraltrust) on the external server beforehand.
     deploy: false
   ingress:
     tls:
-      autoGenerate: true  # Create the shared self-signed TLS secret by default.
-      secretName: "neuraltrust-ingress-tls"  # Shared secret used whenever a TLS-enabled ingress omits tls.secretName.
+      autoGenerate: true
+      secretName: "neuraltrust-ingress-tls"
+  # External Kafka — all subcharts read connection/auth/TLS from global.kafka.
+  # global.customCaCert (HTTP egress) does not enable Kafka TLS by itself.
+  kafka:
+    bootstrapServers: "kafka-kafka-bootstrap.kafka.svc.cluster.local:9093"
+    auth:
+      enabled: true
+      mechanism: "SCRAM-SHA-512"
+      existingSecret: "kafka-credentials"
+      usernameKey: "username"
+      passwordKey: "password"
+    tls:
+      enabled: true
+      existingSecret: "kafka-broker-ca"
+      caKey: "ca.crt"
 
-# Infrastructure Components - Use external services
 infrastructure:
   clickhouse:
-    deploy: false  # Use external ClickHouse
+    deploy: false
     external:
-      host: "clickhouse.clickhouse.svc.cluster.local"  # External ClickHouse service
+      host: "clickhouse.clickhouse.svc.cluster.local"
       port: "8123"
       user: "neuraltrust"
-      password: "your-clickhouse-password"  # Define this value
+      password: "your-clickhouse-password"
       database: "neuraltrust"
-      # Optional: Use secret reference instead of password
-      # secretName: "clickhouse"  # Secret containing CLICKHOUSE_PASSWORD
-      # secretKey: "admin-password"  # Key in secret for password
 
   kafka:
-    deploy: false  # Use external Kafka
-    external:
-      bootstrapServers: "kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
-      # Or individual brokers:
-      # brokers: ["kafka-0.kafka-headless:9092", "kafka-1.kafka-headless:9092"]
-      # Optional: Secret reference for external Kafka credentials (if using SASL)
-      # secretName: ""  # Optional
-      # secretKey: ""  # Optional
+    deploy: false
 
   postgresql:
-    # Note: in-cluster PostgreSQL deployment is controlled by global.postgresql.deploy above
-    # (and the legacy neuraltrust-control-plane.infrastructure.postgresql.deploy below).
-    # External PostgreSQL connection details are configured in neuraltrust-control-plane.controlPlane.components.postgresql.secrets below
+    deploy: false
 
-# NeuralTrust Control Plane - Use external PostgreSQL
 neuraltrust-control-plane:
   infrastructure:
     postgresql:
-      deploy: false  # Redundant with global.postgresql.deploy=false; kept for clarity. Configured in controlPlane.components.postgresql.secrets below
+      deploy: false
   controlPlane:
     enabled: true
     components:
       postgresql:
         secrets:
-          host: "postgresql.postgresql.svc.cluster.local"  # External PostgreSQL service
+          host: "postgresql.postgresql.svc.cluster.local"
           port: "5432"
           user: "neuraltrust"
-          password: "your-postgres-password"  # Define this value
+          password: "your-postgres-password"
           database: "neuraltrust"
-      # Hostnames auto-derive from global.domain (api.<domain>, app.<domain>, scheduler.<domain>).
       api:
         enabled: true
         ingress:
-          enabled: true  # Use Ingress for external access
-          # tls:
-          #   enabled: true
-          #   secretName: ""  # Empty = use the default shared self-signed secret
+          enabled: true
       app:
         enabled: true
         ingress:
-          enabled: true  # Use Ingress for external access
+          enabled: true
       scheduler:
         enabled: true
         ingress:
-          enabled: true  # Use Ingress for external access
+          enabled: true
 
-# NeuralTrust Data Plane - Use external ClickHouse and Kafka
 neuraltrust-data-plane:
   dataPlane:
     enabled: true
     components:
       clickhouse:
-        enabled: false  # External ClickHouse
-        host: "clickhouse.clickhouse.svc.cluster.local"  # External ClickHouse service
+        enabled: false
+        host: "clickhouse.clickhouse.svc.cluster.local"
         port: "8123"
         user: "neuraltrust"
         database: "neuraltrust"
       kafka:
-        enabled: false  # External Kafka
-      # data-plane API hostname auto-derives as data-plane-api.<global.domain>.
+        enabled: true
+        connect:
+          bootstrapServers: ""
       api:
         enabled: true
         ingress:
-          enabled: true  # Use Ingress for external access
-          # tls:
-          #   enabled: true
-          #   secretName: ""  # Empty = use the default shared self-signed secret
+          enabled: true
       worker:
         enabled: true
 
-# TrustGate - Use external PostgreSQL
 trustgate:
   enabled: true
   global:
     env:
-      DATABASE_HOST: "postgresql.postgresql.svc.cluster.local"  # External PostgreSQL
+      DATABASE_HOST: "postgresql.postgresql.svc.cluster.local"
       DATABASE_PORT: "5432"
-      DATABASE_USER: "postgres"  # Or "trustgate" depending on your setup
-      DATABASE_PASSWORD: "your-postgres-password"  # Define this value
+      DATABASE_USER: "postgres"
+      DATABASE_PASSWORD: "your-postgres-password"
       DATABASE_NAME: "trustgate"
-      DATABASE_SSL_MODE: "require"  # Use "require" for external PostgreSQL
-  # TrustGate Ingress hostnames auto-derive: admin.<global.domain>, gateway.<global.domain>, actions.<global.domain>.
+      DATABASE_SSL_MODE: "require"
   ingress:
-    enabled: true  # Use Ingress for external access
-    # Optional:
-    # tls:
-    #   enabled: true
-    #   secretName: ""  # Empty = use the default shared self-signed secret
+    enabled: true
