@@ -108,6 +108,32 @@ trustgate:
       DATABASE_PASSWORD: ""  # inject via --set
 ```
 
+For TrustGate PostgreSQL, you can also keep the database connection in a
+pre-created Secret while the chart generates the rest of the platform secrets:
+
+```yaml
+global:
+  autoGenerateSecrets: true
+  preserveExistingSecrets: false
+
+trustgate:
+  postgresql:
+    existingSecret: "trustgate-postgres"
+    existingSecretKeys:
+      host: DATABASE_HOST
+      port: DATABASE_PORT
+      user: DATABASE_USER
+      password: DATABASE_PASSWORD
+      database: DATABASE_NAME
+      sslMode: DATABASE_SSL_MODE
+      authMode: DATABASE_AUTH_MODE
+```
+
+The chart reads that Secret and renders `trustgate-secrets` for the pods,
+including generated `SERVER_SECRET_KEY`, firewall URL/key, and optional Redis
+password. Do not enable `global.preserveExistingSecrets` unless every required
+Secret is pre-created.
+
 ### Services only (no TrustGate)
 
 ```yaml

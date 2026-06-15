@@ -7,6 +7,7 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 ### Added
 
 - **External Kafka auth/TLS wiring** — `global.kafka` configures bootstrap servers, SASL credentials via an existing Secret (`auth.existingSecret` + `usernameKey`/`passwordKey`, or `jaasConfigKey`), and broker CA trust (`tls.existingSecret`). All Kafka consumers receive consistent `KAFKA_*` / `CONNECT_*` env vars. Renders a shared `kafka-connection` ConfigMap when `global.kafka.bootstrapServers` (or `brokers`) is set. `global.customCaCert` does not enable Kafka TLS unless `global.kafka.tls.enabled` is true.
+- **TrustGate PostgreSQL existing Secret** — `trustgate.postgresql.existingSecret` lets operators source only the TrustGate database connection fields from a pre-created Secret while keeping `global.autoGenerateSecrets: true` for `SERVER_SECRET_KEY`, firewall keys, Redis internals, and the rest of the platform-generated secrets.
 
 ### Changed
 

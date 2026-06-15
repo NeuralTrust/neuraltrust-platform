@@ -664,5 +664,20 @@ assert_not_contains "$TMP/kafka-customca-incluster.yaml" "name: KAFKA_SECURITY_P
 assert_not_contains "$TMP/kafka-customca-incluster.yaml" "name: KAFKA_SSL_CA_LOCATION"   "no Kafka SSL CA env when only customCaCert is enabled"
 assert_not_contains "$TMP/kafka-customca-incluster.yaml" "name: kafka-broker-ca"         "no dedicated Kafka broker CA volume when only customCaCert is enabled"
 
+# Scenario 30: TrustGate can source DB fields from a separate Secret while parent auto-generates the rest.
+blue "scenario 30: TrustGate Postgres existing Secret with generated platform secrets"
+render "$TMP/trustgate-postgres-existing-secret.yaml" \
+  -f values-required.yaml \
+  --set global.autoGenerateSecrets=true \
+  --set global.preserveExistingSecrets=false \
+  --set trustgate.enabled=true \
+  --set trustgate.postgresql.existingSecret=trustgate-postgres \
+  --set trustgate.postgresql.existingSecretKeys.host=DATABASE_HOST \
+  --set trustgate.postgresql.existingSecretKeys.password=DATABASE_PASSWORD
+assert_contains "$TMP/trustgate-postgres-existing-secret.yaml" "name: trustgate-secrets" "trustgate-secrets still rendered by parent chart"
+assert_contains "$TMP/trustgate-postgres-existing-secret.yaml" "SERVER_SECRET_KEY:"      "TrustGate server key remains generated/resolved"
+assert_contains "$TMP/trustgate-postgres-existing-secret.yaml" "DATABASE_URL:"           "TrustGate database URL still rendered for pods"
+assert_not_contains "$TMP/trustgate-postgres-existing-secret.yaml" "preserveExistingSecrets: true" "mixed mode does not require preserving all secrets"
+
 green ""
 green "All helm-render assertions passed."
