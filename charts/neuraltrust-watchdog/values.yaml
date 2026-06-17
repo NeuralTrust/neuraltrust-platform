@@ -13,7 +13,7 @@ enabled: false
 fullnameOverride: "neuraltrust-watchdog"
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/watchdog
-  tag: v0.7.1 # defaults to .Chart.AppVersion
+  tag: v0.8.0 # defaults to .Chart.AppVersion
   pullPolicy: IfNotPresent
 # Pull secret(s) for private nt-docker images (watchdog + bundled Prometheus).
 # Defaults to gcr-secret like the rest of the chart. Set to [] on clusters that
@@ -293,6 +293,28 @@ logExport:
     otlp: {enabled: true}
     pull: {enabled: true, bufferSize: 1000}
     bundle: {enabled: false, outputDir: /var/run/watchdog/logbundles}
+# Product usage bridge (external customers only): discovers teams from
+# in-cluster data-plane-api, polls aggregate counters for each team, and pushes
+# them over OTLP. Default OFF — SaaS/hybrid keep the admin-console UsageSnapshot
+# job. When enabled, reuses the platform data-plane-jwt-secret
+# (DATA_PLANE_JWT_SECRET) to mint discovery and per-team JWTs.
+usageExport:
+  enabled: false
+  # In-cluster data-plane-api base URL (Service DNS, no public ingress).
+  endpoint: "http://data-plane-api-service:80"
+  jwtSecret:
+    existingSecret: data-plane-jwt-secret
+    secretKey: DATA_PLANE_JWT_SECRET
+  # In-cluster control-plane-api base URL for automatic Red Teaming target discovery.
+  controlPlaneEndpoint: "http://control-plane-api-service:80"
+  controlPlaneJwtSecret:
+    existingSecret: control-plane-secrets
+    secretKey: CONTROL_PLANE_JWT_SECRET
+  # Automatic per-team target discovery (default true). Set false to export
+  # TrustGate-only counters without querying control-plane-api.
+  targetDiscovery: true
+  interval: 1h
+  timeout: 30s
 # Connection envs sourced from existing cluster secrets.
 secretEnv:
   clickhouse:
@@ -337,6 +359,10 @@ enabledCheckIds:
   - firewall-synthetic
   - pod-health
   - deployment-health
+# Additional checks merged after the default `checks` list. Use this from
+# umbrella/region values to add cross-namespace or account-specific probes
+# without replacing the entire default check catalog.
+extraChecks: []
 # Default check set. Override / extend via the watchdog.checks key in
 # customer values. Each entry is passed to the Go watchdog as-is. Set
 # enabled: false to skip a check; the corresponding components do not

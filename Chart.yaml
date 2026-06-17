@@ -64,7 +64,7 @@ dependencies:
       - neuraltrust
   # Self-monitoring + self-healing watchdog
   - name: neuraltrust-watchdog
-    version: 0.1.7
+    version: 0.1.8
     repository: file://./charts/neuraltrust-watchdog
     condition: neuraltrust-watchdog.enabled
     tags:

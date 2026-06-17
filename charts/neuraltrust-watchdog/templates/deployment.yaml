@@ -147,6 +147,22 @@ spec:
                   optional: true
             {{- end }}
             {{- end }}
+            {{- if .Values.usageExport.enabled }}
+            - name: DATA_PLANE_API_URL
+              value: {{ .Values.usageExport.endpoint | quote }}
+            - name: DATA_PLANE_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.usageExport.jwtSecret.existingSecret | default "data-plane-jwt-secret" }}
+                  key: {{ .Values.usageExport.jwtSecret.secretKey | default "DATA_PLANE_JWT_SECRET" }}
+            - name: CONTROL_PLANE_API_URL
+              value: {{ .Values.usageExport.controlPlaneEndpoint | quote }}
+            - name: CONTROL_PLANE_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.usageExport.controlPlaneJwtSecret.existingSecret | default "control-plane-secrets" }}
+                  key: {{ .Values.usageExport.controlPlaneJwtSecret.secretKey | default "CONTROL_PLANE_JWT_SECRET" }}
+            {{- end }}
             {{- include "neuraltrust-watchdog.proxyEnv" . | nindent 12 }}
             {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "go" "ctx" .) | nindent 12 }}
           livenessProbe:
