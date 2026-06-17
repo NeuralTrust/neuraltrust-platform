@@ -62,6 +62,19 @@ data:
       transports:
         {{- toYaml .Values.logExport.transports | nindent 8 }}
     {{- end }}
+    {{- if .Values.usageExport.enabled }}
+    usageExport:
+      enabled: true
+      endpointEnv: DATA_PLANE_API_URL
+      jwtSecretEnv: DATA_PLANE_JWT_SECRET
+      controlPlaneEndpointEnv: CONTROL_PLANE_API_URL
+      controlPlaneJWTSecretEnv: CONTROL_PLANE_JWT_SECRET
+      {{- if eq .Values.usageExport.targetDiscovery false }}
+      targetDiscovery: false
+      {{- end }}
+      interval: {{ .Values.usageExport.interval }}
+      timeout: {{ .Values.usageExport.timeout }}
+    {{- end }}
     {{- if or .Values.persistence.enabled .Values.overlay.enabled }}
     {{- /* Shared SQLite DB (internal/sqlitedb) on the StatefulSet PVC. Backs
            persisted operational state (statestore) and, when overlay.enabled,
@@ -89,7 +102,8 @@ data:
         in `.Values.checks` still wins — the overlay only flips off→on.
       */ -}}
       {{- $enabledIds := default (list) .Values.enabledCheckIds }}
-      {{- range .Values.checks }}
+      {{- $allChecks := concat (default (list) .Values.checks) (default (list) .Values.extraChecks) }}
+      {{- range $allChecks }}
       {{- $c := . }}
       {{- if has $c.id $enabledIds }}
       {{- $c = merge (dict "enabled" true) $c }}

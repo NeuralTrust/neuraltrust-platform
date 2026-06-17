@@ -110,7 +110,8 @@ true
 {{- else -}}
 {{- $enabledIds := default (list) .Values.enabledCheckIds -}}
 {{- $needs := dict "enabled" false -}}
-{{- range .Values.checks }}
+{{- $allChecks := concat (default (list) .Values.checks) (default (list) .Values.extraChecks) -}}
+{{- range $allChecks }}
 {{- $enabled := default false .enabled -}}
 {{- if has .id $enabledIds -}}{{- $enabled = true -}}{{- end -}}
 {{- if and $enabled (or (eq .kind "red") (eq .kind "promql") (eq .kind "scrape_staleness")) -}}{{- $_ := set $needs "enabled" true -}}{{- end -}}
