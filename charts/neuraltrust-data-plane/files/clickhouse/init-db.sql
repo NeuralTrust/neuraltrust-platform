@@ -251,6 +251,123 @@ ORDER BY (event_hour, team_id, gateway_id, engine_id, trace_id)
 TTL event_date + INTERVAL 12 MONTH
 SETTINGS index_granularity = 8192;
 
+CREATE TABLE IF NOT EXISTS agentgateway_requests
+(
+    -- Schema / identity
+    schema_version Int32 DEFAULT 2,
+    trace_id String,
+    gateway_id String DEFAULT '',
+    team_id String DEFAULT '',
+
+    -- Timing
+    -- occurred_on: when the request started (arrives as epoch milliseconds).
+    -- event_on: when the row is persisted into ClickHouse (ingestion time).
+    occurred_on DateTime64(3, 'UTC') DEFAULT now64(3, 'UTC'),
+    event_on DateTime64(3, 'UTC') DEFAULT now64(3, 'UTC'),
+
+    -- Session / actor
+    session_id String DEFAULT '',
+    turn_id String DEFAULT '',
+    fingerprint_id String DEFAULT '',
+    ip String DEFAULT '',
+
+    -- Outcome
+    is_flagged UInt8 DEFAULT 0,
+    `security` String DEFAULT '[]',
+
+    -- Nested objects stored as JSON strings
+    consumer String DEFAULT '{}',
+    status String DEFAULT '{}',
+    request String DEFAULT '{}',
+    response String DEFAULT '{}',
+    `usage` String DEFAULT '{}',
+    cost String DEFAULT '{}',
+    latency String DEFAULT '{}',
+
+    -- Nested arrays stored as JSON strings
+    attempts String DEFAULT '[]',
+    policy_chain String DEFAULT '[]',
+
+    -- Indexes for common filters
+    INDEX idx_team_id (team_id) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_gateway_id (gateway_id) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_trace_id (trace_id) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_session_id (session_id) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_turn_id (turn_id) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_fingerprint_id (fingerprint_id) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_is_flagged (is_flagged) TYPE minmax GRANULARITY 1
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMM(occurred_on)
+ORDER BY (toStartOfHour(occurred_on), team_id, gateway_id, trace_id)
+TTL toDate(occurred_on) + INTERVAL 12 MONTH
+SETTINGS index_granularity = 8192;
+
+
+-- ============================================================================
+-- TRUSTGUARD_REQUESTS TABLE: Consolidated TrustGuard guard request events (schema_version 1)
+-- Source: Kafka topic "trustguard_metrics" (one row per guard request).
+-- Written by Kafka Connect (ClickHouse sink) directly from the JSON event.
+-- Root-level scalar fields map to columns; nested objects/arrays (consumer,
+-- status, latency, request, response, security, detector_chain) are stored as JSON
+-- strings and parsed at query time with JSONExtract* functions.
+-- Column names match the emitted JSON keys so the sink maps fields directly.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS trustguard_requests
+(
+    -- Schema / identity
+    schema_version Int32 DEFAULT 1,
+    trace_id String,
+    collector_id String DEFAULT '',
+    api_key_id String DEFAULT '',
+    team_id String DEFAULT '',
+
+    -- Timing
+    -- start_timestamp / end_timestamp: request boundaries (epoch milliseconds).
+    -- occurred_on: derived from start_timestamp for partitioning / ordering.
+    -- event_on: when the row is persisted into ClickHouse (ingestion time).
+    timestamp String DEFAULT '',
+    start_timestamp Int64 DEFAULT 0,
+    end_timestamp Int64 DEFAULT 0,
+    occurred_on DateTime64(3, 'UTC') MATERIALIZED fromUnixTimestamp64Milli(start_timestamp),
+    event_on DateTime64(3, 'UTC') DEFAULT now64(3, 'UTC'),
+
+    -- Session / actor
+    session_id String DEFAULT '',
+    conversation_id String DEFAULT '',
+    interaction_id String DEFAULT '',
+    fingerprint_id String DEFAULT '',
+    ip String DEFAULT '',
+
+    -- Outcome
+    is_flagged UInt8 DEFAULT 0,
+    `security` String DEFAULT '[]',
+
+    -- Nested objects stored as JSON strings
+    consumer String DEFAULT '{}',
+    status String DEFAULT '{}',
+    latency String DEFAULT '{}',
+    request String DEFAULT '{}',
+    response String DEFAULT '{}',
+
+    -- Nested arrays stored as JSON strings
+    detector_chain String DEFAULT '[]',
+
+    -- Indexes for common filters
+    INDEX idx_team_id (team_id) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_collector_id (collector_id) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_trace_id (trace_id) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_session_id (session_id) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_fingerprint_id (fingerprint_id) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_is_flagged (is_flagged) TYPE minmax GRANULARITY 1
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMM(occurred_on)
+ORDER BY (toStartOfHour(occurred_on), team_id, collector_id, trace_id)
+TTL toDate(occurred_on) + INTERVAL 12 MONTH
+SETTINGS index_granularity = 8192;
+
+-- Backfill rename for environments created before the policy->detector rename.
+ALTER TABLE trustguard_requests RENAME COLUMN IF EXISTS policy_chain TO detector_chain;
+
 
 -- ============================================================================
 -- DETECTIONS TABLE: Detection events emitted to the detections topic
