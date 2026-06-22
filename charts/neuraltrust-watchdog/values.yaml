@@ -13,7 +13,7 @@ enabled: false
 fullnameOverride: "neuraltrust-watchdog"
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/watchdog
-  tag: v0.8.0 # defaults to .Chart.AppVersion
+  tag: v0.9.0 # defaults to .Chart.AppVersion
   pullPolicy: IfNotPresent
 # Pull secret(s) for private nt-docker images (watchdog + bundled Prometheus).
 # Defaults to gcr-secret like the rest of the chart. Set to [] on clusters that
@@ -602,8 +602,8 @@ checks:
     target:
       namespace: neuraltrust
       deployments: [trustgate-control-plane, trustgate-data-plane]
-    # thresholds come from kindDefaults.deployment_health; notify actions from
-    # actions.defaultActions. Add k8s.restart_deployment here when ready to heal.
+      # thresholds come from kindDefaults.deployment_health; notify actions from
+      # actions.defaultActions. Add k8s.restart_deployment here when ready to heal.
   # Multi-tenant SaaS coverage. Discovers tenant namespaces dynamically
   # via label selector — NeuralTrust SaaS uses this to cover tenants
   # created at runtime by trustgate-ee
