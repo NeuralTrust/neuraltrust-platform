@@ -55,3 +55,6 @@ neuraltrust-watchdog:
     - gateway-health
     - otel-collector
     - cert-renewal
+    # Log-error-volume alert. Requires the log bridge (logExport) to be tailing;
+    # without it the check reports unknown. Enable logExport.enabled alongside.
+    - log-error-rate

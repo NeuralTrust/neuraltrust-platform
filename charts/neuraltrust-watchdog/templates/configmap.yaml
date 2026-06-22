@@ -21,6 +21,11 @@ data:
       {{- end }}
     telemetry:
       serviceName: {{ .Values.telemetry.serviceName | quote }}
+      {{- $obs := default dict (default dict .Values.global).observability }}
+      {{- $clusterName := default $obs.clusterName .Values.telemetry.clusterName }}
+      {{- with $clusterName }}
+      clusterName: {{ . | quote }}
+      {{- end }}
       otlpEndpointEnv: OTEL_EXPORTER_OTLP_ENDPOINT
       otlpHeadersEnv: OTEL_EXPORTER_OTLP_HEADERS
       otlpAuthTokenEnv: OPENTELEMETRY_AUTH_TOKEN
