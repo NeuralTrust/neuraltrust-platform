@@ -577,6 +577,42 @@ if [ "$chouse_sel" != "clickhouse-pool" ]; then
 fi
 green "ok  - per-component nodeSelector wins over global on key conflict"
 
+# Scenario 25d: firewall GPU workers pin to a different node pool than the global
+# default using the SAME label key. global.nodeSelector keys the CPU pool and the
+# per-worker nodeSelector keys the GPU pool on `nodepool`. The worker must end up
+# with a single nodeAffinity selecting the GPU pool (per-worker wins) and NO plain
+# nodeSelector forcing the CPU pool — otherwise the two collide and the worker can
+# never schedule on GPU.
+blue "scenario 25d: firewall worker per-pool selector overrides global on same key"
+render "$TMP/firewall-gpu-pool.yaml" \
+  --set neuraltrust-firewall.firewall.enabled=true \
+  --set global.nodeSelector.nodepool=cpu-pool \
+  --set 'neuraltrust-firewall.firewall.workers.toxicity.enabled=true' \
+  --set 'neuraltrust-firewall.firewall.workerDefaults.nodeSelector.nodepool[0]=gpu-pool'
+# Scope to the toxicity-worker Deployment document (split on the YAML `---`
+# separator so the assertions never bleed into an adjacent resource) and assert
+# it requires the GPU pool via nodeAffinity and never the CPU pool via a plain
+# nodeSelector.
+worker_block=$(awk '
+  /^---[[:space:]]*$/ { if (isdep && isname) print buf; buf=""; isdep=0; isname=0; next }
+  { buf = buf $0 "\n" }
+  /^kind: Deployment[[:space:]]*$/ { isdep=1 }
+  /^  name: toxicity-worker[[:space:]]*$/ { isname=1 }
+  END { if (isdep && isname) print buf }
+' "$TMP/firewall-gpu-pool.yaml")
+if ! printf '%s\n' "$worker_block" | grep -qE -- "- gpu-pool"; then
+  red "FAIL: firewall worker nodeAffinity does not select the GPU pool (gpu-pool)"
+  printf '%s\n' "$worker_block" | grep -nE "affinity|nodeSelector|nodepool|pool" | head -20
+  exit 1
+fi
+green "ok  - firewall worker nodeAffinity selects the GPU pool"
+if printf '%s\n' "$worker_block" | grep -qE -- "nodepool: cpu-pool"; then
+  red "FAIL: firewall worker still carries a plain nodeSelector pinning the CPU pool (conflict)"
+  printf '%s\n' "$worker_block" | grep -nE "nodeSelector|cpu-pool" | head -20
+  exit 1
+fi
+green "ok  - firewall worker carries no conflicting CPU-pool nodeSelector"
+
 # Scenario 26: external PostgreSQL via global.postgresql.deploy=false. The chart
 # must skip every postgres-image consumer so the heavy image is never pulled:
 #   - in-cluster control-plane-postgresql Deployment,

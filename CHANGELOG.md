@@ -4,6 +4,10 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Firewall GPU workers could not be pinned to a separate node pool from `global.nodeSelector`.** The worker template previously rendered the per-worker selector as `nodeAffinity` **and** `global.nodeSelector` as a plain `nodeSelector`. When both used the same label key (e.g. a CPU pool in `global.nodeSelector.nodepool` and a GPU pool in `firewall.workerDefaults.nodeSelector.nodepool`), the two constraints were ANDed and could never be satisfied, so GPU workers stuck on / fell back to the global pool with no values-only workaround. The selectors are now merged into a single `nodeAffinity` where the per-worker selector **wins on key conflicts** and non-conflicting global keys remain required (ANDed). Behavior is unchanged when the keys differ or when only one selector is set. Render coverage added to `scripts/test-helm-render.sh` (scenario 25d). Firewall subchart `2.0.12 → 2.0.13`.
+
 ## [v1.14.3] — 2026-06-15
 
 ### Added

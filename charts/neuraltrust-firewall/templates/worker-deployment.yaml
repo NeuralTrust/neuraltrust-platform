@@ -35,14 +35,36 @@ spec:
       imagePullSecrets:
         - name: {{ $imagePullSecret }}
       {{- end }}
-      {{- $nodeSelector := $workerCfg.nodeSelector | default $defaults.nodeSelector }}
-      {{- if $nodeSelector }}
+      {{- /* Per-worker selection and global.nodeSelector are merged into a single
+             nodeAffinity so they never collide on the same label key. The
+             per-worker selector (lists, e.g. the GPU pool) wins over global on
+             key conflicts; non-conflicting global keys are still required (ANDed)
+             as extra matchExpressions. Rendering everything as nodeAffinity (not a
+             plain nodeSelector) is what lets the GPU pool override a global CPU
+             pool keyed by the same label — global.nodeSelector values are scalars
+             and are normalized to single-element lists here. */}}
+      {{- $workerSelector := $workerCfg.nodeSelector | default $defaults.nodeSelector | default dict }}
+      {{- $globalSelector := default dict (default dict $.Values.global).nodeSelector }}
+      {{- $mergedSelector := dict }}
+      {{- range $key, $value := $globalSelector }}
+        {{- $_ := set $mergedSelector $key (list ($value | toString)) }}
+      {{- end }}
+      {{- range $key, $values := $workerSelector }}
+        {{- $list := list }}
+        {{- if kindIs "slice" $values }}
+          {{- range $values }}{{- $list = append $list (. | toString) }}{{- end }}
+        {{- else }}
+          {{- $list = list ($values | toString) }}
+        {{- end }}
+        {{- $_ := set $mergedSelector $key $list }}
+      {{- end }}
+      {{- if $mergedSelector }}
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
               - matchExpressions:
-                {{- range $key, $values := $nodeSelector }}
+                {{- range $key, $values := $mergedSelector }}
                   - key: {{ $key }}
                     operator: In
                     values:
@@ -51,10 +73,6 @@ spec:
                     {{- end }}
                 {{- end }}
       {{- end }}
-      {{- /* global.nodeSelector applies as a plain nodeSelector (ANDed with the
-             per-worker GPU-pool nodeAffinity above). Per-worker selection stays
-             expressed via nodeAffinity because its values are lists. */}}
-      {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" $) | nindent 6 }}
       {{- $tolerations := $workerCfg.tolerations | default $defaults.tolerations }}
       {{- include "neuraltrust-platform.tolerations" (dict "ctx" $ "local" $tolerations) | nindent 6 }}
       {{- $hostIPC := $workerCfg.hostIPC | default $defaults.hostIPC }}

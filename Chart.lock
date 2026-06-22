@@ -22,9 +22,9 @@ dependencies:
   version: 1.2.27
 - name: neuraltrust-firewall
   repository: file://./charts/neuraltrust-firewall
-  version: 2.0.12
+  version: 2.0.13
 - name: neuraltrust-watchdog
   repository: file://./charts/neuraltrust-watchdog
   version: 0.1.9
-digest: sha256:05d581742f97fa41a0df3109b30a3137e394fe1c99d994734843376e0fcd6f49
-generated: "2026-06-22T09:55:58.401986782Z"
+digest: sha256:dad6c2cf4baf04d9211e074568039db87af7f803cc31545dad59c50320f46e53
+generated: "2026-06-22T12:43:06.909851+02:00"
