@@ -234,6 +234,11 @@ global:
     # to hostedExport without rendering the collector or bundled Prometheus.
     enabled: false
     tenantId: "" # Sent as nt.tenant_id resource attribute (optional).
+    # clusterName labels this deployment on watchdog Slack alerts (header
+    # context line + push-notification prefix) and as the nt.cluster OTLP
+    # resource attribute, so a page names which cluster to act on. Set per
+    # install, e.g. "acme-eks-prod". Optional.
+    clusterName: ""
     hostedExport:
       enabled: true
       endpoint: "https://collector.neuraltrust.ai" # OTLP/HTTP via external Gateway (443)

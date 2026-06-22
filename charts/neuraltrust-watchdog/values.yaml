@@ -215,6 +215,13 @@ networkPolicy:
 # SDK is initialized with no-op providers (graceful no-egress).
 telemetry:
   serviceName: neuraltrust-watchdog
+  # clusterName is an operator label for THIS deployment (e.g. "bv-prod",
+  # "acme-eks"). It is surfaced on every Slack alert (header context line +
+  # push-notification prefix) and stamped as the nt.cluster OTLP resource
+  # attribute, so an alert names where to act when the same binary runs across
+  # many customer clusters. Not topology — safe to expose. Falls back to
+  # global.observability.clusterName when this is empty; omitted when both are.
+  clusterName: ""
   otlp:
     endpoint: ""
     headers: ""
@@ -518,6 +525,24 @@ checks:
         - {name: control-plane, url: 'http://trustgate-control-plane/health'}
         - {name: data-plane, url: 'http://trustgate-data-plane/health'}
         - {name: actions, url: 'http://trustgate-actions/health'}
+  - id: deploy-api-synthetic
+    kind: httpsynthetic
+    enabled: false
+    target:
+      urls:
+        - {name: api, url: 'http://deploy-api-service.deploy-api/health'}
+  - id: aispm-synthetic
+    kind: httpsynthetic
+    enabled: false
+    target:
+      urls:
+        - {name: api, url: 'http://aispm-api-service.aispm/health'}
+  - id: trustscan-synthetic
+    kind: httpsynthetic
+    enabled: false
+    target:
+      urls:
+        - {name: api, url: 'http://trustscan.trustscan:8000/health'}
   - id: trustgate-e2e-pipeline
     kind: e2e_synthetic
     enabled: false
@@ -601,9 +626,40 @@ checks:
     enabled: false
     target:
       namespace: neuraltrust
-      deployments: [trustgate-control-plane, trustgate-data-plane]
-      # thresholds come from kindDefaults.deployment_health; notify actions from
-      # actions.defaultActions. Add k8s.restart_deployment here when ready to heal.
+      deployments: [trustgate-control-plane, trustgate-data-plane, trustgate-actions]
+    # thresholds come from kindDefaults.deployment_health; notify actions from
+    # actions.defaultActions. Add k8s.restart_deployment here when ready to heal.
+  - id: deploy-api-deployment-health
+    kind: deployment_health
+    enabled: false
+    target:
+      namespace: deploy-api
+      deployments: [deploy-api]
+  - id: aispm-deployment-health
+    kind: deployment_health
+    enabled: false
+    target:
+      namespace: aispm
+      deployments: [aispm-api, aispm-beat, aispm-worker]
+  - id: trustscan-deployment-health
+    kind: deployment_health
+    enabled: false
+    target:
+      namespace: trustscan
+      deployments: [trustscan-api, trustscan-integration-created-worker, trustscan-scan-chunk-completed-worker, trustscan-scan-requested-worker]
+  # Alerts on a high volume of ERROR/WARN container-log lines per workload,
+  # read from the in-cluster log bridge (no Prometheus needed). REQUIRES
+  # logExport.enabled — without the bridge it reports unknown. Notify-only.
+  - id: log-error-rate
+    kind: log_error_rate
+    enabled: false
+    target:
+      namespace: neuraltrust
+    thresholds:
+      severity: error
+      window: 5m
+      warning: 20    # error log lines/min per workload
+      critical: 100
   # Multi-tenant SaaS coverage. Discovers tenant namespaces dynamically
   # via label selector — NeuralTrust SaaS uses this to cover tenants
   # created at runtime by trustgate-ee
