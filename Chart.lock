@@ -13,18 +13,18 @@ dependencies:
   version: 1.0.1
 - name: neuraltrust-data-plane
   repository: file://./charts/neuraltrust-data-plane
-  version: 1.2.38
+  version: 1.2.39
 - name: neuraltrust-control-plane
   repository: file://./charts/neuraltrust-control-plane
   version: 1.2.36
 - name: trustgate
   repository: file://./charts/trustgate
-  version: 1.2.27
+  version: 1.2.29
 - name: neuraltrust-firewall
   repository: file://./charts/neuraltrust-firewall
   version: 2.0.13
 - name: neuraltrust-watchdog
   repository: file://./charts/neuraltrust-watchdog
   version: 0.1.9
-digest: sha256:dad6c2cf4baf04d9211e074568039db87af7f803cc31545dad59c50320f46e53
-generated: "2026-06-22T12:43:06.909851+02:00"
+digest: sha256:cdba430ac3ca30e656a37fc341ab6610cc7f3f4fae68029b341bf4f171c3e371
+generated: "2026-06-23T14:14:27.851757+02:00"

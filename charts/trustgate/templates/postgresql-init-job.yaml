@@ -337,11 +337,19 @@ spec:
               name: {{ $tgSecretName }}
               key: DATABASE_USER
               optional: true
+        {{- if eq (include "trustgate.pg.passwordFromSecret" .) "true" }}
+        - name: TG_DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.postgresql.passwordSecretRef.name | quote }}
+              key: {{ .Values.postgresql.passwordSecretRef.key | quote }}
+        {{- else }}
         - name: TG_DATABASE_PASSWORD
           valueFrom:
             secretKeyRef:
               name: {{ $tgSecretName }}
               key: DATABASE_PASSWORD
+        {{- end }}
         # SSL mode (check if in-cluster PostgreSQL)
         - name: POSTGRES_SSL_MODE
           value: {{ $tgDbSslMode }}

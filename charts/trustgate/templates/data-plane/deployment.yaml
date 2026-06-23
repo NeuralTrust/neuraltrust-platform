@@ -47,54 +47,7 @@ spec:
               name: trustgate-secrets
               key: SERVER_SECRET_KEY
               optional: true
-        - name: DATABASE_HOST
-          valueFrom:
-            secretKeyRef:
-              name: trustgate-secrets
-              key: DATABASE_HOST
-        - name: DATABASE_PORT
-          valueFrom:
-            secretKeyRef:
-              name: trustgate-secrets
-              key: DATABASE_PORT
-        - name: DATABASE_USER
-          valueFrom:
-            secretKeyRef:
-              name: trustgate-secrets
-              key: DATABASE_USER
-        - name: DATABASE_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: trustgate-secrets
-              key: DATABASE_PASSWORD
-        - name: DATABASE_NAME
-          valueFrom:
-            secretKeyRef:
-              name: trustgate-secrets
-              key: DATABASE_NAME
-        - name: DATABASE_URL
-          valueFrom:
-            secretKeyRef:
-              name: trustgate-secrets
-              key: DATABASE_URL
-        - name: DATABASE_SSL_MODE
-          valueFrom:
-            secretKeyRef:
-              name: trustgate-secrets
-              key: DATABASE_SSL_MODE
-              optional: true
-        - name: DATABASE_AUTH_MODE
-          valueFrom:
-            secretKeyRef:
-              name: trustgate-secrets
-              key: DATABASE_AUTH_MODE
-              optional: true
-        - name: DATABASE_IAM_AUTH
-          valueFrom:
-            secretKeyRef:
-              name: trustgate-secrets
-              key: DATABASE_IAM_AUTH
-              optional: true
+        {{- include "trustgate.databaseEnv" . | nindent 8 }}
         # REDIS_PASSWORD is optional and sourced only from trustgate-secrets when configured
         - name: REDIS_PASSWORD
           valueFrom:
