@@ -13,14 +13,6 @@ spec:
   {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect .Values.dataPlane.components.kafka.connect.bootstrapServers }}
     {{- $connectBs = .Values.dataPlane.components.kafka.connect.bootstrapServers }}
   {{- end }}
-  {{- /* Opt-in (default false, preserving prior behavior where the chart never
-         created topics): when true the init container creates the internal topics
-         with the correct partition layout. Either way it validates connect-configs
-         and fails fast if it has the wrong partition count. */}}
-  {{- $createInternalTopics := false }}
-  {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect (hasKey .Values.dataPlane.components.kafka.connect "createInternalTopics") }}
-    {{- $createInternalTopics = .Values.dataPlane.components.kafka.connect.createInternalTopics }}
-  {{- end }}
   {{- $kafkaCtx := dict "context" . "connectOverride" $connectBs }}
   {{- $resolvedBootstrap := include "neuraltrust-platform.kafka.bootstrapServers" $kafkaCtx }}
   {{- $kafkaAuth := include "neuraltrust-platform.kafka.authConfig" . | fromYaml }}
@@ -103,7 +95,8 @@ spec:
               echo "Kafka broker reachable after ${WAITED}s"
               EXISTING_TOPICS=$(/opt/kafka/bin/kafka-topics.sh --bootstrap-server "${BOOTSTRAP}" "${CMD_CFG[@]}" --list 2>/dev/null || true)
               RF="{{ $kafkaConnectReplicas }}"
-              CREATE_TOPICS="{{ $createInternalTopics }}"
+              # Ensure the internal topics exist with the correct layout (create-if-not-exists,
+              # idempotent — also recovers clusters where the topics/volume were deleted).
               # Kafka Connect REQUIRES config.storage.topic to have exactly 1 partition;
               # offset/status follow Connect's own defaults (25 / 5). A broker with
               # auto.create.topics.enable=true may otherwise create connect-configs with
@@ -125,17 +118,12 @@ spec:
               for topic in $TOPICS; do
                 WANT=$(want_partitions "$topic")
                 if ! printf '%s\n' "$EXISTING_TOPICS" | grep -qFx "$topic"; then
-                  if [ "$CREATE_TOPICS" = "true" ]; then
-                    echo "Creating topic '$topic' (partitions=${WANT}, replication-factor=${RF}, cleanup.policy=compact)"
-                    if ! /opt/kafka/bin/kafka-topics.sh --bootstrap-server "${BOOTSTRAP}" "${CMD_CFG[@]}" \
-                        --create --if-not-exists --topic "$topic" \
-                        --partitions "${WANT}" --replication-factor "${RF}" \
-                        --config cleanup.policy=compact 2>&1; then
-                      echo "WARN: failed to create '$topic'; Connect will try to create it on start"
-                    fi
-                  else
-                    echo "Topic '$topic' does not exist. Create it with partitions=${WANT} and cleanup.policy=compact"
-                    echo "  (or set dataPlane.components.kafka.connect.createInternalTopics=true to let the chart create it)."
+                  echo "Creating topic '$topic' (partitions=${WANT}, replication-factor=${RF}, cleanup.policy=compact)"
+                  if ! /opt/kafka/bin/kafka-topics.sh --bootstrap-server "${BOOTSTRAP}" "${CMD_CFG[@]}" \
+                      --create --if-not-exists --topic "$topic" \
+                      --partitions "${WANT}" --replication-factor "${RF}" \
+                      --config cleanup.policy=compact 2>&1; then
+                    echo "WARN: failed to create '$topic'; Connect will try to create it on start"
                   fi
                   continue
                 fi
