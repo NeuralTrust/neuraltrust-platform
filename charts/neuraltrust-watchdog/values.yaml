@@ -13,7 +13,7 @@ enabled: false
 fullnameOverride: "neuraltrust-watchdog"
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/watchdog
-  tag: v0.10.0 # defaults to .Chart.AppVersion
+  tag: v0.10.1 # defaults to .Chart.AppVersion
   pullPolicy: IfNotPresent
 # Pull secret(s) for private nt-docker images (watchdog + bundled Prometheus).
 # Defaults to gcr-secret like the rest of the chart. Set to [] on clusters that
