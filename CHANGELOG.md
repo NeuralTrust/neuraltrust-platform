@@ -4,6 +4,11 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Kafka Connect: validate (and optionally create) the internal topics so it starts reliably against an external broker.** Kafka Connect requires `connect-configs` to have exactly 1 partition; on a broker with `auto.create.topics.enable=true` and a default `num.partitions > 1` it could be created with multiple partitions, after which Connect's herder refuses to start (`config.storage.topic ... required to have a single partition`). The `kafka-connect` init container now **fails fast** when `connect-configs` already exists with the wrong partition count, printing the exact `kafka-topics.sh --delete` command to run (it never deletes topics automatically). Optionally it can also **create the internal topics** with the correct layout (`connect-configs=1`, `connect-offsets=25`, `connect-status=5`, `cleanup.policy=compact`) so a broker with `auto.create.topics.enable=true` can't race in with the wrong partition count — controlled by the new `dataPlane.components.kafka.connect.createInternalTopics` (default `false`, preserving the prior behavior where topics were managed outside the chart). Render coverage added to `scripts/test-helm-render.sh` (scenario 28). data-plane subchart `1.2.39 → 1.2.40`.
+- **Kafka Connect logs no longer fail under `securityHardening`.** With `readOnlyRootFilesystem` enabled, log4j's `RollingFileAppender` and the Kafka CLI tools could not create `/opt/kafka/logs` (`Read-only file system`), emitting startup errors before falling back to stdout. A writable `emptyDir` is now mounted at `/opt/kafka/logs` on the `kafka-connect` container and its init container.
+
 ## [v1.14.8] — 2026-06-23
 
 ### Changed

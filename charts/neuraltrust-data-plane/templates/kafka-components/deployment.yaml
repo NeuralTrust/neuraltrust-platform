@@ -13,6 +13,14 @@ spec:
   {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect .Values.dataPlane.components.kafka.connect.bootstrapServers }}
     {{- $connectBs = .Values.dataPlane.components.kafka.connect.bootstrapServers }}
   {{- end }}
+  {{- /* Opt-in (default false, preserving prior behavior where the chart never
+         created topics): when true the init container creates the internal topics
+         with the correct partition layout. Either way it validates connect-configs
+         and fails fast if it has the wrong partition count. */}}
+  {{- $createInternalTopics := false }}
+  {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.kafka .Values.dataPlane.components.kafka.connect (hasKey .Values.dataPlane.components.kafka.connect "createInternalTopics") }}
+    {{- $createInternalTopics = .Values.dataPlane.components.kafka.connect.createInternalTopics }}
+  {{- end }}
   {{- $kafkaCtx := dict "context" . "connectOverride" $connectBs }}
   {{- $resolvedBootstrap := include "neuraltrust-platform.kafka.bootstrapServers" $kafkaCtx }}
   {{- $kafkaAuth := include "neuraltrust-platform.kafka.authConfig" . | fromYaml }}
@@ -94,10 +102,55 @@ spec:
               done
               echo "Kafka broker reachable after ${WAITED}s"
               EXISTING_TOPICS=$(/opt/kafka/bin/kafka-topics.sh --bootstrap-server "${BOOTSTRAP}" "${CMD_CFG[@]}" --list 2>/dev/null || true)
+              RF="{{ $kafkaConnectReplicas }}"
+              CREATE_TOPICS="{{ $createInternalTopics }}"
+              # Kafka Connect REQUIRES config.storage.topic to have exactly 1 partition;
+              # offset/status follow Connect's own defaults (25 / 5). A broker with
+              # auto.create.topics.enable=true may otherwise create connect-configs with
+              # the broker default num.partitions (often >1), which makes the herder
+              # refuse to start ("...required to have a single partition...").
+              want_partitions() {
+                case "$1" in
+                  connect-configs) echo 1 ;;
+                  connect-offsets) echo 25 ;;
+                  connect-status)  echo 5 ;;
+                  *)               echo 1 ;;
+                esac
+              }
+              have_partitions() {
+                { /opt/kafka/bin/kafka-topics.sh --bootstrap-server "${BOOTSTRAP}" "${CMD_CFG[@]}" \
+                  --describe --topic "$1" 2>/dev/null \
+                  | sed -n 's/.*PartitionCount: *\([0-9][0-9]*\).*/\1/p' | head -1; } || true
+              }
               for topic in $TOPICS; do
+                WANT=$(want_partitions "$topic")
                 if ! printf '%s\n' "$EXISTING_TOPICS" | grep -qFx "$topic"; then
-                  echo "Topic '$topic' does not exist yet — Connect will create it with cleanup.policy=compact on first start"
+                  if [ "$CREATE_TOPICS" = "true" ]; then
+                    echo "Creating topic '$topic' (partitions=${WANT}, replication-factor=${RF}, cleanup.policy=compact)"
+                    if ! /opt/kafka/bin/kafka-topics.sh --bootstrap-server "${BOOTSTRAP}" "${CMD_CFG[@]}" \
+                        --create --if-not-exists --topic "$topic" \
+                        --partitions "${WANT}" --replication-factor "${RF}" \
+                        --config cleanup.policy=compact 2>&1; then
+                      echo "WARN: failed to create '$topic'; Connect will try to create it on start"
+                    fi
+                  else
+                    echo "Topic '$topic' does not exist. Create it with partitions=${WANT} and cleanup.policy=compact"
+                    echo "  (or set dataPlane.components.kafka.connect.createInternalTopics=true to let the chart create it)."
+                  fi
                   continue
+                fi
+                # connect-configs MUST have exactly 1 partition. Connect cannot start
+                # otherwise, and partition count cannot be reduced via --alter. We never
+                # delete topics automatically (possible data loss), so fail with the fix.
+                if [ "$topic" = "connect-configs" ]; then
+                  HAVE=$(have_partitions "$topic")
+                  if [ -n "$HAVE" ] && [ "$HAVE" != "1" ]; then
+                    echo "ERROR: topic 'connect-configs' has ${HAVE} partitions but Kafka Connect requires exactly 1."
+                    echo "       Connect will not start until this is fixed. Delete the topic so it can be"
+                    echo "       recreated with 1 partition (safe when Connect has not stored connector configs):"
+                    echo "         kafka-topics.sh --bootstrap-server ${BOOTSTRAP} --command-config ${PROPS} --delete --topic connect-configs"
+                    exit 1
+                  fi
                 fi
                 if /opt/kafka/bin/kafka-configs.sh --bootstrap-server "${BOOTSTRAP}" "${CMD_CFG[@]}" \
                     --entity-type topics --entity-name "$topic" --describe 2>/dev/null \
@@ -120,6 +173,10 @@ spec:
               mountPath: /tmp
             - name: kafka-client-config
               mountPath: /shared/kafka
+            # Writable logs dir: Kafka CLI tools (kafka-run-class.sh) mkdir /opt/kafka/logs,
+            # which fails under readOnlyRootFilesystem. emptyDir keeps it writable.
+            - name: kafka-logs
+              mountPath: /opt/kafka/logs
             {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 12 }}
             {{- include "neuraltrust-platform.kafka.tlsVolumeMount" . | nindent 12 }}
           resources:
@@ -257,6 +314,10 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            # Writable logs dir so log4j's RollingFileAppender (connect.log) works
+            # under readOnlyRootFilesystem; otherwise it errors and falls back to stdout.
+            - name: kafka-logs
+              mountPath: /opt/kafka/logs
             {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 12 }}
             {{- include "neuraltrust-platform.kafka.tlsVolumeMount" . | nindent 12 }}
         {{- with .Values.dataPlane.components.kafka.connect.extraVolumeMounts }}
@@ -277,6 +338,8 @@ spec:
         - name: tmp
           emptyDir: {}
         - name: kafka-client-config
+          emptyDir: {}
+        - name: kafka-logs
           emptyDir: {}
         {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 8 }}
         {{- include "neuraltrust-platform.kafka.tlsVolume" . | nindent 8 }}
