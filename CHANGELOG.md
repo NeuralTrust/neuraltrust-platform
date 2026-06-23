@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v1.14.8] — 2026-06-23
+
 ### Changed
 
 - **Bump NeuralTrust images to latest releases.** The Kafka-client releases now honor the `KAFKA_SECURITY_PROTOCOL` / `KAFKA_SASL_*` / `KAFKA_SSL_CA_LOCATION` env the chart already injects for external brokers (`global.kafka.auth`), so connecting to a SASL-authenticated Kafka now works: `trustgate-ee` `v1.28.1 → v1.28.2`, `data-plane-api` `v1.34.1 → v1.35.0`, `workers` `v1.6.12 → v1.8.0`, `kafka-connect` `v0.4.0 → v0.4.1`. Also `watchdog` `v0.9.0 → v0.10.0`. Subcharts: TrustGate `1.2.28 → 1.2.29`, data-plane `1.2.38 → 1.2.39`, watchdog `0.1.9 → 0.1.10`.
