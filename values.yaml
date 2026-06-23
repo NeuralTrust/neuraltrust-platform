@@ -1152,13 +1152,6 @@ neuraltrust-data-plane:
         connect:
           replicas: 1
           bootstrapServers: "" # Empty = resolved from global.kafka.bootstrapServers
-          # When true, the init container creates the Connect internal topics with the
-          # required layout (connect-configs=1 partition, connect-offsets=25,
-          # connect-status=5, cleanup.policy=compact). Default false preserves the
-          # prior behavior (topics managed outside the chart / created by Connect). In
-          # both modes the init validates connect-configs and, if it has the wrong
-          # partition count, fails with the exact fix to run.
-          createInternalTopics: false
           extraEnv: []
           extraEnvFrom: []
           image:

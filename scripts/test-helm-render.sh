@@ -705,22 +705,14 @@ awk '/^kind: Deployment/{d=0} /name: trustgate-data-plane$/{d=1} d' "$TMP/kafka-
 assert_contains "$TMP/tg-dp-kafka.yaml" "name: KAFKA_HOST"              "TrustGate data-plane receives KAFKA_HOST from global.kafka"
 assert_contains "$TMP/tg-dp-kafka.yaml" "name: KAFKA_SECURITY_PROTOCOL" "TrustGate data-plane receives SASL/TLS env vars"
 assert_contains "$TMP/tg-dp-kafka.yaml" "name: kafka-broker-ca"         "TrustGate data-plane mounts Kafka broker CA for TLS"
-# The kafka-connect init container must guard against a multi-partition
-# connect-configs (which crashes Connect's herder on start) and keep a writable
-# logs dir under readOnlyRootFilesystem. Topic creation is opt-in (default off).
+# The kafka-connect init container creates the internal topics with explicit
+# partition counts (idempotent create-if-not-exists), guards against a
+# multi-partition connect-configs (which crashes Connect's herder on start), and
+# keeps a writable logs dir under readOnlyRootFilesystem.
 assert_contains     "$TMP/kafka-external.yaml" "connect-configs) echo 1 ;;"        "init container pins connect-configs to a single partition"
+assert_contains     "$TMP/kafka-external.yaml" "--create --if-not-exists"          "init container provisions missing internal topics idempotently"
 assert_contains     "$TMP/kafka-external.yaml" "Kafka Connect requires exactly 1"  "init container guards against a multi-partition connect-configs"
 assert_contains     "$TMP/kafka-external.yaml" "mountPath: /opt/kafka/logs"        "kafka-connect mounts a writable logs dir for readOnlyRootFilesystem"
-assert_contains     "$TMP/kafka-external.yaml" "CREATE_TOPICS=\"false\""           "internal-topic creation is off by default (backward compatible)"
-# Opt-in: operators can let the chart create the internal topics.
-render "$TMP/kafka-connect-create.yaml" \
-  -f values-required.yaml \
-  --set infrastructure.kafka.deploy=false \
-  --set global.kafka.bootstrapServers=kafka.example.svc:9093 \
-  --set neuraltrust-data-plane.dataPlane.enabled=true \
-  --set neuraltrust-data-plane.dataPlane.components.kafka.connect.createInternalTopics=true
-assert_contains     "$TMP/kafka-connect-create.yaml" "CREATE_TOPICS=\"true\""       "createInternalTopics=true enables chart-side topic creation"
-assert_contains     "$TMP/kafka-connect-create.yaml" "--create --if-not-exists"     "init container creates internal topics when opted in"
 
 # Scenario 29: customCaCert for HTTP egress must not enable Kafka TLS on in-cluster broker.
 blue "scenario 29: customCaCert does not enable Kafka TLS"
