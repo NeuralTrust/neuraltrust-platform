@@ -4,6 +4,14 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Changed
+
+- **Bump NeuralTrust images to releases that add external-Kafka SASL/TLS support.** `trustgate-ee` `v1.28.1 → v1.28.2`, `data-plane-api` `v1.34.1 → v1.35.0`, and `workers` (data-plane Kafka workers) `v1.6.12 → v1.8.0`. These releases make the Kafka producers/consumers honor the `KAFKA_SECURITY_PROTOCOL` / `KAFKA_SASL_*` / `KAFKA_SSL_CA_LOCATION` env the chart already injects for external brokers (`global.kafka.auth`), so connecting to a SASL-authenticated Kafka now works. TrustGate subchart `1.2.28 → 1.2.29`; data-plane subchart `1.2.38 → 1.2.39`.
+
+### Added
+
+- **TrustGate `postgresql.passwordSecretRef` — keep the DB password only in an external Secret.** For operators using external-secrets / Secrets Store CSI, set `trustgate.postgresql.passwordSecretRef.name` and `.key` to keep **only** the database password in their own Kubernetes Secret while host/port/user/database/sslMode stay in values (`trustgate.global.env.DATABASE_*`). Setting both fields activates the mode (no separate boolean). In this mode the chart never `lookup`s or copies the password: the TrustGate control-plane, data-plane, actions containers and the `postgresql-init` Job reference it directly via `secretKeyRef` → `{name, key}`. TrustGate connects using the individual `DATABASE_*` vars (it does not read `DATABASE_URL`), so `DATABASE_URL` is omitted entirely in this mode and the password is never embedded in a chart-managed object. This fixes both the external-secrets timing problem (the Secret no longer has to exist at `helm` render time) and credential rotation (rotating the source Secret no longer requires re-running Helm), with no password URL-encoding constraints. Leaving `passwordSecretRef` unset preserves the existing lookup-and-copy behavior; `DATABASE_PASSWORD`/`DATABASE_URL` are omitted from `trustgate-secrets` only in the new mode. The shared `trustgate.databaseEnv` helper now backs all three deployments. Render coverage added to `scripts/test-helm-render.sh` (scenario 18c). TrustGate subchart `1.2.27 → 1.2.28`.
+
 ## [v1.14.7] — 2026-06-22
 
 ### Fixed

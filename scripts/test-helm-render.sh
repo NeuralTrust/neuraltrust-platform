@@ -435,6 +435,25 @@ assert_contains     "$TMP/tg-iam.yaml" "DATABASE_IAM_AUTH: \"dHJ1ZQ==\""        
 blue "scenario 18b: TrustGate password auth (default) keeps the init Job"
 assert_contains     "$TMP/default.yaml" "app.kubernetes.io/component: postgresql-init" "postgresql-init Job present in password mode"
 
+# Scenario 18c: TrustGate postgresql.passwordSecretRef. The DB password lives
+# ONLY in the user's Secret (external-secrets / CSI): containers reference it via
+# secretKeyRef. TrustGate reads the individual DATABASE_* vars (not DATABASE_URL),
+# so the chart-managed trustgate-secrets never carries the password, and
+# DATABASE_URL is omitted entirely in this mode.
+blue "scenario 18c: TrustGate passwordSecretRef keeps the password out of trustgate-secrets"
+render "$TMP/tg-pw-secret.yaml" \
+  --set trustgate.enabled=true \
+  --set trustgate.postgresql.passwordSecretRef.name=tg-ext-pg \
+  --set trustgate.postgresql.passwordSecretRef.key=azure-pg-password \
+  --set trustgate.global.env.DATABASE_HOST=db.example.com
+assert_contains "$TMP/tg-pw-secret.yaml" "name: \"tg-ext-pg\"" "DATABASE_PASSWORD sourced via secretKeyRef from the user Secret"
+assert_contains "$TMP/tg-pw-secret.yaml" "key: \"azure-pg-password\"" "DATABASE_PASSWORD uses the configured key from the user Secret"
+# Scope the negative assertions to the trustgate-secrets object (other secrets
+# legitimately carry a DATABASE_URL, e.g. the in-cluster postgresql-secrets).
+awk 'BEGIN{RS="---\n"} /kind: Secret/ && /name: trustgate-secrets/ {print}' "$TMP/tg-pw-secret.yaml" > "$TMP/tg-pw-secret-only.yaml"
+assert_not_contains "$TMP/tg-pw-secret-only.yaml" "DATABASE_PASSWORD:" "trustgate-secrets omits DATABASE_PASSWORD in passwordSecretRef mode"
+assert_not_contains "$TMP/tg-pw-secret-only.yaml" "DATABASE_URL:"      "trustgate-secrets omits DATABASE_URL in passwordSecretRef mode"
+
 # Scenario 19: IRSA. applyGlobally annotates every component ServiceAccount with
 # the role; default (off) emits no role annotation. Guards the new
 # serviceAccount.annotationsBlock helper.

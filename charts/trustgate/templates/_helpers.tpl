@@ -219,3 +219,94 @@ Usage: {{- include "trustgate.kafkaEnv" . | nindent 8 }}
   value: {{ include "neuraltrust-platform.kafka.port" . | quote }}
 {{- include "neuraltrust-platform.kafka.authEnv" . }}
 {{- end -}}
+
+{{/*
+Returns "true" when TrustGate should read its PostgreSQL password directly from
+a pre-existing Secret (e.g. provisioned by external-secrets / CSI) instead of the
+chart copying it into trustgate-secrets. Activated simply by setting both:
+  postgresql.passwordSecretRef.name: <secret-name>
+  postgresql.passwordSecretRef.key:  <key-in-that-secret>
+Host/port/user/database/sslMode keep coming from values (global.env.DATABASE_*).
+*/}}
+{{- define "trustgate.pg.passwordFromSecret" -}}
+{{- $ref := ((.Values.postgresql | default dict).passwordSecretRef | default dict) -}}
+{{- if and $ref.name $ref.key -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+TrustGate database environment variables, shared by the control-plane, data-plane
+and actions containers. TrustGate reads the individual DATABASE_* vars (see
+pkg/config/config.go); it does not consume DATABASE_URL.
+
+Default mode: every field is sourced from the chart-managed trustgate-secrets
+Secret (DATABASE_URL is kept for backward compatibility).
+
+passwordSecretRef mode: DATABASE_PASSWORD is sourced via secretKeyRef from the
+user's pre-existing Secret; the non-secret fields still come from
+trustgate-secrets and DATABASE_URL is omitted (unused, and it is the only field
+that would otherwise embed the password).
+Usage: {{- include "trustgate.databaseEnv" . | nindent 8 }}
+*/}}
+{{- define "trustgate.databaseEnv" -}}
+- name: DATABASE_HOST
+  valueFrom:
+    secretKeyRef:
+      name: trustgate-secrets
+      key: DATABASE_HOST
+- name: DATABASE_PORT
+  valueFrom:
+    secretKeyRef:
+      name: trustgate-secrets
+      key: DATABASE_PORT
+- name: DATABASE_USER
+  valueFrom:
+    secretKeyRef:
+      name: trustgate-secrets
+      key: DATABASE_USER
+{{- if eq (include "trustgate.pg.passwordFromSecret" .) "true" }}
+- name: DATABASE_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ .Values.postgresql.passwordSecretRef.name | quote }}
+      key: {{ .Values.postgresql.passwordSecretRef.key | quote }}
+- name: DATABASE_NAME
+  valueFrom:
+    secretKeyRef:
+      name: trustgate-secrets
+      key: DATABASE_NAME
+{{- else }}
+- name: DATABASE_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: trustgate-secrets
+      key: DATABASE_PASSWORD
+- name: DATABASE_NAME
+  valueFrom:
+    secretKeyRef:
+      name: trustgate-secrets
+      key: DATABASE_NAME
+- name: DATABASE_URL
+  valueFrom:
+    secretKeyRef:
+      name: trustgate-secrets
+      key: DATABASE_URL
+{{- end }}
+- name: DATABASE_SSL_MODE
+  valueFrom:
+    secretKeyRef:
+      name: trustgate-secrets
+      key: DATABASE_SSL_MODE
+      optional: true
+- name: DATABASE_AUTH_MODE
+  valueFrom:
+    secretKeyRef:
+      name: trustgate-secrets
+      key: DATABASE_AUTH_MODE
+      optional: true
+- name: DATABASE_IAM_AUTH
+  valueFrom:
+    secretKeyRef:
+      name: trustgate-secrets
+      key: DATABASE_IAM_AUTH
+      optional: true
+{{- end -}}
