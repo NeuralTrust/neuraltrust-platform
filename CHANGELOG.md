@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v1.14.9] — 2026-06-23
+
 ### Fixed
 
 - **Kafka Connect now provisions and validates its internal topics so it starts reliably against an external broker.** Kafka Connect requires `connect-configs` to have exactly 1 partition; on a broker with `auto.create.topics.enable=true` and a default `num.partitions > 1` it could be created with multiple partitions, after which Connect's herder refuses to start (`config.storage.topic ... required to have a single partition`). The `kafka-connect` init container now **creates the internal topics that are missing** with the correct layout (`connect-configs=1`, `connect-offsets=25`, `connect-status=5`, `cleanup.policy=compact`) — idempotent (`--create --if-not-exists`), so it also recovers clusters where the topics or their volume were deleted, and never overrides topics an operator pre-created. If `connect-configs` already exists with the wrong partition count it **fails fast**, printing the exact `kafka-topics.sh --delete` command to run (it never deletes topics automatically). Render coverage added to `scripts/test-helm-render.sh` (scenario 28). data-plane subchart `1.2.39 → 1.2.40`.
