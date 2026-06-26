@@ -751,9 +751,11 @@ neuraltrust-data-plane:
         accessMode: ReadWriteOnce
         huggingfaceToken: ""
         storage: 10Gi
-        # TrustTest configuration: Set to {} to enable volume mounting of trusttest config
-        # The ConfigMap content is generated from charts/neuraltrust-data-plane/files/.trusttest_config.json
-        trustTestConfig: {}
+        # TrustTest configuration: mounts charts/neuraltrust-data-plane/files/.trusttest_config.json
+        # at /app/.trusttest_config.json on data-plane-api (and evaluation Job pods).
+        # Set enabled: true to opt in.
+        trustTestConfig:
+          enabled: false
         replicas: 3
         resources:
           requests:

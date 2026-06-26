@@ -7,13 +7,13 @@ dependencies:
   version: 1.0.5
 - name: clickhouse
   repository: file://./charts/clickhouse
-  version: 1.0.1
+  version: 1.0.2
 - name: kafka
   repository: file://./charts/kafka
   version: 1.0.1
 - name: neuraltrust-data-plane
   repository: file://./charts/neuraltrust-data-plane
-  version: 1.2.40
+  version: 1.2.42
 - name: neuraltrust-control-plane
   repository: file://./charts/neuraltrust-control-plane
   version: 1.2.36
@@ -25,6 +25,6 @@ dependencies:
   version: 2.0.13
 - name: neuraltrust-watchdog
   repository: file://./charts/neuraltrust-watchdog
-  version: 0.1.11
-digest: sha256:d5193c949407b7967fce22de0ffddb19cd686355501b822a688453f61bcf0175
-generated: "2026-06-23T17:49:12.907005+02:00"
+  version: 0.2.0
+digest: sha256:13431d8d1952288faa74e55897e1ef7ad5b4683ed0e71dd64983a0f6246bedcf
+generated: "2026-06-26T11:03:22.224122+02:00"

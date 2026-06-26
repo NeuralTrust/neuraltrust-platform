@@ -44,15 +44,15 @@ firewall:
       pullPolicy: IfNotPresent
     replicas: 1
     # CPU-worker default: one HF transformer (~86M-class) per pod via ONNX.
-    # 2Gi/3Gi matches the dev/GPU-prod overlays. The heavier prompt-moderation
-    # worker (e5-base embedder + 13 LightGBM) overrides this below.
+    # 3Gi/4Gi gives ONNX runtime headroom under concurrent requests. The heavier
+    # prompt-moderation worker (e5-base embedder + 13 LightGBM) overrides this below.
     resources:
       limits:
+        cpu: "2"
+        memory: 4Gi
+      requests:
         cpu: "1"
         memory: 3Gi
-      requests:
-        cpu: 500m
-        memory: 2Gi
     nodeSelector: {}
     tolerations: []
     hostIPC: false
@@ -102,11 +102,11 @@ firewall:
       # LightGBM classifiers. Override workerDefaults with a larger floor.
       resources:
         requests:
-          cpu: 500m
-          memory: 3Gi
-        limits:
           cpu: "1"
           memory: 4Gi
+        limits:
+          cpu: "2"
+          memory: 6Gi
       extraEnv: []
       extraEnvFrom: []
     response-jailbreak:

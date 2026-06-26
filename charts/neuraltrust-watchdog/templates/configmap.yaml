@@ -80,6 +80,31 @@ data:
       interval: {{ .Values.usageExport.interval }}
       timeout: {{ .Values.usageExport.timeout }}
     {{- end }}
+    {{- if .Values.desiredState.enabled }}
+    {{- /* Fleet reporting + monitoring-policy pull from deploy-api. The address,
+           cluster id, and bearer token are injected via the fixed env names set
+           on the StatefulSet (DEPLOY_API_URL / DEPLOY_API_CLUSTER_ID /
+           WATCHDOG_INGEST_TOKEN). */}}
+    desiredState:
+      enabled: true
+      endpointEnv: DEPLOY_API_URL
+      clusterIdEnv: DEPLOY_API_CLUSTER_ID
+      authTokenEnv: WATCHDOG_INGEST_TOKEN
+      pollInterval: {{ .Values.desiredState.pollInterval }}
+    {{- end }}
+    {{- if .Values.platformState.enabled }}
+    {{- /* Remote image-tag applier. dryRun true (default) = compute helm-diff +
+           report only, never mutate. Shares the deploy-api env names above. */}}
+    platformState:
+      enabled: true
+      dryRun: {{ .Values.platformState.dryRun }}
+      releaseName: {{ .Values.platformState.releaseName | quote }}
+      namespace: {{ .Values.platformState.namespace | default .Release.Namespace | quote }}
+      pollInterval: {{ .Values.platformState.pollInterval }}
+      endpointEnv: DEPLOY_API_URL
+      clusterIdEnv: DEPLOY_API_CLUSTER_ID
+      authTokenEnv: WATCHDOG_INGEST_TOKEN
+    {{- end }}
     {{- if or .Values.persistence.enabled .Values.overlay.enabled }}
     {{- /* Shared SQLite DB (internal/sqlitedb) on the StatefulSet PVC. Backs
            persisted operational state (statestore) and, when overlay.enabled,

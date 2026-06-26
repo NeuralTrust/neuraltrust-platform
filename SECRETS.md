@@ -29,6 +29,14 @@ helm upgrade --install neuraltrust-platform . --namespace neuraltrust --create-n
 2. On `helm upgrade`, existing values are read from the cluster via `lookup` and reused
 3. Explicit (non-empty) values in your values file always take priority
 
+> **Deploy methods without `lookup`.** `lookup` returns nothing during `helm template`,
+> `--dry-run`, ArgoCD/Flux renders, or when the deploy identity lacks RBAC to read Secrets.
+> In those flows step 2 cannot preserve a generated value, so a fresh random value would
+> overwrite the live Secret each upgrade. Generated secrets carry `helm.sh/resource-policy: keep`
+> and the ClickHouse secret skips emission on upgrade when no value is resolvable, which avoids
+> clobbering existing Secrets; for a guaranteed-stable result, install once and then set
+> `global.preserveExistingSecrets: true` (or supply explicit values / `existingSecret`).
+
 **Override a specific secret:**
 
 ```yaml

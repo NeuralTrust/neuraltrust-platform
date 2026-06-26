@@ -1,6 +1,4 @@
-{{- if .Values.dataPlane }}
-  {{- if .Values.dataPlane.components }}
-    {{- if .Values.dataPlane.components.api }}
+{{- if eq (include "data-plane.api.trustTestConfig.enabled" .) "true" }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -11,6 +9,4 @@ metadata:
 data:
   .trusttest_config.json: |-
 {{ .Files.Get "files/.trusttest_config.json" | indent 4 }}
-    {{- end }}
-  {{- end }}
 {{- end }} 

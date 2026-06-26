@@ -163,6 +163,35 @@ spec:
                   name: {{ .Values.usageExport.controlPlaneJwtSecret.existingSecret | default "control-plane-secrets" }}
                   key: {{ .Values.usageExport.controlPlaneJwtSecret.secretKey | default "CONTROL_PLANE_JWT_SECRET" }}
             {{- end }}
+            {{- if or .Values.desiredState.enabled .Values.platformState.enabled }}
+            {{- /* deploy-api control-plane wiring, shared by the desired-state
+                   reporter and the platform image-tag applier. */}}
+            - name: DEPLOY_API_URL
+              value: {{ .Values.desiredState.endpoint | quote }}
+            - name: DEPLOY_API_CLUSTER_ID
+              value: {{ .Values.desiredState.clusterId | quote }}
+            {{- if or .Values.desiredState.token.value .Values.desiredState.token.existingSecret }}
+            - name: WATCHDOG_INGEST_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "neuraltrust-watchdog.desiredStateTokenSecretName" . }}
+                  key: {{ .Values.desiredState.token.secretKey | default "token" }}
+            {{- end }}
+            {{- end }}
+            {{- if .Values.platformState.enabled }}
+            {{- /* helm needs writable HOME dirs (root FS is read-only, so point
+                   them at the emptyDir below) and a registry config to pull the
+                   OCI chart for diffing. HELM_DATA_HOME (plugins incl. helm-diff)
+                   stays at the baked-in image path. */}}
+            - name: HELM_CONFIG_HOME
+              value: /var/run/helm/work/config
+            - name: HELM_CACHE_HOME
+              value: /var/run/helm/work/cache
+            {{- if .Values.platformState.registryConfig.existingSecret }}
+            - name: HELM_REGISTRY_CONFIG
+              value: /var/run/helm/registry/config.json
+            {{- end }}
+            {{- end }}
             {{- include "neuraltrust-watchdog.proxyEnv" . | nindent 12 }}
             {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "go" "ctx" .) | nindent 12 }}
           livenessProbe:
@@ -200,6 +229,17 @@ spec:
             - name: overlay
               mountPath: /var/lib/watchdog
             {{- end }}
+            {{- if .Values.platformState.enabled }}
+            {{- /* Writable scratch for helm config/cache (root FS is read-only). */}}
+            - name: helm-work
+              mountPath: /var/run/helm/work
+            {{- if .Values.platformState.registryConfig.existingSecret }}
+            {{- /* Read-only OCI registry auth (dockerconfigjson) for helm pull. */}}
+            - name: helm-registry
+              mountPath: /var/run/helm/registry
+              readOnly: true
+            {{- end }}
+            {{- end }}
             {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 12 }}
       volumes:
         - name: config
@@ -208,6 +248,18 @@ spec:
         {{- if and .Values.logExport.enabled .Values.logExport.transports.bundle.enabled }}
         - name: logbundles
           emptyDir: {}
+        {{- end }}
+        {{- if .Values.platformState.enabled }}
+        - name: helm-work
+          emptyDir: {}
+        {{- if .Values.platformState.registryConfig.existingSecret }}
+        - name: helm-registry
+          secret:
+            secretName: {{ .Values.platformState.registryConfig.existingSecret }}
+            items:
+              - key: {{ .Values.platformState.registryConfig.secretKey | default ".dockerconfigjson" }}
+                path: config.json
+        {{- end }}
         {{- end }}
         {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 8 }}
       {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" . "local" .Values.nodeSelector) | nindent 6 }}

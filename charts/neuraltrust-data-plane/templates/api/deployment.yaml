@@ -183,7 +183,7 @@ spec:
       - name: api
         {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.image }}
         {{- $apiRepo := .Values.dataPlane.components.api.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api" }}
-        {{- $apiTag := .Values.dataPlane.components.api.image.tag | default "v1.35.0" }}
+        {{- $apiTag := .Values.dataPlane.components.api.image.tag | default "v1.35.1" }}
         image: {{ include "data-plane.image" (dict "repository" $apiRepo "tag" $apiTag "global" .Values.global) | quote }}
         imagePullPolicy: {{ .Values.dataPlane.components.api.image.pullPolicy | default "Always" }}
         {{- else }}
@@ -328,7 +328,7 @@ spec:
           {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "python" "ctx" .) | nindent 10 }}
           {{- include "neuraltrust-platform.appVersionEnv" (dict "tag" (dig "components" "api" "image" "tag" "" (.Values.dataPlane | default dict))) | nindent 10 }}
         volumeMounts:
-          {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.trustTestConfig }}
+          {{- if eq (include "data-plane.api.trustTestConfig.enabled" .) "true" }}
           - name: trusttest-config-volume
             mountPath: /app/.trusttest_config.json # Assuming app runs from /app
             subPath: .trusttest_config.json
@@ -401,7 +401,7 @@ spec:
           items:
             - key: init-db.sql
               path: init-db.sql
-      {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.trustTestConfig }}
+      {{- if eq (include "data-plane.api.trustTestConfig.enabled" .) "true" }}
       - name: trusttest-config-volume
         configMap:
           name: data-plane-trusttest-config

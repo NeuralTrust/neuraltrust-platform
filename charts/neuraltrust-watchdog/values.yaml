@@ -179,6 +179,14 @@ rbac:
   # `pods/log` get verb. Tailing still also requires logExport.enabled=true.
   logExport:
     enabled: false
+  # READ-ONLY RBAC for the platformState helm-diff preflight. helm needs to read
+  # its release Secret (sh.helm.release.v1.*) in the platform release namespace
+  # to compute a diff. Grants get/list/watch on Secrets in that namespace ONLY —
+  # NO write/patch verbs, so it cannot mutate workloads even if granted. This is
+  # the dry-run RBAC; real `helm upgrade` mutation would require additional
+  # write verbs that are intentionally NOT provided here. Defaults off.
+  platformApply:
+    enabled: false
 # Pod-level overrides.
 podAnnotations: {}
 podLabels: {}
@@ -215,8 +223,8 @@ networkPolicy:
 # SDK is initialized with no-op providers (graceful no-egress).
 telemetry:
   serviceName: neuraltrust-watchdog
-  # clusterName is an operator label for THIS deployment (e.g. "bv-prod",
-  # "acme-eks"). It is surfaced on every Slack alert (header context line +
+  # clusterName is an operator label for THIS deployment (e.g. "acme-eks"). 
+  # It is surfaced on every Slack alert (header context line +
   # push-notification prefix) and stamped as the nt.cluster OTLP resource
   # attribute, so an alert names where to act when the same binary runs across
   # many customer clusters. Not topology — safe to expose. Falls back to
@@ -322,6 +330,60 @@ usageExport:
   targetDiscovery: true
   interval: 1h
   timeout: 30s
+# Desired-state pull from deploy-api (the SaaS control plane). When enabled, the
+# watchdog reports observed state (per-service status + versions) to deploy-api
+# so the cluster appears on the admin-console fleet page, and pulls desired
+# monitoring policy revisions. OFF by default — customers stay pure GitOps/Helm.
+#
+# endpoint/clusterId are plain values; the ingest bearer token is referenced from
+# an existing Secret (never inlined). The watchdog binary reads the address via
+# fixed env-var names (DEPLOY_API_URL / DEPLOY_API_CLUSTER_ID / WATCHDOG_INGEST_TOKEN).
+desiredState:
+  enabled: false
+  # deploy-api base URL including the API prefix, e.g.
+  # http://deploy-api-service.deploy-api.svc.cluster.local/api/v1
+  endpoint: ""
+  # Cluster id identifying THIS cluster to deploy-api (fleet rollup +
+  # GET /desired-state/by-cluster/{id}). e.g. "prod".
+  clusterId: ""
+  # Bearer token for deploy-api ingest (WATCHDOG_INGEST_TOKEN). Provide EITHER
+  # `value` (the chart renders a managed Secret "<fullname>-deploy-api", same
+  # idiom as server.authToken / actions.slack) OR `existingSecret` to reference
+  # a pre-existing Secret. `existingSecret` wins when both are set. Must match
+  # the WATCHDOG_INGEST_TOKEN that deploy-api validates.
+  token:
+    value: ""
+    existingSecret: ""
+    secretKey: token
+  pollInterval: 60s
+# Remote neuraltrust-platform image-tag applier (internal/platformstate). When
+# enabled, the watchdog pulls the active desired-state revision for this cluster
+# and applies ONLY image tags to the in-cluster Helm release via
+# `helm upgrade --install --reuse-values --set <path>=<tag>`, after a
+# `helm diff upgrade` preflight that ABORTS if any non-image-tag field would
+# change.
+#
+# TRIPLE-GATED + DEFAULT-SAFE:
+#   1. enabled: false by default.
+#   2. dryRun: true by default — even when enabled, it only computes + reports
+#      the helm-diff; it never mutates the release until dryRun is set false.
+#   3. The diff guard refuses to apply if anything other than image tags changes.
+# Mutating apply ALSO requires rbac.platformApply.enabled (read-only by default).
+# Reuses the same deploy-api endpoint/clusterId/token as desiredState above.
+platformState:
+  enabled: false
+  dryRun: true
+  # Helm release name to diff/upgrade. Defaults to the umbrella release.
+  releaseName: neuraltrust-platform
+  # Namespace of the platform Helm release. Empty => the release namespace.
+  namespace: ""
+  pollInterval: 120s
+  # OCI registry auth so helm can pull the chart referenced by the desired
+  # revision (chart_source) for diffing. Points HELM_REGISTRY_CONFIG at an
+  # existing dockerconfigjson Secret (e.g. the image-pull gcr-secret). Read-only.
+  registryConfig:
+    existingSecret: gcr-secret
+    secretKey: .dockerconfigjson
 # Connection envs sourced from existing cluster secrets.
 secretEnv:
   clickhouse:

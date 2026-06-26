@@ -111,5 +111,42 @@ subjects:
   - kind: ServiceAccount
     name: {{ $sa }}
     namespace: {{ .Release.Namespace }}
+{{ end }}
+{{- if and .Values.rbac.platformApply .Values.rbac.platformApply.enabled }}
+{{- /* READ-ONLY RBAC for the platformState helm-diff preflight. helm reads its
+       release Secret (sh.helm.release.v1.<release>.vN) to compute a diff. Scoped
+       to the platform release namespace via a namespaced Role even when the main
+       watch role is cluster-wide, and limited to get/list/watch — NO write verbs,
+       so this grant alone cannot mutate any workload. */}}
+{{- $pns := .Values.platformState.namespace | default .Release.Namespace }}
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}-platform-diff
+  namespace: {{ $pns }}
+  labels:
+    {{- include "neuraltrust-watchdog.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}-platform-diff
+  namespace: {{ $pns }}
+  labels:
+    {{- include "neuraltrust-watchdog.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}-platform-diff
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ .Release.Namespace }}
 {{- end }}
 {{- end }}

@@ -2,7 +2,7 @@ apiVersion: v2
 name: neuraltrust-platform
 description: Unified Helm chart for NeuralTrust platform including Data Plane, Control Plane, TrustGate, and infrastructure components
 type: application
-version: 1.14.9
+version: 1.14.10
 appVersion: "1.0.0"
 icon: https://neuraltrust.ai/favicon.ico
 dependencies:
@@ -23,7 +23,7 @@ dependencies:
       - optional
   # Infrastructure components (conditional deployment)
   - name: clickhouse
-    version: 1.0.1
+    version: 1.0.2
     repository: file://./charts/clickhouse
     condition: infrastructure.clickhouse.deploy
     tags:
@@ -36,7 +36,7 @@ dependencies:
       - infrastructure
   # NeuralTrust components
   - name: neuraltrust-data-plane
-    version: 1.2.40
+    version: 1.2.42
     condition: neuraltrust-data-plane.dataPlane.enabled
     repository: file://./charts/neuraltrust-data-plane
     tags:
@@ -64,7 +64,7 @@ dependencies:
       - neuraltrust
   # Self-monitoring + self-healing watchdog
   - name: neuraltrust-watchdog
-    version: 0.1.11
+    version: 0.2.0
     repository: file://./charts/neuraltrust-watchdog
     condition: neuraltrust-watchdog.enabled
     tags:

@@ -23,7 +23,7 @@ global:
   openshiftDomain: ""
   imageRegistry: "" # Global image registry prefix (e.g., "europe-west1-docker.pkg.dev/project/repo"). If set, will be prepended to image repositories.
   autoGenerateSecrets: true # Auto-generate required secrets (JWT keys, passwords) if not explicitly provided. Uses lookup to preserve existing values on upgrades. Set to false to let subcharts manage their own secrets (required when using secret references).
-  preserveExistingSecrets: false # Set to true to prevent Helm from creating/updating secrets (secrets are pre-generated). When true, secret templates are NOT rendered.
+  preserveExistingSecrets: false # Set to true to prevent Helm from creating/updating secrets (secrets are pre-generated). When true, secret templates (including the ClickHouse subchart) are NOT rendered. Recommended for deploy methods where `lookup` is unavailable (ArgoCD/Flux, `helm template`, restricted RBAC): install once, then set true so upgrades never re-generate/rotate secrets. Generated secrets carry `helm.sh/resource-policy: keep`, so flipping this on after install will not prune the live secrets.
   security:
     allowInsecureImages: true # Allow Bitnami charts to use their container images
   storageClass: "" # Global storage class for persistent volumes
@@ -480,7 +480,12 @@ clickhouse:
     imagePullSecrets: []
   auth:
     username: "neuraltrust"
-    password: "" # Auto-generated if empty
+    # Auto-generated if empty. Preserved across upgrades via lookup; the rendered
+    # Secret carries helm.sh/resource-policy: keep and is skipped on upgrade when no
+    # value is resolvable, so it is never rotated. For deploy methods without lookup
+    # (ArgoCD/Flux, helm template, restricted RBAC), set this explicitly or use
+    # global.preserveExistingSecrets: true after the first install.
+    password: ""
     existingSecret: "" # Set to "" if you want Helm to create/manage the secret
     existingSecretKey: "admin-password"
     database: "neuraltrust"
@@ -1195,14 +1200,16 @@ neuraltrust-data-plane:
         classifierModel: "gpt"
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.35.0
+          tag: v1.35.1
           pullPolicy: Always
         accessMode: ReadWriteOnce
         huggingfaceToken: ""
         storage: 10Gi
-        # TrustTest configuration: Set to {} to enable volume mounting of trusttest config
-        # The ConfigMap content is generated from charts/neuraltrust-data-plane/files/.trusttest_config.json
-        trustTestConfig: {}
+        # TrustTest configuration: mounts charts/neuraltrust-data-plane/files/.trusttest_config.json
+        # at /app/.trusttest_config.json on data-plane-api (and evaluation Job pods).
+        # Set enabled: true to opt in.
+        trustTestConfig:
+          enabled: false
         replicas: 2
         autoscaling:
           enabled: false
@@ -1301,7 +1308,7 @@ neuraltrust-data-plane:
           minAvailable: 1
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/workers
-          tag: v1.8.0
+          tag: v1.8.1
           pullPolicy: Always
         resources:
           requests:
@@ -1374,15 +1381,15 @@ neuraltrust-firewall:
         pullPolicy: IfNotPresent
       replicas: 1
       # CPU-worker default: one HF transformer (~86M-class) per pod via ONNX.
-      # 2Gi/3Gi matches the firewall repo dev/GPU-prod overlays. The heavier
+      # 3Gi/4Gi gives ONNX runtime headroom under concurrent requests. The heavier
       # prompt-moderation worker (e5-base embedder + 13 LightGBM) overrides this below.
       resources:
         requests:
-          cpu: 500m
-          memory: 2Gi
-        limits:
-          cpu: "1"
+          cpu: "1000m"
           memory: 3Gi
+        limits:
+          cpu: "2000m"
+          memory: 4Gi
       nodeSelector: {}
       tolerations: []
       hostIPC: false
@@ -1424,11 +1431,11 @@ neuraltrust-firewall:
         # LightGBM classifiers. Override workerDefaults with a larger floor.
         resources:
           requests:
-            cpu: 500m
-            memory: 3Gi
-          limits:
             cpu: "1"
             memory: 4Gi
+          limits:
+            cpu: "2"
+            memory: 6Gi
         extraEnv: []
         extraEnvFrom: []
       response-jailbreak:
