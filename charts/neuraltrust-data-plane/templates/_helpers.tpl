@@ -274,3 +274,27 @@ both the API Deployment and its Jobs.
 {{- end -}}
 {{- include "data-plane.image" (dict "repository" $repo "tag" $tag "global" .Values.global) -}}
 {{- end }}
+
+{{/*
+Returns "true" when the TrustTest config file should be mounted on data-plane-api
+(and evaluation Job pods). Default: disabled. Set trustTestConfig.enabled: true
+to opt in.
+Usage: {{- if eq (include "data-plane.api.trustTestConfig.enabled" .) "true" }}
+*/}}
+{{- define "data-plane.api.trustTestConfig.enabled" -}}
+{{- $api := dict -}}
+{{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api -}}
+  {{- $api = .Values.dataPlane.components.api -}}
+{{- end -}}
+{{- if hasKey $api "trustTestConfig" -}}
+  {{- $cfg := $api.trustTestConfig -}}
+  {{- if kindIs "map" $cfg -}}
+    {{- if hasKey $cfg "enabled" -}}
+      {{- if $cfg.enabled -}}true{{- end -}}
+    {{- end -}}
+  {{- else if $cfg -}}
+    {{- /* legacy non-map truthy value */ -}}
+    true
+  {{- end -}}
+{{- end -}}
+{{- end }}

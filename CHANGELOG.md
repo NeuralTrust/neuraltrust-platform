@@ -4,6 +4,12 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Fixed
+
+- **data-plane-api TrustTest config mount uses an explicit opt-in flag.** `trustTestConfig: {}` is an empty map and Helm treats it as falsy, so the `data-plane-trusttest-config` ConfigMap was created but never mounted at `/app/.trusttest_config.json`. The chart now gates the mount on `trustTestConfig.enabled` (default `false`; set `enabled: true` to opt in). data-plane subchart `1.2.41 → 1.2.42`.
+
+- **Auto-generated secrets no longer rotate on upgrade when `lookup` is unavailable, and ClickHouse now honors `global.preserveExistingSecrets`.** Secret preservation relied solely on Helm's `lookup`, which returns nothing under restricted RBAC or template-only renders (ArgoCD/Flux, `helm template`, `--dry-run`). In those flows the ClickHouse `admin-password` (and other generated secrets) could be overwritten with a fresh random value on every upgrade, breaking consumers that cached the previous value (e.g. Kafka Connect) until they were restarted. `charts/clickhouse/templates/secret.yaml` now (1) honors `global.preserveExistingSecrets` like every other subchart, (2) carries `helm.sh/resource-policy: keep`, and (3) skips emission on upgrade when no value is resolvable (no explicit `clickhouse.auth.password` and an empty `lookup`) so the live Secret is preserved instead of clobbered. The non-hook parent secrets (`control-plane-secrets`, `data-plane-jwt-secret`, `postgresql-secrets`, `firewall-secrets`, `aispm-secrets`) also gain `helm.sh/resource-policy: keep`, making it safe to set `global.preserveExistingSecrets: true` after first install (Helm will not prune them). NOTE: these secrets are now retained on `helm uninstall`. Render coverage added to `scripts/test-helm-render.sh` (scenarios 31-33). ClickHouse subchart `1.0.1 → 1.0.2`.
+
 ## [v1.14.9] — 2026-06-23
 
 ### Fixed

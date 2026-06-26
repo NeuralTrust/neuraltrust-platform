@@ -2,5 +2,5 @@ apiVersion: v2
 name: clickhouse
 description: Minimal ClickHouse chart using official clickhouse-server image
 type: application
-version: 1.0.1
+version: 1.0.2
 appVersion: "26.3"

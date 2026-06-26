@@ -395,6 +395,41 @@ assert_contains     "$TMP/dp-jobs-default.yaml" "serviceAccountName: data-plane$
 assert_not_contains "$TMP/dp-jobs-default.yaml" 'name: K8S_JOBS_ENABLED'              "no K8S_JOBS_ENABLED env when k8sJobs disabled by default"
 assert_not_contains "$TMP/dp-jobs-default.yaml" 'name: K8S_JOB_IMAGE'                 "no K8S_JOB_IMAGE env when k8sJobs disabled by default"
 
+# Scenario 16b: trustTestConfig.enabled defaults to false — ConfigMap and volume
+# mount render only when explicitly opted in.
+blue "scenario 16b: data-plane-api trustTestConfig mount disabled by default"
+render "$TMP/dp-trusttest-default.yaml" \
+  --set neuraltrust-data-plane.dataPlane.enabled=true
+assert_not_contains "$TMP/dp-trusttest-default.yaml" "name: data-plane-trusttest-config"      "trusttest ConfigMap omitted by default"
+assert_not_contains "$TMP/dp-trusttest-default.yaml" "mountPath: /app/.trusttest_config.json"  "trusttest config not mounted by default"
+render "$TMP/dp-trusttest-on.yaml" \
+  --set neuraltrust-data-plane.dataPlane.enabled=true \
+  --set neuraltrust-data-plane.dataPlane.components.api.trustTestConfig.enabled=true
+assert_contains "$TMP/dp-trusttest-on.yaml" "name: data-plane-trusttest-config"       "trusttest ConfigMap rendered when trustTestConfig.enabled=true"
+assert_contains "$TMP/dp-trusttest-on.yaml" "mountPath: /app/.trusttest_config.json"  "trusttest config mounted when opted in"
+# Legacy trustTestConfig: {} does not opt in (requires explicit enabled: true).
+cat > "$TMP/dp-trusttest-legacy-values.yaml" <<'YAML'
+neuraltrust-data-plane:
+  dataPlane:
+    enabled: true
+    components:
+      api:
+        trustTestConfig: {}
+YAML
+render "$TMP/dp-trusttest-legacy.yaml" -f "$TMP/dp-trusttest-legacy-values.yaml"
+assert_not_contains "$TMP/dp-trusttest-legacy.yaml" "mountPath: /app/.trusttest_config.json" "legacy trustTestConfig: {} does not mount without enabled: true"
+# trustTestConfig: null must disable.
+cat > "$TMP/dp-trusttest-null-values.yaml" <<'YAML'
+neuraltrust-data-plane:
+  dataPlane:
+    enabled: true
+    components:
+      api:
+        trustTestConfig: null
+YAML
+render "$TMP/dp-trusttest-null.yaml" -f "$TMP/dp-trusttest-null-values.yaml"
+assert_not_contains "$TMP/dp-trusttest-null.yaml" "mountPath: /app/.trusttest_config.json" "trusttest config not mounted when trustTestConfig: null"
+
 # Scenario 17: opt-in path. Setting k8sJobs.enabled=true renders the
 # job-creator RBAC bound to the shared `data-plane` SA (NOT a new SA),
 # wires K8S_* env vars, and forwards the pull secret for spawned Job pods.
@@ -741,6 +776,33 @@ assert_contains "$TMP/trustgate-postgres-existing-secret.yaml" "name: trustgate-
 assert_contains "$TMP/trustgate-postgres-existing-secret.yaml" "SERVER_SECRET_KEY:"      "TrustGate server key remains generated/resolved"
 assert_contains "$TMP/trustgate-postgres-existing-secret.yaml" "DATABASE_URL:"           "TrustGate database URL still rendered for pods"
 assert_not_contains "$TMP/trustgate-postgres-existing-secret.yaml" "preserveExistingSecrets: true" "mixed mode does not require preserving all secrets"
+
+# Scenario 31: ClickHouse admin-password secret is prune-safe and re-renders deterministically.
+blue "scenario 31: ClickHouse admin-password secret carries resource-policy keep"
+helm template test "$CHART_DIR" -f "$CHART_DIR/values-required.yaml" \
+  --show-only charts/clickhouse/templates/secret.yaml > "$TMP/ch-secret.yaml"
+assert_contains "$TMP/ch-secret.yaml" "name: clickhouse"                "clickhouse admin-password secret rendered"
+assert_contains "$TMP/ch-secret.yaml" "helm.sh/resource-policy: keep"   "clickhouse secret carries resource-policy keep"
+assert_contains "$TMP/ch-secret.yaml" "admin-password:"                 "clickhouse secret emits admin-password"
+
+# Scenario 32: preserveExistingSecrets=true skips chart-managed secrets, including ClickHouse
+# (previously the ClickHouse subchart ignored this flag and kept rotating).
+blue "scenario 32: preserveExistingSecrets=true skips chart-managed secrets (incl. ClickHouse)"
+render "$TMP/preserve.yaml" \
+  -f values-required.yaml \
+  --set global.preserveExistingSecrets=true
+assert_not_contains "$TMP/preserve.yaml" "admin-password: [A-Za-z0-9]" "ClickHouse secret skipped under preserveExistingSecrets"
+# Anchor to the metadata line (2-space indent) so secretKeyRef references to the
+# secret in pods/jobs don't count as the Secret resource itself.
+assert_not_contains "$TMP/preserve.yaml" "^  name: postgresql-secrets$" "parent generated Secret resource skipped under preserveExistingSecrets"
+
+# Scenario 33: parent-generated (non-hook) secrets are prune-safe so preserveExistingSecrets
+# can be flipped after install without Helm pruning the live secrets.
+blue "scenario 33: parent generated secrets carry resource-policy keep"
+helm template test "$CHART_DIR" -f "$CHART_DIR/values-required.yaml" \
+  --show-only templates/platform-secrets.yaml > "$TMP/platform-secrets.yaml"
+assert_contains "$TMP/platform-secrets.yaml" "name: postgresql-secrets"      "postgresql-secrets rendered"
+assert_contains "$TMP/platform-secrets.yaml" "helm.sh/resource-policy: keep" "parent generated secret carries resource-policy keep"
 
 green ""
 green "All helm-render assertions passed."
