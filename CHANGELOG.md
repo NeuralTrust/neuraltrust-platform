@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v1.14.10] — 2026-06-26
+
 ### Fixed
 
 - **data-plane-api TrustTest config mount uses an explicit opt-in flag.** `trustTestConfig: {}` is an empty map and Helm treats it as falsy, so the `data-plane-trusttest-config` ConfigMap was created but never mounted at `/app/.trusttest_config.json`. The chart now gates the mount on `trustTestConfig.enabled` (default `false`; set `enabled: true` to opt in). data-plane subchart `1.2.41 → 1.2.42`.
