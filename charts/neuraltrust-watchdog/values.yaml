@@ -13,7 +13,7 @@ enabled: false
 fullnameOverride: "neuraltrust-watchdog"
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/watchdog
-  tag: v0.10.1 # defaults to .Chart.AppVersion
+  tag: v0.12.0 # defaults to .Chart.AppVersion
   pullPolicy: IfNotPresent
 # Pull secret(s) for private nt-docker images (watchdog + bundled Prometheus).
 # Defaults to gcr-secret like the rest of the chart. Set to [] on clusters that
@@ -290,7 +290,8 @@ logExport:
   # Workloads to tail. Use an explicit `namespace:` in namespace-scoped RBAC
   # mode; `namespaceSelector:` requires rbac.watchAllNamespaces=true.
   sources: []
-  #  - { namespace: neuraltrust, podSelector: "app in (control-plane-api, data-plane-api, trustgate, firewall)" }
+  #  - { namespace: "", podSelector: "app in (control-plane-api, data-plane-api, trustgate, firewall)" }
+  #    Empty namespace => Helm release namespace (see platformNamespace).
   # Replay window on FIRST connect / cold restart only. Stream reconnects
   # resume from an in-memory checkpoint (SinceTime) and drop the boundary
   # overlap, so reconnects do not re-export the same lines.
@@ -370,9 +371,19 @@ desiredState:
 #   3. The diff guard refuses to apply if anything other than image tags changes.
 # Mutating apply ALSO requires rbac.platformApply.enabled (read-only by default).
 # Reuses the same deploy-api endpoint/clusterId/token as desiredState above.
+# Namespace for platform-scoped check targets (pod-health, deployment-health,
+# cert-renewal, log-error-rate, …). Empty => the Helm release namespace.
+# Cross-namespace checks (deploy-api, aispm, …) set an explicit namespace on
+# the check target and are not overridden.
+platformNamespace: ""
 platformState:
   enabled: false
   dryRun: true
+  # When false (default), only image-tag changes pass the diff guard. When true,
+  # the watchdog may apply reviewed full rendered values (requires dryRun:false
+  # AND expanded rbac.platformApply write verbs). Keep false until real apply
+  # is explicitly gated.
+  fullValuesApply: false
   # Helm release name to diff/upgrade. Defaults to the umbrella release.
   releaseName: neuraltrust-platform
   # Namespace of the platform Helm release. Empty => the release namespace.
@@ -425,7 +436,7 @@ enabledCheckIds:
   - control-plane-synthetic
   - data-plane-synthetic
   - trustgate-synthetic
-  - firewall-synthetic
+  - firewall-health
   - pod-health
   - deployment-health
 # Additional checks merged after the default `checks` list. Use this from
@@ -565,7 +576,7 @@ checks:
     kind: tcpsynthetic
     enabled: false
     target:
-      host: postgresql.neuraltrust
+      host: postgresql
       port: 5432
   # Smoke probe — Cloud SQL CPU/memory/disk stays in cloud-infrastructure TF.
   - id: postgres-ping
@@ -640,27 +651,24 @@ checks:
       connectedClientsRatioMax: 0.85
       blockedClientsMax: 0
     actions: [notify.otlp]
-  - id: firewall-synthetic
-    kind: httpsynthetic
-    enabled: false
-    target:
-      urls:
-        - {name: gateway, url: 'http://firewall/health'}
-  - id: gateway-health
-    kind: gateway_health
+  - id: firewall-health
+    kind: firewall_health
     enabled: false
     target:
       url: http://firewall/health
-      namespace: gateway
-      labelSelector: app.kubernetes.io/name=firewall
+      namespace: "" # resolved to the platform release namespace
+      gatewayLabelSelector: app.kubernetes.io/name=firewall
+      workerLabelSelector: app.kubernetes.io/component=worker
     thresholds:
       minReadyPods: 1
+      minReadyWorkerPods: 1
+      maxUnhealthyWorkers: 0
   # Watches cert-manager Certificates across the listed namespaces.
   - id: cert-renewal
     kind: cert_renewal
     enabled: false
     target:
-      namespaces: [neuraltrust]
+      namespaces: [] # empty => Helm release namespace
     thresholds:
       renewalWarnDays: 14
       renewalCriticalDays: 3
@@ -678,7 +686,7 @@ checks:
     kind: pod_health
     enabled: false
     target:
-      namespaces: [neuraltrust]
+      namespaces: [] # empty => Helm release namespace
       reasons: [CrashLoopBackOff, OOMKilled, ImagePullBackOff, ErrImagePull, CreateContainerConfigError]
     thresholds:
       maxFailingPods: 0
@@ -687,7 +695,7 @@ checks:
     kind: deployment_health
     enabled: false
     target:
-      namespace: neuraltrust
+      namespace: "" # empty => Helm release namespace
       deployments: [trustgate-control-plane, trustgate-data-plane, trustgate-actions]
       # thresholds come from kindDefaults.deployment_health; notify actions from
       # actions.defaultActions. Add k8s.restart_deployment here when ready to heal.
@@ -716,7 +724,7 @@ checks:
     kind: log_error_rate
     enabled: false
     target:
-      namespace: neuraltrust
+      namespace: "" # empty => Helm release namespace
     thresholds:
       severity: error
       window: 5m

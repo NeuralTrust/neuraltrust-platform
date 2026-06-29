@@ -137,6 +137,33 @@ if awk '
 fi
 green "ok  - hosted token SecretRef is required when wired"
 
+# Scenario 4c: platform-scoped check namespaces follow --namespace (not hardcoded).
+blue "scenario 4c: watchdog platform check namespaces follow release namespace"
+render "$TMP/watchdog-ns.yaml" \
+  --namespace alt-ns \
+  --set neuraltrust-watchdog.enabled=true
+if ! awk '
+  /id: deployment-health/ { in_check=1; next }
+  in_check && /namespace: alt-ns/ { found=1; exit }
+  in_check && /^      - id:/ { exit }
+  END { exit found ? 0 : 1 }
+' "$TMP/watchdog-ns.yaml"; then
+  red "FAIL: deployment-health check namespace not resolved to release namespace (alt-ns)"
+  exit 1
+fi
+green "ok  - deployment-health namespace resolves to release namespace"
+if ! awk '
+  /id: pod-health/ { in_check=1; next }
+  in_check && /- alt-ns/ { found=1; exit }
+  in_check && /^      - id:/ { exit }
+  END { exit found ? 0 : 1 }
+' "$TMP/watchdog-ns.yaml"; then
+  red "FAIL: pod-health namespaces not resolved to release namespace (alt-ns)"
+  exit 1
+fi
+green "ok  - pod-health namespaces resolve to release namespace"
+assert_contains "$TMP/watchdog-ns.yaml" "namespace: deploy-api" "cross-namespace deploy-api check keeps explicit namespace"
+
 # Scenario 5: hosted explicitly disabled (local-only collector). Hosted
 # exporter omitted; collector still runs.
 blue "scenario 5: hosted export explicitly disabled"
