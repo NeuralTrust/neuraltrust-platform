@@ -383,7 +383,7 @@ assert_contains "$TMP/self-mon.yaml" "name: neuraltrust-watchdog\$"   "watchdog 
 # Curated check ids are flipped on (regex tolerates surrounding YAML indent).
 assert_contains "$TMP/self-mon.yaml" "id: control-plane-synthetic"         "control-plane-synthetic check present in overlay"
 assert_contains "$TMP/self-mon.yaml" "id: data-plane-synthetic"            "data-plane-synthetic check present in overlay"
-assert_contains "$TMP/self-mon.yaml" "id: firewall-synthetic"              "firewall-synthetic check present in overlay"
+assert_contains "$TMP/self-mon.yaml" "id: firewall-health"                   "firewall-health check present in overlay"
 # The kafka-broker check must keep its target.bootstrapServers (overlay
 # flips enabled only — must NOT replace the check definition).
 assert_contains "$TMP/self-mon.yaml" "bootstrapServers:"                   "kafka-broker target preserved through overlay"
@@ -396,7 +396,7 @@ assert_contains "$TMP/self-mon.yaml" "control-plane-scheduler-service/v1/health"
 # PromQL checks), so assert the overlay-controlled check IDs specifically.
 blue "scenario 15: no overlay => no curated-check flip"
 render "$TMP/no-overlay.yaml" --set neuraltrust-watchdog.enabled=true
-for check_id in control-plane-synthetic data-plane-synthetic firewall-synthetic; do
+for check_id in control-plane-synthetic data-plane-synthetic firewall-health; do
   enabled=$(awk -v id="$check_id" '
     $0 ~ "id: " id { print last_enabled; found=1; exit }
     $0 ~ /^[[:space:]]*enabled:/ { last_enabled=$2 }
