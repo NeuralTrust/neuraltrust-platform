@@ -220,6 +220,40 @@ Secret named "<fullname>-deploy-api" rendered from desiredState.token.value.
 {{- end }}
 
 {{/*
+Namespace for platform-scoped check targets. Empty platformNamespace => release ns.
+*/}}
+{{- define "neuraltrust-watchdog.platformNamespace" -}}
+{{- .Values.platformNamespace | default .Release.Namespace -}}
+{{- end -}}
+
+{{/*
+Resolve empty namespace / namespaces / k8sNamespace on a check target to
+platformNamespace. Explicit non-empty values are preserved (cross-namespace).
+Usage: include "neuraltrust-watchdog.resolveCheck" (dict "check" $c "ctx" $)
+*/}}
+{{- define "neuraltrust-watchdog.resolveCheck" -}}
+{{- $ctx := .ctx -}}
+{{- $c := deepCopy .check -}}
+{{- if $c.target -}}
+{{- $target := deepCopy $c.target -}}
+{{- $ns := include "neuraltrust-watchdog.platformNamespace" $ctx -}}
+{{- if and (hasKey $target "namespace") (eq ($target.namespace | toString) "") -}}
+{{- $_ := set $target "namespace" $ns -}}
+{{- end -}}
+{{- if hasKey $target "namespaces" -}}
+{{- if eq (len (default (list) $target.namespaces)) 0 -}}
+{{- $_ := set $target "namespaces" (list $ns) -}}
+{{- end -}}
+{{- end -}}
+{{- if and (hasKey $target "k8sNamespace") (eq ($target.k8sNamespace | toString) "") -}}
+{{- $_ := set $target "k8sNamespace" $ns -}}
+{{- end -}}
+{{- $_ := set $c "target" $target -}}
+{{- end -}}
+{{- $c | toYaml -}}
+{{- end -}}
+
+{{/*
 Optional egress proxy environment variables, only when umbrella
 global.proxy.enabled is true.
 */}}

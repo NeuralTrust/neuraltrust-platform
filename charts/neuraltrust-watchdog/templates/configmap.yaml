@@ -54,9 +54,16 @@ data:
         {{- toYaml .Values.logExport.severities | nindent 8 }}
       sources:
         {{- if .Values.logExport.sources }}
-        {{- toYaml .Values.logExport.sources | nindent 8 }}
+        {{- $platformNs := include "neuraltrust-watchdog.platformNamespace" . }}
+        {{- range .Values.logExport.sources }}
+        {{- $src := deepCopy . }}
+        {{- if and (hasKey $src "namespace") (eq ($src.namespace | toString) "") }}
+        {{- $_ := set $src "namespace" $platformNs }}
+        {{- end }}
+        - {{ toYaml $src | nindent 10 | trim }}
+        {{- end }}
         {{- else }}
-        - namespace: {{ .Release.Namespace | quote }}
+        - namespace: {{ include "neuraltrust-watchdog.platformNamespace" . | quote }}
         {{- end }}
       sinceSeconds: {{ .Values.logExport.sinceSeconds }}
       maxLinesPerPodPerMinute: {{ .Values.logExport.maxLinesPerPodPerMinute }}
@@ -98,6 +105,7 @@ data:
     platformState:
       enabled: true
       dryRun: {{ .Values.platformState.dryRun }}
+      fullValuesApply: {{ .Values.platformState.fullValuesApply }}
       releaseName: {{ .Values.platformState.releaseName | quote }}
       namespace: {{ .Values.platformState.namespace | default .Release.Namespace | quote }}
       pollInterval: {{ .Values.platformState.pollInterval }}
@@ -138,5 +146,5 @@ data:
       {{- if has $c.id $enabledIds }}
       {{- $c = merge (dict "enabled" true) $c }}
       {{- end }}
-      - {{ toYaml $c | nindent 8 | trim }}
+      - {{ include "neuraltrust-watchdog.resolveCheck" (dict "check" $c "ctx" $) | nindent 8 | trim }}
       {{- end }}
