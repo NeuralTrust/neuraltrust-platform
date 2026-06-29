@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v1.14.12] — 2026-06-29
+
 ### Fixed
 
 - **Watchdog platform check namespaces follow the Helm release namespace.** Platform-scoped checks (`pod-health`, `deployment-health`, `cert-renewal`, `log-error-rate`, …) no longer hardcode `neuraltrust`; empty `target.namespace` / `target.namespaces` now resolve to `platformNamespace` (default: the release namespace). Cross-namespace checks (`deploy-api`, `aispm`, `trustscan`, `opentelemetry`, …) keep explicit namespaces. `logExport.sources` uses the same resolution. watchdog subchart `0.2.0 → 0.2.1`.
