@@ -48,11 +48,10 @@ neuraltrust-watchdog:
     - control-plane-synthetic
     - data-plane-synthetic
     - trustgate-synthetic
-    - firewall-synthetic
+    - firewall-health
     # Platform-level (kubelet + API observations)
     - pod-health
     - deployment-health
-    - gateway-health
     - otel-collector
     - cert-renewal
     # Log-error-volume alert. Requires the log bridge (logExport) to be tailing;
