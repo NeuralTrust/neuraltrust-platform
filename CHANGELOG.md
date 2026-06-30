@@ -4,6 +4,14 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Changed
+
+- **Bump NeuralTrust images to latest releases.** `trustgate-ee` `v1.28.2 → v1.28.3`, `app` `v1.72.0 → v1.76.0`, `data-plane-api` `v1.35.1 → v1.36.0`, `watchdog` `v0.12.0 → v0.13.0`. All other bump-images targets were already at the latest Artifact Registry tags. Subcharts: TrustGate `1.2.30 → 1.2.31`, control-plane `1.2.37 → 1.2.38`, data-plane `1.2.43 → 1.2.44`, watchdog `0.2.3 → 0.2.4`.
+
+### Fixed
+
+- **TrustGate Kafka SASL auth works without a binary change.** The shared Kafka auth env emits the platform-standard `KAFKA_SASL_USERNAME` / `KAFKA_SASL_PASSWORD`, but the TrustGate binary reads `KAFKA_USERNAME` / `KAFKA_PASSWORD`. With auth enabled the credentials therefore arrived empty and the telemetry producer connected in PLAINTEXT against a SASL broker (`broker might require SASL authentication`). `trustgate.kafkaEnv` now also emits the legacy `KAFKA_USERNAME` / `KAFKA_PASSWORD` aliases (same inline/existing-secret source as `KAFKA_SASL_*`), so SASL (e.g. SCRAM-SHA-512 on a `SASL_PLAINTEXT` listener) works with the current image. The alias is harmless once the binary aligns to the `KAFKA_SASL_*` names. Only rendered when `global.kafka.auth` is enabled and no `jaasConfigKey` is set. TrustGate subchart `1.2.29 → 1.2.30`.
+
 ## [v1.14.12] — 2026-06-29
 
 ### Fixed
