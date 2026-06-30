@@ -254,7 +254,9 @@ SETTINGS index_granularity = 8192;
 CREATE TABLE IF NOT EXISTS agentgateway_requests
 (
     -- Schema / identity
-    schema_version Int32 DEFAULT 2,
+    schema_version Int32 DEFAULT 3,
+    -- kind discriminates the request plane: 'llm' (proxy) or 'mcp' (MCP server).
+    kind String DEFAULT 'llm',
     trace_id String,
     gateway_id String DEFAULT '',
     team_id String DEFAULT '',
@@ -268,7 +270,6 @@ CREATE TABLE IF NOT EXISTS agentgateway_requests
     -- Session / actor
     session_id String DEFAULT '',
     turn_id String DEFAULT '',
-    fingerprint_id String DEFAULT '',
     ip String DEFAULT '',
 
     -- Outcome
@@ -284,7 +285,10 @@ CREATE TABLE IF NOT EXISTS agentgateway_requests
     cost String DEFAULT '{}',
     latency String DEFAULT '{}',
 
-    -- Nested arrays stored as JSON strings
+    -- Nested objects/arrays stored as JSON strings
+    -- mcp carries MCP-plane metadata (method, host/server, tool/prompt/resource,
+    -- upstream status/latency); empty for LLM requests.
+    mcp String DEFAULT '{}',
     attempts String DEFAULT '[]',
     policy_chain String DEFAULT '[]',
 
@@ -294,7 +298,7 @@ CREATE TABLE IF NOT EXISTS agentgateway_requests
     INDEX idx_trace_id (trace_id) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_session_id (session_id) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_turn_id (turn_id) TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_fingerprint_id (fingerprint_id) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_kind (kind) TYPE set(2) GRANULARITY 1,
     INDEX idx_is_flagged (is_flagged) TYPE minmax GRANULARITY 1
 ) ENGINE = MergeTree()
 PARTITION BY toYYYYMM(occurred_on)
@@ -302,15 +306,159 @@ ORDER BY (toStartOfHour(occurred_on), team_id, gateway_id, trace_id)
 TTL toDate(occurred_on) + INTERVAL 12 MONTH
 SETTINGS index_granularity = 8192;
 
+-- Backfill columns/index for environments created before the MCP plane (schema v3).
+ALTER TABLE agentgateway_requests ADD COLUMN IF NOT EXISTS kind String DEFAULT 'llm';
+ALTER TABLE agentgateway_requests ADD COLUMN IF NOT EXISTS mcp String DEFAULT '{}';
+ALTER TABLE agentgateway_requests ADD INDEX IF NOT EXISTS idx_kind (kind) TYPE set(2) GRANULARITY 1;
 
 -- ============================================================================
--- TRUSTGUARD_REQUESTS TABLE: Consolidated TrustGuard guard request events (schema_version 1)
--- Source: Kafka topic "trustguard_metrics" (one row per guard request).
+-- AGENTGATEWAY DASHBOARD VIEWS
+-- Normalized views that flatten the JSON blobs of agentgateway_requests into
+-- typed columns so the data-plane-api dashboards aggregate without repeating
+-- JSONExtract everywhere. Heavy time-series live in the *_1h materialized views.
+-- ============================================================================
+
+-- Flat view: one typed row per request (LLM or MCP).
+CREATE VIEW IF NOT EXISTS agentgateway_requests_flat AS
+SELECT
+    team_id,
+    gateway_id,
+    trace_id,
+    occurred_on,
+    kind,
+    JSONExtractInt(status, 'code')             AS status_code,
+    JSONExtractString(status, 'outcome')       AS outcome,
+    JSONExtractBool(status, 'is_timeout')      AS is_timeout,
+    JSONExtractString(request, 'provider')        AS provider,
+    JSONExtractString(request, 'model')           AS model,
+    JSONExtractString(request, 'requested_model') AS requested_model,
+    JSONExtractString(request, 'path')            AS path,
+    JSONExtractString(consumer, 'id')   AS consumer_id,
+    JSONExtractString(consumer, 'name') AS consumer_name,
+    JSONExtractInt(usage, 'prompt_tokens')     AS prompt_tokens,
+    JSONExtractInt(usage, 'completion_tokens') AS completion_tokens,
+    JSONExtractInt(usage, 'total_tokens')      AS total_tokens,
+    JSONExtractFloat(cost, 'total_usd')        AS cost_total_usd,
+    JSONExtractString(cost, 'currency')        AS cost_currency,
+    (usage != '' AND usage != '{}')            AS has_usage,
+    (cost != '' AND cost != '{}')              AS has_cost,
+    JSONExtractInt(latency, 'total_ms')    AS total_ms,
+    JSONExtractInt(latency, 'provider_ms') AS provider_ms,
+    JSONExtractString(mcp, 'method')           AS mcp_method,
+    JSONExtractString(mcp, 'operation')        AS mcp_operation,
+    JSONExtractString(mcp, 'server_name')      AS mcp_server_name,
+    JSONExtractString(mcp, 'host')             AS mcp_host,
+    JSONExtractString(mcp, 'tool')             AS mcp_tool,
+    JSONExtractString(mcp, 'upstream_status')  AS mcp_upstream_status,
+    JSONExtractInt(mcp, 'upstream_latency_ms') AS mcp_upstream_latency_ms,
+    JSONExtractInt(mcp, 'rpc_error_code')      AS mcp_rpc_error_code,
+    JSONExtractInt(mcp, 'targets')             AS mcp_targets,
+    (
+        JSONExtractInt(status, 'code') >= 400
+        OR JSONExtractBool(status, 'is_timeout')
+        OR JSONExtractString(mcp, 'upstream_status') = 'error'
+        OR JSONExtractInt(mcp, 'rpc_error_code') != 0
+    ) AS error
+FROM agentgateway_requests;
+
+-- Policy chain view: one typed row per policy entry (for the Policy tab).
+CREATE OR REPLACE VIEW agentgateway_policy_chain AS
+SELECT
+    team_id,
+    gateway_id,
+    trace_id,
+    occurred_on,
+    kind,
+    JSONExtractString(consumer, 'id')   AS consumer_id,
+    JSONExtractString(consumer, 'name') AS consumer_name,
+    JSONExtractString(entry, 'name')        AS policy_name,
+    JSONExtractString(entry, 'stage')       AS stage,
+    JSONExtractString(entry, 'decision')    AS decision,
+    JSONExtractBool(entry, 'error')         AS error,
+    JSONExtractBool(entry, 'flagged')       AS flagged,
+    JSONExtractString(entry, 'score_label') AS score_label,
+    JSONExtractInt(entry, 'status_code')    AS status_code
+FROM agentgateway_requests
+ARRAY JOIN JSONExtractArrayRaw(policy_chain) AS entry;
+
+-- ============================================================================
+-- AGENTGATEWAY DASHBOARD MATERIALIZED VIEWS (hourly pre-aggregation)
+-- Populated on new inserts only; rows already present before these views are
+-- created are not back-aggregated.
+-- ============================================================================
+
+-- Hourly request/latency/cost rollup (Overview + Cost time-series).
+CREATE MATERIALIZED VIEW IF NOT EXISTS agentgateway_metrics_1h
+ENGINE = AggregatingMergeTree()
+PARTITION BY toYYYYMM(hour)
+ORDER BY (hour, team_id, gateway_id, kind)
+AS SELECT
+    toStartOfHour(occurred_on) AS hour,
+    team_id,
+    gateway_id,
+    kind,
+    countState() AS requests_state,
+    countStateIf(
+        JSONExtractInt(status, 'code') >= 400
+        OR JSONExtractBool(status, 'is_timeout')
+        OR JSONExtractString(mcp, 'upstream_status') = 'error'
+        OR JSONExtractInt(mcp, 'rpc_error_code') != 0
+    ) AS errors_state,
+    quantilesState(0.5, 0.95, 0.99)(toFloat64(JSONExtractInt(latency, 'total_ms'))) AS latency_q_state,
+    avgState(toFloat64(JSONExtractInt(latency, 'total_ms'))) AS latency_avg_state,
+    sumState(toUInt64(JSONExtractInt(usage, 'prompt_tokens'))) AS prompt_tokens_state,
+    sumState(toUInt64(JSONExtractInt(usage, 'completion_tokens'))) AS completion_tokens_state,
+    sumState(JSONExtractFloat(cost, 'total_usd')) AS cost_usd_state,
+    countStateIf((usage != '' AND usage != '{}') AND (cost = '' OR cost = '{}')) AS unpriced_state
+FROM agentgateway_requests
+GROUP BY hour, team_id, gateway_id, kind;
+
+-- Hourly MCP per provider/host/tool rollup (MCP tab with latency percentiles).
+CREATE MATERIALIZED VIEW IF NOT EXISTS agentgateway_mcp_1h
+ENGINE = AggregatingMergeTree()
+PARTITION BY toYYYYMM(hour)
+ORDER BY (hour, team_id, gateway_id, server_name, host, tool, operation)
+AS SELECT
+    toStartOfHour(occurred_on) AS hour,
+    team_id,
+    gateway_id,
+    JSONExtractString(mcp, 'server_name') AS server_name,
+    JSONExtractString(mcp, 'host')        AS host,
+    JSONExtractString(mcp, 'tool')        AS tool,
+    JSONExtractString(mcp, 'operation')   AS operation,
+    countState() AS requests_state,
+    countStateIf(
+        JSONExtractString(mcp, 'upstream_status') = 'error'
+        OR JSONExtractInt(mcp, 'rpc_error_code') != 0
+    ) AS errors_state,
+    quantilesState(0.5, 0.95, 0.99)(toFloat64(JSONExtractInt(mcp, 'upstream_latency_ms'))) AS upstream_latency_q_state
+FROM agentgateway_requests
+WHERE kind = 'mcp'
+GROUP BY hour, team_id, gateway_id, server_name, host, tool, operation;
+
+
+-- ============================================================================
+-- TRUSTGUARD_REQUESTS TABLE: Consolidated TrustGuard guard request events.
+-- Source: Kafka topic "trustguard_requests" (one row per guard request).
 -- Written by Kafka Connect (ClickHouse sink) directly from the JSON event.
 -- Root-level scalar fields map to columns; nested objects/arrays (consumer,
--- status, latency, request, response, security, detector_chain) are stored as JSON
--- strings and parsed at query time with JSONExtract* functions.
--- Column names match the emitted JSON keys so the sink maps fields directly.
+-- policy, status, latency, attributes, request, response, security, gates,
+-- detector_chain) are stored as JSON strings and parsed at query time with
+-- JSONExtract* functions. Column names match the emitted JSON keys so the sink
+-- maps fields directly.
+--
+-- The request verdict lives in status.outcome (allow/report/transform/block/error).
+--
+-- The resolved policy is emitted as a top-level "policy" object {id, name,
+-- report_only}; the matched request attributes are emitted as a top-level
+-- "attributes" map; gates (then-only block/report/skip) carry: name, policy_id,
+-- action, status, terminal.
+-- detector_chain entries (detector model; detectors carry an action, not a mode)
+-- carry: name, stage, policy_id (the resolved policy's id is its key), detector_id,
+-- action (effective action applied: report/block/transform), status (mirrors action),
+-- report_only (the policy's report/enforce switch), detection_type, decision,
+-- confidence, latency_ms, status_code, error, extras. The per-detector fields live
+-- inside the JSON blob, so adding/renaming them needs no DDL change and no sink remap.
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS trustguard_requests
 (
@@ -318,7 +466,7 @@ CREATE TABLE IF NOT EXISTS trustguard_requests
     schema_version Int32 DEFAULT 1,
     trace_id String,
     collector_id String DEFAULT '',
-    api_key_id String DEFAULT '',
+    collector_name String DEFAULT '',
     team_id String DEFAULT '',
 
     -- Timing
@@ -333,40 +481,52 @@ CREATE TABLE IF NOT EXISTS trustguard_requests
 
     -- Session / actor
     session_id String DEFAULT '',
-    conversation_id String DEFAULT '',
-    interaction_id String DEFAULT '',
-    fingerprint_id String DEFAULT '',
     ip String DEFAULT '',
 
     -- Outcome
-    is_flagged UInt8 DEFAULT 0,
     `security` String DEFAULT '[]',
 
     -- Nested objects stored as JSON strings
     consumer String DEFAULT '{}',
+    policy String DEFAULT '{}',
     status String DEFAULT '{}',
     latency String DEFAULT '{}',
+    attributes String DEFAULT '{}',
     request String DEFAULT '{}',
     response String DEFAULT '{}',
 
     -- Nested arrays stored as JSON strings
+    gates String DEFAULT '[]',
     detector_chain String DEFAULT '[]',
 
     -- Indexes for common filters
     INDEX idx_team_id (team_id) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_collector_id (collector_id) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_trace_id (trace_id) TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_session_id (session_id) TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_fingerprint_id (fingerprint_id) TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_is_flagged (is_flagged) TYPE minmax GRANULARITY 1
+    INDEX idx_session_id (session_id) TYPE bloom_filter(0.01) GRANULARITY 1
 ) ENGINE = MergeTree()
 PARTITION BY toYYYYMM(occurred_on)
 ORDER BY (toStartOfHour(occurred_on), team_id, collector_id, trace_id)
 TTL toDate(occurred_on) + INTERVAL 12 MONTH
 SETTINGS index_granularity = 8192;
 
--- Backfill rename for environments created before the policy->detector rename.
-ALTER TABLE trustguard_requests RENAME COLUMN IF EXISTS policy_chain TO detector_chain;
+-- Schema migration for existing clusters (idempotent; no-ops on the fresh table above).
+ALTER TABLE trustguard_requests DROP INDEX IF EXISTS idx_is_flagged;
+ALTER TABLE trustguard_requests DROP INDEX IF EXISTS idx_fingerprint_id;
+ALTER TABLE trustguard_requests DROP COLUMN IF EXISTS is_flagged;
+ALTER TABLE trustguard_requests DROP COLUMN IF EXISTS access_rules;
+ALTER TABLE trustguard_requests DROP COLUMN IF EXISTS conversation_id;
+ALTER TABLE trustguard_requests DROP COLUMN IF EXISTS interaction_id;
+ALTER TABLE trustguard_requests DROP COLUMN IF EXISTS fingerprint_id;
+ALTER TABLE trustguard_requests DROP COLUMN IF EXISTS api_key_id;
+ALTER TABLE trustguard_requests ADD COLUMN IF NOT EXISTS policy String DEFAULT '{}' AFTER consumer;
+ALTER TABLE trustguard_requests ADD COLUMN IF NOT EXISTS attributes String DEFAULT '{}' AFTER request;
+ALTER TABLE trustguard_requests ADD COLUMN IF NOT EXISTS gates String DEFAULT '[]' AFTER response;
+-- collector_name is emitted at the event root; storing it powers the dashboard
+-- "By Collector" table without a join. Backfilled from new inserts only (the sink
+-- maps it by field name); historical rows keep the '' default.
+ALTER TABLE trustguard_requests ADD COLUMN IF NOT EXISTS collector_name String DEFAULT '' AFTER collector_id;
+ALTER TABLE trustguard_requests ADD COLUMN IF NOT EXISTS request_id String DEFAULT '' AFTER trace_id;
 
 
 -- ============================================================================
