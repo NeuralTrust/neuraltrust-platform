@@ -211,6 +211,12 @@ app.kubernetes.io/component: actions
 {{/*
 Kafka broker env for TrustGate (host/port shape + shared SASL/TLS from global.kafka).
 Usage: {{- include "trustgate.kafkaEnv" . | nindent 8 }}
+
+The shared authEnv emits the platform-standard KAFKA_SASL_USERNAME /
+KAFKA_SASL_PASSWORD names. The TrustGate binary reads KAFKA_USERNAME /
+KAFKA_PASSWORD, so we additionally emit those legacy aliases (same secret/inline
+source) to enable SASL without a binary change. Harmless once the binary aligns
+to the KAFKA_SASL_* names.
 */}}
 {{- define "trustgate.kafkaEnv" -}}
 - name: KAFKA_HOST
@@ -218,6 +224,26 @@ Usage: {{- include "trustgate.kafkaEnv" . | nindent 8 }}
 - name: KAFKA_PORT
   value: {{ include "neuraltrust-platform.kafka.port" . | quote }}
 {{- include "neuraltrust-platform.kafka.authEnv" . }}
+{{- $auth := include "neuraltrust-platform.kafka.authConfig" . | fromYaml }}
+{{- if and $auth.enabled (not $auth.jaasConfigKey) }}
+{{- if $auth.username }}
+- name: KAFKA_USERNAME
+  value: {{ $auth.username | quote }}
+{{- else if $auth.existingSecret }}
+- name: KAFKA_USERNAME
+  valueFrom:
+    secretKeyRef:
+      name: {{ $auth.existingSecret | quote }}
+      key: {{ $auth.usernameKey | quote }}
+{{- end }}
+{{- if $auth.existingSecret }}
+- name: KAFKA_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ $auth.existingSecret | quote }}
+      key: {{ $auth.passwordKey | quote }}
+{{- end }}
+{{- end }}
 {{- end -}}
 
 {{/*
