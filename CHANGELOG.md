@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v1.14.14] — 2026-07-01
+
 ### Changed
 
 - **Bump NeuralTrust images to latest releases.** `trustgate-ee` `v1.28.2 → v1.28.3`, `app` `v1.72.0 → v1.76.0`, `data-plane-api` `v1.35.1 → v1.36.0`, `watchdog` `v0.12.0 → v0.13.0`. All other bump-images targets were already at the latest Artifact Registry tags. Subcharts: TrustGate `1.2.30 → 1.2.31`, control-plane `1.2.37 → 1.2.38`, data-plane `1.2.43 → 1.2.44`, watchdog `0.2.3 → 0.2.4`.
