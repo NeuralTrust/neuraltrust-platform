@@ -1024,7 +1024,7 @@ neuraltrust-control-plane:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.78.2"
+          tag: "v1.79.0"
           pullPolicy: "Always"
         config:
           nodeEnv: production
@@ -1200,7 +1200,7 @@ neuraltrust-data-plane:
         classifierModel: "gpt"
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.37.0
+          tag: v1.38.1
           pullPolicy: Always
         accessMode: ReadWriteOnce
         huggingfaceToken: ""

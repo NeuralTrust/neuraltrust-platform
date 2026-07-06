@@ -55,7 +55,6 @@ spec:
             secretKeyRef:
               name: trustgate-secrets
               key: SERVER_SECRET_KEY
-              optional: true
         {{- include "trustgate.databaseEnv" . | nindent 8 }}
         # REDIS_PASSWORD is optional and sourced only from trustgate-secrets when configured
         - name: REDIS_PASSWORD
