@@ -4,6 +4,11 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Changed
+
+- **Bump NeuralTrust images to latest releases.** `app` `v1.78.2 → v1.79.0`, `data-plane-api` `v1.37.0 → v1.38.1`. All other bump-images targets were already at the latest Artifact Registry tags. Subcharts: control-plane `1.2.40 → 1.2.41`, data-plane `1.2.45 → 1.2.47`.
+- **TrustGate `SERVER_SECRET_KEY` is now required, and the firewall API key is enforced when the firewall is enabled.** All three TrustGate deployments (control-plane, data-plane, actions) previously referenced `SERVER_SECRET_KEY` with `optional: true`, so pods could boot without the mandatory server key and fail auth at runtime; the reference is now required so a missing key surfaces immediately as `CreateContainerConfigError`. In addition, the parent `platform-secrets.yaml` now fails the render fast if `SERVER_SECRET_KEY` cannot be resolved, or if `neuraltrust-firewall.firewall.enabled` is true but `NEURAL_TRUST_FIREWALL_SECRET_KEY` cannot be resolved for `trustgate-secrets`. Default installs are unaffected (both keys are auto-generated under `global.autoGenerateSecrets: true`); the change only fails fast on genuinely misconfigured deployments (e.g. `preserveExistingSecrets` with a required key omitted). Render coverage added to `scripts/test-helm-render.sh` (scenario 34). TrustGate subchart `1.2.31 → 1.2.32`.
+
 ## [v1.14.14] — 2026-07-01
 
 ### Changed

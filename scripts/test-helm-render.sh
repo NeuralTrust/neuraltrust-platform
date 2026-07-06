@@ -831,5 +831,21 @@ helm template test "$CHART_DIR" -f "$CHART_DIR/values-required.yaml" \
 assert_contains "$TMP/platform-secrets.yaml" "name: postgresql-secrets"      "postgresql-secrets rendered"
 assert_contains "$TMP/platform-secrets.yaml" "helm.sh/resource-policy: keep" "parent generated secret carries resource-policy keep"
 
+# Scenario 34: SERVER_SECRET_KEY is mandatory (not optional) on every TrustGate
+# deployment, and the firewall API key is auto-populated when firewall is enabled.
+blue "scenario 34: TrustGate SERVER_SECRET_KEY required + firewall key present when firewall enabled"
+render "$TMP/trustgate-required-keys.yaml" \
+  -f values-required.yaml \
+  --set trustgate.enabled=true \
+  --set neuraltrust-firewall.firewall.enabled=true
+# The SERVER_SECRET_KEY env ref must not carry `optional: true` on the line that
+# immediately follows the `key: SERVER_SECRET_KEY` reference.
+if grep -A1 'key: SERVER_SECRET_KEY' "$TMP/trustgate-required-keys.yaml" | grep -qE 'optional: true'; then
+  red "FAIL: SERVER_SECRET_KEY must be required (no optional: true) on TrustGate deployments"
+  exit 1
+fi
+green "ok  - SERVER_SECRET_KEY is required (not optional) on TrustGate deployments"
+assert_contains "$TMP/trustgate-required-keys.yaml" "NEURAL_TRUST_FIREWALL_SECRET_KEY:" "firewall API key auto-populated in trustgate-secrets when firewall enabled"
+
 green ""
 green "All helm-render assertions passed."
