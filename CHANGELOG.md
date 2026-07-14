@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v1.14.16] — 2026-07-14
+
 > **Release accounting.** All entries below ship together as a **single** release —
 > umbrella `1.14.15 → 1.18.0`. Subcharts at this release: `neuraltrust-control-plane`
 > `1.2.42`, `neuraltrust-data-plane` `1.2.48`, `clickhouse` `1.0.3`,
