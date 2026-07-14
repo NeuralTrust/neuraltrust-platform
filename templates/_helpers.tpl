@@ -203,6 +203,166 @@ Usage: {{- if include "neuraltrust-platform.isOpenshift" . }}
 {{- end }}
 
 {{/*
+Resolve the product generation switch.
+`global.platformVersion` selects which stack the umbrella chart deploys:
+  - "v1" (default / empty / null) → today's legacy stack, unchanged.
+  - "v2"                          → next-gen stack (AgentGateway, TrustGuard, TrustLens).
+This is intentionally NOT `global.platform` (that selects the cloud provider).
+Usage: {{ include "neuraltrust-platform.platformVersion" . }}
+*/}}
+{{- define "neuraltrust-platform.platformVersion" -}}
+{{- $global := default dict .Values.global }}
+{{- $global.platformVersion | default "v1" }}
+{{- end }}
+
+{{/*
+Returns "true" (non-empty) when the v2 stack is selected, empty otherwise.
+Guard every v2 subchart template with:
+  {{- if eq (include "neuraltrust-platform.isV2" .) "true" }}
+Under v1 the block renders to empty, keeping upgrades byte-identical to today.
+Usage: {{- if eq (include "neuraltrust-platform.isV2" .) "true" }}
+*/}}
+{{- define "neuraltrust-platform.isV2" -}}
+{{- $global := default dict .Values.global }}
+{{- if eq ($global.platformVersion | default "v1") "v2" }}true{{- end }}
+{{- end }}
+
+{{/*
+Deployment mode for the v2 stack (ignored under v1).
+`global.deploymentMode`:
+  - "hybrid" (default) → only data-plane components deploy at the customer
+                         (control-planes stay in NeuralTrust SaaS). DataAgent
+                         bridges local reads to SaaS DataBridge.
+  - "external"         → control-plane AND data-plane components deploy on-prem
+                         PLUS the self-hosted analytics stack
+                         (clickstack-otel-collector + DataCore reading local
+                         ClickHouse). No SaaS dependency; DataAgent is not
+                         deployed.
+  - "full"             → DEPRECATED alias for "external". Renders identically.
+Returns "true" (non-empty) only when deploymentMode is "external" (or the
+deprecated "full" alias) — the zero-SaaS-dependency install that also renders
+the self-hosted analytics stack (clickstack-otel-collector + DataCore + local
+ClickHouse). Guard the analytics subcharts with BOTH isV2 and isExternal.
+Usage: {{- if and (eq (include "neuraltrust-platform.isV2" .) "true") (eq (include "neuraltrust-platform.isExternal" .) "true") }}
+*/}}
+{{- define "neuraltrust-platform.isExternal" -}}
+{{- $global := default dict .Values.global }}
+{{- $mode := $global.deploymentMode | default "hybrid" }}
+{{- if or (eq $mode "external") (eq $mode "full") }}true{{- end }}
+{{- end }}
+
+{{/*
+DEPRECATED alias of isExternal, kept so existing control-plane template guards
+keep working. "full" and "external" now render identically (both deploy the
+control-planes). Returns "true" (non-empty) when control-planes should deploy,
+i.e. mode is "external" (or the deprecated "full" alias).
+Usage: {{- if and (eq (include "neuraltrust-platform.isV2" .) "true") (eq (include "neuraltrust-platform.isFull" .) "true") }}
+*/}}
+{{- define "neuraltrust-platform.isFull" -}}
+{{- include "neuraltrust-platform.isExternal" . }}
+{{- end }}
+
+{{/*
+Returns "true" (non-empty) only when deploymentMode is "hybrid" — the default
+split-plane install where DataAgent bridges local reads to SaaS DataBridge.
+Guard the DataAgent subchart with BOTH isV2 and isHybrid.
+Usage: {{- if and (eq (include "neuraltrust-platform.isV2" .) "true") (eq (include "neuraltrust-platform.isHybrid" .) "true") }}
+*/}}
+{{- define "neuraltrust-platform.isHybrid" -}}
+{{- $global := default dict .Values.global }}
+{{- if eq ($global.deploymentMode | default "hybrid") "hybrid" }}true{{- end }}
+{{- end }}
+
+{{/*
+Effective v2 service database name, keyed on deployment mode:
+  - external: each service owns a private database (defaults to its own name), because
+    the control planes run on-prem and own their migrations.
+  - hybrid: the data planes share ONE database ("trustdata"); isolation is by schema
+    (see v2-postgres-init.yaml), so DataAgent's single connection can read both.
+An explicit database.name always wins over the mode default.
+Usage: {{ include "neuraltrust-platform.v2.dbName" (dict "ctx" . "explicit" .Values.database.name "external" "agentgateway") }}
+*/}}
+{{- define "neuraltrust-platform.v2.dbName" -}}
+{{- if .explicit -}}
+{{- .explicit -}}
+{{- else if eq (include "neuraltrust-platform.isExternal" .ctx) "true" -}}
+{{- .external -}}
+{{- else -}}
+trustdata
+{{- end -}}
+{{- end }}
+
+{{/*
+Resolve the PostgreSQL host for a v2 service. Subcharts only see .Values.global,
+so we cannot inspect the parent's infrastructure.postgresql.deploy from here:
+default to the in-cluster Service name (control-plane-postgresql) and require an
+explicit host override for external/hosted Postgres. This makes local deploys
+zero-config while external deploys just overlay the host.
+Usage: {{ include "neuraltrust-platform.postgres.host" (dict "host" .Values.database.host) }}
+*/}}
+{{- define "neuraltrust-platform.postgres.host" -}}
+{{- .host | default "control-plane-postgresql" }}
+{{- end }}
+
+{{/*
+Render the shared TrustGuard client-credentials env (client_credentials pair the
+AgentGateway proxy presents to TrustGuard and TrustGuard validates). Both values
+come from the single parent Secret v2-trustguard-client-secret so the id/secret
+stay identical across services (an inconsistent pair makes TrustGuard refuse to
+boot). optional:true keeps pods bootable when the pair is intentionally empty
+(platform scope disabled).
+Usage: {{ include "neuraltrust-platform.trustguardClientEnv" (dict "idVar" "TRUSTGUARD_CLIENT_ID" "secretVar" "TRUSTGUARD_CLIENT_SECRET") }}
+*/}}
+{{- define "neuraltrust-platform.trustguardClientEnv" -}}
+- name: {{ .idVar }}
+  valueFrom:
+    secretKeyRef:
+      name: v2-trustguard-client-secret
+      key: CLIENT_ID
+      optional: true
+- name: {{ .secretVar }}
+  valueFrom:
+    secretKeyRef:
+      name: v2-trustguard-client-secret
+      key: CLIENT_SECRET
+      optional: true
+{{- end }}
+
+{{/*
+Returns "true" (non-empty) when the in-cluster ClickHouse subchart is allowed to
+render. Always true: v1 (any mode) and every v2 mode (hybrid + external) need
+ClickHouse as the analytics store for the data-plane-api shim (temporary, until
+TrustLens ships its own write path). Rendering is still gated by the Chart.yaml
+`infrastructure.clickhouse.deploy` condition, so operators using hosted/external
+ClickHouse set deploy: false to skip it. Guard every charts/clickhouse template
+with this so the intent stays explicit even though it is currently unconditional.
+Usage: {{- if eq (include "neuraltrust-platform.clickhouseAllowed" .) "true" }}
+*/}}
+{{- define "neuraltrust-platform.clickhouseAllowed" -}}
+true
+{{- end }}
+
+{{/*
+Returns "true" (non-empty) when the temporary v2 data-plane-api shim should
+render. In v2 the legacy data-plane subchart is disabled, but the read/analytics
+API (data-plane-api) is kept alive in every v2 mode until TrustLens replaces it.
+Only the API component renders — kafka-workers and kafka-connect stay off.
+True when: isV2 AND dataPlane.enabled AND dataPlane.components.api.enabled.
+MUST be invoked from the neuraltrust-data-plane subchart context so `.Values`
+resolves to that subchart's values (.Values.dataPlane...).
+Usage: {{- if eq (include "neuraltrust-platform.dataPlaneApiV2.enabled" .) "true" }}
+*/}}
+{{- define "neuraltrust-platform.dataPlaneApiV2.enabled" -}}
+{{- if eq (include "neuraltrust-platform.isV2" .) "true" }}
+{{- $dp := default dict .Values.dataPlane }}
+{{- $dpOn := true }}{{- if hasKey $dp "enabled" }}{{- $dpOn = $dp.enabled }}{{- end }}
+{{- $api := default dict (default dict $dp.components).api }}
+{{- $apiOn := true }}{{- if hasKey $api "enabled" }}{{- $apiOn = $api.enabled }}{{- end }}
+{{- if and $dpOn $apiOn }}true{{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
 Resolve the base domain for URL generation.
 Priority: global.domain > global.openshiftDomain (deprecated).
 Usage: {{ include "neuraltrust-platform.domain" . }}
@@ -565,6 +725,105 @@ Usage: {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
 - name: no_proxy
   value: {{ .Values.global.proxy.noProxy | quote }}
 {{- end }}
+{{- end }}
+
+{{/*
+Config-sync data-plane environment.
+Emits the non-secret env that turns a workload into a DB-less config-sync data
+plane. The endpoint and transport are derived from the deployment mode:
+  hybrid: dial the fixed public SaaS endpoint <product>-configsync.<saasDomain>:443
+          over TLS verified against the public root store (no CA distribution).
+  full:   dial the in-cluster control-plane Service over plaintext by default
+          (configSync.tlsInsecure), since both planes live in the same cluster.
+The shared token and the local LKG key arrive via the workload's existing envFrom
+secretRef, so they are not emitted here. Rendered only when configSync.enabled.
+Usage: {{- include "neuraltrust-platform.configSyncEnv" (dict "ctx" . "product" "trustguard") | nindent 8 }}
+*/}}
+{{- define "neuraltrust-platform.configSyncEnv" -}}
+{{- $ctx := .ctx -}}
+{{- $product := .product -}}
+{{- $tlsCaPath := .tlsCaPath | default "" -}}
+{{- $cs := default dict $ctx.Values.configSync -}}
+{{- if $cs.enabled -}}
+{{- $isFull := eq (include "neuraltrust-platform.isFull" $ctx) "true" -}}
+{{- $endpoint := $cs.endpoint -}}
+{{- $insecure := false -}}
+{{- $caPath := "" -}}
+{{- if $isFull -}}
+  {{- /* Full: dial the in-cluster control plane. When the caller provides a
+         generated CA path (tlsCaPath), the listener runs TLS (deployed APP_ENV)
+         and we verify against that CA. Otherwise fall back to plaintext, which
+         the app only accepts under a non-prod APP_ENV. */ -}}
+  {{- if $tlsCaPath -}}
+    {{- $caPath = $tlsCaPath -}}
+  {{- else -}}
+    {{- $insecure = ternary $cs.tlsInsecure true (hasKey $cs "tlsInsecure") -}}
+    {{- $caPath = $cs.tlsCa -}}
+  {{- end -}}
+  {{- if not $endpoint -}}
+    {{- $endpoint = printf "%s.%s.svc.cluster.local:%v" $ctx.Values.controlPlane.name $ctx.Release.Namespace $ctx.Values.controlPlane.ports.grpc -}}
+  {{- end -}}
+{{- else -}}
+  {{- /* Hybrid: fixed public SaaS endpoint, verified against public roots. */ -}}
+  {{- $saasDomain := $cs.saasDomain | default "neuraltrust.ai" -}}
+  {{- $caPath = $cs.tlsCa -}}
+  {{- if not $endpoint -}}
+    {{- $endpoint = printf "%s-configsync.%s:443" $product $saasDomain -}}
+  {{- end -}}
+{{- end -}}
+- name: CONFIG_SYNC_DATA_PLANE_ENABLED
+  value: "true"
+- name: CONFIG_SYNC_GRPC_ENDPOINT
+  value: {{ $endpoint | quote }}
+{{- if $insecure }}
+- name: CONFIG_SYNC_TLS_INSECURE
+  value: "true"
+{{- else }}
+- name: CONFIG_SYNC_TLS_INSECURE
+  value: "false"
+- name: CONFIG_SYNC_TLS_SERVER_NAME
+  value: {{ $cs.serverName | default (regexReplaceAll ":[0-9]+$" $endpoint "") | quote }}
+{{- with $caPath }}
+- name: CONFIG_SYNC_TLS_CA
+  value: {{ . | quote }}
+{{- end }}
+{{- end }}
+{{- end -}}
+{{- end }}
+
+{{/*
+Config-sync shared token. Priority: explicit configSync.token > value preserved
+from the existing cluster secret > empty. Never auto-generated: it MUST match the
+SaaS control plane, so an empty result means the operator delivers it out-of-band
+(pre-created secret + global.preserveExistingSecrets, or --set configSync.token).
+Usage: {{ include "neuraltrust-platform.configSync.token" (dict "ctx" . "existingSecret" $existing) }}
+*/}}
+{{- define "neuraltrust-platform.configSync.token" -}}
+{{- $cs := default dict .ctx.Values.configSync -}}
+{{- $existing := .existingSecret -}}
+{{- if and $cs.token (ne ($cs.token | toString) "") -}}
+{{- $cs.token -}}
+{{- else if and $existing (kindIs "map" $existing) (index $existing "data") (hasKey $existing.data "CONFIG_SYNC_TOKEN") -}}
+{{- index $existing.data "CONFIG_SYNC_TOKEN" | b64dec -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Config-sync local LKG cache key (base64 of exactly 32 bytes). Priority: explicit
+configSync.lkgKey > value preserved from the existing cluster secret > generated.
+Unlike the token this is local-only, so auto-generating a fresh 32-byte key is safe.
+Usage: {{ include "neuraltrust-platform.configSync.lkgKey" (dict "ctx" . "existingSecret" $existing) }}
+*/}}
+{{- define "neuraltrust-platform.configSync.lkgKey" -}}
+{{- $cs := default dict .ctx.Values.configSync -}}
+{{- $existing := .existingSecret -}}
+{{- if and $cs.lkgKey (ne ($cs.lkgKey | toString) "") -}}
+{{- $cs.lkgKey -}}
+{{- else if and $existing (kindIs "map" $existing) (index $existing "data") (hasKey $existing.data "CONFIG_SYNC_LKG_KEY") -}}
+{{- index $existing.data "CONFIG_SYNC_LKG_KEY" | b64dec -}}
+{{- else -}}
+{{- randBytes 32 -}}
+{{- end -}}
 {{- end }}
 
 {{/*

@@ -1,0 +1,23 @@
+{{- if and (eq (include "neuraltrust-platform.isV2" .) "true") (eq (include "neuraltrust-platform.isExternal" .) "true") }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "clickstack-otel-collector.fullname" . }}
+  labels:
+    {{- include "clickstack-otel-collector.labels" . | nindent 4 }}
+    app.kubernetes.io/component: telemetry
+spec:
+  type: {{ .Values.service.type | default "ClusterIP" }}
+  ports:
+    - port: {{ .Values.ports.otlp }}
+      targetPort: otlp
+      protocol: TCP
+      name: otlp
+    - port: {{ .Values.ports.otlpHttp }}
+      targetPort: otlp-http
+      protocol: TCP
+      name: otlp-http
+  selector:
+    {{- include "clickstack-otel-collector.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: telemetry
+{{- end }}

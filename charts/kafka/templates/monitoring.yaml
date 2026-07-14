@@ -1,3 +1,5 @@
+{{- /* platform-v2: legacy component disabled when global.platformVersion=v2 */ -}}
+{{- if not (eq (include "neuraltrust-platform.isV2" .) "true") }}
 {{- $g := default dict .Values.global -}}
 {{- $m := default dict $g.monitoring -}}
 {{- $cap := .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" -}}
@@ -46,4 +48,6 @@ spec:
           annotations:
             summary: "Kafka Connect has no ready replicas"
             description: "ClickHouse sink connector cannot run. Telemetry will buffer in Kafka topics; recovery is automatic once Connect comes back."
+{{- end }}
+
 {{- end }}

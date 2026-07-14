@@ -1,3 +1,5 @@
+{{- /* platform-v2: legacy component disabled when global.platformVersion=v2 */ -}}
+{{- if not (eq (include "neuraltrust-platform.isV2" .) "true") }}
 {{- /*
 DEPRECATED: This init job is deprecated in favor of init containers in the API and Worker deployments.
 The init containers run migrations automatically before the pods start, providing better reliability and integration.
@@ -142,4 +144,5 @@ spec:
                 path: init-db.sql
       {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" .) | nindent 6 }}
       {{- include "neuraltrust-platform.tolerations" (dict "ctx" .) | nindent 6 }}
+{{- end }}
 {{- end }}

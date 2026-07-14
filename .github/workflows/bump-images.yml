@@ -59,6 +59,34 @@ on:
         description: "watchdog tag (e.g. v0.1.0). Empty = latest from AR."
         required: false
         default: ""
+      agentgateway_tag:
+        description: "agentgateway (v2) tag (e.g. v0.2.9). Empty = latest from AR."
+        required: false
+        default: ""
+      trustguard_tag:
+        description: "trustguard (v2) tag (e.g. v0.1.0). Empty = latest from AR."
+        required: false
+        default: ""
+      trustlens_tag:
+        description: "trustlens (v2) tag (e.g. v0.1.0). Empty = latest from AR."
+        required: false
+        default: ""
+      dataagent_tag:
+        description: "dataagent (v2) tag (e.g. v0.1.0). Empty = latest from AR."
+        required: false
+        default: ""
+      datacore_tag:
+        description: "datacore (v2) tag (e.g. v0.1.0). Empty = latest from AR."
+        required: false
+        default: ""
+      clickstack_otel_collector_tag:
+        description: "clickstack-otel-collector (v2) tag (e.g. 2.29.0). External image (docker.clickhouse.com) — manual only, not auto-detected from AR."
+        required: false
+        default: ""
+      alertengine_tag:
+        description: "alertengine (v2) tag (e.g. v0.1.0). Empty = latest from AR."
+        required: false
+        default: ""
       clickhouse_tag:
         description: "clickhouse-server tag (e.g. 25.8 or 25.10.1). Empty = latest from AR (matches X.Y, X.Y.Z, X.Y.Z.W)."
         required: false
@@ -184,6 +212,15 @@ jobs:
           AISPM=$(resolve_tag "aispm-api" "${{ inputs.aispm_tag }}")
           SIEM_CONNECTORS=$(resolve_tag "siem-connectors" "${{ inputs.siem_connectors_tag }}")
           WATCHDOG=$(resolve_tag "watchdog" "${{ inputs.watchdog_tag }}")
+          AGENTGATEWAY=$(resolve_tag "agentgateway" "${{ inputs.agentgateway_tag }}")
+          TRUSTGUARD=$(resolve_tag "trustguard" "${{ inputs.trustguard_tag }}")
+          TRUSTLENS=$(resolve_tag "trustlens" "${{ inputs.trustlens_tag }}")
+          DATAAGENT=$(resolve_tag "dataagent" "${{ inputs.dataagent_tag }}")
+          DATACORE=$(resolve_tag "datacore" "${{ inputs.datacore_tag }}")
+          # clickstack-otel-collector is an external image (docker.clickhouse.com);
+          # it is not in AR, so honor the manual input only (no auto-detect).
+          CLICKSTACK_OTEL_COLLECTOR="${{ inputs.clickstack_otel_collector_tag }}"
+          ALERTENGINE=$(resolve_tag "alertengine" "${{ inputs.alertengine_tag }}")
 
           # Infrastructure images (non-standard tag patterns, override default regex).
           CLICKHOUSE=$(resolve_tag "clickhouse-server" "${{ inputs.clickhouse_tag }}" '^[0-9]+\.[0-9]+(\.[0-9]+){0,2}$')
@@ -203,6 +240,13 @@ jobs:
           echo "aispm=${AISPM}" >> "$GITHUB_OUTPUT"
           echo "siem_connectors=${SIEM_CONNECTORS}" >> "$GITHUB_OUTPUT"
           echo "watchdog=${WATCHDOG}" >> "$GITHUB_OUTPUT"
+          echo "agentgateway=${AGENTGATEWAY}" >> "$GITHUB_OUTPUT"
+          echo "trustguard=${TRUSTGUARD}" >> "$GITHUB_OUTPUT"
+          echo "trustlens=${TRUSTLENS}" >> "$GITHUB_OUTPUT"
+          echo "dataagent=${DATAAGENT}" >> "$GITHUB_OUTPUT"
+          echo "datacore=${DATACORE}" >> "$GITHUB_OUTPUT"
+          echo "clickstack_otel_collector=${CLICKSTACK_OTEL_COLLECTOR}" >> "$GITHUB_OUTPUT"
+          echo "alertengine=${ALERTENGINE}" >> "$GITHUB_OUTPUT"
           echo "clickhouse=${CLICKHOUSE}" >> "$GITHUB_OUTPUT"
           echo "kafka=${KAFKA}" >> "$GITHUB_OUTPUT"
           echo "redis=${REDIS}" >> "$GITHUB_OUTPUT"
@@ -223,6 +267,13 @@ jobs:
           echo "| aispm-api/worker/beat (shared tag) | \`${AISPM:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| siem-connectors | \`${SIEM_CONNECTORS:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| watchdog (neuraltrust-watchdog subchart) | \`${WATCHDOG:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| agentgateway (v2) | \`${AGENTGATEWAY:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| trustguard (v2) | \`${TRUSTGUARD:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| trustlens (v2) | \`${TRUSTLENS:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| dataagent (v2) | \`${DATAAGENT:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| datacore (v2) | \`${DATACORE:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| clickstack-otel-collector (v2, external image) | \`${CLICKSTACK_OTEL_COLLECTOR:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| alertengine (v2) | \`${ALERTENGINE:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| clickhouse-server | \`${CLICKHOUSE:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| kafka | \`${KAFKA:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| redis-stack-server | \`${REDIS:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
@@ -240,6 +291,12 @@ jobs:
           BUMP_AISPM=false
           BUMP_SIEM_CONNECTORS=false
           BUMP_WATCHDOG=false
+          BUMP_AGENTGATEWAY=false
+          BUMP_TRUSTGUARD=false
+          BUMP_TRUSTLENS=false
+          BUMP_DATAAGENT=false
+          BUMP_DATACORE=false
+          BUMP_CLICKSTACK_OTEL_COLLECTOR=false
           BUMP_CLICKHOUSE=false
           BUMP_KAFKA=false
 
@@ -455,6 +512,60 @@ jobs:
           fi
 
           # =============================================
+          # 11b. Platform v2 subcharts (agentgateway / trustguard / trustlens)
+          # Each has its own values.yaml with a single .image.tag and no
+          # hardcoded template fallback (image resolved via the subchart helper).
+          # Only deployed when global.platformVersion=v2.
+          # =============================================
+          TAG="${{ steps.tags.outputs.agentgateway }}"
+          if update_values_tag '.image.tag' "$TAG" "agentgateway (v2)" "charts/agentgateway/values.yaml"; then
+            BUMP_AGENTGATEWAY=true
+            yq eval -i ".appVersion = \"${TAG}\"" charts/agentgateway/Chart.yaml
+          fi
+
+          TAG="${{ steps.tags.outputs.trustguard }}"
+          if update_values_tag '.image.tag' "$TAG" "trustguard (v2)" "charts/trustguard/values.yaml"; then
+            BUMP_TRUSTGUARD=true
+            yq eval -i ".appVersion = \"${TAG}\"" charts/trustguard/Chart.yaml
+          fi
+
+          TAG="${{ steps.tags.outputs.trustlens }}"
+          if update_values_tag '.image.tag' "$TAG" "trustlens (v2)" "charts/trustlens/values.yaml"; then
+            BUMP_TRUSTLENS=true
+            yq eval -i ".appVersion = \"${TAG}\"" charts/trustlens/Chart.yaml
+          fi
+
+          # =============================================
+          # 11c. Platform v2 data pipeline (dataagent / datacore /
+          # clickstack-otel-collector). Same single .image.tag pattern; dataagent
+          # and datacore ship from AR, clickstack-otel-collector is an external
+          # image bumped by manual input only.
+          # =============================================
+          TAG="${{ steps.tags.outputs.dataagent }}"
+          if update_values_tag '.image.tag' "$TAG" "dataagent (v2)" "charts/dataagent/values.yaml"; then
+            BUMP_DATAAGENT=true
+            yq eval -i ".appVersion = \"${TAG}\"" charts/dataagent/Chart.yaml
+          fi
+
+          TAG="${{ steps.tags.outputs.datacore }}"
+          if update_values_tag '.image.tag' "$TAG" "datacore (v2)" "charts/datacore/values.yaml"; then
+            BUMP_DATACORE=true
+            yq eval -i ".appVersion = \"${TAG}\"" charts/datacore/Chart.yaml
+          fi
+
+          TAG="${{ steps.tags.outputs.clickstack_otel_collector }}"
+          if update_values_tag '.image.tag' "$TAG" "clickstack-otel-collector (v2)" "charts/clickstack-otel-collector/values.yaml"; then
+            BUMP_CLICKSTACK_OTEL_COLLECTOR=true
+            yq eval -i ".appVersion = \"${TAG}\"" charts/clickstack-otel-collector/Chart.yaml
+          fi
+
+          TAG="${{ steps.tags.outputs.alertengine }}"
+          if update_values_tag '.image.tag' "$TAG" "alertengine (v2)" "charts/alertengine/values.yaml"; then
+            BUMP_ALERTENGINE=true
+            yq eval -i ".appVersion = \"${TAG}\"" charts/alertengine/Chart.yaml
+          fi
+
+          # =============================================
           # 12. Infrastructure: ClickHouse (clickhouse-server)
           # No subchart values.yaml — parent values.yaml is the sole source.
           # No template fallback (charts/clickhouse uses .Values.image directly).
@@ -483,6 +594,10 @@ jobs:
             BUMP_TRUSTGATE=true
             yq eval -i ".redis.image.tag = \"${TAG}\"" charts/trustgate/values.yaml
             echo "  Synced charts/trustgate/values.yaml redis.image.tag"
+          fi
+          # v2 in-cluster Redis (umbrella-managed) shares the same redis-stack-server image.
+          if update_values_tag '.infrastructure.redis.image.tag' "$TAG" "redis (v2 in-cluster)"; then
+            :
           fi
 
           # =============================================
@@ -567,6 +682,48 @@ jobs:
             echo "  Updated root Chart.yaml dep: neuraltrust-watchdog → ${NEW_VER}"
           fi
 
+          if [[ "$BUMP_AGENTGATEWAY" == "true" ]]; then
+            NEW_VER=$(bump_chart_version "charts/agentgateway/Chart.yaml")
+            yq eval -i "(.dependencies[] | select(.name == \"agentgateway\")).version = \"${NEW_VER}\"" Chart.yaml
+            echo "  Updated root Chart.yaml dep: agentgateway → ${NEW_VER}"
+          fi
+
+          if [[ "$BUMP_TRUSTGUARD" == "true" ]]; then
+            NEW_VER=$(bump_chart_version "charts/trustguard/Chart.yaml")
+            yq eval -i "(.dependencies[] | select(.name == \"trustguard\")).version = \"${NEW_VER}\"" Chart.yaml
+            echo "  Updated root Chart.yaml dep: trustguard → ${NEW_VER}"
+          fi
+
+          if [[ "$BUMP_TRUSTLENS" == "true" ]]; then
+            NEW_VER=$(bump_chart_version "charts/trustlens/Chart.yaml")
+            yq eval -i "(.dependencies[] | select(.name == \"trustlens\")).version = \"${NEW_VER}\"" Chart.yaml
+            echo "  Updated root Chart.yaml dep: trustlens → ${NEW_VER}"
+          fi
+
+          if [[ "$BUMP_DATAAGENT" == "true" ]]; then
+            NEW_VER=$(bump_chart_version "charts/dataagent/Chart.yaml")
+            yq eval -i "(.dependencies[] | select(.name == \"dataagent\")).version = \"${NEW_VER}\"" Chart.yaml
+            echo "  Updated root Chart.yaml dep: dataagent → ${NEW_VER}"
+          fi
+
+          if [[ "$BUMP_DATACORE" == "true" ]]; then
+            NEW_VER=$(bump_chart_version "charts/datacore/Chart.yaml")
+            yq eval -i "(.dependencies[] | select(.name == \"datacore\")).version = \"${NEW_VER}\"" Chart.yaml
+            echo "  Updated root Chart.yaml dep: datacore → ${NEW_VER}"
+          fi
+
+          if [[ "$BUMP_ALERTENGINE" == "true" ]]; then
+            NEW_VER=$(bump_chart_version "charts/alertengine/Chart.yaml")
+            yq eval -i "(.dependencies[] | select(.name == \"alertengine\")).version = \"${NEW_VER}\"" Chart.yaml
+            echo "  Updated root Chart.yaml dep: alertengine → ${NEW_VER}"
+          fi
+
+          if [[ "$BUMP_CLICKSTACK_OTEL_COLLECTOR" == "true" ]]; then
+            NEW_VER=$(bump_chart_version "charts/clickstack-otel-collector/Chart.yaml")
+            yq eval -i "(.dependencies[] | select(.name == \"clickstack-otel-collector\")).version = \"${NEW_VER}\"" Chart.yaml
+            echo "  Updated root Chart.yaml dep: clickstack-otel-collector → ${NEW_VER}"
+          fi
+
           if [[ "$BUMP_CLICKHOUSE" == "true" ]]; then
             NEW_VER=$(bump_chart_version "charts/clickhouse/Chart.yaml")
             yq eval -i "(.dependencies[] | select(.name == \"clickhouse\")).version = \"${NEW_VER}\"" Chart.yaml
@@ -644,6 +801,20 @@ jobs:
             charts/neuraltrust-siem-connectors/templates/ \
             charts/neuraltrust-watchdog/values.yaml \
             charts/neuraltrust-watchdog/Chart.yaml \
+            charts/agentgateway/values.yaml \
+            charts/agentgateway/Chart.yaml \
+            charts/trustguard/values.yaml \
+            charts/trustguard/Chart.yaml \
+            charts/trustlens/values.yaml \
+            charts/trustlens/Chart.yaml \
+            charts/dataagent/values.yaml \
+            charts/dataagent/Chart.yaml \
+            charts/datacore/values.yaml \
+            charts/datacore/Chart.yaml \
+            charts/clickstack-otel-collector/values.yaml \
+            charts/clickstack-otel-collector/Chart.yaml \
+            charts/alertengine/values.yaml \
+            charts/alertengine/Chart.yaml \
             charts/clickhouse/Chart.yaml \
             charts/kafka/Chart.yaml \
             charts/kafka/templates/

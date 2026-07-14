@@ -1,0 +1,80 @@
+{{- if and (eq (include "neuraltrust-platform.isV2" .) "true") (eq (include "neuraltrust-platform.isExternal" .) "true") }}
+{{- $img := include "clickstack-otel-collector.image" (dict "repository" .Values.image.repository "tag" .Values.image.tag "global" .Values.global) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "clickstack-otel-collector.fullname" . }}
+  labels:
+    {{- include "clickstack-otel-collector.labels" . | nindent 4 }}
+    app.kubernetes.io/component: telemetry
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels:
+      {{- include "clickstack-otel-collector.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: telemetry
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ .Values.customConfig | sha256sum }}
+      labels:
+        {{- include "clickstack-otel-collector.labels" . | nindent 8 }}
+        app.kubernetes.io/component: telemetry
+    spec:
+      serviceAccountName: {{ include "clickstack-otel-collector.serviceAccountName" . }}
+      {{- include "clickstack-otel-collector.imagePullSecrets" . | nindent 6 }}
+      {{- if .Values.securityHardening }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      {{- end }}
+      volumes:
+      - name: custom-config
+        configMap:
+          name: {{ include "clickstack-otel-collector.fullname" . }}-config
+      containers:
+      - name: collector
+        image: {{ $img | quote }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        envFrom:
+        - secretRef:
+            name: {{ include "clickstack-otel-collector.fullname" . }}-secrets
+            optional: true
+        env:
+        # Shared ClickHouse password (same secret DataCore/AlertEngine read). Explicit
+        # env wins over the clickstack-collector-secrets envFrom above.
+        - name: CLICKHOUSE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.clickhouse.existingSecret.name | default "clickhouse" | quote }}
+              key: {{ .Values.clickhouse.existingSecret.key | default "admin-password" | quote }}
+              optional: true
+        - name: HYPERDX_OTEL_EXPORTER_CLICKHOUSE_DATABASE
+          value: {{ .Values.clickhouse.database | quote }}
+        - name: HYPERDX_LOG_LEVEL
+          value: {{ .Values.logLevel | default "info" | quote }}
+        - name: CUSTOM_OTELCOL_CONFIG_FILE
+          value: /etc/otelcol-custom/custom-config.yaml
+        {{- with .Values.extraEnv }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
+        {{- if .Values.securityHardening }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+        {{- end }}
+        ports:
+        - containerPort: {{ .Values.ports.otlp }}
+          name: otlp
+        - containerPort: {{ .Values.ports.otlpHttp }}
+          name: otlp-http
+        volumeMounts:
+        - name: custom-config
+          mountPath: /etc/otelcol-custom
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}
+      {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" . "local" .Values.nodeSelector) | nindent 6 }}
+      {{- include "neuraltrust-platform.tolerations" (dict "ctx" . "local" .Values.tolerations) | nindent 6 }}
+{{- end }}

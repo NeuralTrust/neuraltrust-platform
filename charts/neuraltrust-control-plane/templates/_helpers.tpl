@@ -37,6 +37,23 @@ control-plane
 {{- end }}
 
 {{/*
+Whether the product control-plane stack (api + app + supporting resources) is
+active. In v2 the console is SaaS-side EXCEPT in external mode, where it runs
+on-prem regardless of controlPlane.enabled (flag-driven, not values). In v1 it
+keeps the explicit controlPlane.enabled opt-in. The scheduler is force-off in
+v2 via its own `not isV2` guard and is NOT covered by this helper.
+Usage: {{- if eq (include "neuraltrust-control-plane.controlPlaneEnabled" .) "true" }}
+*/}}
+{{- define "neuraltrust-control-plane.controlPlaneEnabled" -}}
+{{- if eq (include "neuraltrust-platform.isV2" .) "true" -}}
+  {{- /* v2: console is SaaS-side except in external mode, where it auto-enables
+         regardless of controlPlane.enabled. controlPlane.enabled is ignored in v2. */ -}}
+  {{- if eq (include "neuraltrust-platform.isExternal" .) "true" -}}true{{- end -}}
+{{- else if and .Values.controlPlane .Values.controlPlane.enabled -}}true
+{{- end -}}
+{{- end }}
+
+{{/*
 Helper to get secret value - supports both direct values and secret references
 Usage: {{ include "control-plane.getSecretValue" (dict "value" .Values.controlPlane.secrets.openaiApiKey "secretName" "my-secret" "secretKey" "OPENAI_API_KEY" "context" $) }}
 */}}
@@ -237,5 +254,34 @@ Usage: {{- include "control-plane.envFrom" (dict "component" "api" "extraEnvFrom
 envFrom:
 {{ toYaml $items }}
 {{- end -}}
+{{- end }}
+
+{{/*
+Resolve the control-plane app's public origin (scheme + host). Used for APP_URL
+and NEXTAUTH_URL so magic links / auth callbacks match the real ingress host
+instead of the in-cluster service name.
+Priority:
+  1. OpenShift: control-plane-app.<domain> (matches the OpenShift Route naming)
+  2. explicit controlPlane.components.app.host
+  3. <app.hostPrefix|"app">.<global.domain> (matches the app Ingress)
+  4. bare "control-plane-app" (no domain/host configured)
+Usage: {{ include "control-plane.appPublicUrl" . }}
+*/}}
+{{- define "control-plane.appPublicUrl" -}}
+{{- $app := dict -}}
+{{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app -}}
+  {{- $app = .Values.controlPlane.components.app -}}
+{{- end -}}
+{{- $host := "" -}}
+{{- if eq (include "neuraltrust-platform.isOpenshift" .) "true" -}}
+  {{- $domain := include "neuraltrust-platform.domain" . -}}
+  {{- if $domain -}}{{- $host = printf "control-plane-app.%s" $domain -}}{{- end -}}
+{{- else -}}
+  {{- $prefix := "app" -}}
+  {{- if hasKey $app "hostPrefix" -}}{{- $prefix = $app.hostPrefix -}}{{- end -}}
+  {{- $host = include "neuraltrust-platform.ingress.host" (dict "host" ($app.host | default "") "prefix" $prefix "global" .Values.global) -}}
+{{- end -}}
+{{- if not $host -}}{{- $host = "control-plane-app" -}}{{- end -}}
+{{- printf "https://%s" $host -}}
 {{- end }}
 

@@ -1,3 +1,5 @@
+{{- /* platform-v2: legacy component disabled when global.platformVersion=v2 */ -}}
+{{- if not (eq (include "neuraltrust-platform.isV2" .) "true") }}
 {{- if .Values.redis.enabled }}
 apiVersion: v1
 kind: ConfigMap
@@ -55,4 +57,5 @@ data:
     {{- if gt (.Values.redis.replica.replicaCount | int) 0 }}
     replica-read-only yes
     {{- end }} 
+{{- end }}
 {{- end }}

@@ -1,3 +1,5 @@
+{{- /* platform-v2: legacy data-plane disabled under v2, EXCEPT the data-plane-api shim (kept until TrustLens). Renders under v1 (any mode) or the v2 data-plane-api shim. */ -}}
+{{- if or (not (eq (include "neuraltrust-platform.isV2" .) "true")) (eq (include "neuraltrust-platform.dataPlaneApiV2.enabled" .) "true") }}
 {{- /*
   OTel routing for data-plane-api.
 
@@ -27,4 +29,6 @@ data:
   # Emit stable HTTP semconv (http.server.request.duration) so watchdog RED
   # alerting sees the same series the collector and GMP expect.
   OTEL_SEMCONV_STABILITY_OPT_IN: "http"
+{{- end }}
+
 {{- end }}

@@ -1,3 +1,14 @@
+{{- /* platform-v2: legacy data-plane disabled under v2, EXCEPT the data-plane-api shim (kept until TrustLens). Renders under v1 (any mode) or the v2 data-plane-api shim. */ -}}
+{{- if or (not (eq (include "neuraltrust-platform.isV2" .) "true")) (eq (include "neuraltrust-platform.dataPlaneApiV2.enabled" .) "true") }}
+{{- /* ClickHouse password secret. Defaults to the in-cluster `clickhouse` secret
+       (key admin-password); override via dataPlane.components.clickhouse.existingSecret
+       {name,key} to match an external ClickHouse secret (infrastructure.clickhouse.external). */ -}}
+{{- $chPwSecret := dict }}
+{{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.clickhouse .Values.dataPlane.components.clickhouse.existingSecret }}
+{{- $chPwSecret = .Values.dataPlane.components.clickhouse.existingSecret }}
+{{- end }}
+{{- $chPwSecretName := $chPwSecret.name | default "clickhouse" }}
+{{- $chPwSecretKey := $chPwSecret.key | default "admin-password" }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -152,8 +163,8 @@ spec:
           - name: CLICKHOUSE_PASSWORD
             valueFrom:
               secretKeyRef:
-                name: clickhouse
-                key: admin-password
+                name: {{ $chPwSecretName | quote }}
+                key: {{ $chPwSecretKey | quote }}
           - name: CLICKHOUSE_DATABASE
             valueFrom:
               secretKeyRef:
@@ -183,7 +194,7 @@ spec:
       - name: api
         {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.image }}
         {{- $apiRepo := .Values.dataPlane.components.api.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api" }}
-        {{- $apiTag := .Values.dataPlane.components.api.image.tag | default "v1.38.1" }}
+        {{- $apiTag := .Values.dataPlane.components.api.image.tag | default "v1.38.2" }}
         image: {{ include "data-plane.image" (dict "repository" $apiRepo "tag" $apiTag "global" .Values.global) | quote }}
         imagePullPolicy: {{ .Values.dataPlane.components.api.image.pullPolicy | default "Always" }}
         {{- else }}
@@ -233,6 +244,8 @@ spec:
           {{- include "neuraltrust-platform.kafka.clientEnv" . | nindent 10 }}
           - name: HF_HOME
             value: "/root/.cache/huggingface"
+          # Optional: the data-plane image bundles its own model (fastText) and
+          # needs no HF token to run. Only forwarded to eval Jobs when set.
           - name: HUGGINGFACE_TOKEN
             valueFrom:
               secretKeyRef:
@@ -264,8 +277,8 @@ spec:
           - name: CLICKHOUSE_PASSWORD
             valueFrom:
               secretKeyRef:
-                name: clickhouse
-                key: admin-password
+                name: {{ $chPwSecretName | quote }}
+                key: {{ $chPwSecretKey | quote }}
           {{- if eq (include "data-plane.api.k8sJobs.enabled" .) "true" }}
           {{- $jobsCfg := .Values.dataPlane.components.api.k8sJobs }}
           - name: K8S_JOBS_ENABLED
@@ -408,3 +421,5 @@ spec:
       {{- end }}
       {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" .) | nindent 6 }}
       {{- include "neuraltrust-platform.tolerations" (dict "ctx" .) | nindent 6 }}
+
+{{- end }}

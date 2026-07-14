@@ -1,0 +1,130 @@
+# Example: Deploy the NeuralTrust platform v2 stack (AgentGateway + TrustGuard + TrustLens).
+#
+# The single switch is `global.platformVersion: v2`. Under v2 the legacy stack
+# (Python control-plane API, trustgate, kafka, aispm, siem-connectors) stops
+# deploying and the v2 subcharts render instead. The legacy data-plane is
+# disabled EXCEPT its `data-plane-api` component, which is kept as a temporary
+# read/analytics API over ClickHouse in all v2 modes (until TrustLens); its
+# kafka-workers and kafka-connect stay off.
+#
+# `global.deploymentMode` decides the split-plane boundary:
+#   hybrid   → only data-plane workloads deploy on-prem (control-planes in SaaS).
+#              DataAgent bridges local reads to the SaaS DataBridge. In-cluster
+#              Postgres + Redis + ClickHouse deploy by default.
+#   external → control-plane AND data-plane workloads deploy on-prem PLUS the
+#              self-hosted analytics stack (clickstack-otel-collector + DataCore +
+#              AlertEngine over local ClickHouse). The product control-plane API +
+#              App UI (neuraltrust-control-plane api + app) auto-run on-prem from the
+#              platform flags (scheduler stays off) — no controlPlane.enabled needed.
+#              No SaaS dependency; DataAgent is not deployed. In-cluster Postgres +
+#              Redis + ClickHouse deploy by default.
+#   full     → DEPRECATED alias for "external"; renders identically.
+#
+# Usage (hybrid, most customers):
+#   helm upgrade --install neuraltrust-platform . -f values-v2.yaml.example
+#
+# Usage (external / zero-SaaS-dependency):
+#   helm upgrade --install neuraltrust-platform . \
+#     -f values-v2.yaml.example --set global.deploymentMode=external \
+#     --set global.observability.hostedExport.enabled=false
+#
+# See docs/platform-v2.md for the full architecture and component mapping.
+
+global:
+  platform: "kubernetes"
+  platformVersion: "v2"
+  deploymentMode: "hybrid" # or "external"
+  domain: "platform.example.com"
+  imageRegistry: ""
+
+# In-cluster Postgres (control-plane-postgresql) and Redis (redis) deploy by
+# default in all v2 modes. Postgres isolation is mode-derived: external gives each
+# service its OWN database; hybrid shares ONE database ("trustdata") where
+# AgentGateway + TrustGuard each write their OWN schema and DataAgent reads both
+# read-only (its role's search_path spans both schemas). The database host,
+# per-service passwords, roles and schemas are all auto-derived/provisioned
+# (v2-postgresql-init). The AgentGateway↔TrustGuard
+# TrustGuard URL, external audience URL (from global.domain) and shared client
+# credentials are auto-wired too. So a default in-cluster deploy needs almost
+# nothing below. To use hosted datastores, overlay database.host + database.password
+# (and infrastructure.redis.deploy=false / postgresql.deploy=false).
+
+# --- AgentGateway (TrustGate v2): admin (control) + proxy/mcp (data) ---
+agentgateway:
+  image:
+    tag: "latest" # pin to a released tag in production
+  # trustguard.baseURL auto-derives to the in-cluster data-plane Service; client
+  # credentials come from the shared v2-trustguard-client-secret. database.host
+  # auto-derives to control-plane-postgresql, redis.host defaults to "redis".
+
+# --- TrustGuard: control (admin) + data (runtime /v1/evaluate) ---
+trustguard:
+  image:
+    tag: "latest"
+  # platform.baseURL (token audience) auto-derives to https://trustguard.<domain>;
+  # client credentials come from the shared secret. database.host auto-derives.
+
+# --- TrustLens (WIP): api (control) + worker (data), Postgres-only. OFF by default ---
+trustlens:
+  enabled: false # set true to deploy TrustLens
+  image:
+    tag: "latest"
+  # database.host defaults to "control-plane-postgresql" (its own "trustlens" DB).
+
+# --- DataAgent (deploymentMode=hybrid only): outbound bridge to SaaS DataBridge ---
+dataagent:
+  image:
+    tag: "latest"
+  # databridge.addr/serverName default to the SaaS DataBridge (databridge.neuraltrust.ai).
+  # database (read-only into "trustdata") auto-derives in-cluster — nothing to set.
+  tenantId: "<tenant-id>"
+  enrolmentToken: "<enrolment-token-from-saas>"
+
+# --- DataCore (deploymentMode=external only): residency API over local ClickHouse ---
+datacore:
+  image:
+    tag: "latest"
+  # ClickHouse password is read from the shared `clickhouse` secret (same secret
+  # AlertEngine uses) via clickhouse.existingSecret — nothing to set here.
+  clickhouse:
+    host: "clickhouse" # in-cluster; set to your endpoint when infrastructure.clickhouse.deploy=false
+    nativePort: 9000
+    database: "datacore"
+    otelDatabase: "otel"
+
+# --- clickstack-otel-collector (deploymentMode=external only): OTLP -> ClickHouse ---
+clickstack-otel-collector:
+  image:
+    tag: "2.29.0"
+  clickhouse:
+    endpoint: "http://clickhouse:8123" # in-cluster; set to external/Cloud endpoint when infrastructure.clickhouse.deploy=false
+    database: "otel"
+
+# --- AlertEngine (deploymentMode=external only): rule evaluation + SIEM forwarding ---
+# api (:8085, consumed in-cluster by the app BFF) + worker. Own "alertengine"
+# Postgres DB (auto-provisioned in-cluster) + read access to ClickHouse.
+alertengine:
+  enabled: true # renders only in external mode; no-op elsewhere
+  image:
+    tag: "latest"
+  # database.host auto-derives to control-plane-postgresql in-cluster; overlay for external Postgres.
+  # ClickHouse password comes from the shared `clickhouse` secret (clickhouse.existingSecret).
+  clickhouse:
+    host: "clickhouse" # in-cluster; set to your endpoint when infrastructure.clickhouse.deploy=false
+    nativePort: 9000
+    database: "otel"
+
+# --- Product control-plane (deploymentMode=external only): management API + App UI ---
+# In external mode the api + app auto-enable from the platform flags — no
+# controlPlane.enabled needed. The scheduler stays off in v2. This block is only
+# needed to override defaults (secrets, resources, external Postgres).
+# neuraltrust-control-plane:
+#   controlPlane:
+#     imagePullSecrets: "gcr-secret"
+
+# --- AWS IAM auth (optional) ---
+# For AWS RDS / ElastiCache IAM auth, set database.iamAuth (and redis.iamAuth for
+# AgentGateway/TrustGuard) to true and drop the passwords. RDS IAM is live for the
+# control-plane (controlPlane.components.postgresql.authMode: iam); for the v2 Go
+# services the chart emits the IAM env but the service token-minting is pending.
+# See my-values-aws-v2-iam.yaml for a complete IAM overlay.

@@ -1,3 +1,4 @@
+{{- if eq (include "neuraltrust-platform.clickhouseAllowed" .) "true" }}
 {{- if .Values.backup.enabled }}
 apiVersion: v1
 kind: ConfigMap
@@ -66,4 +67,5 @@ data:
         --query="BACKUP DATABASE \`${CLICKHOUSE_DATABASE}\` TO ${BACKUP_DST} SETTINGS id='${BACKUP_ID}'"
 
     echo "Backup completed successfully: ${BACKUP_ID}"
+{{- end }}
 {{- end }}

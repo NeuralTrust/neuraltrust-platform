@@ -1,3 +1,5 @@
+{{- /* platform-v2: legacy component disabled when global.platformVersion=v2 */ -}}
+{{- if not (eq (include "neuraltrust-platform.isV2" .) "true") }}
 {{- /*
   PrometheusRule + PodMonitor for TrustGate (gateway).
 
@@ -85,4 +87,6 @@ spec:
           annotations:
             summary: "TrustGate Redis is unavailable"
             description: "TrustGate caches and per-route state live in Redis. Without it the gateway degrades to no caching and may fail rate-limit checks."
+{{- end }}
+
 {{- end }}

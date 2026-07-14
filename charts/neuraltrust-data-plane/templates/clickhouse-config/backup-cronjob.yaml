@@ -1,3 +1,5 @@
+{{- /* platform-v2: legacy component disabled when global.platformVersion=v2 */ -}}
+{{- if not (eq (include "neuraltrust-platform.isV2" .) "true") }}
 {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.clickhouse .Values.dataPlane.components.clickhouse.backup .Values.dataPlane.components.clickhouse.backup.enabled }}
 {{- /*
   Hardened ClickHouse backup CronJob.
@@ -104,4 +106,5 @@ spec:
           restartPolicy: OnFailure
           {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" .) | nindent 10 }}
           {{- include "neuraltrust-platform.tolerations" (dict "ctx" .) | nindent 10 }}
+{{- end }}
 {{- end }}

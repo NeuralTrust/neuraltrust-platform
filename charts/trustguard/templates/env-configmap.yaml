@@ -1,0 +1,70 @@
+{{- if eq (include "neuraltrust-platform.isV2" .) "true" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trustguard-env-vars
+  labels:
+    {{- include "trustguard.labels" . | nindent 4 }}
+{{- /*
+TRUSTGUARD_BASE_URL is the audience (`aud`) stamped on platform-scope tokens and
+validated on /v1/evaluate — it just has to be a stable, non-empty string that is
+identical to what this data plane both signs and checks. Derive it from
+global.domain (https://trustguard.<domain>) when set, else fall back to the
+in-cluster Service URL so it is never empty when a platform client is configured
+(TrustGuard refuses to boot with a platform client but no base URL). Override
+.Values.platform.baseURL only for a bespoke public audience.
+*/}}
+{{- $tgAud := .Values.platform.baseURL }}
+{{- if not $tgAud }}
+  {{- $domain := include "neuraltrust-platform.domain" . }}
+  {{- if $domain }}
+    {{- $tgAud = printf "https://trustguard.%s" $domain }}
+  {{- else }}
+    {{- $tgAud = printf "http://trustguard-data-plane.%s.svc.cluster.local" .Release.Namespace }}
+  {{- end }}
+{{- end }}
+data:
+  LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  APP_ENV: {{ .Values.config.appEnv | quote }}
+  # Control plane listens on SERVER_PORT; data plane on SERVER_DATA_PORT. Both
+  # are set so either plane boots correctly from the shared env (they must differ).
+  SERVER_PORT: {{ .Values.controlPlane.ports.http | quote }}
+  SERVER_DATA_PORT: {{ .Values.dataPlane.ports.http | quote }}
+  # Host auto-derives to the in-cluster control-plane-postgresql Service; override
+  # .Values.database.host for external Postgres. DB_NAME is mode-derived: external =>
+  # private "trustguard" DB (control owns migrations); hybrid => shared "trustdata" DB
+  # (each service writes its own schema, so DataAgent's single reader resolves both).
+  DB_HOST: {{ include "neuraltrust-platform.postgres.host" (dict "host" .Values.database.host) | quote }}
+  DB_PORT: {{ .Values.database.port | quote }}
+  DB_NAME: {{ include "neuraltrust-platform.v2.dbName" (dict "ctx" . "explicit" .Values.database.name "external" "trustguard") | quote }}
+  DB_USER: {{ .Values.database.user | quote }}
+  DB_SSL_MODE: {{ .Values.database.sslMode | quote }}
+  {{- if .Values.database.iamAuth }}
+  # IAM (RDS) DB auth: no static DB_PASSWORD is shipped; the service mints a token.
+  DB_IAM_AUTH: "true"
+  DB_AUTH_MODE: "iam"
+  {{- end }}
+  REDIS_HOST: {{ .Values.redis.host | quote }}
+  REDIS_PORT: {{ .Values.redis.port | quote }}
+  {{- if and .Values.redis.username (ne (.Values.redis.username | toString) "") }}
+  REDIS_USERNAME: {{ .Values.redis.username | quote }}
+  {{- end }}
+  {{- if and .Values.redis.tls (ne (.Values.redis.tls | toString) "") }}
+  # TLS-only managed Redis (e.g. ElastiCache Serverless enforces in-transit encryption).
+  REDIS_TLS: {{ .Values.redis.tls | quote }}
+  {{- end }}
+  {{- if .Values.redis.iamAuth }}
+  # IAM (ElastiCache) Redis auth: no static REDIS_PASSWORD is shipped.
+  REDIS_IAM_AUTH: "true"
+  {{- end }}
+  # TRUSTGUARD_PLATFORM_CLIENT_ID/_SECRET are wired from the shared
+  # v2-trustguard-client-secret Secret in the Deployment env (kept consistent
+  # with AgentGateway's TRUSTGUARD_CLIENT_ID/_SECRET).
+  TRUSTGUARD_BASE_URL: {{ $tgAud | quote }}
+  {{- if eq (include "neuraltrust-platform.isHybrid" .) "true" }}
+  # Hybrid: load the raw-telemetry exporters file (trustguard-telemetry ConfigMap),
+  # which persists request/response payloads into SENSIBLE_PG_DSN for DataAgent. The
+  # default metrics exporter is on by default (METRICS_DEFAULT_EXPORTER_ENABLED=true).
+  TELEMETRY_EXPORTERS_FILE: "/etc/telemetry/telemetry.yaml"
+  {{- end }}
+{{- end }}

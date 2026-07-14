@@ -1,0 +1,66 @@
+{{- if and (eq (include "neuraltrust-platform.isV2" .) "true") .Values.enabled }}
+{{- $img := include "trustlens.image" (dict "repository" .Values.image.repository "tag" .Values.image.tag "global" .Values.global) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.dataPlane.name }}
+  labels:
+    {{- include "trustlens.labels" . | nindent 4 }}
+    app.kubernetes.io/component: data-plane
+spec:
+  replicas: {{ .Values.dataPlane.replicas }}
+  selector:
+    matchLabels:
+      {{- include "trustlens.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: data-plane
+  template:
+    metadata:
+      labels:
+        {{- include "trustlens.labels" . | nindent 8 }}
+        app.kubernetes.io/component: data-plane
+    spec:
+      serviceAccountName: {{ include "trustlens.serviceAccountName" . }}
+      {{- include "trustlens.imagePullSecrets" . | nindent 6 }}
+      {{- if .Values.securityHardening }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      {{- end }}
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 6 }}
+      containers:
+      - name: worker
+        image: {{ $img | quote }}
+        args: {{ toJson .Values.dataPlane.args }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        envFrom:
+        - configMapRef:
+            name: trustlens-env-vars
+        - secretRef:
+            name: trustlens-secrets
+            optional: true
+        env:
+        {{- with .Values.dataPlane.extraEnv }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
+        {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "go" "ctx" .) | nindent 8 }}
+        {{- include "neuraltrust-platform.appVersionEnv" (dict "tag" .Values.image.tag) | nindent 8 }}
+        {{- if .Values.securityHardening }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        {{- end }}
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 8 }}
+        resources:
+          {{- toYaml .Values.dataPlane.resources | nindent 10 }}
+      {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" . "local" .Values.dataPlane.nodeSelector) | nindent 6 }}
+      {{- include "neuraltrust-platform.tolerations" (dict "ctx" . "local" .Values.dataPlane.tolerations) | nindent 6 }}
+{{- end }}

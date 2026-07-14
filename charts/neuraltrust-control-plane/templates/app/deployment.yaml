@@ -1,4 +1,5 @@
-{{- if and .Values.controlPlane .Values.controlPlane.enabled }}
+{{- /* platform-v2: App UI stays SaaS-side in v2 hybrid; rendered in v1 and v2 external */ -}}
+{{- if eq (include "neuraltrust-control-plane.controlPlaneEnabled" .) "true" }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -23,12 +24,9 @@ spec:
       {{- $imagePullSecret := "gcr-secret" }}
       {{- if .Values.imagePullSecrets }}
         {{- $imagePullSecret = .Values.imagePullSecrets }}
-      {{- else if .Values.controlPlane }}
-        {{- if hasKey .Values.controlPlane "imagePullSecrets" }}
-          {{- if and .Values.controlPlane.imagePullSecrets (ne .Values.controlPlane.imagePullSecrets "none") (ne .Values.controlPlane.imagePullSecrets "") }}
-            {{- $imagePullSecret = .Values.controlPlane.imagePullSecrets }}
-          {{- end }}
-        {{- end }}
+      {{- else if and .Values.controlPlane (hasKey .Values.controlPlane "imagePullSecrets") }}
+        {{- /* Assign unconditionally so "none"/"" opt out (the guard below suppresses them). */}}
+        {{- $imagePullSecret = .Values.controlPlane.imagePullSecrets }}
       {{- end }}
       {{- if and $imagePullSecret (ne $imagePullSecret "none") (ne $imagePullSecret "") }}
       imagePullSecrets:
@@ -48,7 +46,7 @@ spec:
       initContainers:
       - name: init-db
         {{- $initImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
-        {{- $initImageTag := "v1.79.0" }}
+        {{- $initImageTag := "v1.89.0" }}
         {{- $initPullPolicy := "Always" }}
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.image }}
           {{- if .Values.controlPlane.components.app.image.repository }}{{- $initImageRepo = .Values.controlPlane.components.app.image.repository }}{{- end }}
@@ -166,7 +164,7 @@ spec:
       containers:
       - name: app
         {{- $appImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
-        {{- $appImageTag := "v1.79.0" }}
+        {{- $appImageTag := "v1.89.0" }}
         {{- $appPullPolicy := "Always" }}
         {{- $appPort := 3000 }}
         {{- $nodeEnv := "production" }}
@@ -183,7 +181,15 @@ spec:
         {{- $trustgateDataPlaneUrl := "" }}
         {{- $trustgateActionsUrl := "" }}
         {{- $nextAuthUrl := "" }}
+        {{- $appUrl := "" }}
         {{- $modelScannerApiUrl := "" }}
+        {{- /* platform-v2 backend service URLs (in-cluster defaults, overridable via config) */}}
+        {{- $agentgatewayUrl := "http://agentgateway-admin" }}
+        {{- $agentgatewayProxyUrl := "http://agentgateway-proxy" }}
+        {{- $trustguardUrl := "http://trustguard-control-plane" }}
+        {{- $datacoreUrl := "http://datacore" }}
+        {{- $datacoreMetricsEnabled := "false" }}
+        {{- $alertEngineApiUrl := "http://alertengine-api" }}
         {{- $kafkaHost := include "neuraltrust-platform.kafka.host" . }}
         {{- $kafkaPort := include "neuraltrust-platform.kafka.port" . }}
         {{- $openshiftDomain := include "neuraltrust-platform.domain" . }}
@@ -198,7 +204,14 @@ spec:
           {{- if .Values.controlPlane.components.app.config.trustgateDataPlaneUrl }}{{- $trustgateDataPlaneUrl = .Values.controlPlane.components.app.config.trustgateDataPlaneUrl }}{{- end }}
           {{- if .Values.controlPlane.components.app.config.trustgateActionsUrl }}{{- $trustgateActionsUrl = .Values.controlPlane.components.app.config.trustgateActionsUrl }}{{- end }}
           {{- if .Values.controlPlane.components.app.config.nextAuthUrl }}{{- $nextAuthUrl = .Values.controlPlane.components.app.config.nextAuthUrl }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.appUrl }}{{- $appUrl = .Values.controlPlane.components.app.config.appUrl }}{{- end }}
           {{- if .Values.controlPlane.components.app.config.modelScannerApiUrl }}{{- $modelScannerApiUrl = .Values.controlPlane.components.app.config.modelScannerApiUrl }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.agentgatewayUrl }}{{- $agentgatewayUrl = .Values.controlPlane.components.app.config.agentgatewayUrl }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.agentgatewayProxyUrl }}{{- $agentgatewayProxyUrl = .Values.controlPlane.components.app.config.agentgatewayProxyUrl }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.trustguardUrl }}{{- $trustguardUrl = .Values.controlPlane.components.app.config.trustguardUrl }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.datacoreUrl }}{{- $datacoreUrl = .Values.controlPlane.components.app.config.datacoreUrl }}{{- end }}
+          {{- if hasKey .Values.controlPlane.components.app.config "datacoreMetricsEnabled" }}{{- $datacoreMetricsEnabled = .Values.controlPlane.components.app.config.datacoreMetricsEnabled | toString }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.alertEngineApiUrl }}{{- $alertEngineApiUrl = .Values.controlPlane.components.app.config.alertEngineApiUrl }}{{- end }}
           {{- if .Values.controlPlane.components.app.config.kafkaHost }}{{- $kafkaHost = .Values.controlPlane.components.app.config.kafkaHost }}{{- end }}
           {{- if .Values.controlPlane.components.app.config.kafkaPort }}{{- $kafkaPort = .Values.controlPlane.components.app.config.kafkaPort }}{{- end }}
         {{- end }}
@@ -309,16 +322,10 @@ spec:
               key: resend-alert-sender
               optional: true
         - name: APP_URL
-          {{- $appHost := "" }}
-          {{- /* Prioritize domain when platform provides one */}}
-          {{- if $openshiftDomain }}
-            {{- $appHost = printf "control-plane-app.%s" $openshiftDomain }}
-          {{- else if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.host }}
-            {{- $appHost = .Values.controlPlane.components.app.host }}
-          {{- else }}
-            {{- $appHost = "control-plane-app.neuraltrust.ai" }}
-          {{- end }}
-          value: "https://{{ $appHost }}"
+          {{- /* Resolve to the real ingress host (app.<domain>), not the in-cluster
+                 service name, so magic links / auth callbacks are correct. Explicit
+                 config.appUrl wins. See control-plane.appPublicUrl helper. */}}
+          value: "{{ $appUrl | default (include "control-plane.appPublicUrl" .) }}"
         - name: OPENAI_API_KEY
           valueFrom:
             secretKeyRef:
@@ -359,20 +366,9 @@ spec:
         - name: TRUSTGATE_ACTIONS_URL
           value: "{{ $trustgateActionsUrl }}"
         - name: NEXTAUTH_URL
-          {{- if $nextAuthUrl }}
-          value: "{{ $nextAuthUrl }}"
-          {{- else }}
-          {{- $appHost := "" }}
-          {{- /* Prioritize domain when platform provides one */}}
-          {{- if $openshiftDomain }}
-            {{- $appHost = printf "control-plane-app.%s" $openshiftDomain }}
-          {{- else if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.host }}
-            {{- $appHost = .Values.controlPlane.components.app.host }}
-          {{- else }}
-            {{- $appHost = "control-plane-app.neuraltrust.ai" }}
-          {{- end }}
-          value: "https://{{ $appHost }}"
-          {{- end }}
+          {{- /* Explicit config.nextAuthUrl wins; else resolve to the real ingress
+                 host (app.<domain>). See control-plane.appPublicUrl helper. */}}
+          value: "{{ $nextAuthUrl | default (include "control-plane.appPublicUrl" .) }}"
         - name: TRUSTGATE_JWT_SECRET
           valueFrom:
             secretKeyRef:
@@ -432,6 +428,48 @@ spec:
           value: "{{ $kafkaHost }}"
         - name: KAFKA_PORT
           value: "{{ $kafkaPort }}"
+        {{- if eq (include "neuraltrust-platform.isV2" .) "true" }}
+        {{- /* platform-v2 backend services the console (BFF) calls. URLs default to
+               the in-cluster Services (port 80); JWT secrets come from each v2
+               subchart's own Secret and are optional so the app still boots when a
+               given service is disabled. */}}
+        - name: AGENTGATEWAY_URL
+          value: "{{ $agentgatewayUrl }}"
+        - name: AGENTGATEWAY_PROXY_URL
+          value: "{{ $agentgatewayProxyUrl }}"
+        - name: AGENTGATEWAY_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: agentgateway-secrets
+              key: SERVER_SECRET_KEY
+              optional: true
+        - name: TRUSTGUARD_URL
+          value: "{{ $trustguardUrl }}"
+        - name: TRUSTGUARD_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: trustguard-secrets
+              key: ADMIN_JWT_SECRET
+              optional: true
+        - name: DATACORE_URL
+          value: "{{ $datacoreUrl }}"
+        - name: DATACORE_METRICS_ENABLED
+          value: "{{ $datacoreMetricsEnabled }}"
+        - name: DATACORE_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: datacore-secrets
+              key: AUTH_JWT_HS256_SECRET
+              optional: true
+        - name: ALERT_ENGINE_API_URL
+          value: "{{ $alertEngineApiUrl }}"
+        - name: ALERT_ENGINE_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: alertengine-secrets
+              key: AUTH_JWT_SECRET
+              optional: true
+        {{- end }}
         {{- include "neuraltrust-platform.kafka.authEnv" . | nindent 8 }}
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.extraEnv }}
         {{- toYaml .Values.controlPlane.components.app.extraEnv | nindent 8 }}

@@ -1,0 +1,94 @@
+# AlertEngine subchart.
+# Renders ONLY when global.platformVersion=v2 AND global.deploymentMode=external.
+# One Go image, two runtimes:
+#   api    (args ["api"])    → HTTP :8085, consumed in-cluster by the app BFF
+#   worker (args ["worker"]) → rule evaluation + SIEM forwarding loops (health :8086)
+# Requires its own Postgres database ("alertengine", separate migrations) and
+# read access to ClickHouse (event source written by clickstack-otel-collector).
+enabled: true
+nameOverride: ""
+fullnameOverride: "alertengine"
+securityHardening: true
+image:
+  repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/alertengine
+  tag: "v0.3.0"
+  pullPolicy: IfNotPresent
+imagePullSecrets: "gcr-secret"
+serviceAccount:
+  create: true
+  name: "alertengine"
+  annotations: {}
+config:
+  appEnv: "production"
+  logLevel: "info"
+  logFormat: "json"
+  serverPort: 8085
+  # Bearer JWT carrying a teamId claim (mirrors the app BFF).
+  authEnabled: true
+  # Worker (evaluation + SIEM forwarding) loops.
+  workerEnabled: true
+  workerHealthPort: 8086
+  workerEvalInterval: "45s"
+  workerForwardInterval: "30s"
+# PostgreSQL connection (own database, separate from the shared trustdata DB).
+# host empty → auto-derives to the in-cluster control-plane-postgresql Service.
+# For external Postgres, pre-create the alertengine role + database and set
+# host/user/name/password below.
+database:
+  host: ""
+  port: 5432
+  name: "alertengine"
+  user: "alertengine"
+  password: "" # Auto-generated if empty (in-cluster PG)
+  sslMode: "prefer" # TLS when available, plaintext fallback for the non-TLS in-cluster PG; use "require" for hosted DBs
+  # IAM (e.g. AWS RDS) database auth. Chart-prepared (emits DB_IAM_AUTH/DB_AUTH_MODE
+  # and omits the static DB_PASSWORD); service-side token minting lands separately.
+  # Requires an IRSA-annotated serviceAccount. Leave false for password auth.
+  iamAuth: false
+# ClickHouse (native protocol, port 9000). Defaults to the in-cluster clickhouse
+# subchart; set host/nativePort to your endpoint when infrastructure.clickhouse.deploy=false.
+clickhouse:
+  host: "clickhouse"
+  nativePort: 9000
+  database: "otel" # DB where clickstack-otel-collector writes telemetry events
+  username: "neuraltrust"
+  # CLICKHOUSE_PASSWORD is read from a shared secret — the in-cluster `clickhouse`
+  # subchart secret by default (same secret DataCore uses). For external ClickHouse
+  # (infrastructure.clickhouse.deploy=false), point this at the secret holding your
+  # password (matches infrastructure.clickhouse.external.secretName/Key).
+  existingSecret:
+    name: "clickhouse"
+    key: "admin-password"
+  secure: false
+# HS256 JWT verification key. Must match the app BFF token signer for the
+# Alerts/Logs/Integrations UI to authenticate. Auto-generated if empty.
+authJwtSecret: ""
+# AES-256-GCM passphrase for integration connection secrets at rest.
+appEncryptionKey: "" # Auto-generated if empty
+# ---- api runtime ----
+api:
+  name: alertengine-api
+  args: ["api"]
+  replicas: 1
+  ports:
+    http: 8085
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+  nodeSelector: {}
+  tolerations: []
+  extraEnv: []
+  service:
+    type: ClusterIP
+    port: 80
+# ---- worker runtime ----
+worker:
+  name: alertengine-worker
+  args: ["worker"]
+  replicas: 1
+  resources:
+    requests: {cpu: 250m, memory: 256Mi}
+    limits: {cpu: "1", memory: 512Mi}
+  nodeSelector: {}
+  tolerations: []
+  extraEnv: []

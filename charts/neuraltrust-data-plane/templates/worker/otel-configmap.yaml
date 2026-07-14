@@ -1,3 +1,5 @@
+{{- /* platform-v2: legacy component disabled when global.platformVersion=v2 */ -}}
+{{- if not (eq (include "neuraltrust-platform.isV2" .) "true") }}
 {{- /*
   OTel routing for the data-plane kafka worker pool. Same rendering
   rules as data-plane-api — omitted when no endpoint is set.
@@ -22,4 +24,6 @@ data:
   OTEL_ENVIRONMENT: {{ default "production" $workerCfg.otelEnvironment | quote }}
   # Stable HTTP semconv, consistent with the rest of the platform's OTel wiring.
   OTEL_SEMCONV_STABILITY_OPT_IN: "http"
+{{- end }}
+
 {{- end }}

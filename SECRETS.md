@@ -86,7 +86,7 @@ All required secrets must exist in the namespace before deployment.
 | `openai-secrets` | `OPENAI_API_KEY` | No | OpenAI API key |
 | `google-secrets` | `GOOGLE_API_KEY` | No | Google API key |
 | `resend-secrets` | `RESEND_API_KEY` | No | Resend email API key |
-| `huggingface-secrets` | `HUGGINGFACE_TOKEN` | No | Hugging Face model access |
+| `huggingface-secrets` | `HUGGINGFACE_TOKEN` | No | Not needed to run the data-plane (image bundles fastText). Only forwarded to evaluation Jobs that use HF-gated models. |
 
 ### Control Plane
 
@@ -207,7 +207,7 @@ Created when `neuraltrust-firewall.firewall.enabled: true`:
 | Kubernetes Secret | Key | Required | Description |
 |---|---|---|---|
 | `firewall-secrets` | `JWT_SECRET` | Yes | Shared with services calling the firewall |
-| `firewall-secrets` | `HUGGINGFACE_TOKEN` | No | HF token for model weights |
+| `firewall-secrets` | `HUGGINGFACE_TOKEN` | No | Not needed for official images (models are baked in at build time). Only for custom runtime-download builds. |
 
 Align `controlPlane.secrets.firewallJwtSecret` (`FIREWALL_JWT_SECRET`) with `firewall-secrets` `JWT_SECRET` when the Control Plane validates firewall tokens.
 
@@ -337,6 +337,72 @@ export OBSERVABILITY_TOKEN="your-customer-token"
 
 ./create-secrets.sh --namespace neuraltrust
 ```
+
+## Platform v2 secrets (`global.platformVersion=v2`)
+
+The v2 services follow the same auto-generate + `lookup`-preserve model. Under
+`global.autoGenerateSecrets: true` the keys below are created on first install
+and reused on upgrade. Env var names are what each binary reads (verified in
+source); the `envFrom` mounts map secret keys directly to env vars.
+
+| Secret | Kubernetes Secret | Key | Notes |
+|---|---|---|---|
+| AgentGateway server key | `agentgateway-secrets` | `SERVER_SECRET_KEY` | auto-generated |
+| AgentGateway DB password | `agentgateway-secrets` | `DB_PASSWORD` | auto-generated (app reads `DB_PASSWORD`, not `DATABASE_PASSWORD`); **omitted when `agentgateway.database.iamAuth=true`** |
+| AgentGateway raw-telemetry DSN | `agentgateway-secrets` | `SENSIBLE_PG_DSN` | **hybrid only** — assembled DSN into the shared `trustdata` DB (own `agentgateway` schema); consumed by the postgres raw exporter so DataAgent has data. Omitted in external / when `iamAuth=true` |
+| TrustGuard admin JWT | `trustguard-secrets` | `ADMIN_JWT_SECRET` | auto-generated |
+| TrustGuard token signing | `trustguard-secrets` | `TRUSTGUARD_TOKEN_SIGNING_SECRET` | auto-generated |
+| TrustGuard DB password | `trustguard-secrets` | `DB_PASSWORD` | auto-generated; **omitted when `trustguard.database.iamAuth=true`** |
+| TrustGuard raw-telemetry DSN | `trustguard-secrets` | `SENSIBLE_PG_DSN` | **hybrid only** — assembled DSN into the shared `trustdata` DB (own `trustguard` schema); consumed by the postgres raw exporter so DataAgent has data. Omitted in external / when `iamAuth=true` |
+| Shared TrustGuard client creds | `v2-trustguard-client-secret` | `CLIENT_ID` / `CLIENT_SECRET` | id defaults to `agentgateway-platform`; secret auto-generated (or `global.v2.trustguardClientSecret`). Injected into both AgentGateway (`TRUSTGUARD_CLIENT_ID`/`_SECRET`) and TrustGuard (`TRUSTGUARD_PLATFORM_CLIENT_ID`/`_SECRET`) so the pair matches. |
+| TrustLens JWT | `trustlens-secrets` | `JWT_SECRET` | auto-generated (only when `trustlens.enabled=true`) |
+| TrustLens encryption keyset | `trustlens-secrets` | `ENCRYPTION_KEYSET` | auto-generated |
+| TrustLens DB password | `trustlens-secrets` | `DATABASE_PASSWORD` | auto-generated |
+| DataAgent DB password | `dataagent-secrets` | `DB_PASSWORD` | auto-generated (read-only `dataagent` role in `trustdata`; search_path spans both writer schemas) |
+| DataAgent DB DSN | `dataagent-secrets` | `DATABASE_URL` | assembled from the `database` components (or `databaseUrl` override) |
+| DataAgent enrolment token | `dataagent-secrets` | `ENROLMENT_TOKEN` | **never** auto-generated — SaaS-issued, from values |
+| AlertEngine DB password | `alertengine-secrets` | `DB_PASSWORD` | auto-generated (own `alertengine` DB; external only); **omitted when `alertengine.database.iamAuth=true`** |
+| AlertEngine auth JWT | `alertengine-secrets` | `AUTH_JWT_SECRET` | auto-generated — must match the app BFF token signer for UI auth |
+| AlertEngine encryption key | `alertengine-secrets` | `APP_ENCRYPTION_KEY` | auto-generated (AES-256-GCM for integration secrets) |
+| DataCore / AlertEngine / clickstack / data-plane-api ClickHouse password | `clickhouse` | `admin-password` | **shared** — all read `CLICKHOUSE_PASSWORD` from the in-cluster `clickhouse` secret via `clickhouse.existingSecret` (`dataPlane.components.clickhouse.existingSecret` for the shim; no per-service key). External ClickHouse: point `existingSecret.name`/`key` at your secret. |
+
+- **Postgres (`v2-postgres-init`)**: `control-plane-postgresql` deploys by default
+  in all v2 modes; the Job's provisioning is **mode-derived**:
+  - **hybrid** — ONE shared database `trustdata`. AgentGateway and TrustGuard each get
+    their OWN schema (named after their role) with `search_path` defaulted there, from
+    their `DB_PASSWORD` above, so their identically-named migration trackers
+    (`migration_versions`) never collide. A read-only `dataagent` role (from
+    `dataagent-secrets/DB_PASSWORD`) is granted SELECT on both schemas and its
+    `search_path` spans them, so DataAgent's unqualified reads resolve.
+  - **external** — each service gets its OWN database (`agentgateway`, `trustguard`)
+    on `public`, since the control planes run on-prem and own their migrations;
+    DataCore reads raw data from ClickHouse, so there is no shared Postgres reader.
+    `trustlens` and `alertengine` keep their own databases when deployed (the init Job
+    also provisions the `alertengine` role + DB in external mode).
+- **In-cluster Redis** (`redis`) is passwordless by default; set
+  `agentgateway.redis.password` / `trustguard.redis.password` (stored as
+  `REDIS_PASSWORD`) for an authenticated external Redis. `REDIS_PASSWORD` is
+  omitted when `redis.iamAuth=true`.
+- **Shared ClickHouse credential**: DataCore, AlertEngine, `clickstack-otel-collector`
+  and the `data-plane-api` shim read the ClickHouse password from the single
+  `clickhouse` secret (key `admin-password`) — none store their own
+  `CLICKHOUSE_PASSWORD`. Override per service with
+  `datacore.clickhouse.existingSecret` / `alertengine.clickhouse.existingSecret` /
+  `clickstack-otel-collector.clickhouse.existingSecret` /
+  `neuraltrust-data-plane.dataPlane.components.clickhouse.existingSecret`. For
+  external ClickHouse (`infrastructure.clickhouse.deploy=false`), point these at the
+  secret matching `infrastructure.clickhouse.external.secretName`/`secretKey`, and set
+  the ClickHouse host to your endpoint (a dotted/FQDN host is used verbatim; a bare
+  name expands to `<name>.<namespace>.svc.cluster.local`).
+- **Optional IAM DB/Redis auth (AWS)**: the v2 Go services accept
+  `database.iamAuth` / `redis.iamAuth` (default false). When on they emit
+  `DB_IAM_AUTH`/`DB_AUTH_MODE`/`REDIS_IAM_AUTH` and ship no static password (chart
+  scaffolding; service-side token minting pending). RDS IAM is live for the Python
+  control-plane (`controlPlane.components.postgresql.authMode: iam`). See
+  `my-values-aws-v2-iam.yaml`.
+- **DataAgent** requires operator-supplied `enrolmentToken` (SaaS-issued, never
+  generated). Its `DATABASE_URL` and `DB_PASSWORD` auto-derive for in-cluster
+  Postgres; overlay `dataagent.database.host` + `database.password` for external.
 
 ## Using external secret management
 

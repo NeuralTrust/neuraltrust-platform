@@ -1,0 +1,29 @@
+{{- if and (eq (include "neuraltrust-platform.isV2" .) "true") (eq (include "neuraltrust-platform.isHybrid" .) "true") }}
+{{- /*
+Hybrid raw-telemetry profile. Mounted read-only at /etc/telemetry and selected by
+TELEMETRY_EXPORTERS_FILE. Request/response payloads are persisted in the
+customer-boundary Postgres pointed at by SENSIBLE_PG_DSN (its own "trustguard"
+schema, set by v2-postgresql-init) so DataAgent can read them locally without any
+data leaving the boundary. The postgres exporter runs its own advisory-locked
+migrations (trustguard_data + migration_versions) on first use.
+
+Only the raw sink is declared: the platform chart does not wire an OTLP collector
+endpoint for the v2 data planes, so shipping metadata over OTLP with an empty
+endpoint would fail the exporter at boot. Add a metadata otlp exporter here once an
+OTLP endpoint is configured for these workloads.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trustguard-telemetry
+  labels:
+    {{- include "trustguard.labels" . | nindent 4 }}
+data:
+  telemetry.yaml: |
+    exporters:
+      raw:
+        - name: sensible-pg
+          type: postgres
+          settings:
+            dsn_env: SENSIBLE_PG_DSN
+{{- end }}

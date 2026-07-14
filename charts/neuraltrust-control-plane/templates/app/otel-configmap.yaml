@@ -6,7 +6,7 @@
   short-circuits to no-op providers if OTEL_EXPORTER_OTLP_ENDPOINT is
   unset, so this matches the binary's expected behavior.
 */ -}}
-{{- if and .Values.controlPlane .Values.controlPlane.enabled }}
+{{- if eq (include "neuraltrust-control-plane.controlPlaneEnabled" .) "true" }}
 {{- $endpoint := include "control-plane.otelEndpoint" (dict "component" "app" "context" .) }}
 {{- if $endpoint }}
 {{- $appCfg := dict }}

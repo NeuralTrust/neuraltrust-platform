@@ -1,0 +1,19 @@
+{{- if eq (include "neuraltrust-platform.v2Redis.enabled" .) "true" }}
+{{- $redis := default dict (default dict .Values.infrastructure).redis }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "neuraltrust-platform.v2Redis.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: redis
+      port: {{ default 6379 $redis.port }}
+      targetPort: redis
+      protocol: TCP
+  selector:
+    {{- include "neuraltrust-platform.v2Redis.selectorLabels" . | nindent 4 }}
+{{- end }}

@@ -112,6 +112,8 @@ spec:
                 secretKeyRef:
                   name: firewall-secrets
                   key: JWT_SECRET
+            # Optional: models are bundled in the image at build time, so this
+            # is unset for official images. Kept for custom runtime-download builds.
             - name: HUGGINGFACE_TOKEN
               valueFrom:
                 secretKeyRef:

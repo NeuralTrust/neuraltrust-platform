@@ -1,4 +1,5 @@
-{{- if and .Values.controlPlane .Values.controlPlane.enabled }}
+{{- /* platform-v2: App UI stays SaaS-side in v2 hybrid; rendered in v1 and v2 external */ -}}
+{{- if eq (include "neuraltrust-control-plane.controlPlaneEnabled" .) "true" }}
 {{- $gkeBackendConfigName := include "neuraltrust-platform.service.gkeBackendConfigName" (dict "global" .Values.global "localName" "control-plane-app-backendconfig") }}
 {{- $gcp := default dict (default dict .Values.global.ingress).gcp }}
 {{- if and .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.ingress .Values.controlPlane.components.app.ingress.enabled $gkeBackendConfigName (not $gcp.backendConfig) }}
@@ -129,7 +130,8 @@ spec:
   {{- else if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.host }}
     {{- $host = .Values.controlPlane.components.app.host }}
   {{- else }}
-    {{- $host = "app.neuraltrust.ai" }}
+    {{- /* No domain/host configured: fall back to the in-cluster service name (no vendor domain). Set global.domain or app.host for a public route. */}}
+    {{- $host = "control-plane-app" }}
   {{- end }}
 ---
 apiVersion: route.openshift.io/v1

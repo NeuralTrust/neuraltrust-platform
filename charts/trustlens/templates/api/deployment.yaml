@@ -1,0 +1,104 @@
+{{- if and (eq (include "neuraltrust-platform.isV2" .) "true") .Values.enabled (eq (include "neuraltrust-platform.isFull" .) "true") }}
+{{- $img := include "trustlens.image" (dict "repository" .Values.image.repository "tag" .Values.image.tag "global" .Values.global) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.controlPlane.name }}
+  labels:
+    {{- include "trustlens.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+spec:
+  replicas: {{ .Values.controlPlane.replicas }}
+  selector:
+    matchLabels:
+      {{- include "trustlens.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: control-plane
+  template:
+    metadata:
+      labels:
+        {{- include "trustlens.labels" . | nindent 8 }}
+        app.kubernetes.io/component: control-plane
+    spec:
+      serviceAccountName: {{ include "trustlens.serviceAccountName" . }}
+      {{- include "trustlens.imagePullSecrets" . | nindent 6 }}
+      {{- if .Values.securityHardening }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      {{- end }}
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 6 }}
+      containers:
+      - name: api
+        image: {{ $img | quote }}
+        args: {{ toJson .Values.controlPlane.args }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        envFrom:
+        - configMapRef:
+            name: trustlens-env-vars
+        - secretRef:
+            name: trustlens-secrets
+            optional: true
+        env:
+        {{- with .Values.controlPlane.extraEnv }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
+        {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "go" "ctx" .) | nindent 8 }}
+        {{- include "neuraltrust-platform.appVersionEnv" (dict "tag" .Values.image.tag) | nindent 8 }}
+        {{- if .Values.securityHardening }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        {{- end }}
+        ports:
+        - containerPort: {{ .Values.controlPlane.ports.http }}
+          name: http
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 8 }}
+        resources:
+          {{- toYaml .Values.controlPlane.resources | nindent 10 }}
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 15
+          periodSeconds: 20
+      {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" . "local" .Values.controlPlane.nodeSelector) | nindent 6 }}
+      {{- include "neuraltrust-platform.tolerations" (dict "ctx" . "local" .Values.controlPlane.tolerations) | nindent 6 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.controlPlane.name }}
+  labels:
+    {{- include "trustlens.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+  {{- $negAnnotations := include "neuraltrust-platform.service.negAnnotations" (dict "global" .Values.global "pscServiceKey" "trustlens-api") }}
+  {{- with $negAnnotations }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.controlPlane.service.type | default "ClusterIP" }}
+  ports:
+    - port: 80
+      targetPort: {{ .Values.controlPlane.ports.http }}
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "trustlens.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+{{- end }}

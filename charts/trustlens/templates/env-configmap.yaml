@@ -1,0 +1,16 @@
+{{- if and (eq (include "neuraltrust-platform.isV2" .) "true") .Values.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trustlens-env-vars
+  labels:
+    {{- include "trustlens.labels" . | nindent 4 }}
+data:
+  ENVIRONMENT: {{ .Values.config.environment | quote }}
+  HTTP_ADDR: {{ .Values.config.httpAddr | quote }}
+  DATABASE_HOST: {{ include "neuraltrust-platform.postgres.host" (dict "host" .Values.database.host) | quote }}
+  DATABASE_PORT: {{ .Values.database.port | quote }}
+  DATABASE_NAME: {{ .Values.database.name | quote }}
+  DATABASE_USER: {{ .Values.database.user | quote }}
+  DATABASE_SSLMODE: {{ .Values.database.sslMode | quote }}
+{{- end }}

@@ -1,3 +1,5 @@
+{{- /* platform-v2: legacy data-plane disabled under v2, EXCEPT the data-plane-api shim (kept until TrustLens). Renders under v1 (any mode) or the v2 data-plane-api shim. */ -}}
+{{- if or (not (eq (include "neuraltrust-platform.isV2" .) "true")) (eq (include "neuraltrust-platform.dataPlaneApiV2.enabled" .) "true") }}
 {{- /*
 RBAC for the shared `data-plane` ServiceAccount, used when k8sJobs is
 enabled. The API pod (which creates Jobs) and the Job pods it spawns both
@@ -71,3 +73,5 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
 {{- end -}}
 {{- end -}}
+
+{{- end }}

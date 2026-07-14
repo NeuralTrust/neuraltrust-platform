@@ -2,7 +2,7 @@ apiVersion: v2
 name: neuraltrust-platform
 description: Unified Helm chart for NeuralTrust platform including Data Plane, Control Plane, TrustGate, and infrastructure components
 type: application
-version: 1.14.16
+version: 1.19.0
 appVersion: "1.0.0"
 icon: https://neuraltrust.ai/favicon.ico
 dependencies:
@@ -23,7 +23,7 @@ dependencies:
       - optional
   # Infrastructure components (conditional deployment)
   - name: clickhouse
-    version: 1.0.2
+    version: 1.0.3
     repository: file://./charts/clickhouse
     condition: infrastructure.clickhouse.deploy
     tags:
@@ -36,13 +36,13 @@ dependencies:
       - infrastructure
   # NeuralTrust components
   - name: neuraltrust-data-plane
-    version: 1.2.47
+    version: 1.2.48
     condition: neuraltrust-data-plane.dataPlane.enabled
     repository: file://./charts/neuraltrust-data-plane
     tags:
       - neuraltrust
   - name: neuraltrust-control-plane
-    version: 1.2.41
+    version: 1.2.43
     repository: file://./charts/neuraltrust-control-plane
     # No condition: subchart always loads so PostgreSQL can deploy independently.
     # Control Plane components are guarded by controlPlane.enabled inside templates.
@@ -50,14 +50,68 @@ dependencies:
       - neuraltrust
   # TrustGate components
   - name: trustgate
-    version: 1.2.32
+    version: 1.2.33
     condition: trustgate.enabled
     repository: file://./charts/trustgate
     tags:
       - trustgate
+  # Platform v2 components (rendered only when global.platformVersion=v2;
+  # loaded unconditionally so the single global switch controls them at render
+  # time — see .cursor/rules/platform-v2.mdc). Backward-compatible: under v1
+  # (default) every template in these subcharts renders to empty.
+  - name: agentgateway
+    version: 0.1.3
+    repository: file://./charts/agentgateway
+    tags:
+      - neuraltrust
+      - v2
+  - name: trustguard
+    version: 0.1.3
+    repository: file://./charts/trustguard
+    tags:
+      - neuraltrust
+      - v2
+  - name: trustlens
+    version: 0.1.0
+    repository: file://./charts/trustlens
+    tags:
+      - neuraltrust
+      - v2
+  # DataAgent — hybrid only (global.deploymentMode=hybrid); bridges local reads
+  # to the SaaS DataBridge. Template-guarded (isV2 + isHybrid), no condition.
+  - name: dataagent
+    version: 0.1.0
+    repository: file://./charts/dataagent
+    tags:
+      - neuraltrust
+      - v2
+  # DataCore + clickstack-otel-collector — external only
+  # (global.deploymentMode=external); the self-hosted analytics stack over local
+  # ClickHouse. Template-guarded (isV2 + isExternal), no condition.
+  - name: datacore
+    version: 0.1.1
+    repository: file://./charts/datacore
+    tags:
+      - neuraltrust
+      - v2
+  - name: clickstack-otel-collector
+    version: 0.1.1
+    repository: file://./charts/clickstack-otel-collector
+    tags:
+      - neuraltrust
+      - v2
+  # AlertEngine — external only (global.deploymentMode=external); evaluates
+  # detection rules over ClickHouse telemetry and forwards findings to SIEMs.
+  # Template-guarded (isV2 + isExternal), no condition.
+  - name: alertengine
+    version: 0.1.0
+    repository: file://./charts/alertengine
+    tags:
+      - neuraltrust
+      - v2
   # Firewall API
   - name: neuraltrust-firewall
-    version: 2.0.14
+    version: 2.0.15
     condition: neuraltrust-firewall.firewall.enabled
     repository: file://./charts/neuraltrust-firewall
     tags:

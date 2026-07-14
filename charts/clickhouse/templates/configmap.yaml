@@ -1,3 +1,4 @@
+{{- if eq (include "neuraltrust-platform.clickhouseAllowed" .) "true" }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -13,3 +14,4 @@ data:
       </logger>
       <listen_host>{{ .Values.listenHost | default "::" }}</listen_host>
     </clickhouse>
+{{- end }}

@@ -1,0 +1,104 @@
+{{- if eq (include "neuraltrust-platform.v2Redis.enabled" .) "true" }}
+{{- $redis := default dict (default dict .Values.infrastructure).redis }}
+{{- $persist := default dict $redis.persistence }}
+{{- $port := default 6379 $redis.port }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "neuraltrust-platform.v2Redis.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "neuraltrust-platform.v2Redis.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "neuraltrust-platform.v2Redis.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- include "neuraltrust-platform.v2Redis.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: redis
+          image: {{ include "neuraltrust-platform.v2Redis.image" . | quote }}
+          imagePullPolicy: {{ default "IfNotPresent" (default dict $redis.image).pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          # Plain Redis (no RediSearch modules) — sessions + cache for v2 services.
+          command: ["redis-server"]
+          args:
+            - "--port"
+            - {{ $port | quote }}
+            {{- if $persist.enabled }}
+            - "--save"
+            - "60 1"
+            - "--appendonly"
+            - "yes"
+            {{- else }}
+            - "--save"
+            - ""
+            - "--appendonly"
+            - "no"
+            {{- end }}
+          ports:
+            - name: redis
+              containerPort: {{ $port }}
+          livenessProbe:
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "-p", {{ $port | quote }}, "ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml (default dict $redis.resources) | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: data
+          {{- if $persist.enabled }}
+          persistentVolumeClaim:
+            claimName: redis-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" . "local" $redis.nodeSelector) | nindent 6 }}
+      {{- include "neuraltrust-platform.tolerations" (dict "ctx" . "local" $redis.tolerations) | nindent 6 }}
+{{- if $persist.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-data
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "neuraltrust-platform.v2Redis.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- $sc := $persist.storageClass | default .Values.global.storageClass }}
+  {{- if $sc }}
+  storageClassName: {{ $sc }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ default "2Gi" $persist.size }}
+{{- end }}
+{{- end }}

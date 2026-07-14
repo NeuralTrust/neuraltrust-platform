@@ -1,3 +1,4 @@
+{{- if eq (include "neuraltrust-platform.clickhouseAllowed" .) "true" }}
 {{- if .Values.backup.enabled }}
 {{- $type := .Values.backup.storage.type | default "s3" }}
 {{- $database := .Values.backup.database | default (.Values.auth.database | default "neuraltrust") }}
@@ -121,4 +122,5 @@ spec:
               configMap:
                 name: {{ include "clickhouse.fullname" . }}-backup-script
                 defaultMode: 0550
+{{- end }}
 {{- end }}

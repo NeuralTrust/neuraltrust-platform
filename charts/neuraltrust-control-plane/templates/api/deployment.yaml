@@ -1,4 +1,6 @@
-{{- if and .Values.controlPlane .Values.controlPlane.enabled }}
+{{- /* platform-v2: legacy component disabled in v2 hybrid; re-enabled in v2 external */ -}}
+{{- if or (ne (include "neuraltrust-platform.isV2" .) "true") (eq (include "neuraltrust-platform.isExternal" .) "true") }}
+{{- if eq (include "neuraltrust-control-plane.controlPlaneEnabled" .) "true" }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -31,12 +33,9 @@ spec:
       {{- $imagePullSecret := "gcr-secret" }}
       {{- if .Values.imagePullSecrets }}
         {{- $imagePullSecret = .Values.imagePullSecrets }}
-      {{- else if .Values.controlPlane }}
-        {{- if hasKey .Values.controlPlane "imagePullSecrets" }}
-          {{- if and .Values.controlPlane.imagePullSecrets (ne .Values.controlPlane.imagePullSecrets "none") (ne .Values.controlPlane.imagePullSecrets "") }}
-            {{- $imagePullSecret = .Values.controlPlane.imagePullSecrets }}
-          {{- end }}
-        {{- end }}
+      {{- else if and .Values.controlPlane (hasKey .Values.controlPlane "imagePullSecrets") }}
+        {{- /* Assign unconditionally so "none"/"" opt out (the guard below suppresses them). */}}
+        {{- $imagePullSecret = .Values.controlPlane.imagePullSecrets }}
       {{- end }}
       {{- if and $imagePullSecret (ne $imagePullSecret "none") (ne $imagePullSecret "") }}
       imagePullSecrets:
@@ -310,4 +309,5 @@ spec:
           failureThreshold: 30
       {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" .) | nindent 6 }}
       {{- include "neuraltrust-platform.tolerations" (dict "ctx" .) | nindent 6 }}
+{{- end }}
 {{- end }}

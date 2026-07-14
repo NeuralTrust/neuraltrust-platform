@@ -595,7 +595,7 @@ neuraltrust-data-plane:
       dataPlaneJWTSecretName: "data-plane-jwt-secret"
       dataPlaneJWTSecret: "" #define this value
       huggingFaceTokenSecretName: "huggingface-secrets"
-      huggingFaceToken: ""
+      huggingFaceToken: "" # Optional: data-plane bundles fastText; only needed by eval Jobs using HF-gated models
     components:
       clickhouse:
         enabled: true

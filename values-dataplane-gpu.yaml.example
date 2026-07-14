@@ -121,8 +121,10 @@ neuraltrust-firewall:
     config:
       cudaMpsActiveThreadPercentage: "25"
       cudaMpsPinnedDeviceMemLimit: "6000M"
-    secrets:
-      huggingFaceToken: "your-huggingface-token"
+    # Firewall images (CPU and GPU) bundle all ML models at build time, so no
+    # Hugging Face token is needed at runtime. Leave unset for official images.
+    # secrets:
+    #   huggingFaceToken: ""
 
 trustgate:
   enabled: false

@@ -1,0 +1,43 @@
+{{- if and (eq (include "neuraltrust-platform.isV2" .) "true") (eq (include "neuraltrust-platform.isExternal" .) "true") .Values.ingress.enabled }}
+{{- $className := include "neuraltrust-platform.ingress.className" (dict "global" .Values.global "local" .Values.ingress.className) }}
+{{- $annotations := include "neuraltrust-platform.ingress.annotations" (dict "global" .Values.global "local" .Values.ingress.annotations) }}
+{{- $renderTLS := and .Values.ingress.tls .Values.ingress.tls.enabled (include "neuraltrust-platform.ingress.renderTLS" (dict "global" .Values.global "tlsEnabled" .Values.ingress.tls.enabled)) }}
+{{- $tlsSecret := include "neuraltrust-platform.ingress.effectiveTLSSecretName" (dict "global" .Values.global "localSecretName" .Values.ingress.tls.secretName) }}
+{{- $host := include "neuraltrust-platform.ingress.host" (dict "host" .Values.ingress.host "prefix" .Values.ingress.hostPrefix "global" .Values.global) }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "datacore.fullname" . }}
+  labels:
+    {{- include "datacore.labels" . | nindent 4 }}
+    app.kubernetes.io/component: data-plane
+  {{- with $annotations }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if $className }}
+  ingressClassName: {{ $className }}
+  {{- end }}
+  {{- if $renderTLS }}
+  tls:
+    - secretName: {{ $tlsSecret }}
+      {{- if $host }}
+      hosts:
+        - {{ $host }}
+      {{- end }}
+  {{- end }}
+  rules:
+    - {{- if $host }}
+      host: {{ $host }}
+      {{- end }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "datacore.fullname" . }}
+                port:
+                  name: http
+{{- end }}

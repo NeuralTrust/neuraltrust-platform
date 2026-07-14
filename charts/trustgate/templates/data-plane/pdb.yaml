@@ -1,3 +1,5 @@
+{{- /* platform-v2: legacy component disabled when global.platformVersion=v2 */ -}}
+{{- if not (eq (include "neuraltrust-platform.isV2" .) "true") }}
 {{- if .Values.dataPlane.podDisruptionBudget.enabled }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -13,3 +15,4 @@ spec:
       {{- include "trustgate.selectorLabels" . | nindent 6 }}
       component: data-plane
 {{- end }} 
+{{- end }}

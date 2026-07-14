@@ -75,9 +75,8 @@ Usage: {{ include "data-plane.imagePullSecretName" . }}
 {{- if .Values.imagePullSecrets -}}
   {{- $imagePullSecret = .Values.imagePullSecrets -}}
 {{- else if and .Values.dataPlane (hasKey .Values.dataPlane "imagePullSecrets") -}}
-  {{- if and .Values.dataPlane.imagePullSecrets (ne .Values.dataPlane.imagePullSecrets "none") (ne .Values.dataPlane.imagePullSecrets "") -}}
-    {{- $imagePullSecret = .Values.dataPlane.imagePullSecrets -}}
-  {{- end -}}
+  {{- /* Assign unconditionally so "none"/"" opt out (the guard below suppresses them). */ -}}
+  {{- $imagePullSecret = .Values.dataPlane.imagePullSecrets -}}
 {{- end -}}
 {{- if and $imagePullSecret (ne $imagePullSecret "none") (ne $imagePullSecret "") -}}
 {{- $imagePullSecret -}}

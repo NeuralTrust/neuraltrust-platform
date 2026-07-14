@@ -1,0 +1,64 @@
+{{- if eq (include "neuraltrust-platform.isV2" .) "true" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agentgateway-env-vars
+  labels:
+    {{- include "agentgateway.labels" . | nindent 4 }}
+data:
+  LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  SERVER_ADMIN_PORT: {{ .Values.controlPlane.ports.http | quote }}
+  SERVER_PROXY_PORT: {{ .Values.dataPlane.ports.http | quote }}
+  SERVER_MCP_PORT: {{ .Values.mcp.ports.http | quote }}
+  # App reads GATEWAY_BASE_DOMAIN / MCP_BASE_DOMAIN (see AgentGateway config.go).
+  GATEWAY_BASE_DOMAIN: {{ .Values.config.gatewayBaseDomain | default (include "neuraltrust-platform.domain" .) | quote }}
+  MCP_BASE_DOMAIN: {{ .Values.config.mcpBaseDomain | default (printf "mcp.%s" (include "neuraltrust-platform.domain" .)) | quote }}
+  GATEWAY_DISCOVERY_MODE: {{ .Values.config.gatewayDiscoveryMode | quote }}
+  # App reads DB_* (not DATABASE_*). Host auto-derives to the in-cluster
+  # control-plane-postgresql Service; override .Values.database.host for external
+  # Postgres. DB_NAME is mode-derived: external => private "agentgateway" DB (control
+  # owns migrations); hybrid => shared "trustdata" DB (isolation is by schema).
+  DB_HOST: {{ include "neuraltrust-platform.postgres.host" (dict "host" .Values.database.host) | quote }}
+  DB_PORT: {{ .Values.database.port | quote }}
+  DB_NAME: {{ include "neuraltrust-platform.v2.dbName" (dict "ctx" . "explicit" .Values.database.name "external" "agentgateway") | quote }}
+  DB_USER: {{ .Values.database.user | quote }}
+  DB_SSL_MODE: {{ .Values.database.sslMode | quote }}
+  {{- if .Values.database.iamAuth }}
+  # IAM (RDS) DB auth: no static DB_PASSWORD is shipped; the service mints a token.
+  DB_IAM_AUTH: "true"
+  DB_AUTH_MODE: "iam"
+  {{- end }}
+  REDIS_HOST: {{ .Values.redis.host | quote }}
+  REDIS_PORT: {{ .Values.redis.port | quote }}
+  REDIS_DB: {{ .Values.redis.db | default "0" | quote }}
+  {{- if and .Values.redis.username (ne (.Values.redis.username | toString) "") }}
+  REDIS_USERNAME: {{ .Values.redis.username | quote }}
+  {{- end }}
+  {{- if and .Values.redis.tls (ne (.Values.redis.tls | toString) "") }}
+  # TLS-only managed Redis (e.g. ElastiCache Serverless enforces in-transit encryption).
+  # TrustGate reads REDIS_TLS_ENABLED / REDIS_TLS_INSECURE_VERIFY (not REDIS_TLS).
+  REDIS_TLS_ENABLED: {{ .Values.redis.tls | quote }}
+  {{- end }}
+  {{- if and .Values.redis.tlsInsecureVerify (ne (.Values.redis.tlsInsecureVerify | toString) "") }}
+  REDIS_TLS_INSECURE_VERIFY: {{ .Values.redis.tlsInsecureVerify | quote }}
+  {{- end }}
+  {{- if .Values.redis.iamAuth }}
+  # IAM (ElastiCache) Redis auth: no static REDIS_PASSWORD is shipped.
+  REDIS_IAM_AUTH: "true"
+  {{- end }}
+  # v2 has no Kafka: keep the async telemetry publisher off so the data plane
+  # does not attempt to reach a broker. Set true only when a broker is wired.
+  TELEMETRY_ENABLED: {{ .Values.config.telemetryEnabled | default false | quote }}
+  {{- if eq (include "neuraltrust-platform.isHybrid" .) "true" }}
+  # Hybrid: load the raw-telemetry exporters file (agentgateway-telemetry ConfigMap),
+  # which persists request/response payloads into SENSIBLE_PG_DSN for DataAgent. The
+  # metrics pipeline is on by default (METRICS_ENABLED defaults true).
+  TELEMETRY_EXPORTERS_FILE: "/etc/telemetry/telemetry.yaml"
+  {{- end }}
+  # In-cluster TrustGuard data-plane URL. Derived from the stable Service name +
+  # release namespace (Service listens on port 80), so it never needs setting in
+  # a single-umbrella deploy. Override .Values.trustguard.baseURL only when
+  # TrustGuard runs outside this release. TRUSTGUARD_CLIENT_ID/_SECRET are wired
+  # from the shared v2-trustguard-client-secret Secret in the Deployment env.
+  TRUSTGUARD_BASE_URL: {{ .Values.trustguard.baseURL | default (printf "http://trustguard-data-plane.%s.svc.cluster.local" .Release.Namespace) | quote }}
+{{- end }}
