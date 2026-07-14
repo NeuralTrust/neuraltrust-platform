@@ -1,3 +1,5 @@
+{{- /* platform-v2: legacy component disabled when global.platformVersion=v2 */ -}}
+{{- if not (eq (include "neuraltrust-platform.isV2" .) "true") }}
 {{- if .Values.ingress.enabled }}
 {{- $cpHost := include "neuraltrust-platform.ingress.host" (dict "host" .Values.ingress.controlPlane.host "prefix" .Values.ingress.controlPlane.hostPrefix "global" .Values.global) }}
 {{- $dpHost := include "neuraltrust-platform.ingress.host" (dict "host" .Values.ingress.dataPlane.host "prefix" .Values.ingress.dataPlane.hostPrefix "global" .Values.global) }}
@@ -122,4 +124,6 @@ spec:
                 name: trustgate-actions
                 port:
                   name: http
+{{- end }}
+
 {{- end }}

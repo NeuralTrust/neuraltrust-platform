@@ -1,0 +1,68 @@
+# DataAgent subchart.
+# Renders ONLY when global.platformVersion=v2 AND global.deploymentMode=hybrid.
+# Outbound-only: dials the SaaS DataBridge over gRPC, runs typed read-only
+# queries on a local Postgres, and streams back only entitled rows. No inbound
+# Service is exposed; the :8080 listener is health probes only.
+nameOverride: ""
+fullnameOverride: "dataagent"
+securityHardening: true
+image:
+  repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/dataagent
+  tag: "v0.1.0"
+  pullPolicy: IfNotPresent
+imagePullSecrets: "gcr-secret"
+serviceAccount:
+  create: true
+  name: "dataagent"
+  annotations: {}
+# Single outbound stream — a second replica would double-register on DataBridge.
+replicas: 1
+ports:
+  health: 8080
+resources:
+  requests: {cpu: 50m, memory: 64Mi}
+  limits: {cpu: 250m, memory: 128Mi}
+nodeSelector: {}
+tolerations: []
+extraEnv: []
+# DataBridge (SaaS) connection. Defaults point at the NeuralTrust SaaS DataBridge,
+# so hybrid customers need not set these — override only for a non-default SaaS
+# region/endpoint or a self-hosted DataBridge.
+databridge:
+  addr: "databridge.neuraltrust.ai:443" # SaaS DataBridge gRPC host:port
+  serverName: "databridge.neuraltrust.ai" # TLS SNI / server identity pin
+  tlsMode: "tls" # tls | mtls | insecure (insecure = dev only)
+tenantId: "" # Required: tenant identity on the stream
+instanceId: "" # Defaults to the pod hostname when empty
+# Local store the agent reads (read-only). `memory` is dev-only.
+store:
+  backend: "postgres" # postgres | memory
+# Read-only Postgres connection into the shared "trustdata" DB. AgentGateway and
+# TrustGuard each write their raw telemetry into their OWN schema in that DB; the
+# read-only "dataagent" role (provisioned by v2-postgresql-init) is granted SELECT on
+# both schemas and its search_path is set to span them, so DataAgent's unqualified
+# reads (SELECT ... FROM "trustgate_data" / "trustguard_data") resolve without any
+# schema qualification. The assembled DSN + enrolment token live in the secret.
+# In-cluster: everything auto-derives (host = control-plane-postgresql, password
+# auto-generated). External: overlay host + password (and user/name only if renamed).
+database:
+  host: "" # Empty ⇒ in-cluster control-plane-postgresql
+  port: 5432
+  name: "trustdata" # Shared v2 DB (hybrid only)
+  user: "dataagent" # Read-only role; search_path spans both writer schemas (set by v2-postgresql-init)
+  password: "" # Auto-generated when empty (global.autoGenerateSecrets)
+  sslMode: "prefer"
+# DEPRECATED escape hatch: a full DSN that overrides the `database` block above.
+# Prefer the components. Kept for backward compatibility.
+databaseUrl: ""
+enrolmentToken: "" # Issued by SaaS; required for tls/mtls
+# gRPC supervisor tuning (sane defaults; override only if needed).
+supervisor:
+  backoffMin: "1s"
+  backoffMax: "30s"
+  keepaliveTime: "10s"
+  keepaliveTimeout: "3s"
+  maxConcurrentQueries: 8
+pdb:
+  enabled: true
+  minAvailable: 1

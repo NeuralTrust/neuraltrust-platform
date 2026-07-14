@@ -1,0 +1,6 @@
+apiVersion: v2
+name: clickstack-otel-collector
+description: ClickStack OpenTelemetry Collector — OTLP gateway that writes telemetry directly into ClickHouse (local or external). Deployed only when global.platformVersion=v2 AND global.deploymentMode=external.
+type: application
+version: 0.1.1
+appVersion: "2.29.0"

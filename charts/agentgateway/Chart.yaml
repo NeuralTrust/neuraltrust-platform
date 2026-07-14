@@ -1,0 +1,6 @@
+apiVersion: v2
+name: agentgateway
+description: AgentGateway (TrustGate v2) — admin control-plane + proxy/MCP data-plane. Deployed only when global.platformVersion=v2.
+type: application
+version: 0.1.3
+appVersion: "v0.3.6"

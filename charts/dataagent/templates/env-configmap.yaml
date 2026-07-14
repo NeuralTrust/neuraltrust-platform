@@ -1,0 +1,23 @@
+{{- if and (eq (include "neuraltrust-platform.isV2" .) "true") (eq (include "neuraltrust-platform.isHybrid" .) "true") }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dataagent-env-vars
+  labels:
+    {{- include "dataagent.labels" . | nindent 4 }}
+data:
+  DATABRIDGE_ADDR: {{ .Values.databridge.addr | quote }}
+  DATABRIDGE_SERVER_NAME: {{ .Values.databridge.serverName | quote }}
+  TLS_MODE: {{ .Values.databridge.tlsMode | quote }}
+  TENANT_ID: {{ .Values.tenantId | quote }}
+  {{- with .Values.instanceId }}
+  INSTANCE_ID: {{ . | quote }}
+  {{- end }}
+  STORE_BACKEND: {{ .Values.store.backend | quote }}
+  HEALTH_ADDR: {{ printf ":%v" .Values.ports.health | quote }}
+  BACKOFF_MIN: {{ .Values.supervisor.backoffMin | quote }}
+  BACKOFF_MAX: {{ .Values.supervisor.backoffMax | quote }}
+  KEEPALIVE_TIME: {{ .Values.supervisor.keepaliveTime | quote }}
+  KEEPALIVE_TIMEOUT: {{ .Values.supervisor.keepaliveTimeout | quote }}
+  MAX_CONCURRENT_QUERIES: {{ .Values.supervisor.maxConcurrentQueries | quote }}
+{{- end }}

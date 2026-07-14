@@ -1,3 +1,5 @@
+{{- /* platform-v2: legacy component disabled when global.platformVersion=v2 */ -}}
+{{- if not (eq (include "neuraltrust-platform.isV2" .) "true") }}
 {{- $g := default dict .Values.global -}}
 {{- $m := default dict $g.monitoring -}}
 {{- $cap := .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" -}}
@@ -55,4 +57,6 @@ spec:
           annotations:
             summary: "ClickHouse hourly backup Job failed"
             description: 'Inspect with `kubectl logs job/{{ printf "{{ $labels.job_name }}" }}`. Failure means the most recent backup did not write to S3/GCS.'
+{{- end }}
+
 {{- end }}

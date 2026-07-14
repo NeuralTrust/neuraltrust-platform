@@ -14,6 +14,38 @@ global:
   #   kubernetes → Generic Kubernetes, no cloud-specific annotations
   # Switch platform: --set global.platform=gcp
   platform: "gcp"
+  # Product generation switch. Selects WHICH stack the umbrella chart deploys.
+  # This is NOT the cloud provider (that is `global.platform` above).
+  #   "v1" | "" | null → legacy stack, byte-identical to today (default).
+  #   "v2"             → next-gen stack: AgentGateway + TrustGuard + TrustLens
+  #                      control/data planes. Under v2 the legacy Python
+  #                      control-plane API, data-plane, trustgate, kafka, aispm
+  #                      and siem-connectors stop deploying.
+  # Switch to v2: --set global.platformVersion=v2
+  platformVersion: "v1"
+  # Split-plane boundary for the v2 stack (ignored under v1).
+  #   "hybrid"   → only data-plane components deploy at the customer; control
+  #                planes stay in NeuralTrust SaaS (default, most customers).
+  #                DataAgent bridges local reads to the SaaS DataBridge.
+  #                In-cluster Postgres + Redis + ClickHouse deploy by default;
+  #                the temporary data-plane-api analytics shim runs over
+  #                ClickHouse (kept until TrustLens).
+  #   "external" → control-plane AND data-plane components deploy on-prem PLUS
+  #                the self-hosted analytics stack (clickstack-otel-collector +
+  #                DataCore over local ClickHouse). No SaaS dependency; DataAgent
+  #                is not deployed. In-cluster Postgres + Redis + ClickHouse
+  #                deploy by default. Set global.observability.hostedExport.enabled=false
+  #                to keep telemetry fully in-cluster.
+  #   "full"     → DEPRECATED alias for "external"; renders identically.
+  deploymentMode: "hybrid"
+  # v2-only knobs. The AgentGateway proxy authenticates to TrustGuard with a
+  # shared client_credentials pair that TrustGuard validates; the umbrella owns
+  # both sides via the v2-trustguard-client-secret Secret so they always match.
+  # Leave the secret empty to auto-generate (needs autoGenerateSecrets), or set it
+  # to integrate with an externally-managed platform client.
+  v2:
+    trustguardClientId: "agentgateway-platform"
+    trustguardClientSecret: "" # Auto-generated when empty (global.autoGenerateSecrets)
   # Base domain for auto-generating service URLs and hostnames.
   # Used across all platforms for URL generation (e.g., "control-plane-api.{domain}").
   # Examples: "aws.neuraltrust.ai", "apps.mycluster.openshiftapps.com", "gcp.neuraltrust.ai"
@@ -416,6 +448,10 @@ infrastructure:
   clickhouse:
     # Set to true to deploy ClickHouse, false to use pre-installed instance
     # Default: true (deploy)
+    # NOTE (v2): ClickHouse deploys in ALL v2 modes (hybrid + external) — it backs
+    # the temporary data-plane-api analytics shim in every mode and the
+    # clickstack-otel-collector + DataCore stack in external mode. Set deploy=false
+    # and point the endpoints at a hosted instance to use external ClickHouse.
     deploy: true
     # External ClickHouse configuration (used when deploy: false)
     external:
@@ -433,7 +469,10 @@ infrastructure:
   kafka:
     # Set to true to deploy Kafka, false to use a pre-installed broker.
     # When false, configure global.kafka.bootstrapServers (and auth/tls if needed).
-    # Default: true (deploy)
+    # Default: true (deploy).
+    # NOTE (v2): Kafka is not part of the v2 stack — every charts/kafka template
+    # is isV2-guarded and renders to empty under global.platformVersion=v2,
+    # regardless of this flag. No need to set deploy: false for v2.
     deploy: true
     # Kafka chart values (used when deploy: true) are in the root-level 'kafka:' section below.
   # PostgreSQL Configuration
@@ -462,9 +501,38 @@ infrastructure:
       # PostgreSQL chart values (used when deploy: true)
       # Values are passed via 'neuraltrust-control-plane.controlPlane.components.postgresql:' section below
   # Redis Configuration
-  # Note: Redis is deployed as part of TrustGate, not as a separate subchart
-  # Control Redis deployment via 'trustgate.redis.enabled' (see trustgate.redis section below)
-  # External Redis configuration is available in 'trustgate.redis.external' section below
+  # v1: Redis is deployed as part of TrustGate (see 'trustgate.redis' below).
+  # v2: an umbrella-managed in-cluster Redis (service name "redis") deploys by
+  #     default in ALL v2 deployment modes for AgentGateway/TrustGuard sessions
+  #     and cache. Rendered only when global.platformVersion=v2 AND deploy=true.
+  #     Set deploy=false and point the services at infrastructure.redis.external
+  #     (or a hosted Redis/Memorystore) to use an external instance.
+  redis:
+    deploy: true
+    image:
+      repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/redis-stack-server
+      tag: "7.4.0-v0"
+      pullPolicy: IfNotPresent
+    port: 6379
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    persistence:
+      enabled: false
+      size: 2Gi
+      storageClass: ""
+    nodeSelector: {}
+    tolerations: []
+    # External Redis (used when deploy=false). Point agentgateway.redis.host /
+    # trustguard.redis.host here (or at a hosted endpoint) in that case.
+    external:
+      host: ""
+      port: "6379"
+      password: "" # Optional
 # ClickHouse subchart values (passed directly to clickhouse subchart)
 # These values are used when infrastructure.clickhouse.deploy=true
 clickhouse:
@@ -876,6 +944,9 @@ neuraltrust-control-plane:
     postgresql:
       deploy: true # Deploy PostgreSQL in-cluster (set to false to use external PostgreSQL)
   controlPlane:
+    # In v1 this opt-in gates the whole control-plane. In v2 the console (api + app)
+    # is SaaS-side, EXCEPT global.deploymentMode=external where api + app auto-enable
+    # from the platform flags (this toggle is ignored). The scheduler is force-off in v2.
     enabled: false
     imagePullSecrets: "gcr-secret" # Set imagePullSecrets for all control-plane components (scheduler, api, app, postgresql)
     serviceAccount:
@@ -1024,7 +1095,7 @@ neuraltrust-control-plane:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.79.0"
+          tag: "v1.89.0"
           pullPolicy: "Always"
         config:
           nodeEnv: production
@@ -1037,8 +1108,22 @@ neuraltrust-control-plane:
           trustgateControlPlaneUrl: "" # Auto: https://trustgate-admin.{global.openshiftDomain} or http://trustgate-control-plane:80 (same namespace)
           trustgateDataPlaneUrl: "" # Auto: https://trustgate-gateway.{global.openshiftDomain} or http://trustgate-data-plane:80 (same namespace)
           trustgateActionsUrl: "" # Auto: https://trustgate-actions.{global.openshiftDomain} or http://trustgate-actions:80 (same namespace)
-          nextAuthUrl: "" # Auto: https://{app.host} or https://control-plane-app.yourdomain.com
+          # APP_URL / NEXTAUTH_URL auto-resolve to the app's real ingress host:
+          # explicit app.host > <app.hostPrefix ("app")>.<global.domain> > in-cluster
+          # "control-plane-app" (OpenShift keeps control-plane-app.<domain> to match its Route).
+          # Set these only to override that (e.g. a custom auth domain).
+          appUrl: "" # Auto: https://<app.hostPrefix>.<global.domain> (drives magic-link / callback URLs)
+          nextAuthUrl: "" # Auto: same as appUrl; set to override the NextAuth callback base
           firewallApiUrl: ""
+          # platform-v2 backend service URLs (only wired when global.platformVersion=v2).
+          # Empty = in-cluster Service defaults (same namespace, port 80). JWT secrets are
+          # read from each v2 subchart's own Secret (optional).
+          agentgatewayUrl: "" # Auto: http://agentgateway-admin (AgentGateway admin/control API)
+          agentgatewayProxyUrl: "" # Auto: http://agentgateway-proxy (AgentGateway proxy/data plane)
+          trustguardUrl: "" # Auto: http://trustguard-control-plane (TrustGuard admin API)
+          datacoreUrl: "" # Auto: http://datacore (DataCore metrics read API)
+          datacoreMetricsEnabled: "false" # "true" to enable DataCore-backed metrics in the console (needs datacore deployed)
+          alertEngineApiUrl: "" # Auto: http://alertengine-api (AlertEngine API)
           # POSTURE_API_URL — control-plane-app → AISPM API host (no path).
           # Empty value lets the parent chart auto-resolve to
           # http://aispm-api-service.<release-namespace>.svc.cluster.local:80
@@ -1117,6 +1202,122 @@ neuraltrust-control-plane:
         service:
           type: ClusterIP
           port: 5432
+# ----------------------------------------------------------------------
+# Platform v2 subcharts (rendered only when global.platformVersion=v2).
+# Full defaults live in each subchart's values.yaml; the blocks below surface
+# the operator knobs you typically must set for a v2 customer deployment.
+# In hybrid mode only the data-plane workloads deploy; set
+# global.deploymentMode=external to also deploy the control-planes + analytics
+# stack on-prem. Postgres and Redis deploy in-cluster by default (see
+# infrastructure.postgresql / infrastructure.redis), so the DB/Redis hosts
+# below default to the in-cluster service names. Point them at external
+# endpoints (and set the matching infrastructure.*.deploy=false) for hosted DBs.
+# ----------------------------------------------------------------------
+# AgentGateway (TrustGate v2): admin (control) + proxy/mcp (data)
+agentgateway:
+  image:
+    tag: "v0.3.6" # Pin to a released AgentGateway tag in production
+  database:
+    # host auto-derives to the in-cluster control-plane-postgresql Service; set
+    # only for external/CloudSQL Postgres. name is mode-derived when left empty:
+    # external => private "agentgateway" DB (control owns migrations); hybrid =>
+    # shared "trustdata" DB, own "agentgateway" schema. user defaults to "agentgateway".
+    sslMode: "prefer" # TLS when available, plaintext fallback for the non-TLS in-cluster PG; use "require" for hosted DBs
+    iamAuth: false # AWS RDS IAM DB auth (chart-prepared; service token minting pending). false = password
+  redis:
+    host: "redis" # In-cluster Redis svc; set to external/Memorystore host for hosted Redis
+    iamAuth: false # AWS ElastiCache IAM auth (chart-prepared). false = password
+    # username: ""  # Redis 6+ ACL username (e.g. ElastiCache user group) -> REDIS_USERNAME
+    # tls: ""       # "true" for TLS-only managed Redis (e.g. ElastiCache Serverless) -> REDIS_TLS
+    # trustguard.baseURL + client credentials are auto-wired (in-cluster Service URL
+    # + shared v2-trustguard-client-secret); no need to set them here.
+# TrustGuard: control-plane (admin) + data-plane (runtime /v1/evaluate)
+trustguard:
+  image:
+    tag: "v0.9.1"
+  database:
+    # host auto-derives to the in-cluster control-plane-postgresql Service; set
+    # only for external Postgres. name is mode-derived when left empty: external =>
+    # private "trustguard" DB (control owns migrations); hybrid => shared "trustdata"
+    # DB, own "trustguard" schema. user defaults to "trustguard".
+    sslMode: "prefer" # TLS when available, plaintext fallback for the non-TLS in-cluster PG; use "require" for hosted DBs
+    iamAuth: false # AWS RDS IAM DB auth (chart-prepared; service token minting pending). false = password
+  redis:
+    host: "redis" # In-cluster Redis svc; set to external host for hosted Redis
+    iamAuth: false # AWS ElastiCache IAM auth (chart-prepared). false = password
+    # username: ""  # Redis 6+ ACL username (e.g. ElastiCache user group) -> REDIS_USERNAME
+    # tls: ""       # "true" for TLS-only managed Redis (e.g. ElastiCache Serverless) -> REDIS_TLS
+# TrustLens (WIP): api (control) + worker (data), Postgres-only. Disabled by default.
+trustlens:
+  enabled: false # Opt-in; set true to deploy TrustLens under v2
+  image:
+    tag: "latest"
+  database:
+    host: "control-plane-postgresql" # In-cluster Postgres svc; set to external host for hosted DB
+    sslMode: "prefer" # TLS when available, plaintext fallback for the non-TLS in-cluster PG; use "require" for hosted DBs
+# DataAgent (hybrid only): outbound-only agent bridging local reads to the SaaS
+# DataBridge. Renders when global.deploymentMode=hybrid.
+dataagent:
+  image:
+    tag: "v0.1.0" # Pin to a released DataAgent tag in production
+  databridge:
+    # Defaults target the NeuralTrust SaaS DataBridge — override only for a
+    # non-default region/endpoint or a self-hosted DataBridge.
+    addr: "databridge.neuraltrust.ai:443" # SaaS DataBridge gRPC host:port
+    serverName: "databridge.neuraltrust.ai" # TLS SNI / server identity pin
+  tenantId: "" # Required: tenant identity on the stream
+  # Read-only connection into the shared "trustdata" DB (hybrid). AgentGateway and
+  # TrustGuard each write raw telemetry into their OWN schema; the read-only role's
+  # search_path spans both, so DataAgent's unqualified reads resolve. In-cluster: host
+  # + password auto-derive and the role is provisioned by v2-postgresql-init — nothing
+  # to set. External: overlay database.host + database.password (user/name if renamed).
+  database:
+    sslMode: "prefer"
+  enrolmentToken: "" # Issued by SaaS (required for tls/mtls)
+# DataCore (external only): residency query API over local ClickHouse. Renders
+# when global.deploymentMode=external.
+datacore:
+  image:
+    tag: "v0.1.1"
+  # CLICKHOUSE_PASSWORD is read from the shared `clickhouse` secret (same secret
+  # AlertEngine uses) via clickhouse.existingSecret — no password set here.
+  clickhouse:
+    host: "clickhouse" # In-cluster default; set to your endpoint when infrastructure.clickhouse.deploy=false
+    nativePort: 9000
+    database: "default" # DataCore writes its tables/MVs here; matches DataCore's SaaS overlays (built-in ClickHouse DB, no creation needed)
+    otelDatabase: "otel" # DataCore reads {otelDatabase}.otel_logs, written by clickstack-otel-collector
+# clickstack-otel-collector (external only): OTLP gateway writing to ClickHouse.
+# Renders when global.deploymentMode=external.
+clickstack-otel-collector:
+  image:
+    tag: "2.29.0"
+  clickhouse:
+    endpoint: "http://clickhouse:8123" # In-cluster default; set to external/Cloud endpoint when infrastructure.clickhouse.deploy=false
+    database: "otel"
+# alertengine (external only): api + worker; evaluates detection rules over
+# ClickHouse telemetry, dedupes alerts in its own Postgres DB, forwards to SIEMs.
+# Renders when global.deploymentMode=external. Enabled by default (no-op elsewhere).
+alertengine:
+  enabled: true
+  image:
+    tag: "v0.3.0"
+  # Own Postgres database (separate migrations, NOT the shared trustdata DB).
+  # host empty ⇒ in-cluster control-plane-postgresql; set for external Postgres.
+  database:
+    host: ""
+    port: 5432
+    name: "alertengine"
+    user: "alertengine"
+    sslMode: "prefer" # TLS when available, plaintext fallback for the non-TLS in-cluster PG; use "require" for hosted DBs
+    iamAuth: false # AWS RDS IAM DB auth (chart-prepared; service token minting pending). false = password
+  # CLICKHOUSE_PASSWORD is read from the shared `clickhouse` secret (same secret
+  # DataCore uses) via clickhouse.existingSecret — no password set here.
+  clickhouse:
+    host: "clickhouse" # In-cluster default; set to your endpoint when infrastructure.clickhouse.deploy=false
+    nativePort: 9000
+    database: "otel" # DB where clickstack-otel-collector writes telemetry events
+    username: "neuraltrust"
+    secure: false
 # NeuralTrust Data Plane subchart values
 # Helm requires values to be passed to subcharts using the subchart name as a prefix
 neuraltrust-data-plane:
@@ -1137,15 +1338,27 @@ neuraltrust-data-plane:
       resendApiKey: ""
       dataPlaneJWTSecretName: "data-plane-jwt-secret"
       dataPlaneJWTSecret: "" # Auto-generated if empty
+      # OPTIONAL: the data-plane image bundles its own model (fastText) and does
+      # not need a Hugging Face token to run. The token is only forwarded to
+      # spawned evaluation Jobs when set, and only matters if those Jobs use
+      # HF-gated models. Leave empty for standard installs. The env var is
+      # mounted with optional:true, so an absent token never blocks startup.
       huggingFaceTokenSecretName: "huggingface-secrets"
       huggingFaceToken: ""
     components:
       clickhouse:
         enabled: true
-        host: "clickhouse"
+        host: "clickhouse" # Bare name ⇒ <name>.<namespace>.svc.cluster.local; a dotted host (external endpoint/FQDN) is used verbatim
         port: "8123"
         user: "neuraltrust"
         database: "neuraltrust"
+        # CLICKHOUSE_PASSWORD source. Defaults to the shared in-cluster `clickhouse`
+        # secret (key admin-password). For EXTERNAL ClickHouse
+        # (infrastructure.clickhouse.deploy=false) point this at your secret to match
+        # infrastructure.clickhouse.external.secretName/secretKey.
+        existingSecret:
+          name: "clickhouse"
+          key: "admin-password"
         auth:
           username: "neuraltrust"
         secrets:
@@ -1200,7 +1413,7 @@ neuraltrust-data-plane:
         classifierModel: "gpt"
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.38.1
+          tag: v1.38.2
           pullPolicy: Always
         accessMode: ReadWriteOnce
         huggingfaceToken: ""
@@ -1308,7 +1521,7 @@ neuraltrust-data-plane:
           minAvailable: 1
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/workers
-          tag: v1.8.1
+          tag: v1.8.2
           pullPolicy: Always
         resources:
           requests:
@@ -1452,6 +1665,9 @@ neuraltrust-firewall:
       otelEnabled: "false"
     secrets:
       jwtSecret: ""
+      # OPTIONAL: official firewall images bundle all ML models at build time
+      # (TRANSFORMERS_OFFLINE=1), so no Hugging Face token is needed at runtime.
+      # Leave empty. Only set for custom images that download models at runtime.
       huggingFaceToken: ""
     serviceAccount:
       create: true

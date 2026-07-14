@@ -1,0 +1,131 @@
+{{- if eq (include "neuraltrust-platform.isV2" .) "true" }}
+{{- $img := include "trustguard.image" (dict "repository" .Values.image.repository "tag" .Values.image.tag "global" .Values.global) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.dataPlane.name }}
+  labels:
+    {{- include "trustguard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: data-plane
+spec:
+  replicas: {{ .Values.dataPlane.replicas }}
+  selector:
+    matchLabels:
+      {{- include "trustguard.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: data-plane
+  template:
+    metadata:
+      labels:
+        {{- include "trustguard.labels" . | nindent 8 }}
+        app.kubernetes.io/component: data-plane
+    spec:
+      serviceAccountName: {{ include "trustguard.serviceAccountName" . }}
+      {{- include "trustguard.imagePullSecrets" . | nindent 6 }}
+      {{- if .Values.securityHardening }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      {{- end }}
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      {{- if eq (include "neuraltrust-platform.isHybrid" .) "true" }}
+      - name: telemetry
+        configMap:
+          name: trustguard-telemetry
+          optional: true
+      {{- end }}
+      {{- if and .Values.configSync.enabled (eq (include "trustguard.configSyncTls.active" .) "true") }}
+      - name: configsync-tls
+        secret:
+          secretName: {{ include "trustguard.configSyncTls.secretName" . }}
+      {{- end }}
+      {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 6 }}
+      containers:
+      - name: data-plane
+        image: {{ $img | quote }}
+        args: {{ toJson .Values.dataPlane.args }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        envFrom:
+        - configMapRef:
+            name: trustguard-env-vars
+        - secretRef:
+            name: trustguard-secrets
+            optional: true
+        env:
+        {{- with .Values.dataPlane.extraEnv }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- include "neuraltrust-platform.trustguardClientEnv" (dict "idVar" "TRUSTGUARD_PLATFORM_CLIENT_ID" "secretVar" "TRUSTGUARD_PLATFORM_CLIENT_SECRET") | nindent 8 }}
+        {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
+        {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "go" "ctx" .) | nindent 8 }}
+        {{- if eq (include "trustguard.configSyncTls.active" .) "true" }}
+        {{- include "neuraltrust-platform.configSyncEnv" (dict "ctx" . "product" "trustguard" "tlsCaPath" (printf "%s/ca.crt" (include "trustguard.configSyncTls.mountPath" .))) | nindent 8 }}
+        {{- else }}
+        {{- include "neuraltrust-platform.configSyncEnv" (dict "ctx" . "product" "trustguard") | nindent 8 }}
+        {{- end }}
+        {{- include "neuraltrust-platform.appVersionEnv" (dict "tag" .Values.image.tag) | nindent 8 }}
+        {{- if .Values.securityHardening }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        {{- end }}
+        ports:
+        - containerPort: {{ .Values.dataPlane.ports.http }}
+          name: http
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        {{- if eq (include "neuraltrust-platform.isHybrid" .) "true" }}
+        - name: telemetry
+          mountPath: /etc/telemetry
+          readOnly: true
+        {{- end }}
+        {{- if and .Values.configSync.enabled (eq (include "trustguard.configSyncTls.active" .) "true") }}
+        - name: configsync-tls
+          mountPath: {{ include "trustguard.configSyncTls.mountPath" . | quote }}
+          readOnly: true
+        {{- end }}
+        {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 8 }}
+        resources:
+          {{- toYaml .Values.dataPlane.resources | nindent 10 }}
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          initialDelaySeconds: 15
+          periodSeconds: 20
+      {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" . "local" .Values.dataPlane.nodeSelector) | nindent 6 }}
+      {{- include "neuraltrust-platform.tolerations" (dict "ctx" . "local" .Values.dataPlane.tolerations) | nindent 6 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.dataPlane.name }}
+  labels:
+    {{- include "trustguard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: data-plane
+  {{- $negAnnotations := include "neuraltrust-platform.service.negAnnotations" (dict "global" .Values.global "pscServiceKey" "trustguard-data-plane") }}
+  {{- with $negAnnotations }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.dataPlane.service.type | default "ClusterIP" }}
+  ports:
+    - port: 80
+      targetPort: {{ .Values.dataPlane.ports.http }}
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "trustguard.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: data-plane
+{{- end }}

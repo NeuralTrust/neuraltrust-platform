@@ -1,3 +1,5 @@
+{{- /* platform-v2: legacy component disabled when global.platformVersion=v2 */ -}}
+{{- if not (eq (include "neuraltrust-platform.isV2" .) "true") }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -31,7 +33,7 @@ spec:
       - name: worker
         {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.worker .Values.dataPlane.components.worker.image }}
         {{- $workerRepo := .Values.dataPlane.components.worker.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/workers" }}
-        {{- $workerTag := .Values.dataPlane.components.worker.image.tag | default "v1.8.1" }}
+        {{- $workerTag := .Values.dataPlane.components.worker.image.tag | default "v1.8.2" }}
         image: {{ include "data-plane.image" (dict "repository" $workerRepo "tag" $workerTag "global" .Values.global) | quote }}
         imagePullPolicy: "{{ .Values.dataPlane.components.worker.image.pullPolicy | default "Always" }}"
         {{- else }}
@@ -147,3 +149,4 @@ spec:
       {{- end }}
       {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" .) | nindent 6 }}
       {{- include "neuraltrust-platform.tolerations" (dict "ctx" .) | nindent 6 }}
+{{- end }}

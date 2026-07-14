@@ -1,3 +1,5 @@
+{{- /* platform-v2: legacy component disabled when global.platformVersion=v2 */ -}}
+{{- if not (eq (include "neuraltrust-platform.isV2" .) "true") }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -19,3 +21,5 @@ spec:
       protocol: TCP
   selector:
     {{- include "kafka.selectorLabels" . | nindent 4 }}
+
+{{- end }}

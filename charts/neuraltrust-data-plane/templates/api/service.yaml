@@ -1,3 +1,5 @@
+{{- /* platform-v2: legacy data-plane disabled under v2, EXCEPT the data-plane-api shim (kept until TrustLens). Renders under v1 (any mode) or the v2 data-plane-api shim. */ -}}
+{{- if or (not (eq (include "neuraltrust-platform.isV2" .) "true")) (eq (include "neuraltrust-platform.dataPlaneApiV2.enabled" .) "true") }}
 {{- $gkeBackendConfigName := include "neuraltrust-platform.service.gkeBackendConfigName" (dict "global" .Values.global "localName" "data-plane-api-backendconfig") }}
 {{- $gcp := default dict (default dict .Values.global.ingress).gcp }}
 {{- if and $gkeBackendConfigName (not $gcp.backendConfig) }}
@@ -95,7 +97,8 @@ spec:
   {{- else if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.host }}
     {{- $host = .Values.dataPlane.components.api.host }}
   {{- else }}
-    {{- $host = "data-plane-api.neuraltrust.ai" }}
+    {{- /* No domain/host configured: fall back to the in-cluster service name (no vendor domain). Set global.domain or api.host for a public route. */}}
+    {{- $host = "data-plane-api" }}
   {{- end }}
 ---
 apiVersion: route.openshift.io/v1
@@ -149,4 +152,5 @@ spec:
   port:
     targetPort: http
   path: "/"
+{{- end }}
 {{- end }}

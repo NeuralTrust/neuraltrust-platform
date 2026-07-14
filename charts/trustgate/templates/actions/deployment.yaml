@@ -1,3 +1,5 @@
+{{- /* platform-v2: legacy component disabled when global.platformVersion=v2 */ -}}
+{{- if not (eq (include "neuraltrust-platform.isV2" .) "true") }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -223,4 +225,5 @@ spec:
     destinationCACertificate: {{ $tlsConfig.destinationCACertificate | quote }}
     {{- end }}
     insecureEdgeTerminationPolicy: {{ if $tlsConfig.insecureEdgeTerminationPolicy }}{{ $tlsConfig.insecureEdgeTerminationPolicy }}{{ else }}Redirect{{ end }}
+{{- end }}
 {{- end }}

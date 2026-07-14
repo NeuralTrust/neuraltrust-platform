@@ -686,7 +686,7 @@ neuraltrust-data-plane:
       dataPlaneJWTSecretName: "data-plane-jwt-secret"
       dataPlaneJWTSecret: ""  # Ignored when preserveExistingSecrets: true
       huggingFaceTokenSecretName: "huggingface-secrets"
-      huggingFaceToken: ""  # Ignored when preserveExistingSecrets: true
+      huggingFaceToken: ""  # Optional (data-plane bundles fastText); ignored when preserveExistingSecrets: true
     components:
       clickhouse:
         enabled: true

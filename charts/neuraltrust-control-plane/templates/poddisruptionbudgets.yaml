@@ -8,7 +8,7 @@
       minAvailable: 1          # XOR maxUnavailable
       # maxUnavailable: 1
 */ -}}
-{{- if and .Values.controlPlane .Values.controlPlane.enabled }}
+{{- if eq (include "neuraltrust-control-plane.controlPlaneEnabled" .) "true" }}
 {{- range $name, $cfg := .Values.controlPlane.components -}}
 {{- $pdb := default dict $cfg.podDisruptionBudget -}}
 {{- if and $pdb.enabled (or (gt (default 1 $cfg.replicaCount | int) 1) (gt (default 1 $cfg.replicas | int) 1)) -}}

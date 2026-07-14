@@ -9,7 +9,7 @@
       targetCPUUtilizationPercentage: 80
       targetMemoryUtilizationPercentage: 80
 */ -}}
-{{- if and .Values.controlPlane .Values.controlPlane.enabled }}
+{{- if eq (include "neuraltrust-control-plane.controlPlaneEnabled" .) "true" }}
 {{- range $name, $cfg := .Values.controlPlane.components }}
 {{- if and $cfg.enabled (ne $name "postgresql") }}
 {{- $as := default dict $cfg.autoscaling }}

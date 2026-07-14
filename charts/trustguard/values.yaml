@@ -1,0 +1,151 @@
+# TrustGuard subchart.
+# Renders ONLY when global.platformVersion=v2. control-plane (admin API) renders
+# only in external mode; data-plane (runtime /v1/guard) renders in hybrid + external.
+# NOTE: the control/data split is in progress upstream; args + ports below are
+# placeholders modeled on the split branch — confirm before GA.
+nameOverride: ""
+fullnameOverride: "trustguard"
+securityHardening: true
+image:
+  repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustguard
+  tag: "v0.9.1"
+  pullPolicy: IfNotPresent
+imagePullSecrets: "gcr-secret"
+serviceAccount:
+  create: true
+  name: "trustguard"
+  annotations: {}
+config:
+  logLevel: "info"
+  appEnv: "production"
+# PostgreSQL connection (external-capable). Password lives in the secret.
+# DB_NAME is mode-derived from an EMPTY name:
+#   external → private "trustguard" DB (control plane owns its migrations);
+#   hybrid   → shared "trustdata" DB, where the data plane writes raw telemetry into
+#              its OWN "trustguard" schema (set by v2-postgresql-init) so AgentGateway's
+#              identically-named migration tracker never collides and DataAgent's single
+#              reader (search_path spanning both schemas) resolves both tables.
+# Set an explicit name only to override the mode default.
+database:
+  host: "" # Empty ⇒ in-cluster control-plane-postgresql; set for external/CloudSQL
+  port: 5432
+  name: "" # Empty ⇒ mode-derived (external: "trustguard"; hybrid: shared "trustdata")
+  user: "trustguard" # Owns its schema in trustdata (hybrid) / its own DB (external)
+  password: "" # Auto-generated if empty
+  sslMode: "prefer" # TLS when available, plaintext fallback for the non-TLS in-cluster PG; use "require" for hosted DBs
+  # IAM (e.g. AWS RDS) database auth. Chart-prepared (emits DB_IAM_AUTH/DB_AUTH_MODE
+  # and omits the static DB_PASSWORD); service-side token minting lands separately.
+  # Requires an IRSA-annotated serviceAccount. Leave false for password auth.
+  iamAuth: false
+redis:
+  host: "" # Required in v2 (sessions + cache invalidation)
+  port: 6379
+  password: "" # Optional
+  username: "" # Optional Redis 6+ ACL username (e.g. ElastiCache user group). Emits REDIS_USERNAME.
+  tls: "" # Set "true" for TLS-only managed Redis (e.g. ElastiCache Serverless). Emits REDIS_TLS.
+  # IAM (e.g. AWS ElastiCache) Redis auth. Chart-prepared (emits REDIS_IAM_AUTH and
+  # omits REDIS_PASSWORD); service-side token minting lands separately. false = password.
+  iamAuth: false
+# Admin API JWT signing key + runtime token signing key.
+adminJwtSecret: "" # Auto-generated if empty
+tokenSigningSecret: "" # Auto-generated if empty
+# ---- config-sync (DB-less data plane <- SaaS control plane) ----
+# When enabled, the data plane pulls compiled config over gRPC from the
+# NeuralTrust SaaS control plane instead of Postgres. OFF by default: enabling
+# switches the data plane to DB-less (a behavior change). TLS uses the public LE
+# cert on the SaaS endpoint, so no CA distribution is needed (system roots).
+configSync:
+  enabled: false
+  # Control-plane gRPC endpoint host:port. Empty => mode-derived:
+  #   hybrid: trustguard-configsync.<saasDomain>:443 (public SaaS, TLS)
+  #   full:   <controlPlane.name>.<namespace>.svc.cluster.local:<controlPlane.ports.grpc> (in-cluster)
+  endpoint: ""
+  # Hybrid only: SaaS domain for the fixed public endpoint above. Override to
+  # dev.neuraltrust.ai for the dev SaaS. Ignored in full mode.
+  saasDomain: "neuraltrust.ai"
+  # Full only: dial the in-cluster control plane over plaintext (no cert). The app
+  # rejects CONFIG_SYNC_TLS_INSECURE=true when APP_ENV is staging/production, so a
+  # plaintext full deployment must run config.appEnv=dev/local. Ignored in hybrid.
+  tlsInsecure: true
+  # TLS SNI to verify (hybrid / full-with-TLS). Empty => host part of endpoint.
+  serverName: ""
+  # Custom CA file path, only if the data plane sits behind a TLS-intercepting
+  # proxy. Empty => verify against the system root store.
+  tlsCa: ""
+  # Shared token authenticating the data plane to the control plane. MUST match
+  # the SaaS control plane. Prefer a pre-created secret + global.preserveExistingSecrets
+  # over putting the value here. Never auto-generated.
+  token: ""
+  # Local encrypted last-known-good cache key: base64 of exactly 32 bytes.
+  # Auto-generated per release when empty (local-only, need not match anything).
+  lkgKey: ""
+  # ---- control-plane gRPC listener TLS (external/full mode) ----
+  # In a deployed APP_ENV (prod/staging) the control plane REFUSES to start its
+  # config-sync gRPC server without a cert/key. The chart auto-generates a
+  # self-signed CA + server cert (SANs cover the control-plane Service DNS),
+  # preserved across upgrades via lookup, mounts the cert/key on the control
+  # plane and the CA on the data plane (which then dials with TLS verification).
+  grpcTls:
+    autoGenerate: true # false + existingSecret to bring your own cert/key/ca
+    existingSecret: "" # kubernetes.io/tls-style Secret with tls.crt, tls.key, ca.crt
+    durationDays: 3650
+# Platform client-credentials (data-plane validates the AgentGateway proxy's
+# client_credentials token exchange for scope=platform).
+platform:
+  # DEPRECATED: client credentials are now owned centrally by the umbrella chart
+  # (global.v2.trustguardClientId / trustguardClientSecret → shared
+  # v2-trustguard-client-secret Secret) so they always match AgentGateway's
+  # client. These fields are ignored; kept for backward compatibility.
+  clientId: ""
+  clientSecret: ""
+  # Empty ⇒ auto-derived from global.domain (https://trustguard.<domain>), else
+  # the in-cluster Service URL. Stamped as the `aud` on issued platform tokens.
+  baseURL: ""
+# ---- control-plane (admin API) — full deployments only ----
+controlPlane:
+  name: trustguard-control-plane
+  args: ["control"]
+  replicas: 1
+  ports:
+    http: 8080
+    # config-sync gRPC listener (CONFIG_SYNC_GRPC_LISTEN_ADDR default :8082).
+    # Exposed on the control-plane Service so full-mode data planes can dial it.
+    grpc: 8082
+  resources:
+    requests: {cpu: 250m, memory: 512Mi}
+    limits: {cpu: 500m, memory: 1Gi}
+  nodeSelector: {}
+  tolerations: []
+  extraEnv: []
+  service:
+    port: 8080
+# ---- data-plane (runtime /v1/guard) — hybrid + full ----
+# The binary selects the plane via argv[1] ("data") and serves on SERVER_DATA_PORT
+# (8081); config-sync makes it DB-less when configSync.enabled.
+dataPlane:
+  name: trustguard-data-plane
+  args: ["data"]
+  replicas: 1
+  ports:
+    http: 8081
+  resources:
+    requests: {cpu: 500m, memory: 1Gi}
+    limits: {cpu: 2000m, memory: 2Gi}
+  nodeSelector: {}
+  tolerations: []
+  extraEnv: []
+  service:
+    port: 8080
+ingress:
+  enabled: true
+  className: ""
+  annotations: {}
+  tls:
+    enabled: false
+    secretName: ""
+  controlPlane:
+    host: ""
+    hostPrefix: "trustguard-admin"
+  dataPlane:
+    host: ""
+    hostPrefix: "trustguard"

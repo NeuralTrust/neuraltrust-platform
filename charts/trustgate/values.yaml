@@ -241,7 +241,8 @@ redis:
     port: 6379 # External Redis port (set via trustgate.global.env.REDIS_PORT when redis.enabled=false)
     password: "" # External Redis password (set via trustgate.global.env.REDIS_PASSWORD when redis.enabled=false)
     username: "" # Optional Redis 6+ ACL username (AUTH username password). Emits REDIS_USERNAME. Also settable via trustgate.global.env.REDIS_USERNAME
-    tls: "" # Set "true" for TLS-only external Redis (e.g. managed serverless Redis). Emits REDIS_TLS. Also settable via trustgate.global.env.REDIS_TLS
+    tls: "" # Set "true" for TLS-only external Redis (e.g. managed serverless Redis). Emits REDIS_TLS_ENABLED (the var TrustGate reads). Also settable via trustgate.global.env.REDIS_TLS_ENABLED
+    tlsInsecureVerify: "" # Set "true" to skip Redis server-cert verification (self-signed). Emits REDIS_TLS_INSECURE_VERIFY. Also settable via trustgate.global.env.REDIS_TLS_INSECURE_VERIFY
     authMode: "password" # password | iam. IAM requires app support for SigV4 token generation.
   master:
     service:

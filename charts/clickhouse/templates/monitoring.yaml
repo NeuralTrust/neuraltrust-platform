@@ -1,3 +1,4 @@
+{{- if eq (include "neuraltrust-platform.clickhouseAllowed" .) "true" }}
 {{- $g := default dict .Values.global -}}
 {{- $m := default dict $g.monitoring -}}
 {{- $cap := .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" -}}
@@ -44,4 +45,5 @@ spec:
           annotations:
             summary: "ClickHouse Keeper is unavailable"
             description: "Replication and DDL won't make progress without Keeper. Verify the keeper StatefulSet."
+{{- end }}
 {{- end }}

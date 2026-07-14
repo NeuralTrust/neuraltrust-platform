@@ -1,0 +1,85 @@
+{{- if and (eq (include "neuraltrust-platform.isV2" .) "true") .Values.ingress.enabled }}
+{{- $className := include "neuraltrust-platform.ingress.className" (dict "global" .Values.global "local" .Values.ingress.className) }}
+{{- $annotations := include "neuraltrust-platform.ingress.annotations" (dict "global" .Values.global "local" .Values.ingress.annotations) }}
+{{- $renderTLS := and .Values.ingress.tls .Values.ingress.tls.enabled (include "neuraltrust-platform.ingress.renderTLS" (dict "global" .Values.global "tlsEnabled" .Values.ingress.tls.enabled)) }}
+{{- $tlsSecret := include "neuraltrust-platform.ingress.effectiveTLSSecretName" (dict "global" .Values.global "localSecretName" .Values.ingress.tls.secretName) }}
+{{- $dpHost := include "neuraltrust-platform.ingress.host" (dict "host" .Values.ingress.dataPlane.host "prefix" .Values.ingress.dataPlane.hostPrefix "global" .Values.global) }}
+# Data-plane (runtime) ingress — hybrid + full
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: trustguard
+  labels:
+    {{- include "trustguard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: data-plane
+  {{- with $annotations }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if $className }}
+  ingressClassName: {{ $className }}
+  {{- end }}
+  {{- if $renderTLS }}
+  tls:
+    - secretName: {{ $tlsSecret }}
+      {{- if $dpHost }}
+      hosts:
+        - {{ $dpHost }}
+      {{- end }}
+  {{- end }}
+  rules:
+    - {{- if $dpHost }}
+      host: {{ $dpHost }}
+      {{- end }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Values.dataPlane.name }}
+                port:
+                  name: http
+{{- if eq (include "neuraltrust-platform.isFull" .) "true" }}
+{{- $cpHost := include "neuraltrust-platform.ingress.host" (dict "host" .Values.ingress.controlPlane.host "prefix" .Values.ingress.controlPlane.hostPrefix "global" .Values.global) }}
+---
+# Control-plane (admin) ingress — full only
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: trustguard-admin
+  labels:
+    {{- include "trustguard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+  {{- with $annotations }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if $className }}
+  ingressClassName: {{ $className }}
+  {{- end }}
+  {{- if $renderTLS }}
+  tls:
+    - secretName: {{ $tlsSecret }}
+      {{- if $cpHost }}
+      hosts:
+        - {{ $cpHost }}
+      {{- end }}
+  {{- end }}
+  rules:
+    - {{- if $cpHost }}
+      host: {{ $cpHost }}
+      {{- end }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Values.controlPlane.name }}
+                port:
+                  name: http
+{{- end }}
+{{- end }}

@@ -1,0 +1,82 @@
+{{- if and (eq (include "neuraltrust-platform.isV2" .) "true") (eq (include "neuraltrust-platform.isHybrid" .) "true") }}
+{{- $img := include "dataagent.image" (dict "repository" .Values.image.repository "tag" .Values.image.tag "global" .Values.global) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dataagent.fullname" . }}
+  labels:
+    {{- include "dataagent.labels" . | nindent 4 }}
+    app.kubernetes.io/component: data-plane
+spec:
+  replicas: {{ .Values.replicas }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "dataagent.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: data-plane
+  template:
+    metadata:
+      labels:
+        {{- include "dataagent.labels" . | nindent 8 }}
+        app.kubernetes.io/component: data-plane
+    spec:
+      serviceAccountName: {{ include "dataagent.serviceAccountName" . }}
+      {{- include "dataagent.imagePullSecrets" . | nindent 6 }}
+      {{- if .Values.securityHardening }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      {{- end }}
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 6 }}
+      containers:
+      - name: dataagent
+        image: {{ $img | quote }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        envFrom:
+        - configMapRef:
+            name: dataagent-env-vars
+        - secretRef:
+            name: dataagent-secrets
+            optional: true
+        env:
+        {{- with .Values.extraEnv }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
+        {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "go" "ctx" .) | nindent 8 }}
+        {{- include "neuraltrust-platform.appVersionEnv" (dict "tag" .Values.image.tag) | nindent 8 }}
+        {{- if .Values.securityHardening }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        {{- end }}
+        ports:
+        - containerPort: {{ .Values.ports.health }}
+          name: health
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 8 }}
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: health
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: health
+          initialDelaySeconds: 15
+          periodSeconds: 20
+      {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" . "local" .Values.nodeSelector) | nindent 6 }}
+      {{- include "neuraltrust-platform.tolerations" (dict "ctx" . "local" .Values.tolerations) | nindent 6 }}
+{{- end }}

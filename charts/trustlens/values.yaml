@@ -1,0 +1,79 @@
+# TrustLens subchart (WIP).
+# Renders ONLY when global.platformVersion=v2 AND enabled=true. Single image, two runtimes:
+#   worker (data-plane, args /worker) → hybrid + external
+#   api    (control-plane, args /api) → external only
+# Postgres-only (no Redis/Kafka/ClickHouse). Migrations run embedded on startup.
+# Disabled by default (WIP); set enabled: true to deploy under v2.
+enabled: false
+nameOverride: ""
+fullnameOverride: "trustlens"
+
+securityHardening: true
+
+image:
+  repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustlens
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: "gcr-secret"
+
+serviceAccount:
+  create: true
+  name: "trustlens"
+  annotations: {}
+
+config:
+  environment: "production"
+  httpAddr: ":8080"
+
+# PostgreSQL connection (external-capable). Password lives in the secret.
+database:
+  host: "" # Required in v2
+  port: 5432
+  name: "trustlens"
+  user: "trustlens"
+  password: "" # Auto-generated if empty
+  sslMode: "prefer" # TLS when available, plaintext fallback for the non-TLS in-cluster PG; use "require" for hosted DBs
+
+# HS256 JWT verification key + Tink AEAD keyset for integration credentials.
+jwtSecret: "" # Auto-generated if empty
+encryptionKeyset: "" # Auto-generated if empty
+
+# ---- control-plane (api runtime) — full deployments only ----
+controlPlane:
+  name: trustlens-api
+  args: ["/api"]
+  replicas: 1
+  ports:
+    http: 8080
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { cpu: 500m, memory: 1Gi }
+  nodeSelector: {}
+  tolerations: []
+  extraEnv: []
+  service:
+    port: 8080
+
+# ---- data-plane (worker runtime) — hybrid + full ----
+dataPlane:
+  name: trustlens-worker
+  args: ["/worker"]
+  replicas: 1
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { cpu: 1000m, memory: 1Gi }
+  nodeSelector: {}
+  tolerations: []
+  extraEnv: []
+
+ingress:
+  enabled: true
+  className: ""
+  annotations: {}
+  tls:
+    enabled: false
+    secretName: ""
+  controlPlane:
+    host: ""
+    hostPrefix: "trustlens"

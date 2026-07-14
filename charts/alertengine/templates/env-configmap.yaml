@@ -1,0 +1,36 @@
+{{- if eq (include "alertengine.deploy" .) "true" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertengine-env-vars
+  labels:
+    {{- include "alertengine.labels" . | nindent 4 }}
+data:
+  APP_ENV: {{ .Values.config.appEnv | quote }}
+  SERVER_PORT: {{ .Values.config.serverPort | quote }}
+  LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  LOG_FORMAT: {{ .Values.config.logFormat | quote }}
+  # ---- Postgres (CRUD + alert state) ----
+  DB_HOST: {{ include "neuraltrust-platform.postgres.host" (dict "host" .Values.database.host) | quote }}
+  DB_PORT: {{ .Values.database.port | quote }}
+  DB_NAME: {{ .Values.database.name | quote }}
+  DB_USER: {{ .Values.database.user | quote }}
+  DB_SSL_MODE: {{ .Values.database.sslMode | quote }}
+  {{- if .Values.database.iamAuth }}
+  # IAM (RDS) DB auth: no static DB_PASSWORD is shipped; the service mints a token.
+  DB_IAM_AUTH: "true"
+  DB_AUTH_MODE: "iam"
+  {{- end }}
+  # ---- ClickHouse (event source, native protocol) ----
+  CLICKHOUSE_ADDR: {{ printf "%s:%v" .Values.clickhouse.host .Values.clickhouse.nativePort | quote }}
+  CLICKHOUSE_DATABASE: {{ .Values.clickhouse.database | quote }}
+  CLICKHOUSE_USERNAME: {{ .Values.clickhouse.username | quote }}
+  CLICKHOUSE_SECURE: {{ .Values.clickhouse.secure | quote }}
+  # ---- Auth (JWT teamId, mirrors app BFF) ----
+  AUTH_ENABLED: {{ .Values.config.authEnabled | quote }}
+  # ---- Worker (evaluation + SIEM forwarding) ----
+  WORKER_ENABLED: {{ .Values.config.workerEnabled | quote }}
+  WORKER_HEALTH_PORT: {{ .Values.config.workerHealthPort | quote }}
+  WORKER_EVAL_INTERVAL: {{ .Values.config.workerEvalInterval | quote }}
+  WORKER_FORWARD_INTERVAL: {{ .Values.config.workerForwardInterval | quote }}
+{{- end }}

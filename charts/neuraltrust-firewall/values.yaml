@@ -122,6 +122,10 @@ firewall:
   # --- Secrets (standard K8s Secret, same pattern as other charts) ---
   secrets:
     jwtSecret: ""
+    # DEPRECATED / OPTIONAL: the official firewall images bake all ML models in
+    # at build time (/app/resources/*, TRANSFORMERS_OFFLINE=1), so no Hugging
+    # Face token is needed at runtime. Leave empty. Only set it for custom
+    # images that download models at runtime; the env var is mounted optionally.
     huggingFaceToken: ""
   # --- ConfigMap ---
   config:

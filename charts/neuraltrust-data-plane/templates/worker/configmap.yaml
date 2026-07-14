@@ -1,6 +1,9 @@
+{{- /* platform-v2: legacy component disabled when global.platformVersion=v2 */ -}}
+{{- if not (eq (include "neuraltrust-platform.isV2" .) "true") }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: data-plane-secrets
 data:
   NEURALTRUST_CLASSIFIER_MODEL: "gpt" 
+{{- end }}

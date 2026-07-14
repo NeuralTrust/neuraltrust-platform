@@ -1,0 +1,66 @@
+# DataCore subchart.
+# Renders ONLY when global.platformVersion=v2 AND global.deploymentMode=external.
+# Single HTTP API on :8080. Requires ClickHouse (native protocol): runs embedded
+# migrations that materialize DataCore tables from the otel_logs landing table
+# written by clickstack-otel-collector, then serves a tenant-scoped REST API.
+nameOverride: ""
+fullnameOverride: "datacore"
+securityHardening: true
+image:
+  repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/datacore
+  tag: "v0.1.1"
+  pullPolicy: IfNotPresent
+imagePullSecrets: "gcr-secret"
+serviceAccount:
+  create: true
+  name: "datacore"
+  annotations: {}
+replicas: 1
+config:
+  # saas  → serve everything from ClickHouse (the self-hosted / external mode).
+  # hybrid → route hybrid-instance raw reads to DataBridge (SaaS) instead.
+  residencyBackend: "saas"
+  logLevel: "info"
+  httpAddr: ":8080"
+ports:
+  http: 8080
+# ClickHouse (native protocol, port 9000). Defaults to the in-cluster clickhouse
+# subchart; set clickhouse.host/nativePort to your endpoint when
+# infrastructure.clickhouse.deploy=false.
+clickhouse:
+  host: "clickhouse"
+  nativePort: 9000
+  database: "default" # DB where DataCore owns its tables/materialized views. Matches DataCore's SaaS/prod overlays (CLICKHOUSE_DATABASE=default); "default" is a built-in ClickHouse DB, so nothing needs creating.
+  otelDatabase: "otel" # DB where clickstack-otel-collector writes otel_logs
+  tls: false
+  user: "neuraltrust"
+  # CLICKHOUSE_PASSWORD is read from a shared secret — the in-cluster `clickhouse`
+  # subchart secret by default (same secret AlertEngine uses). For external
+  # ClickHouse (infrastructure.clickhouse.deploy=false), point this at the secret
+  # holding your password (matches infrastructure.clickhouse.external.secretName/Key).
+  existingSecret:
+    name: "clickhouse"
+    key: "admin-password"
+# HS256 JWT verification key (required at runtime).
+jwtSecret: "" # Auto-generated if empty
+# Optional JWT validation.
+jwt:
+  issuer: ""
+  audience: ""
+resources:
+  requests: {cpu: 100m, memory: 128Mi}
+  limits: {cpu: 1000m, memory: 256Mi}
+nodeSelector: {}
+tolerations: []
+extraEnv: []
+service:
+  type: ClusterIP
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  tls:
+    enabled: false
+    secretName: ""
+  host: ""
+  hostPrefix: "datacore"

@@ -1,0 +1,22 @@
+{{- if and (eq (include "neuraltrust-platform.isV2" .) "true") (eq (include "neuraltrust-platform.isExternal" .) "true") }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: datacore-env-vars
+  labels:
+    {{- include "datacore.labels" . | nindent 4 }}
+data:
+  RESIDENCY_BACKEND: {{ .Values.config.residencyBackend | quote }}
+  LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  HTTP_ADDR: {{ .Values.config.httpAddr | quote }}
+  CLICKHOUSE_ADDR: {{ printf "%s:%v" .Values.clickhouse.host .Values.clickhouse.nativePort | quote }}
+  CLICKHOUSE_DATABASE: {{ .Values.clickhouse.database | quote }}
+  CLICKHOUSE_OTEL_DATABASE: {{ .Values.clickhouse.otelDatabase | quote }}
+  CLICKHOUSE_TLS: {{ .Values.clickhouse.tls | quote }}
+  {{- with .Values.jwt.issuer }}
+  AUTH_JWT_ISSUER: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.jwt.audience }}
+  AUTH_JWT_AUDIENCE: {{ . | quote }}
+  {{- end }}
+{{- end }}

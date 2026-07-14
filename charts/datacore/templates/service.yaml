@@ -1,0 +1,24 @@
+{{- if and (eq (include "neuraltrust-platform.isV2" .) "true") (eq (include "neuraltrust-platform.isExternal" .) "true") }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "datacore.fullname" . }}
+  labels:
+    {{- include "datacore.labels" . | nindent 4 }}
+    app.kubernetes.io/component: data-plane
+  {{- $negAnnotations := include "neuraltrust-platform.service.negAnnotations" (dict "global" .Values.global "pscServiceKey" "datacore") }}
+  {{- with $negAnnotations }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type | default "ClusterIP" }}
+  ports:
+    - port: 80
+      targetPort: {{ .Values.ports.http }}
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "datacore.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: data-plane
+{{- end }}

@@ -1,0 +1,11 @@
+{{- if and (eq (include "neuraltrust-platform.isV2" .) "true") (eq (include "neuraltrust-platform.isExternal" .) "true") }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "clickstack-otel-collector.fullname" . }}-config
+  labels:
+    {{- include "clickstack-otel-collector.labels" . | nindent 4 }}
+data:
+  custom-config.yaml: |
+{{ .Values.customConfig | indent 4 }}
+{{- end }}

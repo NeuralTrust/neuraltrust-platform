@@ -1,4 +1,6 @@
-{{- if and .Values.controlPlane .Values.controlPlane.enabled }}
+{{- /* platform-v2: legacy component disabled when global.platformVersion=v2 */ -}}
+{{- if not (eq (include "neuraltrust-platform.isV2" .) "true") }}
+{{- if eq (include "neuraltrust-control-plane.controlPlaneEnabled" .) "true" }}
 {{- $gkeBackendConfigName := include "neuraltrust-platform.service.gkeBackendConfigName" (dict "global" .Values.global "localName" "control-plane-scheduler-backendconfig") }}
 {{- $gcp := default dict (default dict .Values.global.ingress).gcp }}
 {{- if and .Values.controlPlane.components .Values.controlPlane.components.scheduler .Values.controlPlane.components.scheduler.ingress .Values.controlPlane.components.scheduler.ingress.enabled $gkeBackendConfigName (not $gcp.backendConfig) }}
@@ -107,7 +109,8 @@ spec:
   {{- else if .host }}
     {{- $host = .host }}
   {{- else }}
-    {{- $host = "scheduler.neuraltrust.ai" }}
+    {{- /* No domain/host configured: fall back to the in-cluster service name (no vendor domain). Set global.domain or host for a public route. */}}
+    {{- $host = "control-plane-scheduler" }}
   {{- end }}
 ---
 apiVersion: route.openshift.io/v1
@@ -164,5 +167,6 @@ spec:
       {{- end }}
     {{- end }}
   {{- end }}
+{{- end }}
 {{- end }}
 {{- end }}

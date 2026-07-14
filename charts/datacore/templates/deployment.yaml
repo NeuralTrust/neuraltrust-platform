@@ -1,0 +1,88 @@
+{{- if and (eq (include "neuraltrust-platform.isV2" .) "true") (eq (include "neuraltrust-platform.isExternal" .) "true") }}
+{{- $img := include "datacore.image" (dict "repository" .Values.image.repository "tag" .Values.image.tag "global" .Values.global) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "datacore.fullname" . }}
+  labels:
+    {{- include "datacore.labels" . | nindent 4 }}
+    app.kubernetes.io/component: data-plane
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels:
+      {{- include "datacore.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: data-plane
+  template:
+    metadata:
+      labels:
+        {{- include "datacore.labels" . | nindent 8 }}
+        app.kubernetes.io/component: data-plane
+    spec:
+      serviceAccountName: {{ include "datacore.serviceAccountName" . }}
+      {{- include "datacore.imagePullSecrets" . | nindent 6 }}
+      {{- if .Values.securityHardening }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      {{- end }}
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 6 }}
+      containers:
+      - name: datacore
+        image: {{ $img | quote }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        envFrom:
+        - configMapRef:
+            name: datacore-env-vars
+        - secretRef:
+            name: datacore-secrets
+            optional: true
+        env:
+        # Shared ClickHouse password (same secret AlertEngine reads). Explicit env
+        # wins over the datacore-secrets envFrom above.
+        - name: CLICKHOUSE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.clickhouse.existingSecret.name | default "clickhouse" | quote }}
+              key: {{ .Values.clickhouse.existingSecret.key | default "admin-password" | quote }}
+              optional: true
+        {{- with .Values.extraEnv }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
+        {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "go" "ctx" .) | nindent 8 }}
+        {{- include "neuraltrust-platform.appVersionEnv" (dict "tag" .Values.image.tag) | nindent 8 }}
+        {{- if .Values.securityHardening }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        {{- end }}
+        ports:
+        - containerPort: {{ .Values.ports.http }}
+          name: http
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 8 }}
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          initialDelaySeconds: 15
+          periodSeconds: 20
+      {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" . "local" .Values.nodeSelector) | nindent 6 }}
+      {{- include "neuraltrust-platform.tolerations" (dict "ctx" . "local" .Values.tolerations) | nindent 6 }}
+{{- end }}

@@ -1,3 +1,5 @@
+{{- /* platform-v2: legacy component disabled when global.platformVersion=v2 */ -}}
+{{- if not (eq (include "neuraltrust-platform.isV2" .) "true") }}
 {{- /*
 Job to initialize TrustGate PostgreSQL database and user.
 1) First tries to connect using trustgate-secrets (DATABASE_HOST, DATABASE_USER, DATABASE_PASSWORD).
@@ -355,3 +357,5 @@ spec:
           value: {{ $tgDbSslMode }}
 {{- end }}
 
+
+{{- end }}

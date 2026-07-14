@@ -1,3 +1,5 @@
+{{- /* platform-v2: legacy data-plane disabled under v2, EXCEPT the data-plane-api shim (kept until TrustLens). Renders under v1 (any mode) or the v2 data-plane-api shim. */ -}}
+{{- if or (not (eq (include "neuraltrust-platform.isV2" .) "true")) (eq (include "neuraltrust-platform.dataPlaneApiV2.enabled" .) "true") }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -10,3 +12,4 @@ metadata:
 data:
   init-db.sql: |
 {{ .Files.Get "files/clickhouse/init-db.sql" | indent 4 }} 
+{{- end }}
