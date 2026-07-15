@@ -442,19 +442,70 @@ true
 {{- end }}
 
 {{/*
+Resolve the neuraltrust-data-plane `dataPlane.components` dict from EITHER the
+umbrella root context (.Values["neuraltrust-data-plane"].dataPlane.components) or
+the neuraltrust-data-plane subchart context (.Values.dataPlane.components) —
+whichever resolves a non-empty dict wins, so this is safe to call from either
+chart (mirrors dataPlaneApi.redisConfig).
+Usage: {{ include "neuraltrust-platform.dataPlane.components" . | fromYaml }}
+*/}}
+{{- define "neuraltrust-platform.dataPlane.components" -}}
+{{- $root := default dict (index .Values "neuraltrust-data-plane") }}
+{{- $rootComp := default dict (default dict $root.dataPlane).components }}
+{{- $subComp := default dict (default dict .Values.dataPlane).components }}
+{{- $comp := $rootComp }}
+{{- if not $comp }}{{- $comp = $subComp }}{{- end }}
+{{- default dict $comp | toYaml }}
+{{- end }}
+
+{{/*
+Resolve the SQL backend the data-plane-api reads from: "postgres" | "clickhouse".
+The data-plane-api image (>= v1.40.0) selects its analytics/evaluation store via
+SQL_DATABASE. Resolution order:
+  1. Explicit dataPlane.components.api.database.backend ("postgres"/"postgresql"
+     or "clickhouse") always wins — for rollback or advanced deployments.
+  2. Empty/"auto" in v2 HYBRID: PostgreSQL by default, EXCEPT when a dotted
+     (external) ClickHouse host is configured — then ClickHouse, preserving
+     existing hybrid installs that opted into an external ClickHouse read shim.
+  3. Empty/"auto" in v2 external or v1: ClickHouse (unchanged legacy behavior).
+Unknown explicit values fall through to ClickHouse here; validate-values.yaml
+fails the render for them so misconfiguration surfaces loudly.
+Safe to call from either the umbrella root or the neuraltrust-data-plane subchart
+context (see dataPlane.components above).
+Usage: {{ include "neuraltrust-platform.dataPlaneApi.sqlBackend" . }}
+*/}}
+{{- define "neuraltrust-platform.dataPlaneApi.sqlBackend" -}}
+{{- $comp := include "neuraltrust-platform.dataPlane.components" . | fromYaml }}
+{{- $api := default dict $comp.api }}
+{{- $db := default dict $api.database }}
+{{- $backend := $db.backend | default "" | toString | lower }}
+{{- $ch := default dict $comp.clickhouse }}
+{{- $chHost := $ch.host | default "clickhouse" }}
+{{- $chDotted := contains "." $chHost }}
+{{- $isV2 := eq (include "neuraltrust-platform.isV2" .) "true" }}
+{{- $isHybrid := eq (include "neuraltrust-platform.isHybrid" .) "true" }}
+{{- if or (eq $backend "postgres") (eq $backend "postgresql") -}}
+postgres
+{{- else if eq $backend "clickhouse" -}}
+clickhouse
+{{- else if and $isV2 $isHybrid -}}
+{{- if $chDotted -}}clickhouse{{- else -}}postgres{{- end -}}
+{{- else -}}
+clickhouse
+{{- end -}}
+{{- end }}
+
+{{/*
 Returns "true" (non-empty) when the temporary v2 data-plane-api shim should
 render. In v2 the legacy data-plane subchart is disabled, but the read/analytics
-API (data-plane-api) is kept alive until TrustLens replaces it. It hard-requires
-a ClickHouse to read from:
-  - v2 EXTERNAL: the in-cluster ClickHouse (or an external one) is present, so the
-    shim renders whenever dataPlane.enabled AND api.enabled.
-  - v2 HYBRID: no in-cluster ClickHouse is deployed (analytics are SaaS-side), so
-    the shim renders ONLY when pointed at an EXTERNAL ClickHouse — i.e.
-    dataPlane.components.clickhouse.host is a dotted (external) endpoint. With the
-    default bare host it stays OFF so it never boots without a store.
-True when: isV2 AND dataPlane.enabled AND api.enabled AND (external mode OR, in
-hybrid, a dotted ClickHouse host). Only the API component renders — kafka-workers
-and kafka-connect stay off.
+API (data-plane-api) is kept alive until TrustLens replaces it. Its SQL store is
+resolved by dataPlaneApi.sqlBackend:
+  - PostgreSQL backend: renders whenever dataPlane.enabled AND api.enabled (the
+    v2 hybrid default — it reuses the umbrella PostgreSQL, no ClickHouse needed).
+  - ClickHouse backend: renders whenever dataPlane.enabled AND api.enabled in v2
+    EXTERNAL (or v1); in v2 HYBRID it renders ONLY when pointed at an EXTERNAL
+    (dotted) ClickHouse host so it never boots without a store.
+Only the API component renders — kafka-workers and kafka-connect stay off.
 MUST be invoked from the neuraltrust-data-plane subchart context so `.Values`
 resolves to that subchart's values (.Values.dataPlane...).
 Usage: {{- if eq (include "neuraltrust-platform.dataPlaneApiV2.enabled" .) "true" }}
@@ -466,13 +517,20 @@ Usage: {{- if eq (include "neuraltrust-platform.dataPlaneApiV2.enabled" .) "true
 {{- $components := default dict $dp.components }}
 {{- $api := default dict $components.api }}
 {{- $apiOn := true }}{{- if hasKey $api "enabled" }}{{- $apiOn = $api.enabled }}{{- end }}
-{{- $chReachable := true }}
+{{- $backend := include "neuraltrust-platform.dataPlaneApi.sqlBackend" . }}
+{{- $render := false }}
+{{- if eq $backend "postgres" }}
+{{- $render = true }}
+{{- else }}
 {{- if eq (include "neuraltrust-platform.isHybrid" .) "true" }}
 {{- $ch := default dict $components.clickhouse }}
 {{- $chHost := $ch.host | default "clickhouse" }}
-{{- $chReachable = contains "." $chHost }}
+{{- if contains "." $chHost }}{{- $render = true }}{{- end }}
+{{- else }}
+{{- $render = true }}
 {{- end }}
-{{- if and $dpOn $apiOn $chReachable }}true{{- end }}
+{{- end }}
+{{- if and $dpOn $apiOn $render }}true{{- end }}
 {{- end }}
 {{- end }}
 
@@ -507,6 +565,9 @@ Usage: {{ include "neuraltrust-platform.dataPlaneApi.redisBackend" . }}
 {{- define "neuraltrust-platform.dataPlaneApi.redisBackend" -}}
 {{- $cfg := include "neuraltrust-platform.dataPlaneApi.redisConfig" . | fromYaml }}
 {{- if $cfg.backend -}}
+{{- if not (or (eq ($cfg.backend | toString) "redis") (eq ($cfg.backend | toString) "kafka")) -}}
+{{- fail "neuraltrust-data-plane.dataPlane.components.api.redis.backend must be \"redis\" or \"kafka\"" -}}
+{{- end -}}
 {{- $cfg.backend -}}
 {{- else if eq (include "neuraltrust-platform.isV2" .) "true" -}}
 redis
@@ -545,6 +606,91 @@ Usage: {{ include "neuraltrust-platform.dataPlaneApi.redisUrl" . }}
 {{- end }}
 {{- printf "%s://%s%s:%v/%s" $scheme $authority $host $port $db -}}
 {{- end }}
+{{- end -}}
+
+{{/*
+Resolve the data-plane-api PostgreSQL connection dict
+(neuraltrust-data-plane.dataPlane.components.api.database.postgresql) from EITHER
+the umbrella root or the neuraltrust-data-plane subchart context — whichever
+resolves a non-empty dict wins.
+Usage: {{ include "neuraltrust-platform.dataPlaneApi.postgresConfig" . | fromYaml }}
+*/}}
+{{- define "neuraltrust-platform.dataPlaneApi.postgresConfig" -}}
+{{- $comp := include "neuraltrust-platform.dataPlane.components" . | fromYaml }}
+{{- $api := default dict $comp.api }}
+{{- $db := default dict $api.database }}
+{{- default dict $db.postgresql | toYaml }}
+{{- end }}
+
+{{/*
+Emit the data-plane-api PostgreSQL connection env vars (SQL_DATABASE=postgres +
+the five POSTGRES_* the binary reads). Precedence per connection field:
+  1. non-empty scalar value under api.database.postgresql (host/port/user/database)
+  2. the mapped key from the configured existingSecret (default: postgresql-secrets)
+The password is ALWAYS read from a Secret via secretKeyRef (never inlined),
+defaulting to postgresql-secrets/POSTGRES_PASSWORD. The platform Secret stores
+the database name under POSTGRES_DB, which is mapped to the binary's expected
+POSTGRES_DATABASE. secretKeyRef references are required (not optional) so an
+incomplete PostgreSQL configuration fails visibly instead of booting half-wired.
+Also emits PGSSLMODE from api.database.postgresql.sslMode (default "prefer") so a
+single default works against the non-TLS in-cluster PostgreSQL and TLS hosted DBs.
+Usage: {{- include "neuraltrust-platform.dataPlaneApi.postgresEnv" . | nindent 10 }}
+*/}}
+{{- define "neuraltrust-platform.dataPlaneApi.postgresEnv" -}}
+{{- $pg := include "neuraltrust-platform.dataPlaneApi.postgresConfig" . | fromYaml }}
+{{- $es := default dict $pg.existingSecret }}
+{{- $secretName := $es.name | default "postgresql-secrets" }}
+{{- $keys := default dict $es.keys }}
+{{- $hostKey := $keys.host | default "POSTGRES_HOST" }}
+{{- $portKey := $keys.port | default "POSTGRES_PORT" }}
+{{- $userKey := $keys.user | default "POSTGRES_USER" }}
+{{- $passwordKey := $keys.password | default "POSTGRES_PASSWORD" }}
+{{- $databaseKey := $keys.database | default "POSTGRES_DB" }}
+- name: SQL_DATABASE
+  value: "postgres"
+- name: POSTGRES_HOST
+{{- if $pg.host }}
+  value: {{ $pg.host | quote }}
+{{- else }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ $secretName | quote }}
+      key: {{ $hostKey | quote }}
+{{- end }}
+- name: POSTGRES_PORT
+{{- if $pg.port }}
+  value: {{ $pg.port | quote }}
+{{- else }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ $secretName | quote }}
+      key: {{ $portKey | quote }}
+{{- end }}
+- name: POSTGRES_USER
+{{- if $pg.user }}
+  value: {{ $pg.user | quote }}
+{{- else }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ $secretName | quote }}
+      key: {{ $userKey | quote }}
+{{- end }}
+- name: POSTGRES_DATABASE
+{{- if $pg.database }}
+  value: {{ $pg.database | quote }}
+{{- else }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ $secretName | quote }}
+      key: {{ $databaseKey | quote }}
+{{- end }}
+- name: POSTGRES_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ $secretName | quote }}
+      key: {{ $passwordKey | quote }}
+- name: PGSSLMODE
+  value: {{ $pg.sslMode | default "prefer" | quote }}
 {{- end -}}
 
 {{/*
@@ -1058,7 +1204,7 @@ Usage: {{ include "neuraltrust-platform.clickstack.otlpHeaders" (dict "ctx" . "e
 {{- $existing := .existingSecret -}}
 {{- $token := $cfg.authToken | default "" -}}
 {{- if and $token (ne ($token | toString) "") -}}
-{{- printf "authorization=Bearer %s" $token -}}
+{{- printf "authorization=%s" $token -}}
 {{- else if and $existing (kindIs "map" $existing) (index $existing "data") (hasKey $existing.data "OTEL_EXPORTER_OTLP_HEADERS") -}}
 {{- index $existing.data "OTEL_EXPORTER_OTLP_HEADERS" | b64dec -}}
 {{- end -}}

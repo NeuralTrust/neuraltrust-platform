@@ -940,11 +940,19 @@ assert_not_contains "$TMP/v2-hybrid.yaml" "name: datacore"                 "data
 assert_not_contains "$TMP/v2-hybrid.yaml" "name: clickstack-collector"     "clickstack-otel-collector omitted in hybrid (external-only)"
 assert_not_contains "$TMP/v2-hybrid.yaml" "name: alertengine-api"          "alertengine omitted in hybrid (external-only)"
 assert_not_contains "$TMP/v2-hybrid.yaml" "name: alertengine-worker"       "alertengine worker omitted in hybrid (external-only)"
-# Hybrid runs NO in-cluster ClickHouse and NO data-plane-api shim by default
-# (analytics are SaaS-side); the shim is opt-in via an external ClickHouse (36-ext).
-assert_not_contains "$TMP/v2-hybrid.yaml" 'name: "data-plane-api"'         "data-plane-api shim omitted in hybrid default (no local ClickHouse)"
-assert_not_contains "$TMP/v2-hybrid.yaml" "name: clickhouse-secrets"       "clickhouse-secrets omitted in hybrid default"
-assert_not_contains "$TMP/v2-hybrid.yaml" "name: clickhouse-init-job"      "clickhouse-init-job omitted in hybrid default"
+# Hybrid runs NO in-cluster ClickHouse. The data-plane-api read shim DOES render
+# by default now, backed by PostgreSQL (SQL_DATABASE=postgres) reusing the umbrella
+# PostgreSQL — so NO ClickHouse connection metadata/migrations render. An external
+# ClickHouse backend stays opt-in (36-ext).
+assert_contains     "$TMP/v2-hybrid.yaml" 'name: "data-plane-api"'         "data-plane-api shim renders in hybrid default (PostgreSQL-backed)"
+assert_env_value    "$TMP/v2-hybrid.yaml" "SQL_DATABASE" "postgres"        "data-plane-api selects the PostgreSQL backend in hybrid default"
+assert_contains     "$TMP/v2-hybrid.yaml" "name: postgres-migrations"      "data-plane-api PostgreSQL migration initContainer rendered in hybrid default"
+assert_contains     "$TMP/v2-hybrid.yaml" "name: data-plane-postgres-init" "data-plane-api PostgreSQL schema ConfigMap rendered in hybrid default"
+assert_contains     "$TMP/v2-hybrid.yaml" "SELECT pg_advisory_xact_lock"   "PostgreSQL migration serializes replicas with an advisory lock"
+assert_not_contains "$TMP/v2-hybrid.yaml" "name: clickhouse-secrets"       "clickhouse-secrets omitted in hybrid PostgreSQL default"
+assert_not_contains "$TMP/v2-hybrid.yaml" "name: clickhouse-init-job"      "clickhouse-init-job omitted in hybrid PostgreSQL default"
+assert_not_contains "$TMP/v2-hybrid.yaml" "name: clickhouse-migrations"    "data-plane-api ClickHouse migration initContainer omitted in hybrid PostgreSQL default"
+assert_not_contains "$TMP/v2-hybrid.yaml" "name: CLICKHOUSE_HOST"          "data-plane-api emits no CLICKHOUSE_* env in hybrid PostgreSQL default"
 assert_not_contains "$TMP/v2-hybrid.yaml" "name: data-plane-worker"        "kafka-workers (data-plane-worker) omitted under v2 hybrid"
 assert_not_contains "$TMP/v2-hybrid.yaml" "name: kafka-connect"            "kafka-connect omitted under v2 hybrid"
 # In-cluster datastores: Postgres + Redis default ON in v2; ClickHouse does NOT
@@ -979,14 +987,65 @@ assert_contains     "$TMP/v2-hybrid.yaml" "TELEMETRY_EXPORTERS_FILE: \"/etc/tele
 assert_contains     "$TMP/v2-hybrid.yaml" "TELEMETRY_ENABLED: \"true\""         "AgentGateway enables the configured hybrid telemetry pipeline"
 
 # Scenario 36-ext: hybrid + EXTERNAL ClickHouse. Pointing the data-plane-api shim
-# at a dotted (external) ClickHouse host turns it on WITHOUT deploying an in-cluster
-# ClickHouse — a bare host keeps it off (36 above).
-blue "scenario 36-ext: hybrid data-plane-api read shim opts in via an external ClickHouse"
+# at a dotted (external) ClickHouse host resolves the backend to ClickHouse
+# (backward-compat) WITHOUT deploying an in-cluster ClickHouse. The default bare
+# host now resolves to PostgreSQL (36 above).
+blue "scenario 36-ext: hybrid data-plane-api read shim resolves to ClickHouse via an external host"
 render_default "$TMP/v2-hybrid-extch.yaml" \
   --set neuraltrust-data-plane.dataPlane.components.clickhouse.host=my-ch.example.com
 assert_contains     "$TMP/v2-hybrid-extch.yaml" 'name: "data-plane-api"'    "data-plane-api shim renders in hybrid when pointed at an external ClickHouse"
 assert_not_contains "$TMP/v2-hybrid-extch.yaml" "name: clickhouse$"         "external ClickHouse does not deploy the in-cluster ClickHouse in hybrid"
 assert_contains     "$TMP/v2-hybrid-extch.yaml" "CLICKHOUSE_HOST: $(printf '%s' 'my-ch.example.com' | base64)" "hybrid shim uses the external ClickHouse host verbatim"
+assert_contains     "$TMP/v2-hybrid-extch.yaml" "name: clickhouse-migrations" "external-ClickHouse hybrid keeps the ClickHouse migration initContainer"
+assert_not_contains "$TMP/v2-hybrid-extch.yaml" "name: postgres-migrations"   "external-ClickHouse hybrid does not run the PostgreSQL migration"
+assert_not_contains "$TMP/v2-hybrid-extch.yaml" "SQL_DATABASE"                "external-ClickHouse hybrid does not force SQL_DATABASE=postgres"
+
+# Scenario 36-pg: hybrid data-plane-api PostgreSQL backend — explicit override,
+# external connection, and migration toggle. Also verify credential precedence
+# never inlines a plaintext password and that validation guards misconfiguration.
+blue "scenario 36-pg: hybrid data-plane-api PostgreSQL backend, external connection, and validation"
+# Explicit backend=postgres wins even when a dotted external ClickHouse host is set.
+render_default "$TMP/v2-pg-explicit.yaml" \
+  --set neuraltrust-data-plane.dataPlane.components.clickhouse.host=my-ch.example.com \
+  --set neuraltrust-data-plane.dataPlane.components.api.database.backend=postgres
+assert_env_value    "$TMP/v2-pg-explicit.yaml" "SQL_DATABASE" "postgres"    "explicit backend=postgres overrides a dotted ClickHouse host"
+assert_contains     "$TMP/v2-pg-explicit.yaml" "name: postgres-migrations"  "explicit backend=postgres runs the PostgreSQL migration"
+assert_not_contains "$TMP/v2-pg-explicit.yaml" "name: clickhouse-migrations" "explicit backend=postgres omits the ClickHouse migration"
+# In-cluster default reuses postgresql-secrets; password only via secretKeyRef.
+assert_contains     "$TMP/v2-hybrid.yaml" "name: \"postgresql-secrets\""    "data-plane-api sources POSTGRES_* from postgresql-secrets by default"
+pg_pw_block="$(yq e 'select(.kind == "Deployment" and .metadata.name == "data-plane-api") | .spec.template.spec.containers[0].env[] | select(.name == "POSTGRES_PASSWORD")' "$TMP/v2-hybrid.yaml")"
+if printf '%s' "$pg_pw_block" | grep -qE '^\s*value:'; then
+  red "FAIL: data-plane-api POSTGRES_PASSWORD is inlined as a plaintext value"; exit 1
+fi
+if ! printf '%s' "$pg_pw_block" | grep -q 'secretKeyRef'; then
+  red "FAIL: data-plane-api POSTGRES_PASSWORD is not a secretKeyRef"; exit 1
+fi
+green "ok  - data-plane-api POSTGRES_PASSWORD is always a secretKeyRef (never inlined)"
+# External PostgreSQL: scalar host/port/user/database override; custom Secret for the password.
+render_default "$TMP/v2-pg-external.yaml" \
+  --set neuraltrust-data-plane.dataPlane.components.api.database.postgresql.host=pg.db.example.com \
+  --set neuraltrust-data-plane.dataPlane.components.api.database.postgresql.port=6432 \
+  --set neuraltrust-data-plane.dataPlane.components.api.database.postgresql.user=dpapi \
+  --set neuraltrust-data-plane.dataPlane.components.api.database.postgresql.database=trustdata \
+  --set neuraltrust-data-plane.dataPlane.components.api.database.postgresql.existingSecret.name=my-ext-pg
+assert_env_value    "$TMP/v2-pg-external.yaml" "POSTGRES_HOST" "pg.db.example.com" "external PostgreSQL host wired from values"
+assert_env_value    "$TMP/v2-pg-external.yaml" "POSTGRES_PORT" "6432"              "external PostgreSQL port wired from values"
+assert_contains     "$TMP/v2-pg-external.yaml" "name: \"my-ext-pg\""               "external PostgreSQL password sourced from the configured Secret"
+# Migration can be disabled without disabling the shim.
+render_default "$TMP/v2-pg-nomig.yaml" \
+  --set neuraltrust-data-plane.dataPlane.components.api.database.postgresql.migration.enabled=false
+assert_contains     "$TMP/v2-pg-nomig.yaml" 'name: "data-plane-api"'        "data-plane-api still renders with migration disabled"
+assert_not_contains "$TMP/v2-pg-nomig.yaml" "name: postgres-migrations"     "migration initContainer omitted when migration.enabled=false"
+assert_not_contains "$TMP/v2-pg-nomig.yaml" "name: data-plane-postgres-init" "PostgreSQL schema ConfigMap omitted when migration.enabled=false"
+# Validation: unknown backend and hybrid ClickHouse without an external host both fail.
+assert_render_fails "unknown data-plane-api backend fails render" \
+  --set neuraltrust-data-plane.dataPlane.components.api.database.backend=mysql
+assert_render_fails "hybrid backend=clickhouse without an external host fails render" \
+  --set neuraltrust-data-plane.dataPlane.components.api.database.backend=clickhouse
+# The bundled PostgreSQL schema stays byte-identical to the data-plane-api source
+# (canonical copy checked in under files/postgres). Assert its shape rendered into
+# the ConfigMap.
+assert_contains     "$TMP/v2-hybrid.yaml" "CREATE SCHEMA IF NOT EXISTS neuraltrust" "PostgreSQL init ConfigMap creates the neuraltrust schema"
 
 render_default "$TMP/v2-upgrade-lookupless.yaml" --is-upgrade
 assert_resource_state "$TMP/v2-upgrade-lookupless.yaml" "Secret" "agentgateway-secrets" "absent" "lookup-less upgrade does not rotate AgentGateway secrets"
@@ -1451,16 +1510,64 @@ assert_contains "$TMP/v1-backup.yaml" "image: \"europe-west1-docker.pkg.dev/neur
 # consumer explicitly overrides it, and the REDIS_URL (with any ACL/IAM auth)
 # only ever lives in the Secret, never the plaintext env ConfigMap.
 blue "scenario 38o: data-plane-api evaluation-progress cache defaults to Kafka (v1) / Redis (v2)"
-render "$TMP/v1-dp-redis.yaml" --set global.platformVersion=v1
-assert_env_value "$TMP/v1-dp-redis.yaml" "EVALUATION_PROGRESS_BACKEND" "kafka" "data-plane-api defaults to the Kafka backend under v1"
+render "$TMP/v1-dp-redis.yaml" \
+  --set global.platformVersion=v1 \
+  --set global.kafka.tls.enabled=true \
+  --set global.kafka.tls.existingSecret=kafka-broker-ca
+yq e 'select(.kind == "Deployment" and .metadata.name == "data-plane-api")' "$TMP/v1-dp-redis.yaml" > "$TMP/v1-dp-api.yaml"
+assert_env_value "$TMP/v1-dp-api.yaml" "EVALUATION_PROGRESS_BACKEND" "kafka" "data-plane-api defaults to the Kafka backend under v1"
+assert_env_value "$TMP/v1-dp-api.yaml" "KAFKA_BOOTSTRAP_SERVERS" "kafka:9092" "data-plane-api keeps its Kafka client configuration under v1"
+v1_api_kafka_mount="$(yq e '.spec.template.spec.containers[] | select(.name == "api") | .volumeMounts[] | select(.name == "kafka-broker-ca") | .name' "$TMP/v1-dp-api.yaml")"
+v1_init_kafka_mount="$(yq e '.spec.template.spec.initContainers[] | select(.name == "clickhouse-migrations") | .volumeMounts[] | select(.name == "kafka-broker-ca") | .name' "$TMP/v1-dp-api.yaml")"
+v1_kafka_volume="$(yq e '.spec.template.spec.volumes[] | select(.name == "kafka-broker-ca") | .name' "$TMP/v1-dp-api.yaml")"
+if [[ "$v1_api_kafka_mount" == "kafka-broker-ca" && "$v1_init_kafka_mount" == "kafka-broker-ca" && "$v1_kafka_volume" == "kafka-broker-ca" ]]; then
+  green "ok  - Kafka-backed v1 data-plane-api keeps Kafka TLS mounts and volume"
+else
+  red "FAIL: Kafka-backed v1 data-plane-api is missing a Kafka TLS mount or volume"
+  exit 1
+fi
 assert_not_contains "$TMP/v1-dp-redis.yaml" "REDIS_URL" "data-plane-api does not reference REDIS_URL under v1 (no new Redis dependency)"
-# v2 hybrid runs the data-plane-api shim only when pointed at an external ClickHouse
-# (dotted host), so set one here to exercise its Redis wiring.
+# The Redis evaluation-progress cache is independent of the SQL backend; pin a
+# dotted external ClickHouse host so this case exercises the ClickHouse-backed shim.
 render_default "$TMP/v2-dp-redis.yaml" \
   --set neuraltrust-data-plane.dataPlane.components.clickhouse.host=my-ch.example.com
-assert_env_value "$TMP/v2-dp-redis.yaml" "EVALUATION_PROGRESS_BACKEND" "redis" "data-plane-api defaults to the Redis backend under v2"
+yq e 'select(.kind == "Deployment" and .metadata.name == "data-plane-api")' "$TMP/v2-dp-redis.yaml" > "$TMP/v2-dp-api.yaml"
+assert_env_value "$TMP/v2-dp-api.yaml" "EVALUATION_PROGRESS_BACKEND" "redis" "data-plane-api defaults to the Redis backend under v2"
+assert_not_contains "$TMP/v2-dp-api.yaml" "name: KAFKA_BOOTSTRAP_SERVERS" "v2 data-plane-api omits Kafka client configuration when Redis owns evaluation progress"
 assert_contains "$TMP/v2-dp-redis.yaml" "key: REDIS_URL" "data-plane-api reads REDIS_URL from the data-plane Secret under v2"
 assert_contains "$TMP/v2-dp-redis.yaml" "REDIS_URL: cmVkaXM6Ly9yZWRpczo2Mzc5LzA=" "v2 REDIS_URL defaults to the in-cluster shared Redis (redis://redis:6379/0)"
+assert_env_value "$TMP/v2-dp-api.yaml" "REDIS_MAX_CONNECTIONS" "100" "v2 data-plane-api defaults the Redis connection pool to 100"
+assert_env_value "$TMP/v2-dp-api.yaml" "REDIS_MGET_CHUNK_SIZE" "200" "v2 data-plane-api defaults Redis MGET batches to 200 keys"
+assert_not_contains "$TMP/v2-dp-api.yaml" "name: REDIS_CONNECT_TIMEOUT_SECONDS" "Redis connect timeout stays on the application default when unset"
+assert_not_contains "$TMP/v2-dp-api.yaml" "name: REDIS_SOCKET_TIMEOUT_SECONDS" "Redis socket timeout stays on the application default when unset"
+assert_not_contains "$TMP/v2-dp-api.yaml" "name: REDIS_HEALTH_CHECK_INTERVAL_SECONDS" "Redis health-check interval stays on the application default when unset"
+redis_url_optional="$(yq e '.spec.template.spec.containers[] | select(.name == "api") | .env[] | select(.name == "REDIS_URL") | .valueFrom.secretKeyRef.optional' "$TMP/v2-dp-api.yaml")"
+if [[ "$redis_url_optional" == "null" ]]; then
+  green "ok  - REDIS_URL is required when data-plane-api selects the Redis backend"
+else
+  red "FAIL: REDIS_URL secretKeyRef remains optional in Redis mode"
+  exit 1
+fi
+assert_render_fails "unknown data-plane-api evaluation-progress backend fails render" \
+  --set neuraltrust-data-plane.dataPlane.components.api.redis.backend=memory
+render_default "$TMP/v2-dp-redis-kafka-tls.yaml" \
+  --set neuraltrust-data-plane.dataPlane.components.clickhouse.host=my-ch.example.com \
+  --set global.kafka.tls.enabled=true \
+  --set global.kafka.tls.existingSecret=kafka-broker-ca
+yq e 'select(.kind == "Deployment" and .metadata.name == "data-plane-api")' "$TMP/v2-dp-redis-kafka-tls.yaml" > "$TMP/v2-dp-api-kafka-tls.yaml"
+assert_not_contains "$TMP/v2-dp-api-kafka-tls.yaml" "kafka-broker-ca" "Redis-backed v2 data-plane-api omits Kafka TLS mounts and volumes"
+render_default "$TMP/v2-dp-redis-tuning.yaml" \
+  --set neuraltrust-data-plane.dataPlane.components.clickhouse.host=my-ch.example.com \
+  --set neuraltrust-data-plane.dataPlane.components.api.redis.maxConnections=150 \
+  --set neuraltrust-data-plane.dataPlane.components.api.redis.mgetChunkSize=250 \
+  --set neuraltrust-data-plane.dataPlane.components.api.redis.connectTimeoutSeconds=6 \
+  --set neuraltrust-data-plane.dataPlane.components.api.redis.socketTimeoutSeconds=7 \
+  --set neuraltrust-data-plane.dataPlane.components.api.redis.healthCheckIntervalSeconds=45
+assert_env_value "$TMP/v2-dp-redis-tuning.yaml" "REDIS_MAX_CONNECTIONS" "150" "Redis connection-pool override is wired"
+assert_env_value "$TMP/v2-dp-redis-tuning.yaml" "REDIS_MGET_CHUNK_SIZE" "250" "Redis MGET chunk-size override is wired"
+assert_env_value "$TMP/v2-dp-redis-tuning.yaml" "REDIS_CONNECT_TIMEOUT_SECONDS" "6" "Redis connect-timeout override is wired"
+assert_env_value "$TMP/v2-dp-redis-tuning.yaml" "REDIS_SOCKET_TIMEOUT_SECONDS" "7" "Redis socket-timeout override is wired"
+assert_env_value "$TMP/v2-dp-redis-tuning.yaml" "REDIS_HEALTH_CHECK_INTERVAL_SECONDS" "45" "Redis health-check interval override is wired"
 render_default "$TMP/v2-dp-redis-acl.yaml" \
   --set neuraltrust-data-plane.dataPlane.components.clickhouse.host=my-ch.example.com \
   --set neuraltrust-data-plane.dataPlane.components.api.redis.host=my-redis.example.com \
@@ -1494,7 +1601,7 @@ assert_contains "$TMP/v2-hybrid-clickstack.yaml" "name: sensible-pg" "ClickStack
 assert_contains "$TMP/v2-hybrid-clickstack.yaml" "name: metadata-otlp" "ClickStack export adds the OTLP metadata exporter"
 assert_contains "$TMP/v2-hybrid-clickstack.yaml" "name: raw-otlp" "ClickStack export adds the OTLP raw exporter"
 assert_contains "$TMP/v2-hybrid-clickstack.yaml" "OTEL_EXPORTER_OTLP_ENDPOINT: .https://clickstack-collector.example.com/v1/logs." "ClickStack export sets the OTLP endpoint on the data planes"
-assert_contains "$TMP/v2-hybrid-clickstack.yaml" "OTEL_EXPORTER_OTLP_HEADERS: .authorization=Bearer cs-token-123." "ClickStack export ships the bearer token via the data-plane Secret"
+assert_contains "$TMP/v2-hybrid-clickstack.yaml" "OTEL_EXPORTER_OTLP_HEADERS: .authorization=cs-token-123." "ClickStack export ships the bearer token via the data-plane Secret"
 assert_render_fails "ClickStack export requires an endpoint when enabled" \
   --set global.clickstack.enabled=true
 

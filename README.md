@@ -10,8 +10,8 @@ in your cluster:
 
 - AgentGateway proxy and MCP runtimes
 - TrustGuard runtime
-- the temporary data-plane API read shim over ClickHouse
-- PostgreSQL, Redis, and ClickHouse by default
+- the temporary data-plane API read shim (PostgreSQL-backed by default; no ClickHouse required)
+- PostgreSQL and Redis by default (no in-cluster ClickHouse in hybrid)
 - NeuralTrust Firewall when enabled
 - DataAgent only after the deployment is enrolled
 
@@ -71,16 +71,18 @@ reference pre-created Kubernetes Secrets; see [SECRETS.md](./SECRETS.md).
 
 | Mode | SaaS control plane | Workloads in cluster | Analytics path |
 |---|---:|---|---|
-| `hybrid` (default) | Yes | AgentGateway data plane, TrustGuard data plane, data-plane API shim | Local ClickHouse; optional enrolled DataAgent bridges entitled reads |
-| `external` | No | Control and data planes, product API/app, DataCore, AlertEngine | ClickStack OTel Collector writes to ClickHouse |
+| `hybrid` (default) | Yes | AgentGateway data plane, TrustGuard data plane, data-plane API shim (PostgreSQL) | Analytics in SaaS; optional enrolled DataAgent bridges entitled reads. No in-cluster ClickHouse |
+| `external` | No | Control and data planes, product API/app, DataCore, AlertEngine | ClickStack OTel Collector writes to ClickHouse; data-plane API shim reads ClickHouse |
 
 `full` remains a deprecated alias for `external`. New configuration must use
 `external`.
 
 ## Datastores
 
-Platform v2 deploys PostgreSQL, Redis, and ClickHouse in-cluster by default in
-both modes. Each can be replaced with a managed service:
+Platform v2 deploys PostgreSQL and Redis in-cluster by default in both modes;
+in-cluster ClickHouse renders only in `external` (hybrid keeps analytics in SaaS
+and runs the data-plane API shim on PostgreSQL). Each can be replaced with a
+managed service:
 
 ```yaml
 global:
