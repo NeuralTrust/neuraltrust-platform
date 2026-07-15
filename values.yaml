@@ -1066,7 +1066,7 @@ neuraltrust-control-plane:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.92.0"
+          tag: "v1.93.0"
           pullPolicy: "Always"
         config:
           nodeEnv: production
@@ -1188,7 +1188,7 @@ neuraltrust-control-plane:
 # AgentGateway (TrustGate v2): admin (control) + proxy/mcp (data)
 agentgateway:
   image:
-    tag: "v0.6.0"
+    tag: "v0.7.0"
   database:
     # host auto-derives to the in-cluster control-plane-postgresql Service; set
     # only for external/CloudSQL Postgres. name is mode-derived when left empty:
@@ -1206,7 +1206,7 @@ agentgateway:
 # TrustGuard: control-plane (admin) + data-plane (runtime /v1/evaluate)
 trustguard:
   image:
-    tag: "v0.11.1"
+    tag: "v0.12.0"
   database:
     # host auto-derives to the in-cluster control-plane-postgresql Service; set
     # only for external Postgres. name is mode-derived when left empty: external =>
@@ -1232,7 +1232,7 @@ trustlens:
 # existing Secret reference is configured.
 dataagent:
   image:
-    tag: "v0.1.1" # Pin to a released DataAgent tag in production
+    tag: "v0.1.2" # Pin to a released DataAgent tag in production
   databridge:
     # Defaults target the NeuralTrust SaaS DataBridge — override only for a
     # non-default region/endpoint or a self-hosted DataBridge.
@@ -1256,7 +1256,7 @@ dataagent:
 # when global.deploymentMode=external.
 datacore:
   image:
-    tag: "v0.3.0"
+    tag: "v0.6.0"
   # CLICKHOUSE_PASSWORD is read from the shared `clickhouse` secret (same secret
   # AlertEngine uses) via clickhouse.existingSecret — no password set here.
   clickhouse:
@@ -1278,7 +1278,7 @@ clickstack-otel-collector:
 alertengine:
   enabled: true
   image:
-    tag: "v0.3.0"
+    tag: "v0.4.4"
   # Own Postgres database (separate migrations, NOT the shared trustdata DB).
   # host empty ⇒ in-cluster control-plane-postgresql; set for external Postgres.
   database:
@@ -1401,7 +1401,7 @@ neuraltrust-data-plane:
         classifierModel: "gpt"
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.39.0
+          tag: v1.40.0
           pullPolicy: Always
         accessMode: ReadWriteOnce
         huggingfaceToken: ""

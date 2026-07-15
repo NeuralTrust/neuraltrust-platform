@@ -21,13 +21,13 @@ dependencies:
       - infrastructure
   # NeuralTrust components
   - name: neuraltrust-data-plane
-    version: 1.2.49
+    version: 1.2.50
     condition: neuraltrust-data-plane.dataPlane.enabled
     repository: file://./charts/neuraltrust-data-plane
     tags:
       - neuraltrust
   - name: neuraltrust-control-plane
-    version: 1.2.46
+    version: 1.2.47
     repository: file://./charts/neuraltrust-control-plane
     # No condition: subchart always loads so PostgreSQL can deploy independently.
     # Control Plane components are guarded by controlPlane.enabled inside templates.
@@ -45,13 +45,13 @@ dependencies:
   # time — see .cursor/rules/platform-v2.mdc). Under explicit v1 every template
   # in these subcharts renders to empty.
   - name: agentgateway
-    version: 0.1.8
+    version: 0.1.9
     repository: file://./charts/agentgateway
     tags:
       - neuraltrust
       - v2
   - name: trustguard
-    version: 0.1.7
+    version: 0.1.8
     repository: file://./charts/trustguard
     tags:
       - neuraltrust
@@ -65,7 +65,7 @@ dependencies:
   # DataAgent — enrolled hybrid only; bridges local reads to the SaaS DataBridge.
   # Template-guarded by dataagentEnabled (v2 + hybrid + tenant + token), no condition.
   - name: dataagent
-    version: 0.1.2
+    version: 0.1.3
     repository: file://./charts/dataagent
     tags:
       - neuraltrust
@@ -74,7 +74,7 @@ dependencies:
   # (global.deploymentMode=external); the self-hosted analytics stack over local
   # ClickHouse. Template-guarded (isV2 + isExternal), no condition.
   - name: datacore
-    version: 0.1.3
+    version: 0.1.4
     repository: file://./charts/datacore
     tags:
       - neuraltrust
@@ -89,7 +89,7 @@ dependencies:
   # detection rules over ClickHouse telemetry and forwards findings to SIEMs.
   # Template-guarded (isV2 + isExternal), no condition.
   - name: alertengine
-    version: 0.1.0
+    version: 0.1.1
     repository: file://./charts/alertengine
     tags:
       - neuraltrust
