@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.0.1] — 2026-07-15
+
 > **Release accounting.** The unreleased changes ship as chart `2.0.0`.
 > Platform v2 hybrid is the default; explicit `global.platformVersion: v1`
 > remains the legacy escape hatch.
