@@ -384,6 +384,20 @@ them with `lookup`.
   secret matching `infrastructure.clickhouse.external.secretName`/`secretKey`, and set
   the ClickHouse host to your endpoint (a dotted/FQDN host is used verbatim; a bare
   name expands to `<name>.<namespace>.svc.cluster.local`).
+- **`data-plane-api` PostgreSQL backend (v2 hybrid default)**: in hybrid the shim
+  reads its evaluation store from PostgreSQL (`SQL_DATABASE=postgres`), so it needs
+  no ClickHouse. It resolves its five `POSTGRES_*` connection vars from the
+  umbrella-managed `postgresql-secrets` (keys `POSTGRES_HOST`/`POSTGRES_PORT`/
+  `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB`) by default — the password is
+  ALWAYS a `secretKeyRef` (never inlined). For an EXTERNAL PostgreSQL, set the
+  non-secret scalars under
+  `neuraltrust-data-plane.dataPlane.components.api.database.postgresql.{host,port,user,database}`
+  (they override the matching Secret key) and/or point `…database.postgresql.existingSecret.name`
+  (with an optional `keys` map) at a pre-created Secret holding the password. A
+  `postgres-migrations` initContainer applies the idempotent schema, so the
+  configured role needs `CREATE SCHEMA`/`CREATE TABLE` on the target database.
+  The ClickHouse credential below applies only when the shim is on ClickHouse
+  (v2 external, or hybrid pinned to an external ClickHouse).
 - **Optional IAM DB/Redis auth (AWS)**: the v2 Go services accept
   `database.iamAuth` / `redis.iamAuth` (default false). When on they emit
   `DB_IAM_AUTH`/`DB_AUTH_MODE`/`REDIS_IAM_AUTH` and ship no static password.

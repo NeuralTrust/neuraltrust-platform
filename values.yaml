@@ -1399,6 +1399,60 @@ neuraltrust-data-plane:
             enabled: true
             secretName: "" # Optional override for this ingress; empty = use shared generated/global secret
         classifierModel: "gpt"
+        # SQL store for data-plane-api (SQL_DATABASE). The image (>= v1.40.0)
+        # supports a PostgreSQL evaluation store in addition to ClickHouse.
+        #   backend: "" (auto) | "postgres" | "clickhouse"
+        #     auto → PostgreSQL in v2 hybrid (reusing the umbrella PostgreSQL),
+        #            ClickHouse in v2 external and v1. In v2 hybrid, auto still
+        #            resolves to ClickHouse when a dotted (external) ClickHouse
+        #            host is set (see components.clickhouse.host), preserving
+        #            existing external-ClickHouse hybrid installs.
+        #     postgres/clickhouse → force that backend (rollback / advanced).
+        database:
+          backend: ""
+          # PostgreSQL connection (used when the resolved backend is postgres).
+          # Scalar host/port/user/database override the matching key from the
+          # existingSecret; leave empty to source them from that Secret. The
+          # password is ALWAYS read from the Secret (never inlined). Defaults to
+          # the umbrella-managed `postgresql-secrets`, so bundled in-cluster
+          # PostgreSQL is reused automatically. For EXTERNAL PostgreSQL, set the
+          # scalars and/or point existingSecret at a pre-created Secret.
+          postgresql:
+            host: ""
+            port: ""
+            user: ""
+            database: ""
+            # sslMode → PGSSLMODE. "prefer" works against the non-TLS in-cluster
+            # PostgreSQL (plaintext fallback) and TLS hosted DBs; set "require"
+            # to force TLS.
+            sslMode: "prefer"
+            existingSecret:
+              name: "postgresql-secrets"
+              keys:
+                host: "POSTGRES_HOST"
+                port: "POSTGRES_PORT"
+                user: "POSTGRES_USER"
+                password: "POSTGRES_PASSWORD"
+                # Platform Secret stores the DB name under POSTGRES_DB; it is
+                # mapped to the binary's POSTGRES_DATABASE env.
+                database: "POSTGRES_DB"
+            # Schema migration initContainer (postgres-migrations). Applies the
+            # bundled idempotent DDL (schema neuraltrust + tests/test_runs) under
+            # a transaction-scoped advisory lock. Disable if the schema is
+            # provisioned externally.
+            migration:
+              enabled: true
+              image:
+                repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/postgres
+                tag: "17-alpine"
+                pullPolicy: IfNotPresent
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 64Mi
+                limits:
+                  cpu: 500m
+                  memory: 128Mi
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
           tag: v1.40.0
@@ -1479,6 +1533,11 @@ neuraltrust-data-plane:
           iamCacheName: "" # ElastiCache replication group / serverless cache name
           iamRegion: "" # Empty ⇒ AWS_REGION / AWS_DEFAULT_REGION / us-east-1
           iamServerless: false # true for ElastiCache Serverless
+          maxConnections: 100 # Maximum Redis connection-pool size
+          mgetChunkSize: 200 # Keys fetched per Redis MGET during progress reads
+          connectTimeoutSeconds: "" # Empty ⇒ data-plane-api default (5 seconds)
+          socketTimeoutSeconds: "" # Empty ⇒ data-plane-api default (5 seconds)
+          healthCheckIntervalSeconds: "" # Empty ⇒ data-plane-api default (30 seconds)
         # Run evaluation workloads as Kubernetes Jobs spawned by data-plane-api
         # (instead of FastAPI background tasks). Default OFF — matches
         # data-plane-api's K8S_JOBS_ENABLED=false when unset. Red teaming

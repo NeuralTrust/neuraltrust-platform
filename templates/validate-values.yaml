@@ -87,6 +87,26 @@ intentionally emits no Kubernetes resource when validation succeeds.
 {{- if and (eq $version "v2") (eq $mode "hybrid") ($clickstack.enabled | default false) (not ($clickstack.endpoint | default "")) -}}
   {{- fail "global.clickstack.enabled=true requires global.clickstack.endpoint (the collector's OTLP/HTTP URL, e.g. https://clickstack-collector.<domain>/v1/logs)." -}}
 {{- end -}}
+{{- /* data-plane-api SQL backend: validate the explicit override and guard the  */ -}}
+{{- /* v2 hybrid ClickHouse path (needs an external, dotted host — no in-cluster  */ -}}
+{{- /* ClickHouse renders in hybrid).                                            */ -}}
+{{- $dpRoot := default dict (index .Values "neuraltrust-data-plane") -}}
+{{- $dpComponents := default dict (default dict $dpRoot.dataPlane).components -}}
+{{- $dpApi := default dict $dpComponents.api -}}
+{{- $dpApiEnabled := true -}}
+{{- if hasKey $dpApi "enabled" -}}{{- $dpApiEnabled = $dpApi.enabled -}}{{- end -}}
+{{- $dpApiDatabase := default dict $dpApi.database -}}
+{{- $dpBackend := $dpApiDatabase.backend | default "" | toString | lower -}}
+{{- if and $dpBackend (not (has $dpBackend (list "postgres" "postgresql" "clickhouse" "auto"))) -}}
+  {{- fail (printf "neuraltrust-data-plane.dataPlane.components.api.database.backend must be one of: postgres, clickhouse, auto (got %q)" $dpBackend) -}}
+{{- end -}}
+{{- if and (eq $version "v2") (eq $mode "hybrid") $dpApiEnabled (eq $dpBackend "clickhouse") -}}
+  {{- $dpCh := default dict $dpComponents.clickhouse -}}
+  {{- $dpChHost := $dpCh.host | default "clickhouse" -}}
+  {{- if not (contains "." $dpChHost) -}}
+    {{- fail "neuraltrust-data-plane.dataPlane.components.api.database.backend=clickhouse in v2 hybrid requires an external ClickHouse: set neuraltrust-data-plane.dataPlane.components.clickhouse.host to a dotted (external) endpoint, or use the default PostgreSQL backend." -}}
+  {{- end -}}
+{{- end -}}
 {{- $aispm := default dict (index .Values "neuraltrust-aispm") -}}
 {{- $aispmConfig := default dict $aispm.aispm -}}
 {{- if $aispmConfig.enabled -}}

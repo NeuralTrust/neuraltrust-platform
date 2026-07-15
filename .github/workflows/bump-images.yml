@@ -613,6 +613,11 @@ jobs:
               update_template_tag "charts/neuraltrust-control-plane/templates/api/deployment.yaml" "pgWaitImageTag" "$TAG"
               update_template_tag "charts/neuraltrust-control-plane/templates/scheduler/deployment.yaml" "pgWaitImageTag" "$TAG"
             fi
+            # data-plane-api PostgreSQL migration initContainer (psql client) tracks
+            # the same postgres image as the rest of the platform.
+            if update_values_tag '.["neuraltrust-data-plane"].dataPlane.components.api.database.postgresql.migration.image.tag' "$TAG" "postgres (data-plane-api migration)"; then
+              BUMP_DATA_PLANE=true
+            fi
             update_template_tag "templates/v2-postgres-init.yaml" "pgImageTag" "$TAG"
           fi
 

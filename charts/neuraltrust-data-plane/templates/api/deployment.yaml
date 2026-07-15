@@ -9,6 +9,16 @@
 {{- end }}
 {{- $chPwSecretName := $chPwSecret.name | default "clickhouse" }}
 {{- $chPwSecretKey := $chPwSecret.key | default "admin-password" }}
+{{- /* Resolve the SQL backend (postgres | clickhouse). v2 hybrid defaults to
+       PostgreSQL; v2 external and v1 stay ClickHouse. See the sqlBackend helper. */ -}}
+{{- $sqlBackend := include "neuraltrust-platform.dataPlaneApi.sqlBackend" . }}
+{{- $pgCfg := include "neuraltrust-platform.dataPlaneApi.postgresConfig" . | fromYaml }}
+{{- $pgMigration := default dict $pgCfg.migration }}
+{{- $pgMigrationEnabled := true }}{{- if hasKey $pgMigration "enabled" }}{{- $pgMigrationEnabled = $pgMigration.enabled }}{{- end }}
+{{- $renderChInit := eq $sqlBackend "clickhouse" }}
+{{- $renderPgInit := and (eq $sqlBackend "postgres") $pgMigrationEnabled }}
+{{- $dpRedisCfg := default dict .Values.dataPlane.components.api.redis }}
+{{- $dpRedisBackend := include "neuraltrust-platform.dataPlaneApi.redisBackend" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -38,7 +48,9 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       {{- end }}
+      {{- if or $renderChInit $renderPgInit }}
       initContainers:
+        {{- if $renderChInit }}
         - name: clickhouse-migrations
           {{- $chMigrationRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickhouse-server" }}
           {{- $chMigrationTag := "26.3" }}
@@ -189,7 +201,92 @@ spec:
           - name: tmp
             mountPath: /tmp
           {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 10 }}
+          {{- if eq $dpRedisBackend "kafka" }}
           {{- include "neuraltrust-platform.kafka.tlsVolumeMount" . | nindent 10 }}
+          {{- end }}
+        {{- end }}
+        {{- if $renderPgInit }}
+        - name: postgres-migrations
+          {{- $pgMigRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/postgres" }}
+          {{- $pgMigTag := "17-alpine" }}
+          {{- $pgMigPull := "IfNotPresent" }}
+          {{- if $pgMigration.image }}
+            {{- if $pgMigration.image.repository }}{{- $pgMigRepo = $pgMigration.image.repository }}{{- end }}
+            {{- if $pgMigration.image.tag }}{{- $pgMigTag = $pgMigration.image.tag }}{{- end }}
+            {{- if $pgMigration.image.pullPolicy }}{{- $pgMigPull = $pgMigration.image.pullPolicy }}{{- end }}
+          {{- end }}
+          image: {{ include "data-plane.image" (dict "repository" $pgMigRepo "tag" $pgMigTag "global" .Values.global) | quote }}
+          imagePullPolicy: {{ $pgMigPull }}
+          {{- if .Values.securityHardening }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          {{- end }}
+          command:
+          - /bin/sh
+          - -c
+          - |
+            set -e
+            echo "Applying PostgreSQL schema migrations..."
+            export PGPASSWORD="${POSTGRES_PASSWORD}"
+
+            # Wait for PostgreSQL to accept connections.
+            ATTEMPT=0
+            MAX_ATTEMPTS=60
+            until pg_isready -h "${POSTGRES_HOST}" -p "${POSTGRES_PORT}" -U "${POSTGRES_USER}" -t 2 >/dev/null 2>&1; do
+              ATTEMPT=$((ATTEMPT + 1))
+              if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
+                echo "ERROR: PostgreSQL did not become ready in time"
+                exit 1
+              fi
+              [ $((ATTEMPT % 5)) -eq 0 ] && echo "Waiting for PostgreSQL... ($ATTEMPT/$MAX_ATTEMPTS)"
+              sleep 2
+            done
+            echo "PostgreSQL is ready; applying idempotent schema in a single advisory-locked transaction..."
+
+            # A transaction-scoped advisory lock serializes concurrent replicas so
+            # they never race on CREATE ... IF NOT EXISTS. The bundled DDL is
+            # idempotent; ON_ERROR_STOP makes any failure fatal.
+            psql --set=ON_ERROR_STOP=1 \
+              -h "${POSTGRES_HOST}" \
+              -p "${POSTGRES_PORT}" \
+              -U "${POSTGRES_USER}" \
+              -d "${POSTGRES_DATABASE}" <<'EOSQL'
+            BEGIN;
+            SELECT pg_advisory_xact_lock(8274123);
+            \i /postgres-init/init-db.sql
+            COMMIT;
+            EOSQL
+
+            echo "PostgreSQL schema migration completed."
+          env:
+          {{- include "neuraltrust-platform.dataPlaneApi.postgresEnv" . | nindent 10 }}
+          {{- if include "neuraltrust-platform.customCaCert.enabled" . }}
+          - name: PGSSLROOTCERT
+            value: {{ include "neuraltrust-platform.customCaCert.path" . | quote }}
+          {{- end }}
+          resources:
+            {{- if $pgMigration.resources }}
+            {{- toYaml $pgMigration.resources | nindent 12 }}
+            {{- else }}
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+            {{- end }}
+          volumeMounts:
+          - name: postgres-init-db
+            mountPath: /postgres-init
+            readOnly: true
+          - name: tmp
+            mountPath: /tmp
+          {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 10 }}
+        {{- end }}
+      {{- end }}
       containers:
       - name: api
         {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.image }}
@@ -242,9 +339,9 @@ spec:
                 name: {{ if and .Values.dataPlane .Values.dataPlane.secrets .Values.dataPlane.secrets.resendApiKeySecretName }}{{ .Values.dataPlane.secrets.resendApiKeySecretName }}{{ else }}resend-secrets{{ end }}
                 key: RESEND_API_KEY
                 optional: true
+          {{- if eq $dpRedisBackend "kafka" }}
           {{- include "neuraltrust-platform.kafka.clientEnv" . | nindent 10 }}
-          {{- $dpRedisCfg := default dict .Values.dataPlane.components.api.redis }}
-          {{- $dpRedisBackend := include "neuraltrust-platform.dataPlaneApi.redisBackend" . }}
+          {{- end }}
           - name: EVALUATION_PROGRESS_BACKEND
             value: {{ $dpRedisBackend | quote }}
           {{- if eq $dpRedisBackend "redis" }}
@@ -253,7 +350,22 @@ spec:
               secretKeyRef:
                 name: {{ if and .Values.dataPlane.secrets .Values.dataPlane.secrets.dataPlaneJWTSecretName }}{{ .Values.dataPlane.secrets.dataPlaneJWTSecretName }}{{ else }}data-plane-jwt-secret{{ end }}
                 key: REDIS_URL
-                optional: true
+          - name: REDIS_MAX_CONNECTIONS
+            value: {{ $dpRedisCfg.maxConnections | default 100 | quote }}
+          - name: REDIS_MGET_CHUNK_SIZE
+            value: {{ $dpRedisCfg.mgetChunkSize | default 200 | quote }}
+          {{- with $dpRedisCfg.connectTimeoutSeconds }}
+          - name: REDIS_CONNECT_TIMEOUT_SECONDS
+            value: {{ . | quote }}
+          {{- end }}
+          {{- with $dpRedisCfg.socketTimeoutSeconds }}
+          - name: REDIS_SOCKET_TIMEOUT_SECONDS
+            value: {{ . | quote }}
+          {{- end }}
+          {{- with $dpRedisCfg.healthCheckIntervalSeconds }}
+          - name: REDIS_HEALTH_CHECK_INTERVAL_SECONDS
+            value: {{ . | quote }}
+          {{- end }}
           {{- if $dpRedisCfg.iamAuth }}
           - name: REDIS_AUTH_MODE
             value: "aws_iam"
@@ -281,6 +393,13 @@ spec:
                 optional: true
           - name: PYTHONPATH
             value: "/app"
+          {{- if eq $sqlBackend "postgres" }}
+          {{- include "neuraltrust-platform.dataPlaneApi.postgresEnv" . | nindent 10 }}
+          {{- if include "neuraltrust-platform.customCaCert.enabled" . }}
+          - name: PGSSLROOTCERT
+            value: {{ include "neuraltrust-platform.customCaCert.path" . | quote }}
+          {{- end }}
+          {{- else }}
           - name: CLICKHOUSE_HOST
             valueFrom:
               secretKeyRef:
@@ -306,6 +425,7 @@ spec:
               secretKeyRef:
                 name: {{ $chPwSecretName | quote }}
                 key: {{ $chPwSecretKey | quote }}
+          {{- end }}
           {{- if eq (include "data-plane.api.k8sJobs.enabled" .) "true" }}
           {{- $jobsCfg := .Values.dataPlane.components.api.k8sJobs }}
           - name: K8S_JOBS_ENABLED
@@ -376,7 +496,9 @@ spec:
           - name: tmp
             mountPath: /tmp
           {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 10 }}
+          {{- if eq $dpRedisBackend "kafka" }}
           {{- include "neuraltrust-platform.kafka.tlsVolumeMount" . | nindent 10 }}
+          {{- end }}
         {{- with .Values.dataPlane.components.api.extraVolumeMounts }}
         {{- include "neuraltrust-platform.extraVolumeMounts" (dict "items" .) | nindent 10 }}
         {{- end }}
@@ -431,16 +553,28 @@ spec:
       - name: tmp
         emptyDir: {}
       {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 6 }}
+      {{- if eq $dpRedisBackend "kafka" }}
       {{- include "neuraltrust-platform.kafka.tlsVolume" . | nindent 6 }}
+      {{- end }}
       {{- with .Values.dataPlane.components.api.extraVolumes }}
       {{- include "neuraltrust-platform.extraVolumes" (dict "items" .) | nindent 6 }}
       {{- end }}
+      {{- if $renderChInit }}
       - name: init-db
         configMap:
           name: {{ if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.clickhouse .Values.dataPlane.components.clickhouse.configmap }}{{ .Values.dataPlane.components.clickhouse.configmap.name | default "clickhouse-init-job" }}{{ else }}clickhouse-init-job{{ end }}
           items:
             - key: init-db.sql
               path: init-db.sql
+      {{- end }}
+      {{- if $renderPgInit }}
+      - name: postgres-init-db
+        configMap:
+          name: data-plane-postgres-init
+          items:
+            - key: init-db.sql
+              path: init-db.sql
+      {{- end }}
       {{- if eq (include "data-plane.api.trustTestConfig.enabled" .) "true" }}
       - name: trusttest-config-volume
         configMap:

@@ -1,0 +1,27 @@
+{{- /* platform-v2: PostgreSQL schema migration for the data-plane-api shim.
+       Renders only when the API shim is enabled AND its resolved SQL backend is
+       PostgreSQL (the v2 hybrid default). The ConfigMap carries the idempotent
+       DDL (schema neuraltrust + tests/test_runs + indexes) applied by the
+       postgres-migrations initContainer. Kept byte-identical to the data-plane-api
+       source schema (files/postgres/init-db.sql). */ -}}
+{{- if or (not (eq (include "neuraltrust-platform.isV2" .) "true")) (eq (include "neuraltrust-platform.dataPlaneApiV2.enabled" .) "true") }}
+{{- if eq (include "neuraltrust-platform.dataPlaneApi.sqlBackend" .) "postgres" }}
+{{- $pgCfg := include "neuraltrust-platform.dataPlaneApi.postgresConfig" . | fromYaml }}
+{{- $pgMigration := default dict $pgCfg.migration }}
+{{- $pgMigrationEnabled := true }}{{- if hasKey $pgMigration "enabled" }}{{- $pgMigrationEnabled = $pgMigration.enabled }}{{- end }}
+{{- if $pgMigrationEnabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: data-plane-postgres-init
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: data-plane
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    component: postgres
+data:
+  init-db.sql: |
+{{ .Files.Get "files/postgres/init-db.sql" | indent 4 }}
+{{- end }}
+{{- end }}
+{{- end }}

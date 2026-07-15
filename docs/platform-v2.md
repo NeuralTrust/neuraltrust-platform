@@ -25,11 +25,16 @@ path in the customer cluster:
 Hybrid does **not** deploy an in-cluster ClickHouse: analytics live in NeuralTrust
 SaaS (the data planes write raw telemetry to PostgreSQL, DataAgent bridges it out,
 and you can optionally also stream product data to a ClickStack collector — see
-below). The temporary `data-plane-api` read shim therefore renders only when you
-point it at an **external** ClickHouse (a dotted
-`neuraltrust-data-plane.dataPlane.components.clickhouse.host`); with the default
-bare host the shim stays off. In-cluster ClickHouse deploys only in v2 external
-(and v1).
+below). The temporary `data-plane-api` read shim renders **by default** in hybrid
+and reads from the umbrella-managed **PostgreSQL** (`SQL_DATABASE=postgres`), so no
+ClickHouse is required. Its schema is applied by a `postgres-migrations`
+initContainer (idempotent, advisory-locked). If you instead want it to read from
+an **external/managed ClickHouse**, either set a dotted
+`neuraltrust-data-plane.dataPlane.components.clickhouse.host` (auto-resolves to
+ClickHouse) or force it with
+`neuraltrust-data-plane.dataPlane.components.api.database.backend: clickhouse`.
+The backend can also be pinned to `postgres` explicitly. In-cluster ClickHouse
+deploys only in v2 external (and v1).
 
 Leave DataAgent enrolment empty until a tenant identifier and token are issued:
 
@@ -100,7 +105,7 @@ NeuralTrust SaaS telemetry egress.
 | AgentGateway admin | SaaS | yes | Gateway administration |
 | TrustGuard data plane | yes | yes | Runtime safety evaluation |
 | TrustGuard control plane | SaaS | yes | Policy administration |
-| data-plane API shim | external ClickHouse only | yes | Temporary ClickHouse read API |
+| data-plane API shim | yes (PostgreSQL) | yes (ClickHouse) | Temporary read API — PostgreSQL by default in hybrid, ClickHouse in external |
 | DataAgent | enrolled only | no | Outbound entitled-query bridge |
 | ClickStack OTel Collector | no | yes | OTLP to ClickHouse |
 | DataCore | no | yes | Residency query API |
@@ -117,15 +122,22 @@ never renders.
 
 Hybrid PostgreSQL uses a shared `trustdata` database with isolated
 AgentGateway and TrustGuard schemas. When DataAgent is enabled, its read-only
-role is granted access to both schemas. If you want the temporary `data-plane-api`
-read shim in hybrid, point it at an external/managed ClickHouse by setting a
-dotted `neuraltrust-data-plane.dataPlane.components.clickhouse.host` (and its
-`existingSecret`); otherwise the shim stays off.
+role is granted access to both schemas. The temporary `data-plane-api` read shim
+also runs on PostgreSQL by default in hybrid: it connects with the
+`postgresql-secrets` connection (host/port/user/password/database) and a
+`postgres-migrations` initContainer applies its own schema (`neuraltrust` schema
++ `tests`/`test_runs` tables). Point it at an external/managed ClickHouse instead
+by setting a dotted `neuraltrust-data-plane.dataPlane.components.clickhouse.host`
+(and its `existingSecret`), or force the backend with
+`neuraltrust-data-plane.dataPlane.components.api.database.backend`. For an
+**external** PostgreSQL, set
+`neuraltrust-data-plane.dataPlane.components.api.database.postgresql.{host,port,user,database}`
+and/or point its `existingSecret` at your own Secret.
 
 External gives control-plane services separate databases. AlertEngine also owns
-its own PostgreSQL database. ClickStack, DataCore, AlertEngine, and the
-data-plane API shim share the selected ClickHouse credentials through existing
-Kubernetes Secrets.
+its own PostgreSQL database. In external mode the data-plane API shim stays on
+ClickHouse; ClickStack, DataCore, AlertEngine, and the data-plane API shim share
+the selected ClickHouse credentials through existing Kubernetes Secrets.
 
 The data-plane API shim also uses Redis for its evaluation-progress cache
 (`EVALUATION_PROGRESS_BACKEND`): v1 keeps the existing Kafka-backed behavior,
@@ -133,7 +145,10 @@ while v2 points it at the same Redis AgentGateway/TrustGuard use, via
 `neuraltrust-data-plane.dataPlane.components.api.redis` (host/port/password/
 username/tls, plus AWS ElastiCache IAM auth). Set `redis.host` (and
 `password`/`iamAuth`, etc.) there to match `infrastructure.redis.external`
-when `infrastructure.redis.deploy=false`.
+when `infrastructure.redis.deploy=false`. Redis-backed deployments do not
+receive Kafka client settings. Pooling and batching default to 100 connections
+and 200 keys per MGET; `maxConnections`, `mgetChunkSize`, and the optional
+connect/socket/health-check timeout values under `api.redis` override them.
 
 To use managed datastores, disable each in-cluster component and configure
 service-specific endpoints:

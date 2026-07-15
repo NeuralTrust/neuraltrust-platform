@@ -1,6 +1,8 @@
 # Platform v2 hybrid example.
 # Control planes remain in NeuralTrust SaaS; data-plane workloads run locally.
-# PostgreSQL, Redis, and ClickHouse deploy in-cluster by default. Kafka never
+# PostgreSQL and Redis deploy in-cluster by default; analytics live in SaaS, so
+# no in-cluster ClickHouse renders in hybrid. The temporary data-plane-api read
+# shim runs on PostgreSQL by default (no ClickHouse required). Kafka never
 # renders in v2.
 
 global:
@@ -20,9 +22,36 @@ infrastructure:
   redis:
     deploy: true
   clickhouse:
-    deploy: true
+    # Inert in hybrid — no in-cluster ClickHouse renders (analytics live in SaaS).
+    deploy: false
   kafka:
     deploy: false
+
+# data-plane-api read shim. In hybrid it defaults to PostgreSQL (SQL_DATABASE=postgres)
+# and reuses the umbrella-managed `postgresql-secrets`, so nothing below is required.
+# Uncomment to point it at an EXTERNAL PostgreSQL, or to pin/override the backend.
+# neuraltrust-data-plane:
+#   dataPlane:
+#     components:
+#       api:
+#         database:
+#           # "" (auto) → PostgreSQL in hybrid. Force with "postgres" or "clickhouse".
+#           backend: ""
+#           postgresql:
+#             # Scalars override the matching key from existingSecret; leave empty
+#             # to source them from the Secret. Password is always read from the Secret.
+#             host: "postgres.example.com"
+#             port: "5432"
+#             user: "dataplane"
+#             database: "trustdata"
+#             sslMode: "require"
+#             existingSecret:
+#               name: "my-external-postgres"   # must contain the password key below
+#               keys:
+#                 password: "POSTGRES_PASSWORD"
+#       # To read from an external ClickHouse instead, set a dotted host here:
+#       # clickhouse:
+#       #   host: "clickhouse.example.com"
 
 # DataAgent remains absent while enrolment is empty. Configure tenantId and
 # either the inline token or an existing Secret together.
