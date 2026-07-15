@@ -8,7 +8,7 @@ fullnameOverride: "agentgateway"
 securityHardening: true
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/agentgateway
-  tag: "v0.3.6"
+  tag: "v0.6.0"
   pullPolicy: IfNotPresent
 # Image pull secret name (string) or list. "none"/"" suppresses it.
 # Falls back to global.imagePullSecrets when empty.
@@ -28,7 +28,9 @@ config:
   mcpBaseDomain: ""
   # v2 ships without Kafka; the telemetry publisher stays off unless a broker is
   # wired. Set true only when KAFKA_BROKERS points at a real broker.
-  telemetryEnabled: false
+  # Enabled by default in v2: hybrid writes raw events to local Postgres;
+  # external exports metadata and raw events to the ClickStack collector.
+  telemetryEnabled: true
 # PostgreSQL connection (external-capable). Password lives in the secret.
 # DB_NAME is mode-derived from an EMPTY name:
 #   external → private "agentgateway" DB (control plane owns its migrations);
@@ -98,12 +100,17 @@ trustguard:
   baseURL: ""
   # DEPRECATED: client credentials are now owned centrally by the umbrella chart
   # (global.v2.trustguardClientId / trustguardClientSecret → shared
-  # v2-trustguard-client-secret Secret) so they always match TrustGuard's platform
+  # trustguard-client-credentials Secret) so they always match TrustGuard's platform
   # client. These fields are ignored; kept for backward compatibility.
   clientId: ""
   clientSecret: ""
 # Admin JWT + credential encryption key.
 serverSecretKey: "" # Auto-generated if empty
+# DEPRECATED inline input: Helm cannot cryptographically validate private keys.
+# Leave empty to auto-generate an RSA PKCS#1 key, or pre-create
+# agentgateway-secrets with create-secrets.sh. Existing valid keys are preserved
+# through lookup so MCP sessions remain valid across upgrades.
+stsSigningKey: ""
 # ---- control-plane (admin mode) — full deployments only ----
 controlPlane:
   name: agentgateway-admin

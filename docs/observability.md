@@ -1,159 +1,103 @@
 # Observability and self-healing
 
-The umbrella chart ships an opinionated, customer-portable observability
-plane:
+Platform v2 has two distinct OpenTelemetry collector roles.
 
-1. **In-chart OpenTelemetry Collector** (`templates/otel-collector/`)
-   — receives OTLP from every component, scrapes Prometheus endpoints
-   exposed in-cluster, and forwards to `collector.neuraltrust.ai`. The
-   `attributes/redact` processor strips prompt/response/header payloads
-   before any data leaves the cluster.
-2. **`neuraltrust-watchdog` subchart** — a small Go service that
-   actively probes Kafka brokers, ClickHouse disk/replication, Kafka
-   Connect, HTTP/TCP synthetics, and consumer lag. On failure it
-   dispatches a healing action (restart Deployment, restart Connect
-   task, post Slack/OTLP) — every action gated by an explicit
-   `dryRun` boolean.
-3. **Per-subchart `PrometheusRule`** — every component renders an
-   alert bundle that fires on `kube_deployment_status_replicas_available`
-   / `kube_statefulset_status_replicas_ready` / `kube_job_failed`.
-   Both gates have to be on (operator opt-in **AND** the cluster
-   ships `monitoring.coreos.com/v1` CRDs) — otherwise nothing renders
-   and `helm install` never breaks on a non-Prometheus cluster.
+## Umbrella OTel Collector
 
-## Per-subchart wiring at a glance
+The umbrella collector is controlled by `global.observability.*` and is
+available in hybrid and external modes. It receives component OTLP, scrapes
+supported Prometheus endpoints, collects Kubernetes signals, redacts sensitive
+payload attributes, and can export to hosted observability.
 
-What each platform service contributes to the observability plane:
+For local-only collection:
 
-| Service                       | Subchart                      | Prometheus `/metrics` scraped by the Collector | OTLP push (auto-wired when `global.observability.collector.endpoint` is set) | Watchdog check id        |
-|-------------------------------|-------------------------------|------------------------------------------------|------------------------------------------------------------------------------|--------------------------|
-| TrustGate (OSS + EE)          | `trustgate`                   | yes (`:9090`)                                  | yes (`OPENTELEMETRY_TRACES_ENDPOINT` / `OPENTELEMETRY_METRICS_ENDPOINT`)     | `trustgate-synthetic`    |
-| control-plane-api             | `neuraltrust-control-plane`   | no                                             | yes (`OTEL_EXPORTER_OTLP_ENDPOINT`)                                          | `control-plane-synthetic` |
-| control-plane-app (Next.js)   | `neuraltrust-control-plane`   | no                                             | yes (`OTEL_EXPORTER_OTLP_ENDPOINT`)                                          | `control-plane-synthetic` |
-| control-plane-scheduler       | `neuraltrust-control-plane`   | no                                             | no (no OTel SDK)                                                             | `control-plane-synthetic` (HTTP `/v1/health`) |
-| data-plane-api                | `neuraltrust-data-plane`      | no                                             | yes (`OTEL_EXPORTER_OTLP_ENDPOINT`)                                          | `data-plane-synthetic`   |
-| kafka-workers                 | `neuraltrust-data-plane`      | no                                             | yes (`OTEL_EXPORTER_OTLP_ENDPOINT`)                                          | `data-plane-worker-lag`  |
-| kafka-connect                 | `neuraltrust-data-plane`      | no (Strimzi JMX exporter disabled in image)    | no                                                                           | `kafka-connect`          |
-| firewall (gateway + workers)  | `neuraltrust-firewall`        | no                                             | yes (`OTEL_EXPORTER_OTLP_ENDPOINT`)                                          | `firewall-synthetic`     |
-| aispm                         | `neuraltrust-aispm`           | no                                             | yes (`OTEL_EXPORTER_ENDPOINT` — note legacy name)                            | (none — add via `httpsynthetic` if needed) |
-| watchdog                      | `neuraltrust-watchdog`        | yes (`:8080`)                                  | yes                                                                          | self-scraped              |
-| ClickHouse                    | `clickhouse`                  | yes (`:9363`)                                  | n/a (server)                                                                 | `clickhouse`             |
-| Kafka                         | `kafka`                       | varies (JMX)                                   | n/a                                                                          | `kafka-broker`           |
-
-The Collector's `prometheus` receiver only scrapes endpoints that
-actually exist — when a subchart is disabled, its pod label selector
-matches nothing and the scrape is a no-op.
-
-## Quickstart: one-flag self-monitoring
-
-```sh
-helm upgrade --install neuraltrust . \
-  -f my-values.yaml \
-  -f values-self-monitoring.yaml.example
+```yaml
+global:
+  observability:
+    enabled: true
+    hostedExport:
+      enabled: false
 ```
 
-This overlay:
+The chart does not install Prometheus or Grafana. When
+`global.monitoring.enabled: true` and the cluster exposes the matching CRDs,
+the chart renders ServiceMonitor, PodMonitor, and PrometheusRule resources.
 
-1. Sets `global.selfMonitoring.enabled: true` (informational marker).
-2. Enables the `neuraltrust-watchdog` subchart.
-3. Flips a curated check set via `neuraltrust-watchdog.enabledCheckIds`
-   — an additive overlay that toggles checks by id without replacing
-   their `target` / `thresholds` / `actions` blocks.
-4. Keeps `actions.dryRun: true` for every mutating action. Flip
-   per-check as you validate parity with your existing alerting.
+## ClickStack OTel Collector
 
-## Phased rollout
+The ClickStack collector is a Platform v2 external component, not a replacement
+for the umbrella collector. It receives product OTLP on ports 4317/4318 and
+writes traces, metrics, and logs to ClickHouse.
 
-The watchdog and the in-chart alerts are intentionally additive — deploy
-them observe-only alongside any alerting you already run, prove parity
-over an on-call rotation, then flip mutating actions live one check at a
-time. Start with `actions.dryRun: true`, no `rbac.actions.*` mutating
-verbs, and a curated `enabledCheckIds` subset; widen per environment only
-after a parity rotation proves the checks are stable.
+It never renders in hybrid mode. In external mode, DataCore reads the landed
+telemetry and AlertEngine evaluates rules over it.
 
-## How to flip a single watchdog check out of dry-run
+## AlertEngine SIEM and integrations
 
-The chart accepts a YAML LIST under `checks:` (one entry per check,
-identified by `id`). Each entry supports an optional `dryRun: false`
-override. Flip them individually so a misconfiguration doesn't trigger
-every action at once:
+AlertEngine is the supported v2 external alert and integration path. Its worker:
+
+- evaluates configured detection rules over ClickHouse telemetry
+- stores alert state in its PostgreSQL database
+- deduplicates findings
+- forwards findings to configured SIEM and integration destinations
+
+This preserves SIEM/integration capability after retirement of the legacy SIEM
+Connector subchart. Disabling hosted observability export does not disable
+AlertEngine or the ClickStack-to-ClickHouse pipeline.
+
+## Watchdog
+
+`neuraltrust-watchdog` provides direct probes and optional healing actions.
+Start with every action in dry-run:
 
 ```yaml
 neuraltrust-watchdog:
-  # Global default (panic-stop knob): when true, EVERY mutating action
-  # is logged and skipped, regardless of per-check overrides below.
+  enabled: true
   actions:
-    dryRun: false
-
-  checks:
-    - id: kafka-connect
-      kind: kafka_connect
-      enabled: true
-      dryRun: false                  # live for this check
-      target:
-        url: http://kafka-connect:8083
-      actions: [notify.otlp, notify.slack, kafka_connect.restart_task]
-
-    - id: data-plane-worker-lag
-      kind: kafka_consumer_lag
-      enabled: true
-      dryRun: true                   # still dry while we tune the threshold
-      target:
-        bootstrapServers: ["kafka:9092"]
-        group: data-plane-worker
-        k8sDeployment: data-plane-kafka-worker
-        k8sNamespace: data-plane-workers
-      thresholds:
-        maxLag: 100000
-      actions: [notify.otlp, notify.slack, k8s.restart_deployment]
+    dryRun: true
 ```
 
-Precedence: a per-check `dryRun: true` always wins, so the safest
-panic-stop is `actions.dryRun: true` at the top level. The
-`rbac.actions.restartDeployment.enabled` flag is the second independent
-gate — without it the Kubernetes API rejects mutating actions before
-the watchdog can even attempt them.
+For v2, use checks that target rendered v2 or shared resources, such as
+ClickHouse, the data-plane API shim, Firewall, pod health, deployment health,
+certificate renewal, and the umbrella collector. Kafka, Kafka Connect,
+data-plane worker lag, and legacy TrustGate checks apply only to explicit v1
+deployments.
 
-## Air-gapped customers
+Promote healing actions one check at a time after observing alert parity.
+Mutating actions require both `actions.dryRun: false` and the corresponding
+RBAC action permission.
 
-The chart never requires outbound connectivity. With
-`global.observability.hostedExport.enabled: false` (or no token), the
-in-chart Collector still runs locally and the in-chart PrometheusRule
-resources still feed the customer's own Alertmanager. The watchdog
-likewise still probes its targets and fires actions in-cluster — only
-the Slack notifier requires a webhook URL, which the customer
-controls.
+## Common overlays
 
-## How to add a new OTel-emitting component
+- `values-minimal-observability.yaml.example`: watchdog sends redacted telemetry
+  directly to hosted observability; umbrella collector stays off
+- `values-observability-self-hosted.yaml.example`: umbrella collector and
+  Prometheus Operator resources, hosted export off
+- `values-self-monitoring.yaml.example`: curated v2 check identifiers
+- `values-watchdog.yaml.example`: detailed dry-run-first v2 configuration
+- `values-watchdog-gmp.yaml.example`: Google Managed Prometheus resources
 
-1. The component image must read **`OTEL_EXPORTER_OTLP_ENDPOINT`** (and
-   ideally `OTEL_SERVICE_NAME` / `OTEL_ENVIRONMENT`). TrustGate is the
-   one exception — it reads `OPENTELEMETRY_TRACES_ENDPOINT` and
-   `OPENTELEMETRY_METRICS_ENDPOINT` directly. The chart writes only
-   those two TrustGate-specific names.
-2. In the component's subchart, create
-   `templates/<component>/otel-configmap.yaml` that mirrors
-   `charts/neuraltrust-control-plane/templates/api/otel-configmap.yaml`
-   — it should render only when the OTel endpoint helper resolves to a
-   non-empty string.
-3. Add a single line in the component Deployment's container spec:
+## Air-gapped external deployment
 
-   ```gotemplate
-   {{- include "<subchart>.envFrom" (dict "component" "<name>" "extraEnvFrom" $extra "context" .) | nindent 8 }}
-   ```
+Use v2 external, disable hosted export, and mirror all images:
 
-   This merges the OTel ConfigMap reference with any operator-supplied
-   `extraEnvFrom`. The helper emits *nothing* when no endpoint is set,
-   so customers who don't enable observability see zero diff.
-4. Add a synthetic check entry to
-   `charts/neuraltrust-watchdog/values.yaml` (start with `enabled: false`)
-   and add its id to `values-self-monitoring.yaml.example`.
+```yaml
+global:
+  platformVersion: "v2"
+  deploymentMode: "external"
+  imageRegistry: "<registry>/neuraltrust"
+  observability:
+    hostedExport:
+      enabled: false
+```
 
-## See also
+The umbrella collector remains local. ClickStack continues writing to the
+configured local or managed ClickHouse. AlertEngine continues evaluating and
+forwarding to destinations reachable from the cluster.
 
-- `charts/neuraltrust-watchdog/README.md` — check catalog and
-  configuration reference.
-- `templates/otel-collector/configmap.yaml` — pipelines and the
-  redaction processor.
-- `values-self-monitoring.yaml.example` — single-overlay opt-in for
-  the curated check set.
+## Legacy v1 appendix
+
+Legacy Kafka and TrustGate watchdog checks are valid only when
+`global.platformVersion: v1` is pinned. Kafka never renders in v2, so enabling
+those checks in a v2 deployment produces expected target failures rather than
+useful health signals.

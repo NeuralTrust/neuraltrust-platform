@@ -187,9 +187,10 @@ Usage: {{ include "control-plane.postgresql.deploy" . }}
     {{- end }}
   {{- end }}
 {{- end }}
-{{- /* Also check controlPlane.components.postgresql.installInCluster for backward compatibility */}}
-{{- if and (not $found) .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.postgresql (hasKey .Values.controlPlane.components.postgresql "installInCluster") }}
-  {{- $deploy = .Values.controlPlane.components.postgresql.installInCluster }}
+{{- /* Legacy component-level false remains authoritative even though the newer
+       infrastructure.deploy default is present in the subchart values. */}}
+{{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.postgresql (hasKey .Values.controlPlane.components.postgresql "installInCluster") (not .Values.controlPlane.components.postgresql.installInCluster) }}
+  {{- $deploy = false }}
 {{- end }}
 {{- /* Umbrella-wide override (propagated to subcharts): an explicit global.postgresql.deploy=false
        forces external Postgres regardless of the infrastructure default, so the postgres image is

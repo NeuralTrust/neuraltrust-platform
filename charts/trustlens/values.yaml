@@ -12,7 +12,7 @@ securityHardening: true
 
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustlens
-  tag: "latest"
+  tag: "" # Required when enabled; no release image is published yet
   pullPolicy: IfNotPresent
 
 imagePullSecrets: "gcr-secret"

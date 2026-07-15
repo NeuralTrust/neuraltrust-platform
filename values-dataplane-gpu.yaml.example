@@ -1,130 +1,45 @@
-# Example: NeuralTrust Platform — Data Plane + infrastructure + GPU firewall (no TrustGate)
-#
-# Use this when you want Control Plane + Data Plane + infrastructure and the NeuralTrust Firewall
-# on GPU nodes, without the TrustGate API gateway. Typical cases: internal environments,
-# constrained ingress, red-teaming style setups, or workloads that talk to the data plane directly.
-#
-# Firewall architecture: gateway (CPU) + 5 workers (GPU inference).
-# - Gateway uses `firewall-cpu`, workers use `firewall-gpu` (same tag).
-# - You must set nodeSelector and tolerations under workerDefaults to match your GPU pool.
-# - Set CUDA MPS keys under `firewall.config` for GPU; omit them for CPU-only (see VALUES_SCENARIOS.md).
-# - Default infrastructure deploys in-cluster Kafka (kafka:9092). External Kafka:
-#   see values-external-services.yaml.example (global.kafka + infrastructure.kafka.deploy: false).
-#
-# Usage:
-#   cp values-dataplane-gpu.yaml.example my-dataplane-gpu.yaml
-#   # Edit hosts, secrets, and GPU node labels/tolerations
-#   helm upgrade --install neuraltrust-platform . \
-#     --namespace neuraltrust --create-namespace -f my-dataplane-gpu.yaml
+# Platform v2 hybrid with GPU Firewall workers.
+# Layer over values-required.yaml and replace the registry and scheduling labels.
 
-# Global settings
 global:
-  platform: "kubernetes"        # "aws" | "gcp" | "azure" | "openshift" | "kubernetes"
-  domain: "yourdomain.com"      # Set to your base domain. Ingresses auto-derive as <prefix>.<domain>.
-  imageRegistry: ""             # Optional: set to your private/mirrored registry to rebrand all images.
-  preserveExistingSecrets: false
-  storageClass: ""
-  ingress:
-    tls:
-      autoGenerate: true
-      secretName: "neuraltrust-ingress-tls"
+  platformVersion: "v2"
+  deploymentMode: "hybrid"
+  platform: "kubernetes"
+  domain: "platform.example.com"
 
-# Infrastructure
 infrastructure:
-  clickhouse:
-    deploy: true
   kafka:
-    deploy: true
+    deploy: false
 
-neuraltrust-control-plane:
-  infrastructure:
-    postgresql:
-      deploy: true
-  controlPlane:
-    enabled: true
-    imagePullSecrets: "gcr-secret"
-    secrets:
-      controlPlaneJWTSecret: "your-control-plane-jwt-secret"
-      trustgateJwtSecret: "dummy-trustgate-jwt-secret"
-    # Ingress hostnames auto-derive from global.domain (api/app/scheduler).
-    components:
-      postgresql:
-        secrets:
-          password: "your-postgres-password"
-          database: "neuraltrust"
-      api:
-        enabled: true
-        ingress:
-          enabled: true
-      app:
-        enabled: true
-        ingress:
-          enabled: true
-      scheduler:
-        enabled: true
-        ingress:
-          enabled: true
+dataagent:
+  tenantId: ""
+  enrolmentToken: ""
 
-neuraltrust-data-plane:
-  dataPlane:
-    enabled: true
-    imagePullSecrets: "gcr-secret"
-    secrets:
-      dataPlaneJWTSecret: "your-data-plane-jwt-secret"
-    components:
-      clickhouse:
-        enabled: true
-        host: "clickhouse"
-      kafka:
-        enabled: true
-      # data-plane API hostname auto-derives as data-plane-api.<global.domain>.
-      api:
-        enabled: true
-        ingress:
-          enabled: true
-      worker:
-        enabled: true
-
-# GPU firewall (subchart `neuraltrust-firewall`)
-# Architecture: 1 gateway (CPU) + 5 workers (GPU inference)
 neuraltrust-firewall:
   firewall:
     enabled: true
-    imagePullSecrets: "gcr-secret"
     gateway:
-      replicas: 1
       image:
-        repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-        tag: "v2.6.0"
+        repository: "<registry>/firewall-cpu"
     workerDefaults:
       image:
-        repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-gpu
-        tag: "v2.6.0"
+        repository: "<registry>/firewall-gpu"
       resources:
         requests:
           cpu: "1"
           memory: 4Gi
           nvidia.com/gpu: "1"
         limits:
-          cpu: "1.5"
-          memory: 6Gi
+          cpu: "2"
+          memory: 8Gi
           nvidia.com/gpu: "1"
-      hostIPC: true
       nodeSelector:
-        cloud.google.com/gke-nodepool:
-          - gpu-pool
+        accelerator: "nvidia"
       tolerations:
-        - effect: NoSchedule
-          key: nvidia.com/gpu
-          operator: Equal
-          value: present
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+      hostIPC: true
     config:
       cudaMpsActiveThreadPercentage: "25"
       cudaMpsPinnedDeviceMemLimit: "6000M"
-    # Firewall images (CPU and GPU) bundle all ML models at build time, so no
-    # Hugging Face token is needed at runtime. Leave unset for official images.
-    # secrets:
-    #   huggingFaceToken: ""
-
-trustgate:
-  enabled: false

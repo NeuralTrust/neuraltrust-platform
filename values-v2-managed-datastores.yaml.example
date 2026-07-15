@@ -1,0 +1,128 @@
+# Platform v2 external with managed PostgreSQL, Redis, and ClickHouse.
+# Pre-create the service databases/roles and Kubernetes Secrets before install.
+# This file contains endpoints and secret names only; it contains no credentials.
+#
+# With preserveExistingSecrets=true, pre-create at least:
+# - control-plane-secrets: AUTH_SECRET, NEXTAUTH_SECRET,
+#   CONTROL_PLANE_JWT_SECRET, TRUSTGATE_JWT_SECRET
+# - postgresql-secrets: POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER, POSTGRES_DB,
+#   DATABASE_URL, POSTGRES_PRISMA_URL (and POSTGRES_PASSWORD in password mode)
+# - agentgateway-secrets: SERVER_SECRET_KEY, STS_SIGNING_KEY, DB_PASSWORD
+# - trustguard-secrets: ADMIN_JWT_SECRET, TRUSTGUARD_TOKEN_SIGNING_SECRET,
+#   REDIS_EVENTS_SECRET, DB_PASSWORD
+# - trustguard-client-credentials: CLIENT_ID, CLIENT_SECRET
+# - data-plane-jwt-secret: DATA_PLANE_JWT_SECRET, REDIS_URL
+# - datacore-secrets: AUTH_JWT_HS256_SECRET, CLICKHOUSE_USER
+# - alertengine-secrets: DB_PASSWORD, AUTH_JWT_SECRET, APP_ENCRYPTION_KEY
+# - clickstack-collector-secrets: CLICKHOUSE_ENDPOINT, CLICKHOUSE_USER,
+#   OTLP_AUTH_TOKEN
+# - managed-clickhouse: password (the shared ClickHouse credential referenced below)
+# Omit static DB password keys only for services whose IAM mode is supported.
+# See SECRETS.md for the complete per-component contract.
+
+global:
+  platformVersion: "v2"
+  deploymentMode: "external"
+  platform: "kubernetes"
+  domain: "platform.example.com"
+  autoGenerateSecrets: false
+  preserveExistingSecrets: true
+  postgresql:
+    deploy: false
+  observability:
+    hostedExport:
+      enabled: false
+
+infrastructure:
+  postgresql:
+    deploy: false
+    external:
+      host: "postgres.example.com"
+      port: "5432"
+  redis:
+    deploy: false
+    external:
+      host: "redis.example.com"
+      port: "6379"
+  clickhouse:
+    deploy: false
+    external:
+      host: "clickhouse.example.com"
+      port: "8443"
+      user: "neuraltrust"
+      database: "neuraltrust"
+      secretName: "managed-clickhouse"
+      secretKey: "password"
+  kafka:
+    deploy: false
+
+agentgateway:
+  database:
+    host: "postgres.example.com"
+    sslMode: "require"
+  redis:
+    host: "redis.example.com"
+    tls: "true"
+
+trustguard:
+  database:
+    host: "postgres.example.com"
+    sslMode: "require"
+  redis:
+    host: "redis.example.com"
+    tls: "true"
+
+alertengine:
+  enabled: true
+  database:
+    host: "postgres.example.com"
+    sslMode: "require"
+  clickhouse:
+    host: "clickhouse.example.com"
+    nativePort: 9440
+    secure: true
+    existingSecret:
+      name: "managed-clickhouse"
+      key: "password"
+
+datacore:
+  clickhouse:
+    host: "clickhouse.example.com"
+    nativePort: 9440
+    tls: true
+    existingSecret:
+      name: "managed-clickhouse"
+      key: "password"
+
+clickstack-otel-collector:
+  clickhouse:
+    endpoint: "https://clickhouse.example.com:8443"
+    existingSecret:
+      name: "managed-clickhouse"
+      key: "password"
+
+neuraltrust-data-plane:
+  dataPlane:
+    components:
+      clickhouse:
+        host: "clickhouse.example.com"
+        port: "8443"
+        existingSecret:
+          name: "managed-clickhouse"
+          key: "password"
+      api:
+        redis:
+          host: "redis.example.com"
+          tls: "true"
+
+neuraltrust-control-plane:
+  infrastructure:
+    postgresql:
+      deploy: false
+  controlPlane:
+    components:
+      postgresql:
+        secrets:
+          host: "postgres.example.com"
+          port: "5432"
+

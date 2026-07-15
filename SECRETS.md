@@ -83,6 +83,7 @@ All required secrets must exist in the namespace before deployment.
 | Kubernetes Secret | Key | Required | Description |
 |---|---|---|---|
 | `data-plane-jwt-secret` | `DATA_PLANE_JWT_SECRET` | Auto-generated | JWT for Data Plane API auth |
+| `data-plane-jwt-secret` | `REDIS_URL` | Auto-generated (v2 only) | Evaluation-progress cache. v1 uses Kafka instead (no key). v2 defaults to the in-cluster shared Redis; regenerated from `neuraltrust-data-plane.dataPlane.components.api.redis.*` on every render, so pre-provisioned/`preserveExistingSecrets` setups must set this key themselves when pointing at external/ACL/IAM Redis. |
 | `openai-secrets` | `OPENAI_API_KEY` | No | OpenAI API key |
 | `google-secrets` | `GOOGLE_API_KEY` | No | Google API key |
 | `resend-secrets` | `RESEND_API_KEY` | No | Resend email API key |
@@ -111,7 +112,7 @@ All required secrets must exist in the namespace before deployment.
 | `postgresql-secrets` | `POSTGRES_USER` | Yes (if pre-generating) | Database username |
 | `postgresql-secrets` | `POSTGRES_PASSWORD` | Auto-generated (password mode) | Database password. Empty when `controlPlane.components.postgresql.authMode: iam`. |
 | `postgresql-secrets` | `POSTGRES_DB` | Yes (if pre-generating) | Database name |
-| `postgresql-secrets` | `DATABASE_AUTH_MODE` | No | `password` (default) or `iam`. IAM is only honored for external Postgres (`infrastructure.postgresql.deploy: false`). |
+| `postgresql-secrets` | `DATABASE_AUTH_MODE` | No | `password` (default) or `iam`. IAM is only honored for external Postgres (`global.postgresql.deploy: false`). |
 | `postgresql-secrets` | `DATABASE_IAM_AUTH` | No | `"true"`/`"false"` mirror of the auth mode, read by api/app/scheduler. |
 | `postgresql-secrets` | `DATABASE_URL` | Yes (if pre-generating) | Connection URL (URL-encoded). Password-less when `authMode: iam`. |
 | `postgresql-secrets` | `POSTGRES_PRISMA_URL` | Yes (if pre-generating) | Prisma-compatible URL. Password-less when `authMode: iam`. |
@@ -211,27 +212,6 @@ Created when `neuraltrust-firewall.firewall.enabled: true`:
 
 Align `controlPlane.secrets.firewallJwtSecret` (`FIREWALL_JWT_SECRET`) with `firewall-secrets` `JWT_SECRET` when the Control Plane validates firewall tokens.
 
-### AISPM
-
-Created when `neuraltrust-aispm.aispm.enabled: true`:
-
-| Kubernetes Secret | Key | Required | Description |
-|---|---|---|---|
-| `aispm-secrets` | `AUTH_ENCRYPTION_KEY` | Auto-generated | Fernet key (44-char urlsafe base64) |
-| `aispm-secrets` | `DATABASE_PASSWORD` | Auto-generated (password mode) | Postgres password. Empty when `aispm.database.authMode: iam`. |
-| `aispm-secrets` | `redis-password` | No | External Redis password. Sourced from `aispm.redis.password`. Emitted only when set. |
-| `aispm-secrets` | `OPENAI_API_KEY` … | No | Optional pass-through keys (GitHub App, Azure, Resend, admin). |
-
-> **IAM auth for AISPM (chart plumbing).** `aispm.database.authMode: iam` makes
-> the chart skip the `DATABASE_PASSWORD` requirement and the `aispm-postgresql-init`
-> Job, and emit `DATABASE_AUTH_MODE`/`DATABASE_IAM_AUTH` env so the app can mint
-> RDS tokens (external RDS only; pre-create the aispm user/db with `GRANT rds_iam`).
-> For Redis, `aispm.redis.authMode: iam` emits `REDIS_AUTH_MODE`/`REDIS_IAM_AUTH`;
-> `aispm.redis.password`/`username`/`tls` wire `REDIS_PASSWORD` (via `redis-password`),
-> `REDIS_USERNAME`, and `REDIS_TLS`. Each Redis env renders only when set, so the
-> default in-cluster TrustGate Redis (no auth) is unchanged. Both need an
-> IAM-capable AISPM image + `global.irsa`; leave `password` (default) until then.
-
 ### Docker registry
 
 | Kubernetes Secret | Type | Required | Description |
@@ -303,6 +283,7 @@ All secrets can be provided via environment variables:
 ```bash
 # Data Plane
 export DATA_PLANE_JWT_SECRET="your-secret"
+export DATA_PLANE_REDIS_URL="redis://user:pass@host:6379/0"  # optional; platform-v2 only, requires global.preserveExistingSecrets=true
 export OPENAI_API_KEY="sk-..."
 export GOOGLE_API_KEY="your-key"
 export RESEND_API_KEY="your-key"
@@ -348,23 +329,32 @@ source); the `envFrom` mounts map secret keys directly to env vars.
 | Secret | Kubernetes Secret | Key | Notes |
 |---|---|---|---|
 | AgentGateway server key | `agentgateway-secrets` | `SERVER_SECRET_KEY` | auto-generated |
+| AgentGateway MCP STS signing | `agentgateway-secrets` | `STS_SIGNING_KEY` | auto-generated RSA PKCS#1 private key (RS256), lookup-preserved so MCP tokens survive upgrades; use `create-secrets.sh` to validate and pre-provision an explicit PEM/base64-PEM key |
 | AgentGateway DB password | `agentgateway-secrets` | `DB_PASSWORD` | auto-generated (app reads `DB_PASSWORD`, not `DATABASE_PASSWORD`); **omitted when `agentgateway.database.iamAuth=true`** |
 | AgentGateway raw-telemetry DSN | `agentgateway-secrets` | `SENSIBLE_PG_DSN` | **hybrid only** — assembled DSN into the shared `trustdata` DB (own `agentgateway` schema); consumed by the postgres raw exporter so DataAgent has data. Omitted in external / when `iamAuth=true` |
 | TrustGuard admin JWT | `trustguard-secrets` | `ADMIN_JWT_SECRET` | auto-generated |
 | TrustGuard token signing | `trustguard-secrets` | `TRUSTGUARD_TOKEN_SIGNING_SECRET` | auto-generated |
+| TrustGuard Redis events | `trustguard-secrets` | `REDIS_EVENTS_SECRET` | auto-generated; authenticates cache pub/sub events |
 | TrustGuard DB password | `trustguard-secrets` | `DB_PASSWORD` | auto-generated; **omitted when `trustguard.database.iamAuth=true`** |
 | TrustGuard raw-telemetry DSN | `trustguard-secrets` | `SENSIBLE_PG_DSN` | **hybrid only** — assembled DSN into the shared `trustdata` DB (own `trustguard` schema); consumed by the postgres raw exporter so DataAgent has data. Omitted in external / when `iamAuth=true` |
-| Shared TrustGuard client creds | `v2-trustguard-client-secret` | `CLIENT_ID` / `CLIENT_SECRET` | id defaults to `agentgateway-platform`; secret auto-generated (or `global.v2.trustguardClientSecret`). Injected into both AgentGateway (`TRUSTGUARD_CLIENT_ID`/`_SECRET`) and TrustGuard (`TRUSTGUARD_PLATFORM_CLIENT_ID`/`_SECRET`) so the pair matches. |
+| Shared TrustGuard client creds | `trustguard-client-credentials` | `CLIENT_ID` / `CLIENT_SECRET` | id defaults to `agentgateway-platform`; secret auto-generated (or `global.v2.trustguardClientSecret`). Injected into both AgentGateway (`TRUSTGUARD_CLIENT_ID`/`_SECRET`) and TrustGuard (`TRUSTGUARD_PLATFORM_CLIENT_ID`/`_SECRET`) so the pair matches. The prerelease `v2-trustguard-client-secret` values are copied during upgrade. |
 | TrustLens JWT | `trustlens-secrets` | `JWT_SECRET` | auto-generated (only when `trustlens.enabled=true`) |
 | TrustLens encryption keyset | `trustlens-secrets` | `ENCRYPTION_KEYSET` | auto-generated |
 | TrustLens DB password | `trustlens-secrets` | `DATABASE_PASSWORD` | auto-generated |
 | DataAgent DB password | `dataagent-secrets` | `DB_PASSWORD` | auto-generated (read-only `dataagent` role in `trustdata`; search_path spans both writer schemas) |
 | DataAgent DB DSN | `dataagent-secrets` | `DATABASE_URL` | assembled from the `database` components (or `databaseUrl` override) |
-| DataAgent enrolment token | `dataagent-secrets` | `ENROLMENT_TOKEN` | **never** auto-generated — SaaS-issued, from values |
+| DataAgent enrolment token | `dataagent-secrets` or operator Secret | `ENROLMENT_TOKEN` (configurable key) | **never** auto-generated — SaaS-issued, from `enrolmentToken` or `enrolmentTokenExistingSecret` |
 | AlertEngine DB password | `alertengine-secrets` | `DB_PASSWORD` | auto-generated (own `alertengine` DB; external only); **omitted when `alertengine.database.iamAuth=true`** |
 | AlertEngine auth JWT | `alertengine-secrets` | `AUTH_JWT_SECRET` | auto-generated — must match the app BFF token signer for UI auth |
 | AlertEngine encryption key | `alertengine-secrets` | `APP_ENCRYPTION_KEY` | auto-generated (AES-256-GCM for integration secrets) |
 | DataCore / AlertEngine / clickstack / data-plane-api ClickHouse password | `clickhouse` | `admin-password` | **shared** — all read `CLICKHOUSE_PASSWORD` from the in-cluster `clickhouse` secret via `clickhouse.existingSecret` (`dataPlane.components.clickhouse.existingSecret` for the shim; no per-service key). External ClickHouse: point `existingSecret.name`/`key` at your secret. |
+| Control-plane app auth | `control-plane-secrets` | `AUTH_SECRET` / `NEXTAUTH_SECRET` | one generated or reused value exposed under both aliases |
+
+AlertEngine and TrustLens URLs are non-secret values wired directly into the
+control-plane app Deployment, alongside the other backend service URLs. A live
+v1-to-v2 migration must keep `global.confirmV2Migration: true` for its first v2
+reconciliation so missing v2 Secrets/keys can be created; later upgrades reuse
+them with `lookup`.
 
 - **Postgres (`v2-postgres-init`)**: `control-plane-postgresql` deploys by default
   in all v2 modes; the Job's provisioning is **mode-derived**:
@@ -396,13 +386,19 @@ source); the `envFrom` mounts map secret keys directly to env vars.
   name expands to `<name>.<namespace>.svc.cluster.local`).
 - **Optional IAM DB/Redis auth (AWS)**: the v2 Go services accept
   `database.iamAuth` / `redis.iamAuth` (default false). When on they emit
-  `DB_IAM_AUTH`/`DB_AUTH_MODE`/`REDIS_IAM_AUTH` and ship no static password (chart
-  scaffolding; service-side token minting pending). RDS IAM is live for the Python
-  control-plane (`controlPlane.components.postgresql.authMode: iam`). See
-  `my-values-aws-v2-iam.yaml`.
+  `DB_IAM_AUTH`/`DB_AUTH_MODE`/`REDIS_IAM_AUTH` and ship no static password.
+  AgentGateway and TrustGuard mint RDS tokens at connect time; Redis IAM and
+  AlertEngine database IAM remain chart-prepared and require an IAM-capable
+  service image. RDS IAM is also live for the Python control-plane
+  (`controlPlane.components.postgresql.authMode: iam`). Use
+  `values-v2-managed-datastores.yaml.example` as the tracked starting point.
 - **DataAgent** requires operator-supplied `enrolmentToken` (SaaS-issued, never
   generated). Its `DATABASE_URL` and `DB_PASSWORD` auto-derive for in-cluster
   Postgres; overlay `dataagent.database.host` + `database.password` for external.
+  Prefer `dataagent.enrolmentTokenExistingSecret` so the token never enters Helm
+  values or release history. When chart secret generation is disabled, also set
+  `dataagent.existingSecret.name` to a Secret containing `DATABASE_URL` and
+  `DB_PASSWORD`.
 
 ## Using external secret management
 

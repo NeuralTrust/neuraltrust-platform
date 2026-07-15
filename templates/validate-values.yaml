@@ -1,0 +1,99 @@
+{{- /*
+Fail early for unsupported topology values and retired components. This template
+intentionally emits no Kubernetes resource when validation succeeds.
+*/ -}}
+{{- $global := default dict .Values.global -}}
+{{- $version := $global.platformVersion | default "v2" -}}
+{{- if not (has $version (list "v1" "v2")) -}}
+  {{- fail (printf "global.platformVersion must be one of: v1, v2 (got %q)" $version) -}}
+{{- end -}}
+{{- $mode := $global.deploymentMode | default "hybrid" -}}
+{{- if and (eq $version "v2") (not (has $mode (list "hybrid" "external" "full"))) -}}
+  {{- fail (printf "global.deploymentMode must be one of: hybrid, external, full (got %q)" $mode) -}}
+{{- end -}}
+{{- $trustlens := default dict .Values.trustlens -}}
+{{- $trustlensImage := default dict $trustlens.image -}}
+{{- if and (eq $version "v2") ($trustlens.enabled | default false) (not ($trustlensImage.tag | default "")) -}}
+  {{- fail "trustlens.image.tag is required when trustlens.enabled=true; no default TrustLens release image is published yet." -}}
+{{- end -}}
+{{- if and .Release.IsUpgrade (eq $version "v2") (not ($global.confirmV2Migration | default false)) -}}
+  {{- $legacyTrustgate := lookup "apps/v1" "Deployment" .Release.Namespace "trustgate-control-plane" -}}
+  {{- $legacyKafka := lookup "apps/v1" "StatefulSet" .Release.Namespace "kafka" -}}
+  {{- $legacyWorker := lookup "apps/v1" "Deployment" .Release.Namespace "data-plane-worker" -}}
+  {{- $existingControlPlane := lookup "apps/v1" "Deployment" .Release.Namespace "control-plane-api" -}}
+  {{- $existingDataPlane := lookup "apps/v1" "Deployment" .Release.Namespace "data-plane-api" -}}
+  {{- $v2AgentGateway := lookup "apps/v1" "Deployment" .Release.Namespace "agentgateway-proxy" -}}
+  {{- $v2TrustGuard := lookup "apps/v1" "Deployment" .Release.Namespace "trustguard-data-plane" -}}
+  {{- $legacyApiOnly := and (or $existingControlPlane $existingDataPlane) (not (or $v2AgentGateway $v2TrustGuard)) -}}
+  {{- if or $legacyTrustgate $legacyKafka $legacyWorker $legacyApiOnly -}}
+    {{- fail "Existing v1 workloads were detected. Set global.platformVersion=v1 to keep the legacy stack, or set global.confirmV2Migration=true after completing the chart 2.0 migration checklist." -}}
+  {{- end -}}
+{{- end -}}
+{{- $rootInfrastructure := default dict .Values.infrastructure -}}
+{{- $rootPostgresql := default dict $rootInfrastructure.postgresql -}}
+{{- $globalPostgresql := default dict $global.postgresql -}}
+{{- $globalPostgresqlDeploy := true -}}
+{{- if hasKey $globalPostgresql "deploy" -}}{{- $globalPostgresqlDeploy = $globalPostgresql.deploy -}}{{- end -}}
+{{- if and (hasKey $rootPostgresql "deploy") (not $rootPostgresql.deploy) $globalPostgresqlDeploy -}}
+  {{- fail "infrastructure.postgresql.deploy is a deprecated parent-only alias. Set global.postgresql.deploy=false so the value reaches every subchart." -}}
+{{- end -}}
+{{- $dataagent := default dict .Values.dataagent -}}
+{{- $existingTokenRef := default dict $dataagent.enrolmentTokenExistingSecret -}}
+{{- $existingDataRef := default dict $dataagent.existingSecret -}}
+{{- $managedDataagentSecret := lookup "v1" "Secret" .Release.Namespace "dataagent-secrets" -}}
+{{- $managedDataagentData := dict -}}
+{{- if and $managedDataagentSecret (kindIs "map" $managedDataagentSecret) $managedDataagentSecret.data -}}
+  {{- $managedDataagentData = $managedDataagentSecret.data -}}
+{{- end -}}
+{{- $hasManagedToken := and (hasKey $managedDataagentData "ENROLMENT_TOKEN") (ne (index $managedDataagentData "ENROLMENT_TOKEN") "") -}}
+{{- $hasManagedDatabase := and (hasKey $managedDataagentData "DATABASE_URL") (ne (index $managedDataagentData "DATABASE_URL") "") -}}
+{{- $autoGenerate := true -}}
+{{- if hasKey $global "autoGenerateSecrets" -}}{{- $autoGenerate = $global.autoGenerateSecrets -}}{{- end -}}
+{{- $preserveExisting := false -}}
+{{- if hasKey $global "preserveExistingSecrets" -}}{{- $preserveExisting = $global.preserveExistingSecrets -}}{{- end -}}
+{{- if and
+  (eq $version "v2")
+  (eq $mode "hybrid")
+  $dataagent.tenantId
+  $dataagent.enrolmentToken
+  (not ($existingTokenRef.name | default ""))
+  (not $hasManagedToken)
+  (or (not $autoGenerate) $preserveExisting ($existingDataRef.name | default ""))
+-}}
+  {{- fail "dataagent.enrolmentToken cannot be materialized with externally managed database secrets. Set dataagent.enrolmentTokenExistingSecret.name/key." -}}
+{{- end -}}
+{{- $dataagentTokenConfigured := or $dataagent.enrolmentToken ($existingTokenRef.name | default "") $hasManagedToken -}}
+{{- if and
+  (eq $version "v2")
+  (eq $mode "hybrid")
+  $dataagent.tenantId
+  $dataagentTokenConfigured
+  (or (not $autoGenerate) $preserveExisting)
+  (not ($existingDataRef.name | default ""))
+  (not $hasManagedDatabase)
+-}}
+  {{- fail "DataAgent requires dataagent.existingSecret.name containing DATABASE_URL and DB_PASSWORD when chart secret generation is disabled." -}}
+{{- end -}}
+{{- if and (eq $version "v2") (has $mode (list "external" "full")) $preserveExisting -}}
+  {{- $existingControlPlane := lookup "v1" "Secret" .Release.Namespace "control-plane-secrets" -}}
+  {{- if and $existingControlPlane (kindIs "map" $existingControlPlane) $existingControlPlane.data -}}
+    {{- if or (not (hasKey $existingControlPlane.data "AUTH_SECRET")) (not (hasKey $existingControlPlane.data "NEXTAUTH_SECRET")) -}}
+      {{- fail "preserveExistingSecrets=true requires control-plane-secrets to contain both AUTH_SECRET and NEXTAUTH_SECRET before a v2 external upgrade." -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+
+{{- $clickstack := default dict $global.clickstack -}}
+{{- if and (eq $version "v2") (eq $mode "hybrid") ($clickstack.enabled | default false) (not ($clickstack.endpoint | default "")) -}}
+  {{- fail "global.clickstack.enabled=true requires global.clickstack.endpoint (the collector's OTLP/HTTP URL, e.g. https://clickstack-collector.<domain>/v1/logs)." -}}
+{{- end -}}
+{{- $aispm := default dict (index .Values "neuraltrust-aispm") -}}
+{{- $aispmConfig := default dict $aispm.aispm -}}
+{{- if $aispmConfig.enabled -}}
+  {{- fail "neuraltrust-aispm was removed in chart 2.0. Remove neuraltrust-aispm.aispm.enabled and its values before upgrading." -}}
+{{- end -}}
+{{- $siem := default dict (index .Values "neuraltrust-siem-connectors") -}}
+{{- $siemConfig := default dict $siem.siemConnectors -}}
+{{- if $siemConfig.enabled -}}
+  {{- fail "neuraltrust-siem-connectors was removed in chart 2.0. Remove neuraltrust-siem-connectors.siemConnectors.enabled and its values before upgrading. AlertEngine SIEM forwarding remains supported." -}}
+{{- end -}}

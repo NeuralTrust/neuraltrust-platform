@@ -34,8 +34,8 @@ Fully-qualified Redis image (repository:tag) with sane mirror defaults.
 {{- define "neuraltrust-platform.v2Redis.image" -}}
 {{- $img := default dict (default dict (default dict .Values.infrastructure).redis).image -}}
 {{- $repo := default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/redis-stack-server" $img.repository -}}
-{{- $tag := default "7.4.0-v0" $img.tag -}}
-{{- printf "%s:%s" $repo $tag -}}
+{{- $tag := $img.tag | default "7.2.0-v20" -}}
+{{- include "neuraltrust-platform.image" (dict "repository" $repo "tag" $tag "global" (default dict .Values.global)) -}}
 {{- end -}}
 
 {{/*

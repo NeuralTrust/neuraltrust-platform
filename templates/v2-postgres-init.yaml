@@ -18,6 +18,9 @@ in place. A service is skipped when its password env resolves empty.
 {{- if and $cp $cp.infrastructure $cp.infrastructure.postgresql (hasKey $cp.infrastructure.postgresql "deploy") }}
   {{- $pgDeploy = $cp.infrastructure.postgresql.deploy }}
 {{- end }}
+{{- if and $cp $cp.controlPlane $cp.controlPlane.components $cp.controlPlane.components.postgresql (hasKey $cp.controlPlane.components.postgresql "installInCluster") (not $cp.controlPlane.components.postgresql.installInCluster) }}
+  {{- $pgDeploy = false }}
+{{- end }}
 {{- if and .Values.global .Values.global.postgresql (hasKey .Values.global.postgresql "deploy") (not .Values.global.postgresql.deploy) }}
   {{- $pgDeploy = false }}
 {{- end }}
@@ -47,6 +50,8 @@ in place. A service is skipped when its password env resolves empty.
 {{- $da := default dict (index .Values "dataagent") }}
 {{- $daDb := default dict $da.database }}
 {{- $daUser := $daDb.user | default "dataagent" }}
+{{- $daExistingSecret := default dict $da.existingSecret }}
+{{- $daSecretName := $daExistingSecret.name | default "dataagent-secrets" }}
 {{- $tl := default dict (index .Values "trustlens") }}
 {{- $tlEnabled := and (hasKey $tl "enabled") $tl.enabled }}
 {{- $tlDb := default dict $tl.database }}
@@ -109,7 +114,7 @@ spec:
       {{- include "neuraltrust-platform.tolerations" (dict "ctx" .) | nindent 6 }}
       containers:
         - name: postgresql-init
-          image: {{ printf "%s:%s" $pgImageRepo $pgImageTag | quote }}
+          image: {{ include "neuraltrust-platform.image" (dict "repository" $pgImageRepo "tag" $pgImageTag "global" (default dict .Values.global)) | quote }}
           command:
             - /bin/sh
             - -c
@@ -302,7 +307,7 @@ spec:
             - name: DATAAGENT_DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: dataagent-secrets
+                  name: {{ $daSecretName }}
                   key: DB_PASSWORD
                   optional: true
             {{- if $tlEnabled }}

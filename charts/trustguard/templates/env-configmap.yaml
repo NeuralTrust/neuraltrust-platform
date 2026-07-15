@@ -43,9 +43,13 @@ data:
   # IAM (RDS) DB auth: no static DB_PASSWORD is shipped; the service mints a token.
   DB_IAM_AUTH: "true"
   DB_AUTH_MODE: "iam"
+  POSTGRES_LOGIN: "aws"
   {{- end }}
   REDIS_HOST: {{ .Values.redis.host | quote }}
   REDIS_PORT: {{ .Values.redis.port | quote }}
+  {{- $cachePubSub := true }}
+  {{- if hasKey .Values.redis "enableCachePubSub" }}{{- $cachePubSub = .Values.redis.enableCachePubSub }}{{- end }}
+  ENABLE_CACHE_PUBSUB: {{ $cachePubSub | quote }}
   {{- if and .Values.redis.username (ne (.Values.redis.username | toString) "") }}
   REDIS_USERNAME: {{ .Values.redis.username | quote }}
   {{- end }}
@@ -58,13 +62,33 @@ data:
   REDIS_IAM_AUTH: "true"
   {{- end }}
   # TRUSTGUARD_PLATFORM_CLIENT_ID/_SECRET are wired from the shared
-  # v2-trustguard-client-secret Secret in the Deployment env (kept consistent
+  # trustguard-client-credentials Secret in the Deployment env (kept consistent
   # with AgentGateway's TRUSTGUARD_CLIENT_ID/_SECRET).
   TRUSTGUARD_BASE_URL: {{ $tgAud | quote }}
-  {{- if eq (include "neuraltrust-platform.isHybrid" .) "true" }}
-  # Hybrid: load the raw-telemetry exporters file (trustguard-telemetry ConfigMap),
-  # which persists request/response payloads into SENSIBLE_PG_DSN for DataAgent. The
-  # default metrics exporter is on by default (METRICS_DEFAULT_EXPORTER_ENABLED=true).
+  OPENTELEMETRY_SERVICE_NAME: "trustguard"
   TELEMETRY_EXPORTERS_FILE: "/etc/telemetry/telemetry.yaml"
+  {{- if eq (include "neuraltrust-platform.isExternal" .) "true" }}
+  # External mode exports business telemetry and runtime traces/metrics to the
+  # in-cluster ClickStack collector.
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ printf "http://clickstack-collector.%s.svc.cluster.local:4318/v1/logs" .Release.Namespace | quote }}
+  OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
+  OTEL_EXPORTER_OTLP_INSECURE: "true"
+  OPENTELEMETRY_ENABLED: "true"
+  OPENTELEMETRY_INSECURE: "true"
+  OPENTELEMETRY_TRACES_ENDPOINT: {{ printf "clickstack-collector.%s.svc.cluster.local:4318" .Release.Namespace | quote }}
+  OPENTELEMETRY_METRICS_ENDPOINT: {{ printf "clickstack-collector.%s.svc.cluster.local:4318" .Release.Namespace | quote }}
+  {{- else if eq (include "neuraltrust-platform.clickstackHybridEnabled" .) "true" }}
+  # Hybrid opt-in (global.clickstack.enabled): dual-write product data to a
+  # ClickStack collector in addition to the Postgres raw path used by DataAgent.
+  # The bearer token comes from the trustguard-secrets Secret.
+  {{- include "neuraltrust-platform.clickstack.otlpEnv" . | nindent 2 }}
+  {{- else }}
+  {{- $obs := default dict .Values.global.observability }}
+  {{- $collector := default dict $obs.collector }}
+  {{- if $collector.endpoint }}
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ $collector.endpoint | quote }}
+  {{- else if $obs.enabled }}
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ printf "http://otel-collector.%s.svc.cluster.local:4318" .Release.Namespace | quote }}
+  {{- end }}
   {{- end }}
 {{- end }}

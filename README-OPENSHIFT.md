@@ -1,315 +1,100 @@
 # OpenShift Deployment Guide
 
-Step-by-step guide for deploying the NeuralTrust Platform on OpenShift 4.10+.
-
-> **Prefer installing from a [release](https://github.com/NeuralTrust/neuraltrust-platform/releases)** (OCI or tarball) rather than cloning `main`. The examples below use `.` for a local chart — replace with the OCI URL or `.tgz` path when using a release.
+The default OpenShift path is Platform v2 hybrid with native Routes.
 
 ## Prerequisites
 
-- OpenShift 4.10+ cluster
-- Helm 3.2.0+
-- `oc` CLI configured to access your cluster
-- Image pull secret for NeuralTrust container images (see [Image pull secret](#image-pull-secret))
-- *(Optional)* Ingress controller — only needed if you prefer Ingress over Routes
-- *(Optional)* cert-manager — only needed for automatic TLS certificate management
+- OpenShift 4.10+
+- Helm 3.2+
+- `oc` access to the target project
+- the NeuralTrust registry pull secret in the release namespace
+- a wildcard domain such as `apps.example.com`
 
-## Quick start
+## Hybrid quick start
 
 ```bash
-# 1. Create namespace
 oc new-project neuraltrust
 
-# 2. Create image pull secret (JSON key provided by NeuralTrust)
-oc create secret docker-registry gcr-secret \
-  --docker-server=europe-west1-docker.pkg.dev \
-  --docker-username=_json_key \
-  --docker-password="$(cat path/to/gcr-keys.json)" \
-  --docker-email=admin@neuraltrust.ai \
-  -n neuraltrust
-
-# 3. Deploy (secrets auto-generated)
 helm upgrade --install neuraltrust-platform \
   oci://europe-west1-docker.pkg.dev/neuraltrust-app-prod/helm-charts/neuraltrust-platform \
   --version <VERSION> \
   --namespace neuraltrust \
+  -f values-openshift.yaml \
+  --set global.domain=apps.example.com
+```
+
+`values-openshift.yaml` explicitly selects:
+
+```yaml
+global:
+  platformVersion: "v2"
+  deploymentMode: "hybrid"
+  platform: "openshift"
+```
+
+DataAgent stays disabled until the deployment is enrolled. Add the tenant and
+enrolment token only after they are issued.
+
+## Routes and Ingress
+
+With `global.platform: openshift`, native Routes are the default. Use
+`values-openshift-ingress.yaml.example` when the cluster standardizes on
+Kubernetes Ingress.
+
+Both paths use `global.domain`. Route names remain stable; Ingress hostnames are
+derived from each v2 service's `hostPrefix`.
+
+## Self-hosted external mode
+
+Layer the external topology over the OpenShift values:
+
+```bash
+helm upgrade --install neuraltrust-platform <chart> \
+  --namespace neuraltrust \
+  -f values-openshift.yaml \
+  -f values-v2-external.yaml.example \
   --set global.platform=openshift \
-  --set global.domain="apps.mycluster.example.com"
+  --set global.domain=apps.example.com
 ```
 
-Replace `<VERSION>` with a [release version](https://github.com/NeuralTrust/neuraltrust-platform/releases). All secrets are auto-generated on first install.
+External mode runs the product API/app, v2 control and data planes, DataCore,
+AlertEngine, and the ClickStack OTel Collector in the cluster. DataAgent is
+absent. Disable hosted export for a no-egress deployment.
 
-## OpenShift configuration
+## Security Context Constraints
 
-### Platform and domain
+The chart adapts pod security settings when `global.platform: openshift`.
+Grant additional SCC permissions only when required by cluster policy. GPU
+Firewall workers may require a dedicated SCC because they use `hostIPC` and GPU
+device resources.
+
+## Storage and images
 
 ```yaml
 global:
-  platform: "openshift"
-  domain: "apps.mycluster.example.com"  # your OpenShift wildcard domain
+  storageClass: "<storage-class>"
+  imageRegistry: "<registry>/neuraltrust"
 ```
 
-> **Note:** The deprecated `global.openshift: true` and `global.openshiftDomain` fields still work but `global.platform` and `global.domain` are preferred.
+The default image pull secret is `gcr-secret`. Mirror every required image for
+disconnected clusters, including the external-mode ClickStack image.
 
-### Routes vs Ingress
-
-By default, when `global.platform: "openshift"`, the chart creates **OpenShift Routes** for external access.
-
-To use **Kubernetes Ingress** instead, enable ingress on each component:
-
-```yaml
-global:
-  platform: "openshift"
-  domain: "apps.mycluster.example.com"
-  ingress:
-    provider: "openshift"  # or your custom ingress controller
-
-trustgate:
-  ingress:
-    enabled: true
-
-neuraltrust-control-plane:
-  controlPlane:
-    components:
-      api:
-        ingress:
-          enabled: true
-      app:
-        ingress:
-          enabled: true
-```
-
-When Ingress is enabled for a component, Routes are automatically disabled for that component.
-
-### Hostname derivation
-
-Routes and Ingresses derive hostnames differently:
-
-| Resource | Hostname pattern | Example |
-|---|---|---|
-| **Route** (default on OpenShift) | `<service-name>.<global.domain>` | `control-plane-api.apps.mycluster.example.com` |
-| **Ingress** (when `ingress.enabled: true`) | `<hostPrefix>.<global.domain>` | `api.apps.mycluster.example.com` |
-
-Both use `global.domain`. The Ingress prefixes are short (`admin`, `gateway`, `api`, `app`, `scheduler`, `data-plane-api`, etc.) and configurable per service via `hostPrefix` or fully overridable via `host`. Route prefixes are fixed and match the service name. See the [main README](./README.md#ingress-hostnames) for the full Ingress prefix table.
-
-### Private / mirrored image registry
-
-For air-gapped or proxied OpenShift clusters, mirror the NeuralTrust images to your registry and set:
-
-```yaml
-global:
-  imageRegistry: "my-registry.corp/neuraltrust"
-```
-
-This applies to every subchart automatically. See [DEPLOYMENT.md](./DEPLOYMENT.md#private--mirrored-image-registry) for the full guide and customization options.
-
-### Security Context Constraints (SCC)
-
-The chart automatically adapts security contexts for OpenShift when `global.platform: "openshift"`. If pods fail due to SCC restrictions:
+## Validation
 
 ```bash
-# Grant appropriate SCC (adjust as needed for your policy)
-oc adm policy add-scc-to-user anyuid -z default -n neuraltrust
-```
-
-### Storage classes
-
-Configure the storage class to match your OpenShift environment:
-
-```yaml
-global:
-  storageClass: "gp3-csi"  # or your storage class
-```
-
-## Image pull secret
-
-NeuralTrust and TrustGate images are hosted in a private registry. You will receive a GCR JSON key file from NeuralTrust.
-
-```bash
-# Using the provided script
-./create-image-pull-secret.sh --namespace neuraltrust
-
-# Or manually
-oc create secret docker-registry gcr-secret \
-  --docker-server=europe-west1-docker.pkg.dev \
-  --docker-username=_json_key \
-  --docker-password="$(cat path/to/gcr-keys.json)" \
-  --docker-email=admin@neuraltrust.ai \
-  -n neuraltrust
-```
-
-To use a custom secret name, override `imagePullSecrets` on each subchart:
-
-```yaml
-neuraltrust-data-plane:
-  imagePullSecrets: "my-secret"
-
-neuraltrust-control-plane:
-  imagePullSecrets: "my-secret"
-
-trustgate:
-  imagePullSecrets: "my-secret"
-```
-
-## Secrets
-
-All platform secrets are **auto-generated by default**. You only need to create the image pull secret above.
-
-| Secret | Kubernetes Secret | Auto-generated |
-|---|---|:---:|
-| TrustGate server key | `trustgate-secrets` | Yes |
-| TrustGate DB password | `trustgate-secrets` | Yes |
-| Control Plane JWT | `control-plane-secrets` | Yes |
-| TrustGate JWT (synced) | `control-plane-secrets` | Yes |
-| Data Plane JWT | `data-plane-jwt-secret` | Yes |
-| PostgreSQL password | `postgresql-secrets` | Yes |
-
-For environments that require pre-created secrets, set `global.preserveExistingSecrets: true` and create all secrets before deploying. See [SECRETS.md](./SECRETS.md) for the full list.
-
-## External infrastructure
-
-By default the chart deploys ClickHouse, Kafka, and PostgreSQL in-cluster. To use pre-installed services, set each `infrastructure.*.deploy: false` and wire connection details in the matching values path:
-
-| Component | Skip in-cluster | Connection values |
-|---|---|---|
-| ClickHouse | `infrastructure.clickhouse.deploy: false` | `infrastructure.clickhouse.external.*` |
-| Kafka | `infrastructure.kafka.deploy: false` | **`global.kafka.*`** (bootstrap, auth, tls) |
-| PostgreSQL | `global.postgresql.deploy: false` | `neuraltrust-control-plane.controlPlane.components.postgresql.secrets.*` |
-
-Example overlay: [`values-external-services.yaml.example`](./values-external-services.yaml.example). **`global.customCaCert`** (corporate HTTP proxy CA) does not enable Kafka TLS — in-cluster Kafka stays PLAINTEXT unless `global.kafka.tls.enabled: true`.
-
-## Firewall deployment (CPU and GPU)
-
-The firewall subchart deploys a **gateway** (CPU router) plus specialized **workers** (inference).
-
-| Component | Image | Scheduling |
-|---|---|---|
-| Gateway | `firewall-cpu` | CPU only |
-| Workers (default) | `firewall-cpu` | CPU only |
-| Workers (GPU) | `firewall-gpu` | GPU nodes with `nvidia.com/gpu`, `hostIPC: true` |
-
-On OpenShift, GPU workers typically require taints and specific node labels. Align `workerDefaults.nodeSelector` and `workerDefaults.tolerations` with your MachineSet or node pool configuration.
-
-```yaml
-neuraltrust-firewall:
-  firewall:
-    enabled: true
-    workerDefaults:
-      image:
-        repository: "europe-west1-docker.pkg.dev/.../firewall-gpu"
-      nodeSelector:
-        nvidia.com/gpu.present: "true"
-      tolerations:
-        - key: "nvidia.com/gpu"
-          operator: "Exists"
-          effect: "NoSchedule"
-      resources:
-        limits:
-          nvidia.com/gpu: "1"
-      hostIPC: true
-```
-
-See [VALUES_SCENARIOS.md](./VALUES_SCENARIOS.md#neuraltrust-firewall-gateway--workers-cpu-and-gpu) for detailed firewall configuration.
-
-## Deployment with custom values
-
-```bash
-# 1. Create namespace
-oc new-project neuraltrust
-
-# 2. Create image pull secret
-oc create secret docker-registry gcr-secret \
-  --docker-server=europe-west1-docker.pkg.dev \
-  --docker-username=_json_key \
-  --docker-password="$(cat path/to/gcr-keys.json)" \
-  --docker-email=admin@neuraltrust.ai \
-  -n neuraltrust
-
-# 3. Prepare values (copy OpenShift template)
-cp values-openshift.yaml my-values.yaml
-# Edit my-values.yaml: set domain, storage class, and any overrides
-
-# 4. Deploy
-helm upgrade --install neuraltrust-platform \
-  oci://europe-west1-docker.pkg.dev/neuraltrust-app-prod/helm-charts/neuraltrust-platform \
-  --version <VERSION> \
+helm lint <chart> -f values-openshift.yaml
+helm template neuraltrust-platform <chart> \
   --namespace neuraltrust \
-  -f my-values.yaml
+  -f values-openshift.yaml \
+  --api-versions route.openshift.io/v1
 ```
 
-## Verification
+For v2, confirm Kafka, Kafka Connect, Kafka workers, AISPM, and the legacy SIEM
+Connector do not render.
 
-```bash
-# Check pods
-oc get pods -n neuraltrust
+## Legacy v1
 
-# Check routes
-oc get routes -n neuraltrust
-
-# Check services
-oc get svc -n neuraltrust
-
-# Test connectivity
-curl https://$(oc get route data-plane-api-route -n neuraltrust -o jsonpath='{.spec.host}')/health
-curl https://$(oc get route control-plane-api-route -n neuraltrust -o jsonpath='{.spec.host}')/health
-```
-
-## Troubleshooting
-
-### Pods failing to start
-
-```bash
-oc logs <pod-name> -n neuraltrust
-oc describe pod <pod-name> -n neuraltrust
-oc get events -n neuraltrust --sort-by='.lastTimestamp'
-```
-
-### SCC issues
-
-```bash
-# Check which SCC a pod is using
-oc get pod <pod-name> -n neuraltrust -o jsonpath='{.metadata.annotations.openshift\.io/scc}'
-
-# Grant SCC if needed
-oc adm policy add-scc-to-user anyuid -z default -n neuraltrust
-```
-
-### Image pull errors
-
-```bash
-# Verify the secret exists
-oc get secret gcr-secret -n neuraltrust
-
-# Link secret to the default service account
-oc secrets link default gcr-secret --for=pull -n neuraltrust
-```
-
-### Route not accessible
-
-```bash
-oc get route <route-name> -n neuraltrust -o yaml
-oc describe route <route-name> -n neuraltrust
-```
-
-### Database connection issues
-
-```bash
-# Verify PostgreSQL secret
-oc get secret postgresql-secrets -n neuraltrust -o jsonpath='{.data.DATABASE_URL}' | base64 -d
-
-# Test connection from a pod
-oc run -it --rm pg-test --image=postgres:17.2-alpine --restart=Never -n neuraltrust -- \
-  psql "$(oc get secret postgresql-secrets -n neuraltrust -o jsonpath='{.data.DATABASE_URL}' | base64 -d)"
-```
-
-## Related guides
-
-- [Main README](./README.md) — Quick start and general deployment
-- [Deployment Guide](./DEPLOYMENT.md) — Scenarios, firewall setup, and troubleshooting
-- [Secrets Guide](./SECRETS.md) — Secret names, keys, and management options
-- [Values Scenarios](./VALUES_SCENARIOS.md) — Side-by-side comparison of values files
-
-## Support
-
-- [Documentation](https://docs.neuraltrust.ai)
-- [Slack Community](https://join.slack.com/t/neuraltrustcommunity/shared_invite/zt-2xl47cag6-_HFNpltIULnA3wh4R6AqBg)
-- [Report Issues](https://github.com/NeuralTrust/neuraltrust-platform/issues)
+Legacy OpenShift deployments must pin `global.platformVersion: v1` explicitly.
+Use `values-v1-legacy.yaml.example` as the base, then apply OpenShift provider
+settings. New OpenShift deployments should not enable the retired AISPM or SIEM
+Connector components.

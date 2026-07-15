@@ -1,157 +1,23 @@
-# NeuralTrust Platform Values (example)
-# Copy this file to my-values.yaml, fill every value marked # Required, then:
-#   helm upgrade --install neuraltrust-platform <chart> -f my-values.yaml
-# Only mandatory/required configuration - all other values use chart defaults
-#
-# Secret Auto-Generation:
-#   When global.autoGenerateSecrets: true (default), all secrets marked
-#   "Auto-generated if empty" are automatically generated during helm install/upgrade.
-#   Existing secrets in the cluster are preserved on upgrades (never overwritten).
-#   SERVER_SECRET_KEY and trustgateJwtSecret are automatically synchronized.
+# Minimal Platform v2 hybrid starting point.
+# Set the platform and domain, then install with:
+#   helm upgrade --install neuraltrust-platform <chart> \
+#     --namespace neuraltrust --create-namespace -f values-required.yaml
 
 global:
-  platform: "gcp"  # "aws" | "gcp" | "azure" | "openshift" | "kubernetes"
-  # Base domain for service URLs. When set, every Ingress auto-derives its host as
-  # <hostPrefix>.<domain> (e.g. admin.<domain>, gateway.<domain>, api.<domain>, app.<domain>).
-  # Override per service via .host (full hostname) or .hostPrefix (subdomain only).
-  # OpenShift Routes derive hostnames separately as <service-name>.<domain>.
-  domain: ""
-  # Optional global registry prefix for private/mirrored images (e.g. "my-registry.corp/neuraltrust").
-  # When set, the chart strips the default GCP prefix and prepends this value across every subchart.
-  # Leave empty to use the chart's defaults.
-  imageRegistry: ""
-  autoGenerateSecrets: true  # Auto-generate required secrets if not explicitly provided. Preserves existing values on upgrades.
-  preserveExistingSecrets: false  # Set to true only when every required secret already exists in the namespace.
-  storageClass: ""  # Optional default storage class used by in-cluster stateful components.
-  # Outbound HTTP proxy (for corporate environments behind a forward proxy):
-  # proxy:
-  #   enabled: false
-  #   httpProxy: ""    # e.g. "http://proxy.corp:3128"
-  #   httpsProxy: ""   # e.g. "http://proxy.corp:3128"
-  #   noProxy: "localhost,127.0.0.1,.cluster.local,.svc"
-  # Ingress TLS defaults:
-  #   The chart creates one shared self-signed kubernetes.io/tls secret by default.
-  #   The bundled ingress defaults also enable HTTPS by default.
-  #   If you leave per-ingress tls.secretName empty, those ingresses use the shared secret automatically.
-  #   Configure this behavior in values.yaml under global.ingress.tls when needed.
-  # Pin EVERY platform workload to a dedicated node pool with one setting.
-  # Per-component nodeSelector still works and is merged on top (per-component
-  # keys win). Leave unset (default {}) to schedule anywhere. For an *exclusive*
-  # (tainted) pool, also set global.tolerations — a nodeSelector alone won't keep
-  # other tenants off a tainted pool.
-  # nodeSelector:
-  #   dedicated: neuraltrust
-  # tolerations:
-  #   - key: dedicated
-  #     operator: Equal
-  #     value: neuraltrust
-  #     effect: NoSchedule
-  #
-  # In-cluster Kafka (default): leave global.kafka.bootstrapServers empty.
-  # External Kafka: set infrastructure.kafka.deploy: false and configure
-  # global.kafka.{bootstrapServers,auth,tls} — see values-external-services.yaml.example.
-  # global.customCaCert is for HTTP egress only; it does not enable Kafka TLS.
+  platformVersion: "v2"
+  deploymentMode: "hybrid"
+  platform: "kubernetes" # Required: aws | gcp | azure | openshift | kubernetes
+  domain: "platform.example.com" # Required: base domain for generated hostnames
+  imageRegistry: "" # Optional: "<registry>/neuraltrust"
+  storageClass: "" # Optional: cluster default when empty
+  autoGenerateSecrets: true
+  preserveExistingSecrets: false
 
-# Infrastructure Components
-infrastructure:
-  clickhouse:
-    deploy: true
-
-  kafka:
-    deploy: true
-
-  postgresql:
-    # Note: PostgreSQL deployment is controlled by neuraltrust-control-plane.infrastructure.postgresql.deploy below
-    # Set deploy: true/false in that section to enable/disable in-cluster PostgreSQL deployment
-
-# TrustGate Configuration
-trustgate:
-  enabled: true
-  global:
-    version: "ee"
-    env:
-      # TrustGate secret key - auto-generated if empty and autoGenerateSecrets: true
-      # Shared with neuraltrust-control-plane.controlPlane.secrets.trustgateJwtSecret
-      SERVER_SECRET_KEY: "" # Auto-generated if empty
-      # Database host is the host of the PostgreSQL database
-      DATABASE_HOST: "control-plane-postgresql" # Required
-      # TrustGate database password - auto-generated if empty and autoGenerateSecrets: true
-      DATABASE_PASSWORD: "" # Auto-generated if empty
-      # NeuralTrust Firewall HTTP integration — written to trustgate-secrets keys
-      # Auto-populated when neuraltrust-firewall.firewall.enabled: true and autoGenerateSecrets: true
-      NEURAL_TRUST_FIREWALL_URL: "" # Auto-populated if firewall enabled
-      NEURAL_TRUST_FIREWALL_SECRET_KEY: "" # Auto-populated if firewall enabled (= firewall jwtSecret)
-  redis:
-    enabled: true
-    # Note: redis.auth.password is optional - only recommended when using external Redis (redis.enabled: false)
-
-# NeuralTrust Control Plane
-# Note: Control Plane is NOT deployed by default. Set controlPlane.enabled: true to deploy it.
-neuraltrust-control-plane:
-  infrastructure:
-    postgresql:
-      deploy: true
-  controlPlane:
-    enabled: true
-    secrets:
-      # ControlPlane JWT secret - auto-generated if empty and autoGenerateSecrets: true
-      controlPlaneJWTSecret: "" # Auto-generated if empty
-      # TrustGate JWT secret - auto-generated if empty and autoGenerateSecrets: true
-      # Automatically synchronized with trustgate.global.env.SERVER_SECRET_KEY
-      trustgateJwtSecret: "" # Auto-generated if empty (= SERVER_SECRET_KEY)
-      # Firewall JWT secret - auto-generated if empty and autoGenerateSecrets: true
-      # Shared with neuraltrust-firewall.firewall.secrets.jwtSecret
-      firewallJwtSecret: "" # Auto-generated if empty
-    components:
-      scheduler:
-        enabled: true
-      api:
-        enabled: true
-      app:
-        enabled: true
-      postgresql:
-        secrets:
-          # PostgreSQL password - auto-generated if empty and autoGenerateSecrets: true
-          password: "" # Auto-generated if empty
-        image:
-          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/postgres"
-          tag: "17-alpine"
-
-# NeuralTrust Data Plane
-neuraltrust-data-plane:
-  dataPlane:
-    enabled: true
-    secrets:
-      # DataPlane JWT secret - auto-generated if empty and autoGenerateSecrets: true
-      dataPlaneJWTSecret: "" # Auto-generated if empty
-    components:
-      api:
-        enabled: true
-      worker:
-        enabled: true
-      kafka:
-        connect: {}
-
-# NeuralTrust Firewall
-neuraltrust-firewall:
-  firewall:
-    enabled: true
-    secrets:
-      jwtSecret: "" # Auto-generated if empty
-
-# Optional: AI Security Posture Management (AISPM)
-# When enabled, the parent chart auto-wires POSTURE_API_URL into the Control
-# Plane app (via control-plane-secrets) and creates aispm-secrets with an
-# auto-generated AUTH_ENCRYPTION_KEY and DATABASE_PASSWORD.
-# neuraltrust-aispm:
-#   aispm:
-#     enabled: true
-#     secrets:
-#       openaiApiKey: ""           # Required at runtime
-#       authEncryptionKey: ""      # Auto-generated if empty
-#       dbPassword: ""             # Auto-generated if empty
-
-# Optional: SIEM forwarder (Kafka → Splunk/Sentinel/Datadog/...)
-# neuraltrust-siem-connectors:
-#   siemConnectors:
-#     enabled: true
+# DataAgent is optional and enrolment-gated. Enable only after NeuralTrust
+# provides both values below.
+dataagent:
+  tenantId: ""
+  enrolmentToken: ""
+  enrolmentTokenExistingSecret:
+    name: ""
+    key: "ENROLMENT_TOKEN"

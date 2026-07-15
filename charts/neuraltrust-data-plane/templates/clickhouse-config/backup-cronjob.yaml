@@ -22,6 +22,8 @@
       strings ("Code:", "Exception"); presence fails the Job.
 */}}
 {{- $backupCfg := .Values.dataPlane.components.clickhouse.backup }}
+{{- $s3 := default dict $backupCfg.s3 }}
+{{- $gcs := default dict $backupCfg.gcs }}
 {{- $failOnError := true }}
 {{- if hasKey $backupCfg "failOnError" }}{{- $failOnError = $backupCfg.failOnError }}{{- end }}
 {{- $timeout := default 3600 $backupCfg.timeoutSeconds }}
@@ -62,9 +64,9 @@ spec:
                   trap 'rm -f "$RESP"' EXIT
                   echo "Starting backup ($BACKUP_DATE)..."
                   {{- if and $backupCfg.type (eq $backupCfg.type "s3") }}
-                  STATEMENT="BACKUP DATABASE neuraltrust TO S3('https://{{ if $backupCfg.s3.bucket }}{{ $backupCfg.s3.bucket }}{{ else }}backup-bucket{{ end }}.s3.{{ if $backupCfg.s3.region }}{{ $backupCfg.s3.region }}{{ else }}us-east-1{{ end }}.amazonaws.com/$BACKUP_DATE/shard-0', '{{ if $backupCfg.s3.accessKey }}{{ $backupCfg.s3.accessKey }}{{ else }}access-key{{ end }}', '{{ if $backupCfg.s3.secretKey }}{{ $backupCfg.s3.secretKey }}{{ else }}secret-key{{ end }}'{{- if and $backupCfg.s3 $backupCfg.s3.endpoint }}, '{{ $backupCfg.s3.endpoint }}'{{- end }}) {{ $asyncKeyword }}"
+                  STATEMENT="BACKUP DATABASE neuraltrust TO S3('https://{{ $s3.bucket | default "backup-bucket" }}.s3.{{ $s3.region | default "us-east-1" }}.amazonaws.com/$BACKUP_DATE/shard-0', '{{ $s3.accessKey | default "access-key" }}', '{{ $s3.secretKey | default "secret-key" }}'{{- if $s3.endpoint }}, '{{ $s3.endpoint }}'{{- end }}) {{ $asyncKeyword }}"
                   {{- else }}
-                  STATEMENT="BACKUP DATABASE neuraltrust TO S3('https://storage.googleapis.com/{{ if $backupCfg.gcs.bucket }}{{ $backupCfg.gcs.bucket }}{{ else }}backup-bucket{{ end }}/$BACKUP_DATE/shard-0', '{{ if $backupCfg.gcs.accessKey }}{{ $backupCfg.gcs.accessKey }}{{ else }}access-key{{ end }}', '{{ if $backupCfg.gcs.secretKey }}{{ $backupCfg.gcs.secretKey }}{{ else }}secret-key{{ end }}') {{ $asyncKeyword }}"
+                  STATEMENT="BACKUP DATABASE neuraltrust TO S3('https://storage.googleapis.com/{{ $gcs.bucket | default "backup-bucket" }}/$BACKUP_DATE/shard-0', '{{ $gcs.accessKey | default "access-key" }}', '{{ $gcs.secretKey | default "secret-key" }}') {{ $asyncKeyword }}"
                   {{- end }}
                   HTTP_CODE=$(curl -sS -o "$RESP" -w "%{http_code}" \
                     --max-time {{ $timeout }} \

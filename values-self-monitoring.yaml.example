@@ -1,31 +1,9 @@
----
-# Single-switch self-monitoring overlay.
-#
-# Merge this on top of your customer values to turn on the full self-monitoring
-# stack:
-#   - in-chart OpenTelemetry Collector (enabled via global.observability.enabled
-#     below; also auto-enabled when the watchdog subchart is on)
-#   - neuraltrust-watchdog subchart
-#   - curated default check set scoped to the platform's services
-#
-# All healing actions stay in dry-run by default. Flip per-check after the
-# corresponding alert has demonstrated parity — see docs/observability.md.
-#
-# Usage:
-#
-#   helm upgrade --install neuraltrust . \
-#       -f my-values.yaml \
-#       -f values-self-monitoring.yaml.example
-#
-# Notes
-#   - `enabledCheckIds` is an additive overlay: it flips matching checks to
-#     enabled=true without replacing their target / thresholds / actions
-#     blocks. Per-check overrides in your own values still win.
-#   - Add/remove ids freely; missing ids are silently ignored.
-#   - Kafka checks assume in-cluster kafka:9092 unless you override watchdog
-#     check targets to match global.kafka.bootstrapServers (external Kafka).
-#
+# Curated Platform v2 self-monitoring overlay.
+# Kafka, Kafka Connect, worker-lag, and legacy TrustGate checks are excluded.
+
 global:
+  platformVersion: "v2"
+  deploymentMode: "hybrid"
   selfMonitoring:
     enabled: true
   observability:
@@ -33,27 +11,12 @@ global:
 
 neuraltrust-watchdog:
   enabled: true
-  # actions.dryRun: true is the chart default; left explicit here so this
-  # file alone never enables a destructive action.
   actions:
     dryRun: true
   enabledCheckIds:
-    # Infrastructure
     - clickhouse
-    - kafka-broker
-    - kafka-connect
-    - data-plane-worker-lag
-    - trustgate-redis
-    # Application HTTP synthetics
-    - control-plane-synthetic
-    - data-plane-synthetic
-    - trustgate-synthetic
     - firewall-health
-    # Platform-level (kubelet + API observations)
     - pod-health
-    - deployment-health
     - otel-collector
     - cert-renewal
-    # Log-error-volume alert. Requires the log bridge (logExport) to be tailing;
-    # without it the check reports unknown. Enable logExport.enabled alongside.
     - log-error-rate

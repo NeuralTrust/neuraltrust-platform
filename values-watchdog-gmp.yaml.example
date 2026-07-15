@@ -1,53 +1,20 @@
-# values-watchdog-gmp.yaml.example
-#
-# Google Managed Prometheus (GMP) scenario.
-#
-# Use this when the target cluster runs **Google Managed Service for
-# Prometheus** — either a GKE cluster with `monitoring_config.managed_prometheus.enabled = true`
-# (the NeuralTrust SaaS pattern, see
-# `cloud-infrastructure/gcp/cluster.tf`) or a customer GKE/GCP-anywhere
-# install with the managed-collection operator deployed.
-#
-# What this turns on (in addition to the baseline annotations that the
-# chart always bakes into the pod template):
-#
-#   1. PodMonitoring (monitoring.googleapis.com/v1) — declarative scrape
-#      config the GMP operator picks up directly.
-#   2. Rules (monitoring.googleapis.com/v1) — three alerts
-#      (NeuralTrustWatchdogDown / …CheckFailing / …ActionDispatchFailing)
-#      with the same expressions as the Prometheus Operator
-#      PrometheusRule shipped to kube-prometheus-stack customers.
-#
-# What this turns OFF: the Prometheus Operator-flavoured PodMonitor and
-# PrometheusRule. They would silently no-op anyway (GMP doesn't install
-# monitoring.coreos.com/v1 CRDs) but turning them off explicitly keeps
-# `helm template --debug` output clean and prevents accidental
-# double-scrape when a customer later installs kube-prometheus-stack
-# alongside GMP.
-#
-# Apply with:
-#
-#   helm upgrade --install neuraltrust-platform . \
-#     -f values-required.yaml \
-#     -f values-watchdog.yaml \
-#     -f values-watchdog-gmp.yaml
-#
-# Kafka checks assume in-cluster kafka:9092. External Kafka: configure
-# global.kafka and align watchdog check bootstrapServers — see
-# values-external-services.yaml.example.
+# Platform v2 watchdog resources for Google Managed Prometheus.
+# Layer over values-required.yaml and values-watchdog.yaml.example.
+
+global:
+  platformVersion: "v2"
+  deploymentMode: "hybrid"
+  platform: "gcp"
 
 neuraltrust-watchdog:
   enabled: true
-
   monitoring:
     scrapeAnnotations:
-      enabled: true                    # baseline — uniform contract
-    # Off: GMP doesn't ship monitoring.coreos.com/v1 CRDs.
+      enabled: true
     podMonitor:
       enabled: false
     prometheusRule:
       enabled: false
-    # On: GMP-native CRDs from monitoring.googleapis.com/v1.
     podMonitoring:
       enabled: true
       interval: 30s
@@ -55,4 +22,4 @@ neuraltrust-watchdog:
     gmpRules:
       enabled: true
       alertLabels:
-        team: platform
+        team: "platform"

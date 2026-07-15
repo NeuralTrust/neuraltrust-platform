@@ -194,11 +194,12 @@ spec:
       - name: api
         {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.image }}
         {{- $apiRepo := .Values.dataPlane.components.api.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api" }}
-        {{- $apiTag := .Values.dataPlane.components.api.image.tag | default "v1.38.2" }}
+        {{- $apiTag := .Values.dataPlane.components.api.image.tag | default "v1.39.0" }}
         image: {{ include "data-plane.image" (dict "repository" $apiRepo "tag" $apiTag "global" .Values.global) | quote }}
         imagePullPolicy: {{ .Values.dataPlane.components.api.image.pullPolicy | default "Always" }}
         {{- else }}
-        image: {{ include "data-plane.image" (dict "repository" "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api" "tag" "v1.13.0" "global" .Values.global) | quote }}
+        {{- $fallbackApiTag := "v1.39.0" }}
+        image: {{ include "data-plane.image" (dict "repository" "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api" "tag" $fallbackApiTag "global" .Values.global) | quote }}
         imagePullPolicy: Always
         {{- end }}
         {{- if .Values.securityHardening }}
@@ -242,6 +243,32 @@ spec:
                 key: RESEND_API_KEY
                 optional: true
           {{- include "neuraltrust-platform.kafka.clientEnv" . | nindent 10 }}
+          {{- $dpRedisCfg := default dict .Values.dataPlane.components.api.redis }}
+          {{- $dpRedisBackend := include "neuraltrust-platform.dataPlaneApi.redisBackend" . }}
+          - name: EVALUATION_PROGRESS_BACKEND
+            value: {{ $dpRedisBackend | quote }}
+          {{- if eq $dpRedisBackend "redis" }}
+          - name: REDIS_URL
+            valueFrom:
+              secretKeyRef:
+                name: {{ if and .Values.dataPlane.secrets .Values.dataPlane.secrets.dataPlaneJWTSecretName }}{{ .Values.dataPlane.secrets.dataPlaneJWTSecretName }}{{ else }}data-plane-jwt-secret{{ end }}
+                key: REDIS_URL
+                optional: true
+          {{- if $dpRedisCfg.iamAuth }}
+          - name: REDIS_AUTH_MODE
+            value: "aws_iam"
+          - name: REDIS_IAM_USER
+            value: {{ $dpRedisCfg.iamUser | quote }}
+          - name: REDIS_IAM_CACHE_NAME
+            value: {{ $dpRedisCfg.iamCacheName | quote }}
+          {{- if $dpRedisCfg.iamRegion }}
+          - name: REDIS_IAM_REGION
+            value: {{ $dpRedisCfg.iamRegion | quote }}
+          {{- end }}
+          - name: REDIS_IAM_SERVERLESS
+            value: {{ $dpRedisCfg.iamServerless | default false | quote }}
+          {{- end }}
+          {{- end }}
           - name: HF_HOME
             value: "/root/.cache/huggingface"
           # Optional: the data-plane image bundles its own model (fastText) and

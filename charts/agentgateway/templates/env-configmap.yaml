@@ -27,6 +27,7 @@ data:
   # IAM (RDS) DB auth: no static DB_PASSWORD is shipped; the service mints a token.
   DB_IAM_AUTH: "true"
   DB_AUTH_MODE: "iam"
+  POSTGRES_LOGIN: "aws"
   {{- end }}
   REDIS_HOST: {{ .Values.redis.host | quote }}
   REDIS_PORT: {{ .Values.redis.port | quote }}
@@ -46,19 +47,24 @@ data:
   # IAM (ElastiCache) Redis auth: no static REDIS_PASSWORD is shipped.
   REDIS_IAM_AUTH: "true"
   {{- end }}
-  # v2 has no Kafka: keep the async telemetry publisher off so the data plane
-  # does not attempt to reach a broker. Set true only when a broker is wired.
-  TELEMETRY_ENABLED: {{ .Values.config.telemetryEnabled | default false | quote }}
-  {{- if eq (include "neuraltrust-platform.isHybrid" .) "true" }}
-  # Hybrid: load the raw-telemetry exporters file (agentgateway-telemetry ConfigMap),
-  # which persists request/response payloads into SENSIBLE_PG_DSN for DataAgent. The
-  # metrics pipeline is on by default (METRICS_ENABLED defaults true).
+  # The exporters file contains no Kafka exporter. Hybrid persists raw events to
+  # local Postgres; external sends metadata and raw events to ClickStack.
+  TELEMETRY_ENABLED: {{ .Values.config.telemetryEnabled | quote }}
   TELEMETRY_EXPORTERS_FILE: "/etc/telemetry/telemetry.yaml"
+  {{- if eq (include "neuraltrust-platform.isExternal" .) "true" }}
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ printf "http://clickstack-collector.%s.svc.cluster.local:4318/v1/logs" .Release.Namespace | quote }}
+  OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
+  OTEL_EXPORTER_OTLP_INSECURE: "true"
+  {{- else if eq (include "neuraltrust-platform.clickstackHybridEnabled" .) "true" }}
+  # Hybrid opt-in (global.clickstack.enabled): dual-write product data to a
+  # ClickStack collector in addition to the Postgres raw path used by DataAgent.
+  # The bearer token comes from the agentgateway-secrets Secret.
+  {{- include "neuraltrust-platform.clickstack.otlpEnv" . | nindent 2 }}
   {{- end }}
   # In-cluster TrustGuard data-plane URL. Derived from the stable Service name +
   # release namespace (Service listens on port 80), so it never needs setting in
   # a single-umbrella deploy. Override .Values.trustguard.baseURL only when
   # TrustGuard runs outside this release. TRUSTGUARD_CLIENT_ID/_SECRET are wired
-  # from the shared v2-trustguard-client-secret Secret in the Deployment env.
+  # from the shared trustguard-client-credentials Secret in the Deployment env.
   TRUSTGUARD_BASE_URL: {{ .Values.trustguard.baseURL | default (printf "http://trustguard-data-plane.%s.svc.cluster.local" .Release.Namespace) | quote }}
 {{- end }}

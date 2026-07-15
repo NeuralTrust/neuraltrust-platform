@@ -8,7 +8,7 @@ fullnameOverride: "trustguard"
 securityHardening: true
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustguard
-  tag: "v0.9.1"
+  tag: "v0.11.1"
   pullPolicy: IfNotPresent
 imagePullSecrets: "gcr-secret"
 serviceAccount:
@@ -46,9 +46,11 @@ redis:
   # IAM (e.g. AWS ElastiCache) Redis auth. Chart-prepared (emits REDIS_IAM_AUTH and
   # omits REDIS_PASSWORD); service-side token minting lands separately. false = password.
   iamAuth: false
+  enableCachePubSub: true # Publish cache invalidations between replicas
 # Admin API JWT signing key + runtime token signing key.
 adminJwtSecret: "" # Auto-generated if empty
 tokenSigningSecret: "" # Auto-generated if empty
+redisEventsSecret: "" # Auto-generated if empty; authenticates Redis cache events
 # ---- config-sync (DB-less data plane <- SaaS control plane) ----
 # When enabled, the data plane pulls compiled config over gRPC from the
 # NeuralTrust SaaS control plane instead of Postgres. OFF by default: enabling
@@ -94,7 +96,7 @@ configSync:
 platform:
   # DEPRECATED: client credentials are now owned centrally by the umbrella chart
   # (global.v2.trustguardClientId / trustguardClientSecret → shared
-  # v2-trustguard-client-secret Secret) so they always match AgentGateway's
+  # trustguard-client-credentials Secret) so they always match AgentGateway's
   # client. These fields are ignored; kept for backward compatibility.
   clientId: ""
   clientSecret: ""

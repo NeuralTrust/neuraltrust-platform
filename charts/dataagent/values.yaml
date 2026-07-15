@@ -1,5 +1,5 @@
 # DataAgent subchart.
-# Renders ONLY when global.platformVersion=v2 AND global.deploymentMode=hybrid.
+# Renders ONLY for v2 hybrid when tenantId and enrolment credentials are set.
 # Outbound-only: dials the SaaS DataBridge over gRPC, runs typed read-only
 # queries on a local Postgres, and streams back only entitled rows. No inbound
 # Service is exposed; the :8080 listener is health probes only.
@@ -8,7 +8,7 @@ fullnameOverride: "dataagent"
 securityHardening: true
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/dataagent
-  tag: "v0.1.0"
+  tag: "v0.1.1"
   pullPolicy: IfNotPresent
 imagePullSecrets: "gcr-secret"
 serviceAccount:
@@ -55,7 +55,14 @@ database:
 # DEPRECATED escape hatch: a full DSN that overrides the `database` block above.
 # Prefer the components. Kept for backward compatibility.
 databaseUrl: ""
+# Existing Secret containing DATABASE_URL and DB_PASSWORD. Required when
+# global.autoGenerateSecrets=false or global.preserveExistingSecrets=true.
+existingSecret:
+  name: ""
 enrolmentToken: "" # Issued by SaaS; required for tls/mtls
+enrolmentTokenExistingSecret:
+  name: "" # Existing Secret containing the SaaS-issued token
+  key: "ENROLMENT_TOKEN"
 # gRPC supervisor tuning (sane defaults; override only if needed).
 supervisor:
   backoffMin: "1s"

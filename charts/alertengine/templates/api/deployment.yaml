@@ -49,7 +49,6 @@ spec:
             secretKeyRef:
               name: {{ .Values.clickhouse.existingSecret.name | default "clickhouse" | quote }}
               key: {{ .Values.clickhouse.existingSecret.key | default "admin-password" | quote }}
-              optional: true
         {{- with .Values.api.extraEnv }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

@@ -29,12 +29,10 @@ spec:
       volumes:
       - name: tmp
         emptyDir: {}
-      {{- if eq (include "neuraltrust-platform.isHybrid" .) "true" }}
       - name: telemetry
         configMap:
           name: trustguard-telemetry
           optional: true
-      {{- end }}
       {{- if and .Values.configSync.enabled (eq (include "trustguard.configSyncTls.active" .) "true") }}
       - name: configsync-tls
         secret:
@@ -51,12 +49,11 @@ spec:
             name: trustguard-env-vars
         - secretRef:
             name: trustguard-secrets
-            optional: true
         env:
         {{- with .Values.dataPlane.extraEnv }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-        {{- include "neuraltrust-platform.trustguardClientEnv" (dict "idVar" "TRUSTGUARD_PLATFORM_CLIENT_ID" "secretVar" "TRUSTGUARD_PLATFORM_CLIENT_SECRET") | nindent 8 }}
+        {{- include "neuraltrust-platform.trustguardClientEnv" (dict "ctx" . "idVar" "TRUSTGUARD_PLATFORM_CLIENT_ID" "secretVar" "TRUSTGUARD_PLATFORM_CLIENT_SECRET") | nindent 8 }}
         {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
         {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "go" "ctx" .) | nindent 8 }}
         {{- if eq (include "trustguard.configSyncTls.active" .) "true" }}
@@ -78,11 +75,9 @@ spec:
         volumeMounts:
         - name: tmp
           mountPath: /tmp
-        {{- if eq (include "neuraltrust-platform.isHybrid" .) "true" }}
         - name: telemetry
           mountPath: /etc/telemetry
           readOnly: true
-        {{- end }}
         {{- if and .Values.configSync.enabled (eq (include "trustguard.configSyncTls.active" .) "true") }}
         - name: configsync-tls
           mountPath: {{ include "trustguard.configSyncTls.mountPath" . | quote }}

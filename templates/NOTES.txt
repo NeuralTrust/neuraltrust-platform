@@ -10,6 +10,7 @@ Secrets have been auto-generated for this deployment.
 {{- $isV2 := eq (include "neuraltrust-platform.isV2" .) "true" }}
 {{- $isExternal := eq (include "neuraltrust-platform.isExternal" .) "true" }}
 {{- $isHybrid := eq (include "neuraltrust-platform.isHybrid" .) "true" }}
+{{- $dataagentEnabled := eq (include "neuraltrust-platform.dataagentEnabled" .) "true" }}
 {{- $platform := .Values.global.platform | default "gcp" }}
 {{- $ipField := "ip" }}
 {{- if eq $platform "aws" }}
@@ -81,7 +82,7 @@ Enabled v2 components:
   - AgentGateway proxy{{ if $mcpEnabled }} + MCP server{{ end }} (runtime data plane)
   - TrustGuard runtime (data plane)
   - data-plane-api (temporary analytics shim over ClickHouse)
-{{- if $isHybrid }}
+{{- if $dataagentEnabled }}
   - DataAgent (bridges local reads to the NeuralTrust SaaS control plane)
 {{- end }}
 {{- if $isExternal }}
@@ -92,6 +93,13 @@ Enabled v2 components:
 {{- end }}
 {{- if .Values.trustlens.enabled }}
   - TrustLens worker{{ if $isExternal }} + API{{ end }}
+{{- end }}
+
+{{- if and $isHybrid (not $dataagentEnabled) }}
+WARNING: DataAgent was not deployed because tenantId and enrolment credentials
+are not both configured. AgentGateway and TrustGuard runtime protection remain
+available, but SaaS DataBridge access is disabled. Set dataagent.tenantId and
+either dataagent.enrolmentToken or dataagent.enrolmentTokenExistingSecret.name.
 {{- end }}
 
 Ingress endpoints:
@@ -277,7 +285,7 @@ To view logs for specific components:
   # AlertEngine
   kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=alertengine
 {{- end }}
-{{- if $isHybrid }}
+{{- if $dataagentEnabled }}
   # DataAgent
   kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=dataagent
 {{- end }}
