@@ -1,36 +1,15 @@
-# Example: Deploy NeuralTrust with external ClickHouse, Kafka, and PostgreSQL
-# This example shows how to configure the chart to use pre-installed infrastructure services
-#
-# Usage:
-#   helm install neuraltrust-platform . -f values-external-services.yaml.example
-#
-# Pre-create Kafka credentials in the release namespace when using SASL:
-#   kubectl create secret generic kafka-credentials \
-#     --from-literal=username='neuraltrust' \
-#     --from-literal=password='<password>'
-#   kubectl create secret generic kafka-broker-ca \
-#     --from-file=ca.crt=/path/to/broker-ca-bundle.pem
-#
-# Or use ./create-secrets.sh with KAFKA_USERNAME, KAFKA_PASSWORD, and
-# KAFKA_BROKER_CA_FILE — see SECRETS.md.
+# Legacy Platform v1 with external PostgreSQL, ClickHouse, and Kafka.
+# Kafka configuration is intentionally v1-only; Kafka never renders in v2.
+# Pre-create every referenced Kubernetes Secret.
 
-# Global settings
 global:
+  platformVersion: "v1"
   platform: "kubernetes"
-  domain: "yourdomain.com"
-  imageRegistry: ""
-  preserveExistingSecrets: false
-  storageClass: ""
+  domain: "platform.example.com"
   postgresql:
     deploy: false
-  ingress:
-    tls:
-      autoGenerate: true
-      secretName: "neuraltrust-ingress-tls"
-  # External Kafka — all subcharts read connection/auth/TLS from global.kafka.
-  # global.customCaCert (HTTP egress) does not enable Kafka TLS by itself.
   kafka:
-    bootstrapServers: "kafka-kafka-bootstrap.kafka.svc.cluster.local:9093"
+    bootstrapServers: "kafka.example.com:9093"
     auth:
       enabled: true
       mechanism: "SCRAM-SHA-512"
@@ -43,19 +22,18 @@ global:
       caKey: "ca.crt"
 
 infrastructure:
+  postgresql:
+    deploy: false
   clickhouse:
     deploy: false
     external:
-      host: "clickhouse.clickhouse.svc.cluster.local"
-      port: "8123"
+      host: "clickhouse.example.com"
+      port: "8443"
       user: "neuraltrust"
-      password: "your-clickhouse-password"
       database: "neuraltrust"
-
+      secretName: "managed-clickhouse"
+      secretKey: "password"
   kafka:
-    deploy: false
-
-  postgresql:
     deploy: false
 
 neuraltrust-control-plane:
@@ -67,67 +45,25 @@ neuraltrust-control-plane:
     components:
       postgresql:
         secrets:
-          host: "postgresql.postgresql.svc.cluster.local"
+          host: "postgres.example.com"
           port: "5432"
-          user: "neuraltrust"
-          password: "your-postgres-password"
-          database: "neuraltrust"
-      api:
-        enabled: true
-        ingress:
-          enabled: true
-      app:
-        enabled: true
-        ingress:
-          enabled: true
-      scheduler:
-        enabled: true
-        ingress:
-          enabled: true
+
+trustgate:
+  enabled: true
+  postgresql:
+    existingSecret: "trustgate-postgres"
 
 neuraltrust-data-plane:
   dataPlane:
     enabled: true
     components:
       clickhouse:
-        enabled: false
-        host: "clickhouse.clickhouse.svc.cluster.local"
-        port: "8123"
-        user: "neuraltrust"
-        database: "neuraltrust"
-      kafka:
-        enabled: true
-        connect:
-          bootstrapServers: ""
-      api:
-        enabled: true
-        ingress:
-          enabled: true
+        host: "clickhouse.example.com"
+        port: "8443"
+        existingSecret:
+          name: "managed-clickhouse"
+          key: "password"
       worker:
         enabled: true
-
-trustgate:
-  enabled: true
-  # Optional: source only TrustGate PostgreSQL fields from a pre-created Secret
-  # while the chart still generates SERVER_SECRET_KEY, firewall keys, Redis
-  # internals, and other platform secrets.
-  # postgresql:
-  #   existingSecret: "trustgate-postgres"
-  #   existingSecretKeys:
-  #     host: DATABASE_HOST
-  #     port: DATABASE_PORT
-  #     user: DATABASE_USER
-  #     password: DATABASE_PASSWORD
-  #     database: DATABASE_NAME
-  #     sslMode: DATABASE_SSL_MODE
-  #     authMode: DATABASE_AUTH_MODE
-  global:
-    env:
-      DATABASE_HOST: "postgresql.postgresql.svc.cluster.local"
-      DATABASE_PORT: "5432"
-      DATABASE_USER: "postgres"
-      DATABASE_PASSWORD: "your-postgres-password"
-      DATABASE_NAME: "trustgate"
-      DATABASE_SSL_MODE: "require"
-  ingress:
-    enabled: true
+      kafka:
+        enabled: true

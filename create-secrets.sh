@@ -217,6 +217,77 @@ add_secret_key() {
     fi
 }
 
+# Ensure a stable generated key exists without printing its value. An explicit
+# environment variable wins; otherwise an existing key is preserved, then a new
+# random value is generated.
+ensure_generated_secret_key() {
+    local secret_name=$1
+    local key=$2
+    local env_name=$3
+    local value="${!env_name:-}"
+
+    if [ -z "$value" ]; then
+        value=$(kubectl get secret "$secret_name" -n "$NAMESPACE" \
+            -o "jsonpath={.data.${key}}" 2>/dev/null | base64 -d 2>/dev/null || true)
+    fi
+    if [ -z "$value" ]; then
+        value=$(openssl rand -base64 48 | tr -d '\n\r')
+    fi
+    add_secret_key "$secret_name" "$key" "$value"
+}
+
+# Ensure AgentGateway's MCP STS signer receives an RSA private key. The runtime
+# accepts PEM or base64-wrapped PEM; storing the wrapped form keeps the Secret
+# value single-line and avoids shell/YAML newline corruption.
+ensure_rsa_private_key_secret_key() {
+    local secret_name=$1
+    local key=$2
+    local env_name=$3
+    local value="${!env_name:-}"
+    local explicit=false
+    local pem=""
+
+    if [ -n "$value" ]; then
+        explicit=true
+    else
+        value=$(kubectl get secret "$secret_name" -n "$NAMESPACE" \
+            -o "jsonpath={.data.${key}}" 2>/dev/null | base64 -d 2>/dev/null || true)
+    fi
+
+    if [ -n "$value" ]; then
+        if [[ "$value" == *"-----BEGIN"* ]]; then
+            pem="${value//\\n/$'\n'}"
+        else
+            pem=$(printf '%s' "$value" | base64 -d 2>/dev/null || true)
+        fi
+    fi
+
+    if [ -n "$pem" ] && printf '%s' "$pem" | openssl rsa -noout -check >/dev/null 2>&1; then
+        local pkcs1=""
+        pkcs1=$(printf '%s' "$pem" | openssl rsa -traditional 2>/dev/null || true)
+        if [[ "$pkcs1" != *"-----BEGIN RSA PRIVATE KEY-----"* ]]; then
+            pkcs1=$(printf '%s' "$pem" | openssl rsa 2>/dev/null || true)
+        fi
+        if [[ "$pkcs1" != *"-----BEGIN RSA PRIVATE KEY-----"* ]]; then
+            echo -e "${RED}Error: unable to normalize ${env_name} to RSA PKCS#1 PEM${NC}" >&2
+            return 1
+        fi
+        pem="$pkcs1"
+        value=$(printf '%s' "$pem" | base64 | tr -d '\n\r')
+    elif [ "$explicit" = true ]; then
+        echo -e "${RED}Error: ${env_name} must contain an RSA private key in PEM or base64-encoded PEM format${NC}" >&2
+        return 1
+    else
+        if [ -n "$value" ]; then
+            echo -e "${YELLOW}Replacing invalid ${key} in ${secret_name} with an RSA private key${NC}"
+        fi
+        pem=$(openssl genrsa -traditional 2048 2>/dev/null || openssl genrsa 2048 2>/dev/null)
+        value=$(printf '%s' "$pem" | base64 | tr -d '\n\r')
+    fi
+
+    add_secret_key "$secret_name" "$key" "$value"
+}
+
 echo "=========================================="
 echo "NeuralTrust Platform Secrets Creation"
 echo "=========================================="
@@ -249,6 +320,7 @@ while [[ $# -gt 0 ]]; do
             echo "Environment variables:"
             echo "  All secret values can be provided via environment variables:"
             echo "  - DATA_PLANE_JWT_SECRET"
+            echo "  - DATA_PLANE_REDIS_URL (optional; platform-v2 evaluation-progress cache)"
             echo "  - CONTROL_PLANE_JWT_SECRET"
             echo "  - OPENAI_API_KEY"
             echo "  - GOOGLE_API_KEY"
@@ -262,6 +334,13 @@ while [[ $# -gt 0 ]]; do
             echo "  - FIREWALL_JWT_SECRET"
             echo "  - SERVER_SECRET_KEY (TrustGate)"
             echo "  - OBSERVABILITY_TOKEN (hosted OTLP bearer for collector.neuraltrust.ai)"
+            echo "  - APP_AUTH_SECRET (written to AUTH_SECRET and NEXTAUTH_SECRET)"
+            echo "  - AGENTGATEWAY_SERVER_SECRET_KEY / AGENTGATEWAY_STS_SIGNING_KEY (RSA PEM)"
+            echo "  - TRUSTGUARD_CLIENT_ID / TRUSTGUARD_CLIENT_SECRET"
+            echo "  - TRUSTGUARD_ADMIN_JWT_SECRET / TRUSTGUARD_TOKEN_SIGNING_SECRET"
+            echo "  - TRUSTGUARD_REDIS_EVENTS_SECRET"
+            echo "  - DATACORE_JWT_SECRET / ALERTENGINE_JWT_SECRET"
+            echo "  - DATAAGENT_DB_PASSWORD (ENROLMENT_TOKEN is never generated)"
             echo "  - And more..."
             echo ""
             echo "  REPLACE_EXISTING        Set to 'true' or 'false' to control replacement"
@@ -286,6 +365,82 @@ echo -e "${GREEN}Using namespace: ${NAMESPACE}${NC}"
 echo ""
 
 # ============================================================================
+# PLATFORM V2 STABLE SECRETS
+# ============================================================================
+echo -e "${BLUE}=== Platform v2 Stable Secrets ===${NC}"
+
+ensure_generated_secret_key "agentgateway-secrets" "SERVER_SECRET_KEY" "AGENTGATEWAY_SERVER_SECRET_KEY"
+ensure_rsa_private_key_secret_key "agentgateway-secrets" "STS_SIGNING_KEY" "AGENTGATEWAY_STS_SIGNING_KEY"
+ensure_generated_secret_key "agentgateway-secrets" "DB_PASSWORD" "AGENTGATEWAY_DB_PASSWORD"
+
+ensure_generated_secret_key "trustguard-secrets" "ADMIN_JWT_SECRET" "TRUSTGUARD_ADMIN_JWT_SECRET"
+ensure_generated_secret_key "trustguard-secrets" "TRUSTGUARD_TOKEN_SIGNING_SECRET" "TRUSTGUARD_TOKEN_SIGNING_SECRET"
+ensure_generated_secret_key "trustguard-secrets" "REDIS_EVENTS_SECRET" "TRUSTGUARD_REDIS_EVENTS_SECRET"
+ensure_generated_secret_key "trustguard-secrets" "DB_PASSWORD" "TRUSTGUARD_DB_PASSWORD"
+
+TRUSTGUARD_CLIENT_ID_VALUE="${TRUSTGUARD_CLIENT_ID:-${V2_TRUSTGUARD_CLIENT_ID:-}}"
+if [ -z "$TRUSTGUARD_CLIENT_ID_VALUE" ]; then
+    TRUSTGUARD_CLIENT_ID_VALUE=$(kubectl get secret trustguard-client-credentials -n "$NAMESPACE" \
+        -o jsonpath='{.data.CLIENT_ID}' 2>/dev/null | base64 -d 2>/dev/null || true)
+fi
+if [ -z "$TRUSTGUARD_CLIENT_ID_VALUE" ]; then
+    TRUSTGUARD_CLIENT_ID_VALUE=$(kubectl get secret v2-trustguard-client-secret -n "$NAMESPACE" \
+        -o jsonpath='{.data.CLIENT_ID}' 2>/dev/null | base64 -d 2>/dev/null || true)
+fi
+TRUSTGUARD_CLIENT_ID_VALUE="${TRUSTGUARD_CLIENT_ID_VALUE:-agentgateway-platform}"
+
+TRUSTGUARD_CLIENT_SECRET_VALUE="${TRUSTGUARD_CLIENT_SECRET:-${V2_TRUSTGUARD_CLIENT_SECRET:-}}"
+if [ -z "$TRUSTGUARD_CLIENT_SECRET_VALUE" ]; then
+    TRUSTGUARD_CLIENT_SECRET_VALUE=$(kubectl get secret trustguard-client-credentials -n "$NAMESPACE" \
+        -o jsonpath='{.data.CLIENT_SECRET}' 2>/dev/null | base64 -d 2>/dev/null || true)
+fi
+if [ -z "$TRUSTGUARD_CLIENT_SECRET_VALUE" ]; then
+    TRUSTGUARD_CLIENT_SECRET_VALUE=$(kubectl get secret v2-trustguard-client-secret -n "$NAMESPACE" \
+        -o jsonpath='{.data.CLIENT_SECRET}' 2>/dev/null | base64 -d 2>/dev/null || true)
+fi
+if [ -z "$TRUSTGUARD_CLIENT_SECRET_VALUE" ]; then
+    TRUSTGUARD_CLIENT_SECRET_VALUE=$(openssl rand -base64 48 | tr -d '\n\r')
+fi
+
+add_secret_key "trustguard-client-credentials" "CLIENT_ID" "$TRUSTGUARD_CLIENT_ID_VALUE"
+add_secret_key "trustguard-client-credentials" "CLIENT_SECRET" "$TRUSTGUARD_CLIENT_SECRET_VALUE"
+unset TRUSTGUARD_CLIENT_ID_VALUE TRUSTGUARD_CLIENT_SECRET_VALUE
+
+ensure_generated_secret_key "datacore-secrets" "AUTH_JWT_HS256_SECRET" "DATACORE_JWT_SECRET"
+ensure_generated_secret_key "alertengine-secrets" "AUTH_JWT_SECRET" "ALERTENGINE_JWT_SECRET"
+ensure_generated_secret_key "alertengine-secrets" "APP_ENCRYPTION_KEY" "ALERTENGINE_APP_ENCRYPTION_KEY"
+ensure_generated_secret_key "alertengine-secrets" "DB_PASSWORD" "ALERTENGINE_DB_PASSWORD"
+
+APP_AUTH_SECRET_VALUE="${APP_AUTH_SECRET:-}"
+if [ -z "$APP_AUTH_SECRET_VALUE" ]; then
+    APP_AUTH_SECRET_VALUE=$(kubectl get secret control-plane-secrets -n "$NAMESPACE" \
+        -o jsonpath='{.data.AUTH_SECRET}' 2>/dev/null | base64 -d 2>/dev/null || true)
+fi
+if [ -z "$APP_AUTH_SECRET_VALUE" ]; then
+    APP_AUTH_SECRET_VALUE=$(kubectl get secret control-plane-secrets -n "$NAMESPACE" \
+        -o jsonpath='{.data.NEXTAUTH_SECRET}' 2>/dev/null | base64 -d 2>/dev/null || true)
+fi
+if [ -z "$APP_AUTH_SECRET_VALUE" ]; then
+    APP_AUTH_SECRET_VALUE=$(openssl rand -base64 48 | tr -d '\n\r')
+fi
+add_secret_key "control-plane-secrets" "AUTH_SECRET" "$APP_AUTH_SECRET_VALUE"
+add_secret_key "control-plane-secrets" "NEXTAUTH_SECRET" "$APP_AUTH_SECRET_VALUE"
+unset APP_AUTH_SECRET_VALUE
+
+# DataAgent's local database credential may be generated, but the SaaS-issued
+# enrolment token is deliberately never created by this script.
+ensure_generated_secret_key "dataagent-secrets" "DB_PASSWORD" "DATAAGENT_DB_PASSWORD"
+DATAAGENT_DB_PASSWORD_VALUE=$(kubectl get secret dataagent-secrets -n "$NAMESPACE" \
+    -o jsonpath='{.data.DB_PASSWORD}' 2>/dev/null | base64 -d 2>/dev/null || true)
+DATAAGENT_DB_PASSWORD_ENCODED=$(url_encode "$DATAAGENT_DB_PASSWORD_VALUE")
+DATAAGENT_DATABASE_URL="${DATAAGENT_DATABASE_URL:-postgresql://${DATAAGENT_DB_USER:-dataagent}:${DATAAGENT_DB_PASSWORD_ENCODED}@${DATAAGENT_DB_HOST:-control-plane-postgresql}:${DATAAGENT_DB_PORT:-5432}/${DATAAGENT_DB_NAME:-trustdata}?sslmode=${DATAAGENT_DB_SSLMODE:-prefer}}"
+add_secret_key "dataagent-secrets" "DATABASE_URL" "$DATAAGENT_DATABASE_URL"
+unset DATAAGENT_DB_PASSWORD_VALUE DATAAGENT_DB_PASSWORD_ENCODED DATAAGENT_DATABASE_URL
+echo -e "${GREEN}✓ Platform v2 stable secret keys are ready (values not printed)${NC}"
+echo -e "${YELLOW}DataAgent ENROLMENT_TOKEN was not generated; provide the SaaS-issued token separately.${NC}"
+echo ""
+
+# ============================================================================
 # DATA PLANE SECRETS
 # ============================================================================
 echo -e "${BLUE}=== Data Plane Secrets ===${NC}"
@@ -307,6 +462,19 @@ else
     if [ -n "$DATA_PLANE_JWT_SECRET" ]; then
         create_secret "$SECRET_NAME" "DATA_PLANE_JWT_SECRET" "$DATA_PLANE_JWT_SECRET" "Data Plane JWT Secret"
     fi
+fi
+echo ""
+
+# Data Plane Redis URL (optional; only needed for platform-v2, or a v1 override).
+# The chart auto-generates this key from neuraltrust-data-plane.dataPlane.components.api.redis
+# on every render UNLESS global.preserveExistingSecrets=true — set this when pre-provisioning
+# secrets for external/ACL/IAM Redis. Uses add_secret_key so DATA_PLANE_JWT_SECRET is preserved.
+echo "--- Data Plane Redis URL (Optional; platform-v2 evaluation-progress cache) ---"
+SECRET_NAME="data-plane-jwt-secret"
+DATA_PLANE_REDIS_URL=$(prompt_secret "DATA_PLANE_REDIS_URL" "Enter Data Plane Redis URL, e.g. redis://[user:pass@]host:6379/0 (optional, only with global.preserveExistingSecrets=true)")
+if [ -n "$DATA_PLANE_REDIS_URL" ]; then
+    add_secret_key "$SECRET_NAME" "REDIS_URL" "$DATA_PLANE_REDIS_URL"
+    echo -e "${GREEN}Added REDIS_URL to ${SECRET_NAME}${NC}"
 fi
 echo ""
 
@@ -959,6 +1127,25 @@ else
     fi
 fi
 echo ""
+
+# The legacy control-plane section may recreate control-plane-secrets when
+# --replace-existing is used. Reassert the v2 auth aliases last so both keys
+# always finish with the same value.
+APP_AUTH_SECRET_VALUE="${APP_AUTH_SECRET:-}"
+if [ -z "$APP_AUTH_SECRET_VALUE" ]; then
+    APP_AUTH_SECRET_VALUE=$(kubectl get secret control-plane-secrets -n "$NAMESPACE" \
+        -o jsonpath='{.data.AUTH_SECRET}' 2>/dev/null | base64 -d 2>/dev/null || true)
+fi
+if [ -z "$APP_AUTH_SECRET_VALUE" ]; then
+    APP_AUTH_SECRET_VALUE=$(kubectl get secret control-plane-secrets -n "$NAMESPACE" \
+        -o jsonpath='{.data.NEXTAUTH_SECRET}' 2>/dev/null | base64 -d 2>/dev/null || true)
+fi
+if [ -z "$APP_AUTH_SECRET_VALUE" ]; then
+    APP_AUTH_SECRET_VALUE=$(openssl rand -base64 48 | tr -d '\n\r')
+fi
+add_secret_key "control-plane-secrets" "AUTH_SECRET" "$APP_AUTH_SECRET_VALUE"
+add_secret_key "control-plane-secrets" "NEXTAUTH_SECRET" "$APP_AUTH_SECRET_VALUE"
+unset APP_AUTH_SECRET_VALUE
 
 # ============================================================================
 # SUMMARY

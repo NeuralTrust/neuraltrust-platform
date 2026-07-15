@@ -29,6 +29,10 @@ spec:
       volumes:
       - name: tmp
         emptyDir: {}
+      - name: telemetry
+        configMap:
+          name: agentgateway-telemetry
+          optional: true
       {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 6 }}
       containers:
       - name: admin
@@ -40,12 +44,11 @@ spec:
             name: agentgateway-env-vars
         - secretRef:
             name: agentgateway-secrets
-            optional: true
         env:
         {{- with .Values.controlPlane.extraEnv }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-        {{- include "neuraltrust-platform.trustguardClientEnv" (dict "idVar" "TRUSTGUARD_CLIENT_ID" "secretVar" "TRUSTGUARD_CLIENT_SECRET") | nindent 8 }}
+        {{- include "neuraltrust-platform.trustguardClientEnv" (dict "ctx" . "idVar" "TRUSTGUARD_CLIENT_ID" "secretVar" "TRUSTGUARD_CLIENT_SECRET") | nindent 8 }}
         {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
         {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "go" "ctx" .) | nindent 8 }}
         {{- include "neuraltrust-platform.appVersionEnv" (dict "tag" .Values.image.tag) | nindent 8 }}
@@ -66,6 +69,9 @@ spec:
         volumeMounts:
         - name: tmp
           mountPath: /tmp
+        - name: telemetry
+          mountPath: /etc/telemetry
+          readOnly: true
         {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 8 }}
         resources:
           {{- toYaml .Values.controlPlane.resources | nindent 10 }}

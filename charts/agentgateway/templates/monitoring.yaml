@@ -1,0 +1,20 @@
+{{- if and (eq (include "neuraltrust-platform.isV2" .) "true") (eq (include "neuraltrust-platform.monitoring.enabled" .) "true") }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: agentgateway
+  labels:
+    {{- include "neuraltrust-platform.monitoring.labels" . | nindent 4 }}
+    {{- include "agentgateway.labels" . | nindent 4 }}
+spec:
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "agentgateway.name" . }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ include "neuraltrust-platform.monitoring.interval" . }}
+{{- end }}

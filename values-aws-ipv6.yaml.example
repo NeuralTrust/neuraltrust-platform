@@ -1,55 +1,23 @@
-# values-aws-ipv6.yaml.example
-#
-# Minimal overrides for deploying NeuralTrust on AWS EKS with **IPv6-only
-# pod networking** (or any cluster where pods do not have routable IPv4
-# addresses). Layer on top of values-required.yaml:
-#
-#   helm upgrade --install neuraltrust-platform <chart> \
-#     --namespace neuraltrust --create-namespace \
-#     -f values-required.yaml \
-#     -f values-aws-ipv6.yaml \
-#     --set global.domain=example.com
-#
-# What this file covers (and only this):
-#   1. Set global.platform=aws so ALB ingress kicks in and renders
-#      AWS-specific annotations/security contexts.
-#   2. Pin trustgate.redis.bind to "::" so the in-cluster Redis listens on
-#      IPv6 only. The chart default (`0.0.0.0 -::`) requires an IPv4
-#      wildcard, which fails on an IPv6-only pod network. The kubelet's
-#      tcpSocket liveness probe connects on the pod's IPv6 address on
-#      these clusters, so binding to "::" alone is sufficient.
-#
-# What this file does NOT change (defaults already work on IPv6-only):
-#   - clickhouse.listenHost defaults to "::"
-#   - controlPlane.components.app.hostname (Next.js) defaults to "::"
-#   - firewall gateway/workers and AISPM dual-bind from their entrypoints
-#   - in-cluster Kafka (kafka:9092, PLAINTEXT) — external Kafka is unchanged;
-#     see values-external-services.yaml.example (global.kafka)
-#
-# Dual-stack EKS clusters (the EKS default) need NO override at all — the
-# chart's stock defaults work. Only use this overlay for IPv6-only.
-#
-# See README.md → "Cluster networking (IPv4 / IPv6 / dual-stack)" for the
-# full topology matrix.
+# Platform v2 hybrid on AWS EKS with IPv6 pod networking.
+# v2 Redis uses the image's dual-stack defaults; legacy TrustGate Redis bind
+# overrides are not applicable. Layer this over values-required.yaml.
 
 global:
+  platformVersion: "v2"
+  deploymentMode: "hybrid"
   platform: "aws"
-  # domain: "example.com"   # set on the command line or here; ALB ingresses derive <prefix>.<domain>
-  # imageRegistry: ""       # set if mirroring images to a private registry (e.g. ECR)
+  domain: "platform.example.com"
+  ingress:
+    aws:
+      scheme: "internet-facing"
+      targetType: "ip"
+      groupName: "neuraltrust-platform"
+      sslRedirect: "443"
 
-  # Optional: ALB defaults. Uncomment what you need.
-  # ingress:
-  #   aws:
-  #     scheme: "internet-facing"   # or "internal" for VPC-only
-  #     targetType: "ip"            # required for Fargate
-  #     groupName: "neuraltrust"    # share one ALB across all ingresses
-  #     certificateArn: ""          # arn:aws:acm:<region>:<account>:certificate/<id>
-  #     sslRedirect: "443"
+infrastructure:
+  kafka:
+    deploy: false
 
-# IPv6-only override: TrustGate Redis must bind to :: only.
-# Without this override the in-cluster Redis pod enters a SIGTERM
-# crash loop because the chart default (`0.0.0.0 -::`) treats the IPv4
-# wildcard as required and fails to bind on IPv6-only pods.
-trustgate:
-  redis:
-    bind: "::"
+dataagent:
+  tenantId: ""
+  enrolmentToken: ""

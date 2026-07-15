@@ -117,8 +117,8 @@ jobs:
           # Zero-config deploy (secrets auto-generated):
           helm upgrade --install neuraltrust-platform . --namespace neuraltrust --create-namespace
           # Or with custom values:
-          # cp values-required.yaml my-values.yaml && edit my-values.yaml
-          # helm upgrade --install neuraltrust-platform . --namespace neuraltrust --create-namespace -f my-values.yaml
+          # Edit values-required.yaml, then install with:
+          # helm upgrade --install neuraltrust-platform . --namespace neuraltrust --create-namespace -f values-required.yaml
           \`\`\`
 
           **2. Download chart (tarball)**
@@ -163,9 +163,9 @@ jobs:
           echo "helm upgrade --install neuraltrust-platform $OCI_URL --version $V --namespace neuraltrust --create-namespace" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Or with custom values:" >> $GITHUB_STEP_SUMMARY
+          echo "Or after creating a custom values file:" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-          echo "helm upgrade --install neuraltrust-platform $OCI_URL --version $V --namespace neuraltrust --create-namespace -f my-values.yaml" >> $GITHUB_STEP_SUMMARY
+          echo "helm upgrade --install neuraltrust-platform $OCI_URL --version $V --namespace neuraltrust --create-namespace -f values-custom.yaml" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "\`$OCI_URL\`" >> $GITHUB_STEP_SUMMARY

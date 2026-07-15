@@ -48,7 +48,6 @@ spec:
             secretKeyRef:
               name: {{ .Values.clickhouse.existingSecret.name | default "clickhouse" | quote }}
               key: {{ .Values.clickhouse.existingSecret.key | default "admin-password" | quote }}
-              optional: true
         - name: HYPERDX_OTEL_EXPORTER_CLICKHOUSE_DATABASE
           value: {{ .Values.clickhouse.database | quote }}
         - name: HYPERDX_LOG_LEVEL

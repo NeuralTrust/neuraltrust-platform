@@ -46,7 +46,7 @@ spec:
       initContainers:
       - name: init-db
         {{- $initImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
-        {{- $initImageTag := "v1.89.0" }}
+        {{- $initImageTag := "v1.92.0" }}
         {{- $initPullPolicy := "Always" }}
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.image }}
           {{- if .Values.controlPlane.components.app.image.repository }}{{- $initImageRepo = .Values.controlPlane.components.app.image.repository }}{{- end }}
@@ -164,7 +164,7 @@ spec:
       containers:
       - name: app
         {{- $appImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
-        {{- $appImageTag := "v1.89.0" }}
+        {{- $appImageTag := "v1.92.0" }}
         {{- $appPullPolicy := "Always" }}
         {{- $appPort := 3000 }}
         {{- $nodeEnv := "production" }}
@@ -189,7 +189,9 @@ spec:
         {{- $trustguardUrl := "http://trustguard-control-plane" }}
         {{- $datacoreUrl := "http://datacore" }}
         {{- $datacoreMetricsEnabled := "false" }}
+        {{- $forceV2Ui := "true" }}
         {{- $alertEngineApiUrl := "http://alertengine-api" }}
+        {{- $trustlensApiUrl := "http://trustlens-api" }}
         {{- $kafkaHost := include "neuraltrust-platform.kafka.host" . }}
         {{- $kafkaPort := include "neuraltrust-platform.kafka.port" . }}
         {{- $openshiftDomain := include "neuraltrust-platform.domain" . }}
@@ -211,7 +213,9 @@ spec:
           {{- if .Values.controlPlane.components.app.config.trustguardUrl }}{{- $trustguardUrl = .Values.controlPlane.components.app.config.trustguardUrl }}{{- end }}
           {{- if .Values.controlPlane.components.app.config.datacoreUrl }}{{- $datacoreUrl = .Values.controlPlane.components.app.config.datacoreUrl }}{{- end }}
           {{- if hasKey .Values.controlPlane.components.app.config "datacoreMetricsEnabled" }}{{- $datacoreMetricsEnabled = .Values.controlPlane.components.app.config.datacoreMetricsEnabled | toString }}{{- end }}
+          {{- if hasKey .Values.controlPlane.components.app.config "forceV2Ui" }}{{- $forceV2Ui = .Values.controlPlane.components.app.config.forceV2Ui | toString }}{{- end }}
           {{- if .Values.controlPlane.components.app.config.alertEngineApiUrl }}{{- $alertEngineApiUrl = .Values.controlPlane.components.app.config.alertEngineApiUrl }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.trustlensApiUrl }}{{- $trustlensApiUrl = .Values.controlPlane.components.app.config.trustlensApiUrl }}{{- end }}
           {{- if .Values.controlPlane.components.app.config.kafkaHost }}{{- $kafkaHost = .Values.controlPlane.components.app.config.kafkaHost }}{{- end }}
           {{- if .Values.controlPlane.components.app.config.kafkaPort }}{{- $kafkaPort = .Values.controlPlane.components.app.config.kafkaPort }}{{- end }}
         {{- end }}
@@ -357,6 +361,28 @@ spec:
             secretKeyRef:
               name: data-plane-jwt-secret
               key: DATA_PLANE_JWT_SECRET
+        {{- if eq (include "neuraltrust-platform.isV2" .) "true" }}
+        - name: AUTH_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: control-plane-secrets
+              key: AUTH_SECRET
+        - name: NEXTAUTH_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: control-plane-secrets
+              key: NEXTAUTH_SECRET
+        # Self-hosted v2 installs have no v1 UI to preserve, so the console
+        # forces the v2 experience by default (see app/constants/uiVersion.ts).
+        # Set controlPlane.components.app.config.forceV2Ui: "false" to opt out.
+        - name: FORCE_V2_UI
+          value: "{{ $forceV2Ui }}"
+        {{- end }}
+        - name: NEXTAUTH_URL
+          {{- /* Explicit config.nextAuthUrl wins; else resolve to the real ingress
+                 host (app.<domain>). See control-plane.appPublicUrl helper. */}}
+          value: "{{ $nextAuthUrl | default (include "control-plane.appPublicUrl" .) }}"
+        {{- if ne (include "neuraltrust-platform.isV2" .) "true" }}
         - name: CONTROL_PLANE_SCHEDULER_URL
           value: "{{ $schedulerUrl }}"
         - name: TRUSTGATE_CONTROL_PLANE_URL
@@ -365,16 +391,13 @@ spec:
           value: "{{ $trustgateDataPlaneUrl }}"
         - name: TRUSTGATE_ACTIONS_URL
           value: "{{ $trustgateActionsUrl }}"
-        - name: NEXTAUTH_URL
-          {{- /* Explicit config.nextAuthUrl wins; else resolve to the real ingress
-                 host (app.<domain>). See control-plane.appPublicUrl helper. */}}
-          value: "{{ $nextAuthUrl | default (include "control-plane.appPublicUrl" .) }}"
         - name: TRUSTGATE_JWT_SECRET
           valueFrom:
             secretKeyRef:
               name: control-plane-secrets
               key: TRUSTGATE_JWT_SECRET
               optional: true
+        {{- end }}
         - name: FIREWALL_API_URL
           # Resolved by the parent chart (templates/platform-secrets.yaml):
           # explicit controlPlane.components.app.config.firewallApiUrl >
@@ -384,22 +407,6 @@ spec:
             secretKeyRef:
               name: control-plane-secrets
               key: FIREWALL_API_URL
-              optional: true
-        - name: POSTURE_API_URL
-          # Resolved by the parent chart (templates/platform-secrets.yaml):
-          # explicit controlPlane.components.app.config.postureApiUrl >
-          # existing control-plane-secrets value > aispm-api-service FQDN
-          # when neuraltrust-aispm.aispm.enabled. Optional when AISPM is off.
-          valueFrom:
-            secretKeyRef:
-              name: control-plane-secrets
-              key: POSTURE_API_URL
-              optional: true
-        - name: POSTURE_JWT_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: data-plane-jwt-secret
-              key: DATA_PLANE_JWT_SECRET
               optional: true
         - name: FIREWALL_JWT_SECRET
           {{- if and .Values.controlPlane .Values.controlPlane.secrets .Values.controlPlane.secrets.firewallJwtSecret (or (kindIs "map" .Values.controlPlane.secrets.firewallJwtSecret) (and (kindIs "string" .Values.controlPlane.secrets.firewallJwtSecret) (ne .Values.controlPlane.secrets.firewallJwtSecret ""))) }}
@@ -424,15 +431,16 @@ spec:
               name: control-plane-secrets
               key: MODEL_SCANNER_SECRET
               optional: true
+        {{- if ne (include "neuraltrust-platform.isV2" .) "true" }}
         - name: KAFKA_HOST
           value: "{{ $kafkaHost }}"
         - name: KAFKA_PORT
           value: "{{ $kafkaPort }}"
+        {{- end }}
         {{- if eq (include "neuraltrust-platform.isV2" .) "true" }}
-        {{- /* platform-v2 backend services the console (BFF) calls. URLs default to
-               the in-cluster Services (port 80); JWT secrets come from each v2
-               subchart's own Secret and are optional so the app still boots when a
-               given service is disabled. */}}
+        {{- /* platform-v2 backend services the console (BFF) calls. Core backend
+               credentials are required so the app fails closed on an incomplete
+               external install. AlertEngine and TrustLens remain optional. */}}
         - name: AGENTGATEWAY_URL
           value: "{{ $agentgatewayUrl }}"
         - name: AGENTGATEWAY_PROXY_URL
@@ -442,7 +450,6 @@ spec:
             secretKeyRef:
               name: agentgateway-secrets
               key: SERVER_SECRET_KEY
-              optional: true
         - name: TRUSTGUARD_URL
           value: "{{ $trustguardUrl }}"
         - name: TRUSTGUARD_JWT_SECRET
@@ -450,27 +457,35 @@ spec:
             secretKeyRef:
               name: trustguard-secrets
               key: ADMIN_JWT_SECRET
-              optional: true
         - name: DATACORE_URL
           value: "{{ $datacoreUrl }}"
         - name: DATACORE_METRICS_ENABLED
           value: "{{ $datacoreMetricsEnabled }}"
+        - name: ALERT_ENGINE_API_URL
+          value: "{{ $alertEngineApiUrl }}"
+        - name: TRUSTLENS_API_URL
+          value: "{{ $trustlensApiUrl }}"
         - name: DATACORE_JWT_SECRET
           valueFrom:
             secretKeyRef:
               name: datacore-secrets
               key: AUTH_JWT_HS256_SECRET
-              optional: true
-        - name: ALERT_ENGINE_API_URL
-          value: "{{ $alertEngineApiUrl }}"
         - name: ALERT_ENGINE_JWT_SECRET
           valueFrom:
             secretKeyRef:
               name: alertengine-secrets
               key: AUTH_JWT_SECRET
               optional: true
+        - name: TRUSTLENS_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: trustlens-secrets
+              key: JWT_SECRET
+              optional: true
         {{- end }}
+        {{- if ne (include "neuraltrust-platform.isV2" .) "true" }}
         {{- include "neuraltrust-platform.kafka.authEnv" . | nindent 8 }}
+        {{- end }}
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.extraEnv }}
         {{- toYaml .Values.controlPlane.components.app.extraEnv | nindent 8 }}
         {{- end }}

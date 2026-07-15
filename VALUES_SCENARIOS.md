@@ -1,377 +1,139 @@
 # Values Files and Scenarios
 
-Side-by-side reference for all provided values files and common configuration scenarios.
+All new deployments should start with Platform v2. Platform v1 examples are
+explicitly marked legacy.
 
-## Values files
+## Core examples
 
-### `values-required.yaml` — Minimal starting template
+| File | Platform | Mode | Purpose |
+|---|---|---|---|
+| `values-required.yaml` | v2 | hybrid | Minimal starting point; DataAgent disabled until enrolment |
+| `values-v2.yaml.example` | v2 | hybrid | Documented hybrid knobs |
+| `values-v2-external.yaml.example` | v2 | external | Minimal self-hosted topology |
+| `values-all-deployed.yaml.example` | v2 | external | Supported optional components enabled |
+| `values-v2-managed-datastores.yaml.example` | v2 | external | Managed PostgreSQL, Redis, and ClickHouse |
+| `values-v1-legacy.yaml.example` | v1 | legacy | Explicit legacy topology |
+| `values-external-services.yaml.example` | v1 | legacy | Legacy external PostgreSQL, ClickHouse, and Kafka |
 
-Smallest possible configuration. All other options use chart defaults. Secrets are auto-generated.
+## Platform overlays
 
-```bash
-# Zero-config deploy
-helm upgrade --install neuraltrust-platform . --namespace neuraltrust --create-namespace
+| File | Applies to | Notes |
+|---|---|---|
+| `values-openshift.yaml` | v2 hybrid | Native OpenShift Routes |
+| `values-openshift-ingress.yaml.example` | v2 hybrid | Kubernetes Ingress on OpenShift |
+| `values-aws-ipv6.yaml.example` | v2 hybrid | AWS provider and IPv6-safe v2 defaults |
+| `values-dataplane-gpu.yaml.example` | v2 hybrid | GPU Firewall workers |
 
-# With overrides
-cp values-required.yaml my-values.yaml
-helm upgrade --install neuraltrust-platform . --namespace neuraltrust --create-namespace -f my-values.yaml
-```
+## Observability overlays
 
-### `values.yaml` — Full reference
+| File | Purpose |
+|---|---|
+| `values-minimal-observability.yaml.example` | Watchdog sends redacted telemetry directly to hosted observability |
+| `values-observability-self-hosted.yaml.example` | Umbrella OTel Collector and monitoring resources with hosted export off |
+| `values-self-monitoring.yaml.example` | Curated v2 watchdog checks, dry-run first |
+| `values-watchdog.yaml.example` | Detailed v2 watchdog configuration |
+| `values-watchdog-gmp.yaml.example` | Google Managed Prometheus resources |
 
-Every available option with inline comments. Use as a reference or copy to customize everything.
+The umbrella OTel Collector is portable across hybrid and external. The
+ClickStack OTel Collector is a product analytics component and only renders in
+v2 external.
 
-```bash
-cp values.yaml my-values.yaml
-helm upgrade --install neuraltrust-platform . --namespace neuraltrust --create-namespace -f my-values.yaml
-```
-
-### `values-openshift.yaml` — OpenShift with Routes
-
-Pre-configured for OpenShift: Routes enabled, Ingress disabled, relaxed security contexts.
-
-```yaml
-global:
-  platform: "openshift"
-  domain: "apps.mycluster.example.com"
-```
-
-```bash
-helm upgrade --install neuraltrust-platform . -f values-openshift.yaml \
-  --set global.domain="apps.mycluster.example.com"
-```
-
-> **Note:** The deprecated `global.openshift: true` / `global.openshiftDomain` fields still work. Prefer `global.platform` and `global.domain`.
-
-### `values-openshift-ingress.yaml.example` — OpenShift with Ingress
-
-OpenShift using Kubernetes Ingress instead of Routes. TLS via existing wildcard certificates.
-
-```bash
-cp values-openshift-ingress.yaml.example my-values.yaml
-# Set domain, image pull secrets, and ingress class
-helm upgrade --install neuraltrust-platform . -f my-values.yaml
-```
-
-### `values-all-deployed.yaml.example` — Everything enabled
-
-All infrastructure and services deployed. Use as a reference for what a complete deployment looks like.
-
-### `values-external-services.yaml.example` — External infrastructure
-
-ClickHouse, Kafka, and PostgreSQL provided externally. Only NeuralTrust services and TrustGate are deployed in-cluster. Kafka connection, SASL, and TLS are configured under **`global.kafka`** (not `infrastructure.kafka.external`). Set `infrastructure.kafka.deploy: false` to skip the in-cluster Kafka subchart.
-
-### `values-dataplane-gpu.yaml.example` — Data Plane + GPU firewall
-
-Full stack with GPU firewall workers and TrustGate disabled. Includes GPU scheduling, CUDA MPS, and node selector placeholders.
-
-```bash
-cp values-dataplane-gpu.yaml.example my-values.yaml
-# Set hosts, secrets, GPU node labels, and pool names
-helm upgrade --install neuraltrust-platform . --namespace neuraltrust --create-namespace -f my-values.yaml
-```
-
-For CPU-only firewall, use chart defaults (`firewall-cpu` image, no GPU keys).
-
-### `values-aws-ipv6.yaml.example` — AWS EKS with IPv6-only pod networking
-
-Layered overlay for IPv6-only EKS clusters. Sets `global.platform=aws` (ALB ingress) and pins `trustgate.redis.bind` to `::` so the in-cluster Redis listens on IPv6 only — the chart default (`0.0.0.0 -::`) requires an IPv4 wildcard which fails on IPv6-only pods. Stack on top of `values-required.yaml`:
-
-```bash
-helm upgrade --install neuraltrust-platform . \
-  --namespace neuraltrust --create-namespace \
-  -f values-required.yaml \
-  -f values-aws-ipv6.yaml.example \
-  --set global.domain=example.com
-```
-
-Dual-stack EKS (the EKS default) needs no override — chart defaults work as-is. See [README.md → Cluster networking](./README.md#cluster-networking-ipv4--ipv6--dual-stack) for the full topology matrix.
-
----
-
-## Configuration scenarios
-
-### Scenario 1: Kubernetes with Ingress
-
-**File:** `values-required.yaml` or `values.yaml`
+## Scenario: default v2 hybrid
 
 ```yaml
 global:
-  platform: "aws"  # or "gcp", "azure", "kubernetes"
+  platformVersion: "v2"
+  deploymentMode: "hybrid"
+  platform: "kubernetes"
   domain: "platform.example.com"
+
+dataagent:
+  tenantId: ""
+  enrolmentToken: ""
 ```
 
-### Scenario 2: OpenShift with Routes
+Enable DataAgent only after enrolment:
 
-**File:** `values-openshift.yaml`
+```yaml
+dataagent:
+  tenantId: "<tenant-id>"
+  enrolmentToken: "<enrolment-token>"
+```
+
+## Scenario: self-hosted v2 external
 
 ```yaml
 global:
-  platform: "openshift"
-  domain: "apps.mycluster.example.com"
+  platformVersion: "v2"
+  deploymentMode: "external"
+  observability:
+    hostedExport:
+      enabled: false
+
+alertengine:
+  enabled: true
 ```
 
-### Scenario 3: OpenShift with Ingress
+External mode renders ClickStack, DataCore, AlertEngine, the product API/app,
+and the v2 control and data planes. It does not render DataAgent.
 
-**File:** Based on `values-openshift-ingress.yaml.example`
-
-```yaml
-global:
-  platform: "openshift"
-  domain: "apps.mycluster.example.com"
-  ingress:
-    provider: "openshift"
-
-trustgate:
-  ingress:
-    enabled: true
-```
-
-### Scenario 4: External infrastructure only
-
-**File:** Based on `values-external-services.yaml.example`
+## Scenario: managed datastores
 
 ```yaml
-global:
-  # Single switch for external PostgreSQL across all subcharts (control-plane,
-  # TrustGate, AISPM). Skips the in-cluster PG Deployment, the wait-for-postgresql
-  # initContainers, and the TrustGate/AISPM postgresql-init Jobs — so the postgres
-  # image is never pulled. Pre-create the users/databases on the external server.
+infrastructure:
   postgresql:
     deploy: false
-  # External Kafka — all subcharts read bootstrap/auth/TLS from here.
-  kafka:
-    bootstrapServers: "kafka.example.com:9093"
-    auth:
-      enabled: true
-      existingSecret: "kafka-credentials"
-    tls:
-      enabled: true
-      existingSecret: "kafka-broker-ca"
-
-infrastructure:
+  redis:
+    deploy: false
   clickhouse:
     deploy: false
-    external:
-      host: "clickhouse.example.com"
   kafka:
     deploy: false
-
-neuraltrust-control-plane:
-  controlPlane:
-    components:
-      postgresql:
-        secrets:
-          host: "postgres.example.com"
 ```
 
-### Scenario 5: No TrustGate
+Use existing secrets and generic service endpoints as shown in
+`values-v2-managed-datastores.yaml.example`. Pre-create PostgreSQL roles and
+databases because the in-cluster initialization Job is skipped.
 
-**File:** Based on `values-required.yaml` or `values-dataplane-gpu.yaml.example`
+## Scenario: OpenShift
 
-```yaml
-trustgate:
-  enabled: false
-
-neuraltrust-control-plane:
-  controlPlane:
-    enabled: true
-
-neuraltrust-data-plane:
-  dataPlane:
-    enabled: true
-```
-
-### Scenario 6: Pre-generated secrets (CI/CD)
-
-**File:** Custom values
-
-```yaml
-global:
-  autoGenerateSecrets: false
-  preserveExistingSecrets: true
-```
-
-All secrets must exist in the namespace before deployment. See [SECRETS.md](./SECRETS.md).
-
-### Scenario 7: Zero-config
-
-**File:** None required
+Use `values-openshift.yaml` for Routes:
 
 ```bash
-helm upgrade --install neuraltrust-platform . --namespace neuraltrust --create-namespace
+helm upgrade --install neuraltrust-platform <chart> \
+  --namespace neuraltrust --create-namespace \
+  -f values-openshift.yaml \
+  --set global.domain=apps.example.com
 ```
 
-### Scenario 8: ClickHouse backups to object storage
+Use `values-openshift-ingress.yaml.example` when an Ingress controller and
+certificate Secret are managed separately.
 
-**File:** Custom values
+## Scenario: GPU Firewall
 
-```yaml
-clickhouse:
-  backup:
-    enabled: true
-    schedule: "0 2 * * *"
-    storage:
-      type: s3              # or "azblob"
-      s3:
-        endpoint: "https://s3.eu-west-1.amazonaws.com/my-bucket/clickhouse-backups"
-        accessKeyId: ""     # empty = use IAM/IRSA/Workload Identity
-        secretAccessKey: ""
-```
+Layer `values-dataplane-gpu.yaml.example` over `values-required.yaml`. Replace
+the generic image registry and scheduling labels with values for the GPU pool.
+The gateway remains CPU-only; workers request GPUs.
 
-For GCS, use `https://storage.googleapis.com/<bucket>/<prefix>` and Workload Identity. See [DEPLOYMENT.md](./DEPLOYMENT.md#clickhouse-backups) for full configuration.
+## Scenario: no hosted telemetry egress
 
-### Scenario 9: Auto-derive Ingress hostnames from `global.domain`
+Layer `values-observability-self-hosted.yaml.example`. This disables hosted
+export while retaining the umbrella collector, Prometheus Operator resources
+when CRDs are available, and optional watchdog actions.
 
-**File:** any
+In external mode, the ClickStack collector still writes product telemetry to
+the selected ClickHouse instance; it does not export to NeuralTrust SaaS.
 
-When `global.domain` is set, every Ingress auto-fills its host. No per-service `host` is needed for the common case.
+## Legacy v1
 
-```yaml
-global:
-  domain: "platform.example.com"
-```
-
-Yields: `admin.platform.example.com`, `gateway.platform.example.com`, `actions.platform.example.com`, `api.platform.example.com`, `app.platform.example.com`, `scheduler.platform.example.com`, `data-plane-api.platform.example.com`.
-
-Override per service:
-
-```yaml
-trustgate:
-  ingress:
-    controlPlane:
-      host: "tg-admin.example.com"   # full hostname override
-    dataPlane:
-      hostPrefix: "tg"               # change subdomain only
-```
-
-Disable auto-derive (catch-all) by setting `hostPrefix: ""`. OpenShift Routes are unaffected. Full table of default prefixes in [DEPLOYMENT.md](./DEPLOYMENT.md#ingress-hostnames).
-
-### Scenario 10: Mirror images to a private registry
-
-**File:** any
-
-Set once at the parent level and every subchart inherits:
+Pin v1 explicitly:
 
 ```yaml
 global:
-  imageRegistry: "my-registry.corp/neuraltrust"
+  platformVersion: "v1"
 ```
 
-The image helpers strip the chart's default GCP prefix and prepend yours, so no per-component override is needed when you mirror with the same short names.
-
-Need different tags or renamed paths? Override per component:
-
-```yaml
-neuraltrust-control-plane:
-  controlPlane:
-    components:
-      api:
-        image:
-          repository: "my-registry.corp/cp-api"   # renamed path
-          tag: "v1.13.9-corp1"                    # custom tag
-```
-
-When `image.repository` starts with your registry's host, the helper uses it as-is. See [DEPLOYMENT.md](./DEPLOYMENT.md#private--mirrored-image-registry) for the full list of components and the resolution rules.
-
-### Scenario 11: Inject custom environment variables
-
-**File:** Custom values
-
-```yaml
-neuraltrust-data-plane:
-  dataPlane:
-    components:
-      api:
-        extraEnv:
-          - name: LOG_LEVEL
-            value: "debug"
-        extraEnvFrom:
-          - configMapRef:
-              name: feature-flags
-```
-
-Available on every main service container. See [DEPLOYMENT.md](./DEPLOYMENT.md#custom-environment-variables) for the full list of supported components.
-
-### Scenario 12: Pin the whole platform to a dedicated node pool
-
-**File:** Custom values
-
-```yaml
-global:
-  nodeSelector:
-    dedicated: neuraltrust
-  # Only needed if the pool is tainted (exclusive). A nodeSelector alone
-  # won't keep other tenants off a tainted pool.
-  tolerations:
-    - key: dedicated
-      operator: Equal
-      value: neuraltrust
-      effect: NoSchedule
-```
-
-`global.nodeSelector` / `global.tolerations` apply to **every** workload across all subcharts. Per-component `nodeSelector` (e.g. `clickhouse.nodeSelector`) still works and wins on conflicting keys. Both default to empty (no pinning). See [DEPLOYMENT.md](./DEPLOYMENT.md#dedicated-node-pool).
-
----
-
-## Firewall: CPU and GPU
-
-The firewall is controlled by `neuraltrust-firewall.firewall.enabled` (default: `true`, CPU image). It deploys a **gateway** (CPU router) plus **5 specialized workers**. Disable with `enabled: false` if your environment doesn't need in-cluster prompt/response safety.
-
-| Component | Image | Scheduling | CUDA MPS |
-|---|---|---|---|
-| Gateway | `firewall-cpu` | CPU only | N/A |
-| Workers (default) | `firewall-cpu` | CPU only | Omit MPS keys |
-| Workers (GPU) | `firewall-gpu` | Override image, add `nvidia.com/gpu`, `nodeSelector`, `tolerations`, `hostIPC` | Set `cudaMpsActiveThreadPercentage` + `cudaMpsPinnedDeviceMemLimit` |
-
-CUDA MPS env vars are only rendered in the ConfigMap when **both** keys are set.
-
-**Reference files:** `values-dataplane-gpu.yaml.example` (GPU, no TrustGate), `values.yaml` (full options).
-
----
-
-## Secret management modes
-
-| Mode | Flags | Behavior | Best for |
-|---|---|---|---|
-| Auto-generated (default) | `autoGenerateSecrets: true` | Helm creates and preserves secrets | Dev, staging, quick starts |
-| Explicit values | `autoGenerateSecrets: true` + values set | Your values override auto-generation | Controlled environments |
-| Pre-generated | `preserveExistingSecrets: true` | Helm never touches secrets | Vault, Sealed Secrets, compliance |
-
-When `preserveExistingSecrets: true`, these secrets must exist:
-
-- `clickhouse` — `admin-password`
-- `postgresql-secrets` — `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `DATABASE_URL`, etc.
-- `control-plane-secrets` — `CONTROL_PLANE_JWT_SECRET`, `TRUSTGATE_JWT_SECRET`, etc.
-- `data-plane-jwt-secret` — `DATA_PLANE_JWT_SECRET`
-- `trustgate-secrets` — `SERVER_SECRET_KEY`, `DATABASE_PASSWORD`, and optionally `NEURAL_TRUST_FIREWALL_URL`, `NEURAL_TRUST_FIREWALL_SECRET_KEY`
-
-Optional: `openai-secrets`, `google-secrets`, `resend-secrets`, `huggingface-secrets`
-
-See [SECRETS.md](./SECRETS.md) for the complete reference.
-
----
-
-## Ingress vs Routes
-
-| Feature | Ingress | Routes (OpenShift) |
-|---|---|---|
-| Platform | Any Kubernetes | OpenShift only |
-| Controller | Required (NGINX, ALB, GCE, etc.) | Built-in |
-| TLS | `kubernetes.io/tls` secrets or cloud-managed | OpenShift router |
-| Enable | `ingress.enabled: true` per component | Default when `platform: "openshift"` |
-
----
-
-## Quick reference
-
-| Scenario | Values file | Platform | Ingress | Routes | Secrets |
-|---|---|---|---|---|---|
-| Zero-config | None (defaults) | Any | No | No | Auto |
-| Kubernetes | `values-required.yaml` | `aws`/`gcp`/`azure`/`kubernetes` | Yes | No | Auto |
-| OpenShift (Routes) | `values-openshift.yaml` | `openshift` | No | Yes | Auto |
-| OpenShift (Ingress) | `values-openshift-ingress.yaml.example` | `openshift` | Yes | No | Pre-gen |
-| Everything on | `values-all-deployed.yaml.example` | Configurable | Yes | Configurable | Auto |
-| External infra | `values-external-services.yaml.example` | Configurable | Yes | Configurable | Auto |
-| GPU firewall | `values-dataplane-gpu.yaml.example` | Configurable | Yes | Configurable | Explicit |
-| AWS EKS (IPv6-only) | `values-aws-ipv6.yaml.example` (overlay on `values-required.yaml`) | `aws` | Yes (ALB) | No | Auto |
+Only v1 supports legacy TrustGate, Kafka, Kafka Connect, Kafka workers, and the
+scheduler. Kafka never runs in v2. AISPM and SIEM Connector components are
+retired; AlertEngine in v2 external preserves the supported SIEM and integration
+workflow.

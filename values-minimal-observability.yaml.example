@@ -1,33 +1,12 @@
-# values-minimal-observability.yaml.example
-#
-# Customer-minimal observability: no in-chart OpenTelemetry Collector, no
-# bundled Prometheus. A single watchdog StatefulSet pushes:
-#   - check-status gauges (watchdog.check.status, watchdog.up) over OTLP
-#   - redacted ERROR/WARN pod logs over OTLP
-# directly to the NeuralTrust SaaS collector.
-#
-# Prerequisite in this release namespace:
-#
-#   kubectl -n <namespace> create secret generic neuraltrust-observability-token \
-#     --from-literal=token=<shared-or-tenant-observability-token>
-#
-# Install with:
-#
-#   helm upgrade --install neuraltrust-platform . \
-#     -n <namespace> --create-namespace \
-#     -f values-required.yaml \
-#     -f values-minimal-observability.yaml
-#
-# Assumes in-cluster Kafka (kafka:9092) for any kafka-* watchdog checks you
-# enable separately. External Kafka: see values-external-services.yaml.example.
+# Platform v2 hybrid with collector-less hosted observability.
+# Pre-create `neuraltrust-observability-token` with key `token`.
 
 global:
+  platformVersion: "v2"
+  deploymentMode: "hybrid"
   observability:
-    # Keep the in-chart collector OFF. Watchdog pushes directly to hostedExport.
     enabled: false
-    # Stable customer/tenant slug. The SaaS collector routes customer telemetry
-    # by this resource attribute; the token only authenticates the request.
-    tenantId: "customer-slug"
+    tenantId: "<tenant-id>"
     hostedExport:
       enabled: true
       endpoint: "https://collector.neuraltrust.ai"
@@ -38,6 +17,8 @@ global:
 neuraltrust-watchdog:
   enabled: true
   actions:
-    # Observe-only by default. Mutating/healing actions still need separate RBAC
-    # and per-check dryRun=false before they can change the cluster.
     dryRun: true
+  enabledCheckIds:
+    - clickhouse
+    - firewall-health
+    - pod-health

@@ -6,7 +6,7 @@ firewall:
     replicas: 2
     image:
       repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-      tag: v2.13.0
+      tag: v2.14.0
       pullPolicy: IfNotPresent
     resources:
       limits:
@@ -40,7 +40,7 @@ firewall:
     deploymentStrategy: Recreate # Recreate | RollingUpdate
     image:
       repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-      tag: v2.13.0
+      tag: v2.14.0
       pullPolicy: IfNotPresent
     replicas: 1
     # CPU-worker default: one HF transformer (~86M-class) per pod via ONNX.

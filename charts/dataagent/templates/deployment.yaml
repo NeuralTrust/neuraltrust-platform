@@ -1,4 +1,4 @@
-{{- if and (eq (include "neuraltrust-platform.isV2" .) "true") (eq (include "neuraltrust-platform.isHybrid" .) "true") }}
+{{- if eq (include "neuraltrust-platform.dataagentEnabled" .) "true" }}
 {{- $img := include "dataagent.image" (dict "repository" .Values.image.repository "tag" .Values.image.tag "global" .Values.global) }}
 apiVersion: apps/v1
 kind: Deployment
@@ -40,9 +40,15 @@ spec:
         - configMapRef:
             name: dataagent-env-vars
         - secretRef:
-            name: dataagent-secrets
-            optional: true
+            name: {{ (default dict .Values.existingSecret).name | default "dataagent-secrets" | quote }}
         env:
+        {{- with .Values.enrolmentTokenExistingSecret.name }}
+        - name: ENROLMENT_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ . | quote }}
+              key: {{ $.Values.enrolmentTokenExistingSecret.key | default "ENROLMENT_TOKEN" | quote }}
+        {{- end }}
         {{- with .Values.extraEnv }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

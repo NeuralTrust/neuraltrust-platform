@@ -1,113 +1,49 @@
-# Example: Deploy everything (ClickHouse, Kafka, PostgreSQL, NeuralTrust, TrustGate)
-# This is the default configuration - deploy all infrastructure and services
-#
-# Usage:
-#   helm install neuraltrust-platform . -f values-all-deployed.yaml.example
-#
-# This example shows:
-# - Deploying all infrastructure components (ClickHouse, Kafka, PostgreSQL)
-# - Deploying all NeuralTrust components (Control Plane and Data Plane)
-# - Deploying TrustGate
-# - Using Helm-managed secrets (preserveExistingSecrets: false)
-# - Using Ingress for external access (Kubernetes) or Routes (OpenShift)
-# - Creating the chart's shared self-signed TLS secret by default
-# - Using that shared secret automatically whenever an ingress enables TLS without a secretName
-# - Auto-derived Ingress hostnames from global.domain (admin/gateway/actions/api/app/scheduler/data-plane-api)
+# Platform v2 external with every supported optional component enabled.
+# Retired AISPM and SIEM Connector workloads are intentionally absent.
+# Kafka is explicitly disabled and never renders in v2.
 
-# Global settings
 global:
-  platform: "kubernetes"        # "aws" | "gcp" | "azure" | "openshift" | "kubernetes"
-  domain: "yourdomain.com"      # Set to your base domain. Ingresses auto-derive as <prefix>.<domain>.
-  imageRegistry: ""             # Optional: set to your private/mirrored registry to rebrand all images.
-  preserveExistingSecrets: false  # Set to true if secrets are pre-generated
-  storageClass: ""              # Global storage class for persistent volumes
-  ingress:
-    tls:
-      autoGenerate: true  # Create the shared self-signed TLS secret by default.
-      secretName: "neuraltrust-ingress-tls"  # Shared secret used whenever a TLS-enabled ingress omits tls.secretName.
+  platformVersion: "v2"
+  deploymentMode: "external"
+  platform: "kubernetes"
+  domain: "platform.example.com"
+  imageRegistry: ""
+  autoGenerateSecrets: true
+  preserveExistingSecrets: false
+  observability:
+    enabled: true
+    hostedExport:
+      enabled: false
+  monitoring:
+    enabled: true
 
-# Infrastructure Components - Deploy all
 infrastructure:
-  clickhouse:
-    deploy: true  # Deploy ClickHouse
-    # ClickHouse chart values are passed via root-level 'clickhouse:' section
-    # See values.yaml for full configuration
-
-  kafka:
-    deploy: true  # Deploy Kafka
-    # Kafka chart values are passed via root-level 'kafka:' section
-    # See values.yaml for full configuration
-
   postgresql:
-    # Note: PostgreSQL deployment is controlled by neuraltrust-control-plane.infrastructure.postgresql.deploy below
-    # Set deploy: true/false in that section to enable/disable in-cluster PostgreSQL deployment
+    deploy: true
+  redis:
+    deploy: true
+  clickhouse:
+    deploy: true
+  kafka:
+    deploy: false
 
-# NeuralTrust Control Plane - Deploy all components
-# Hostnames auto-derive from global.domain (api.<domain>, app.<domain>, scheduler.<domain>).
-# Override per service with .host (full hostname) or .hostPrefix (subdomain only) when needed.
-neuraltrust-control-plane:
-  infrastructure:
-    postgresql:
-      deploy: true  # Deploy PostgreSQL in-cluster
-  controlPlane:
-    enabled: true
-    components:
-      postgresql:
-        secrets:
-          password: "your-postgres-password"  # Define this value
-          database: "neuraltrust"
-      api:
-        enabled: true
-        ingress:
-          enabled: true  # Use Ingress for external access
-          # tls:
-          #   enabled: true
-          #   secretName: ""  # Empty = use the default shared self-signed secret
-      app:
-        enabled: true
-        ingress:
-          enabled: true  # Use Ingress for external access
-      scheduler:
-        enabled: true
-        ingress:
-          enabled: true  # Use Ingress for external access
+# WIP component; keep disabled until a TrustLens release image is published.
+trustlens:
+  enabled: false
 
-# NeuralTrust Data Plane - Deploy all components
-# Data Plane API hostname auto-derives as data-plane-api.<global.domain>.
-neuraltrust-data-plane:
-  dataPlane:
-    enabled: true
-    components:
-      clickhouse:
-        enabled: true  # ClickHouse will be deployed via infrastructure.clickhouse.deploy
-        host: "clickhouse"  # Internal service name
-      kafka:
-        enabled: true  # Kafka Connect; broker from infrastructure.kafka.deploy + global.kafka
-      api:
-        enabled: true
-        ingress:
-          enabled: true  # Use Ingress for external access
-          # tls:
-          #   enabled: true
-          #   secretName: ""  # Empty = use the default shared self-signed secret
-      worker:
-        enabled: true
-
-# TrustGate - Deploy all components
-# Ingress hostnames auto-derive: admin.<global.domain>, gateway.<global.domain>, actions.<global.domain>.
-trustgate:
+alertengine:
   enabled: true
-  global:
-    env:
-      DATABASE_HOST: "control-plane-postgresql"  # Use control-plane PostgreSQL
-      DATABASE_PORT: "5432"
-      DATABASE_USER: "trustgate"  # Define this value
-      DATABASE_PASSWORD: "your-trustgate-db-password"  # Define this value
-      DATABASE_NAME: "trustgate"
-      DATABASE_SSL_MODE: "disable"  # Use "disable" for in-cluster PostgreSQL
-  ingress:
-    enabled: true  # Use Ingress for external access
-    # Optional:
-    # tls:
-    #   enabled: true
-    #   secretName: ""  # Empty = use the default shared self-signed secret
+
+neuraltrust-firewall:
+  firewall:
+    enabled: true
+
+neuraltrust-watchdog:
+  enabled: true
+  actions:
+    dryRun: true
+  enabledCheckIds:
+    - clickhouse
+    - firewall-health
+    - pod-health
+    - otel-collector

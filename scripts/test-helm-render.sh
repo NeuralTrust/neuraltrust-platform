@@ -35,7 +35,24 @@ helm dependency update "$CHART_DIR" >/dev/null
 render() {
   local out="$1"
   shift
-  helm template test "$CHART_DIR" -f "$CHART_DIR/values-required.yaml" "$@" > "$out"
+  helm template test "$CHART_DIR" --namespace default -f "$CHART_DIR/values-required.yaml" \
+    --set global.platformVersion=v1 "$@" > "$out"
+}
+
+render_default() {
+  local out="$1"
+  shift
+  helm template test "$CHART_DIR" --namespace default -f "$CHART_DIR/values-required.yaml" "$@" > "$out"
+}
+
+assert_render_fails() {
+  local msg="$1"
+  shift
+  if helm template test "$CHART_DIR" --namespace default -f "$CHART_DIR/values-required.yaml" "$@" >/dev/null 2>&1; then
+    red "FAIL: $msg"
+    exit 1
+  fi
+  green "ok  - $msg"
 }
 
 assert_contains() {
@@ -63,12 +80,60 @@ assert_not_contains() {
   green "ok  - $msg"
 }
 
+assert_env_value() {
+  local file="$1" name="$2" expected="$3" msg="$4"
+  if ! grep -A1 -- "name: $name\$" "$file" | grep -qE -- "value: \"?${expected}\"?\$"; then
+    red "FAIL: $msg"
+    red "  expected env $name to equal: $expected"
+    red "  in: $file"
+    exit 1
+  fi
+  green "ok  - $msg"
+}
+
+assert_watchdog_check_state() {
+  local file="$1" check_id="$2" expected="$3" msg="$4"
+  local actual
+  actual=$(CHECK_ID="$check_id" yq e 'select(.kind == "ConfigMap" and (.metadata.name | test("watchdog.*-config$"))) | .data."config.yaml" | from_yaml | .checks[] | select(.id == strenv(CHECK_ID)) | .enabled' "$file")
+  if [[ "$actual" != "$expected" ]]; then
+    red "FAIL: $msg"
+    red "  check $check_id expected enabled=$expected, got ${actual:-missing}"
+    exit 1
+  fi
+  green "ok  - $msg"
+}
+
+assert_resource_state() {
+  local file="$1" kind="$2" name="$3" expected="$4" msg="$5"
+  local actual
+  actual=$(RESOURCE_KIND="$kind" RESOURCE_NAME="$name" yq e 'select(.kind == strenv(RESOURCE_KIND) and .metadata.name == strenv(RESOURCE_NAME)) | .metadata.name' "$file")
+  if [[ "$expected" == "present" && "$actual" != "$name" ]]; then
+    red "FAIL: $msg"
+    red "  expected $kind/$name to be present"
+    exit 1
+  fi
+  if [[ "$expected" == "absent" && -n "$actual" ]]; then
+    red "FAIL: $msg"
+    red "  expected $kind/$name to be absent"
+    exit 1
+  fi
+  green "ok  - $msg"
+}
+
 # Scenario 1: defaults. Observability is OFF by default — no in-chart
 # collector. Components still render; hosted export is irrelevant until
 # the collector is enabled (via global.observability.enabled or watchdog).
-blue "scenario 1: defaults (observability off, no token)"
+blue "scenario 1: chart 2.0 defaults to v2 hybrid"
+render_default "$TMP/default-v2.yaml"
+assert_contains     "$TMP/default-v2.yaml" "name: agentgateway-proxy" "default render includes AgentGateway"
+assert_contains     "$TMP/default-v2.yaml" "name: trustguard-data-plane" "default render includes TrustGuard"
+assert_not_contains "$TMP/default-v2.yaml" "name: dataagent$" "default render omits DataAgent without enrolment"
+assert_not_contains "$TMP/default-v2.yaml" "name: clickstack-collector" "default hybrid omits external-only ClickStack"
+assert_not_contains "$TMP/default-v2.yaml" "name: kafka-controller" "default v2 render omits Kafka"
+assert_not_contains "$TMP/default-v2.yaml" "name: otel-collector-config" "otel collector ConfigMap omitted by default"
+
+# Keep an explicit v1 baseline for the legacy contract assertions below.
 render "$TMP/default.yaml"
-assert_not_contains "$TMP/default.yaml" "name: otel-collector-config" "otel collector ConfigMap omitted by default"
 
 # Scenario 1b: collector on explicitly but no token — graceful degradation.
 blue "scenario 1b: observability on, no token (graceful degradation)"
@@ -163,6 +228,17 @@ if ! awk '
 fi
 green "ok  - pod-health namespaces resolve to release namespace"
 assert_contains "$TMP/watchdog-ns.yaml" "namespace: deploy-api" "cross-namespace deploy-api check keeps explicit namespace"
+assert_watchdog_check_state "$TMP/watchdog-ns.yaml" "data-plane-synthetic" "true" "v1 enables the legacy data-plane deep check"
+assert_watchdog_check_state "$TMP/watchdog-ns.yaml" "v2-data-plane-synthetic" "false" "v1 leaves the Kafka-free v2 check disabled"
+assert_watchdog_check_state "$TMP/watchdog-ns.yaml" "deployment-health" "true" "v1 enables legacy deployment-health"
+assert_watchdog_check_state "$TMP/watchdog-ns.yaml" "v2-deployment-health" "false" "v1 leaves v2 deployment-health disabled"
+
+render_default "$TMP/watchdog-v2-state.yaml" \
+  --set neuraltrust-watchdog.enabled=true
+assert_watchdog_check_state "$TMP/watchdog-v2-state.yaml" "data-plane-synthetic" "false" "v2 disables the Kafka-dependent deep check"
+assert_watchdog_check_state "$TMP/watchdog-v2-state.yaml" "v2-data-plane-synthetic" "true" "v2 enables the Kafka-free data-plane check"
+assert_watchdog_check_state "$TMP/watchdog-v2-state.yaml" "deployment-health" "false" "v2 disables legacy deployment-health"
+assert_watchdog_check_state "$TMP/watchdog-v2-state.yaml" "v2-deployment-health" "true" "v2 enables v2 deployment-health"
 
 # Scenario 5: hosted explicitly disabled (local-only collector). Hosted
 # exporter omitted; collector still runs.
@@ -181,16 +257,20 @@ blue "scenario 6: global.observability.collector.endpoint flips component endpoi
 render "$TMP/inchart.yaml" \
   --set firewall.enabled=true \
   --set trustgate.enabled=true \
-  --set neuraltrust-aispm.aispm.enabled=true \
   --set global.observability.collector.endpoint=http://test-otel-collector.default.svc.cluster.local:4318
 assert_contains     "$TMP/inchart.yaml" "OTEL_EXPORTER_OTLP_ENDPOINT: \"http://test-otel-collector" "firewall picks up global collector endpoint"
-assert_contains     "$TMP/inchart.yaml" "OTEL_EXPORTER_ENDPOINT: \"http://test-otel-collector"      "aispm picks up global collector endpoint"
 assert_contains     "$TMP/inchart.yaml" "OPENTELEMETRY_TRACES_ENDPOINT: \"http://test-otel-collector"  "trustgate writes OPENTELEMETRY_TRACES_ENDPOINT (read by TrustGate-EE)"
 assert_contains     "$TMP/inchart.yaml" "OPENTELEMETRY_METRICS_ENDPOINT: \"http://test-otel-collector" "trustgate writes OPENTELEMETRY_METRICS_ENDPOINT (read by TrustGate-EE)"
 assert_contains     "$TMP/inchart.yaml" "OPENTELEMETRY_ENABLED: \"true\""                            "trustgate auto-enables OTLP when global endpoint set"
 assert_not_contains "$TMP/inchart.yaml" "OPENTELEMETRY_ENDPOINT:"                                    "legacy OPENTELEMETRY_ENDPOINT key fully removed"
 assert_not_contains "$TMP/inchart.yaml" "OPENTELEMETRY_OTLP_ENDPOINT:"                               "legacy OPENTELEMETRY_OTLP_ENDPOINT key fully removed"
 assert_not_contains "$TMP/inchart.yaml" "OTEL_EXPORTER_OTLP_ENDPOINT: \"http://opentelemetry-collector.opentelemetry" "firewall no longer points at legacy default"
+
+render "$TMP/v2-trustguard-otel.yaml" \
+  --set global.platformVersion=v2 \
+  --set global.observability.collector.endpoint=http://test-otel-collector.default.svc.cluster.local:4318
+assert_contains "$TMP/v2-trustguard-otel.yaml" 'OTEL_EXPORTER_OTLP_ENDPOINT: "http://test-otel-collector' "TrustGuard picks up global collector endpoint"
+assert_contains "$TMP/v2-trustguard-otel.yaml" 'OPENTELEMETRY_SERVICE_NAME: "trustguard"' "TrustGuard has stable OTel service identity"
 
 # Scenario 6b: control-plane + data-plane OTel wiring. The chart was not
 # injecting OTel env into these subcharts before; this catches regressions
@@ -249,7 +329,8 @@ green "ok  - scheduler liveness/readiness probe path is /v1/health"
 # IPv6 fine but rejects the IPv4 probe, triggering a SIGTERM crash loop.
 # Operators must still be able to pin each setting to a specific address.
 blue "scenario 6e: bind addresses default to working cross-topology values"
-render "$TMP/bind-default.yaml"
+render "$TMP/bind-default.yaml" \
+  --set neuraltrust-control-plane.controlPlane.enabled=true
 assert_contains "$TMP/bind-default.yaml" "<listen_host>::</listen_host>" "ClickHouse listen_host defaults to ::"
 assert_contains "$TMP/bind-default.yaml" '^    bind 0\.0\.0\.0 -::$'    "Trustgate Redis bind defaults to 0.0.0.0 -:: (IPv4 required, IPv6 optional)"
 app_hostname=$(grep -A 1 "name: HOSTNAME$" "$TMP/bind-default.yaml" | grep "value:" | head -1 | tr -d '[:space:]')
@@ -263,6 +344,7 @@ blue "scenario 6e (cont): bind addresses overridable (IPv4-only and IPv6-only)"
 render "$TMP/bind-ipv4.yaml" \
   --set clickhouse.listenHost=0.0.0.0 \
   --set trustgate.redis.bind=0.0.0.0 \
+  --set neuraltrust-control-plane.controlPlane.enabled=true \
   --set neuraltrust-control-plane.controlPlane.components.app.hostname=0.0.0.0
 assert_contains "$TMP/bind-ipv4.yaml" "<listen_host>0.0.0.0</listen_host>" "ClickHouse listen_host overridable to 0.0.0.0"
 assert_contains "$TMP/bind-ipv4.yaml" "^    bind 0.0.0.0$"                 "Trustgate Redis bind overridable to 0.0.0.0"
@@ -327,6 +409,15 @@ assert_contains "$TMP/mon-on.yaml" "name: trustgate-data-plane"                 
 assert_contains "$TMP/mon-on.yaml" "name: neuraltrust-watchdog-rules"              "watchdog PrometheusRule rendered"
 assert_not_contains "$TMP/mon-on.yaml" "name: otel-collector-config" "otel collector omitted unless global.observability.enabled"
 
+blue "scenario 9b: v2 monitoring renders runtime ServiceMonitors"
+render_default "$TMP/mon-v2.yaml" \
+  --set global.monitoring.enabled=true \
+  --api-versions monitoring.coreos.com/v1
+yq e 'select(.kind == "ServiceMonitor") | .metadata.name' "$TMP/mon-v2.yaml" > "$TMP/mon-v2-names.txt"
+assert_contains "$TMP/mon-v2-names.txt" "agentgateway" "AgentGateway ServiceMonitor rendered under v2"
+assert_contains "$TMP/mon-v2-names.txt" "trustguard" "TrustGuard ServiceMonitor rendered under v2"
+assert_not_contains "$TMP/mon-v2-names.txt" "trustgate" "legacy TrustGate monitoring omitted under v2"
+
 # Scenario 10: watchdog pod scrape annotations are baseline.
 # Universal scrape contract that works in every monitoring stack
 # (Prometheus Operator, GMP, AMP, Azure Monitor, in-chart OTel
@@ -382,7 +473,7 @@ helm template test "$CHART_DIR" \
 assert_contains "$TMP/self-mon.yaml" "name: neuraltrust-watchdog\$"   "watchdog Deployment rendered by overlay"
 # Curated check ids are flipped on (regex tolerates surrounding YAML indent).
 assert_contains "$TMP/self-mon.yaml" "id: control-plane-synthetic"         "control-plane-synthetic check present in overlay"
-assert_contains "$TMP/self-mon.yaml" "id: data-plane-synthetic"            "data-plane-synthetic check present in overlay"
+assert_contains "$TMP/self-mon.yaml" "id: v2-data-plane-synthetic"         "Kafka-free v2 data-plane check present in overlay"
 assert_contains "$TMP/self-mon.yaml" "id: firewall-health"                   "firewall-health check present in overlay"
 # The kafka-broker check must keep its target.bootstrapServers (overlay
 # flips enabled only — must NOT replace the check definition).
@@ -569,41 +660,6 @@ render "$TMP/cp-iam-incluster.yaml" \
 assert_contains     "$TMP/cp-iam-incluster.yaml" "DATABASE_IAM_AUTH: \"ZmFsc2U=\"" "in-cluster PG stays password even with authMode=iam"
 assert_not_contains "$TMP/cp-iam-incluster.yaml" "DATABASE_IAM_AUTH: \"dHJ1ZQ==\"" "IAM not activated for in-cluster PG"
 
-# Scenario 23: AISPM IAM Postgres auth. IAM skips the aispm-postgresql-init Job
-# (no static password to create the user/db) and empties DATABASE_PASSWORD in
-# aispm-secrets. Default (password) keeps the Job and a generated password.
-# TrustGate disabled so DATABASE_PASSWORD:"" can only come from aispm.
-blue "scenario 23: AISPM IAM Postgres auth skips the init Job"
-render "$TMP/aispm-iam.yaml" \
-  --set trustgate.enabled=false \
-  --set neuraltrust-aispm.aispm.enabled=true \
-  --set neuraltrust-aispm.aispm.database.authMode=iam
-assert_not_contains "$TMP/aispm-iam.yaml" "aispm-postgresql-init"   "aispm init Job skipped in IAM mode"
-assert_contains     "$TMP/aispm-iam.yaml" "DATABASE_PASSWORD: \"\"" "aispm DB password empty in IAM mode"
-
-blue "scenario 23b: AISPM password auth (default) keeps the init Job + password"
-render "$TMP/aispm-default.yaml" \
-  --set trustgate.enabled=false \
-  --set neuraltrust-aispm.aispm.enabled=true
-assert_contains     "$TMP/aispm-default.yaml" "aispm-postgresql-init"   "aispm init Job present in password mode"
-assert_not_contains "$TMP/aispm-default.yaml" "DATABASE_PASSWORD: \"\"" "aispm DB password generated in password mode"
-
-# Scenario 24: AISPM Redis auth plumbing. Each env renders only when its value is
-# set; the default (shared in-cluster TrustGate Redis) emits none. TrustGate is
-# disabled so these markers can only originate from the aispm workloads.
-blue "scenario 24: AISPM Redis auth env wired only when configured"
-render "$TMP/aispm-redis.yaml" \
-  --set trustgate.enabled=false \
-  --set neuraltrust-aispm.aispm.enabled=true \
-  --set neuraltrust-aispm.aispm.redis.password=s3cr3t \
-  --set neuraltrust-aispm.aispm.redis.username=aispm \
-  --set neuraltrust-aispm.aispm.redis.tls=true
-assert_contains     "$TMP/aispm-redis.yaml"   "key: redis-password" "aispm REDIS_PASSWORD wired from aispm-secrets when set"
-assert_contains     "$TMP/aispm-redis.yaml"   "REDIS_USERNAME"      "aispm REDIS_USERNAME emitted when set"
-assert_contains     "$TMP/aispm-redis.yaml"   "REDIS_TLS"           "aispm REDIS_TLS emitted when set"
-assert_not_contains "$TMP/aispm-default.yaml" "key: redis-password" "no aispm Redis password by default (backward-compat)"
-assert_not_contains "$TMP/aispm-default.yaml" "REDIS_USERNAME"      "no aispm REDIS_USERNAME by default (backward-compat)"
-
 # Scenario 25: global.nodeSelector / global.tolerations pin EVERY workload to a
 # dedicated (optionally tainted) node pool with a single setting. Default OFF —
 # default render must inject no nodeSelector. Per-component nodeSelector still
@@ -612,7 +668,6 @@ blue "scenario 25: global.nodeSelector + global.tolerations pin all workloads"
 render "$TMP/global-nodeselector.yaml" \
   --set trustgate.enabled=true \
   --set firewall.enabled=true \
-  --set neuraltrust-aispm.aispm.enabled=true \
   --set neuraltrust-watchdog.enabled=true \
   --set neuraltrust-control-plane.controlPlane.enabled=true \
   --set neuraltrust-data-plane.dataPlane.enabled=true \
@@ -622,8 +677,7 @@ render "$TMP/global-nodeselector.yaml" \
   --set 'global.tolerations[0].value=neuraltrust' \
   --set 'global.tolerations[0].effect=NoSchedule'
 assert_contains "$TMP/global-nodeselector.yaml" "dedicated: neuraltrust"  "global.nodeSelector key rendered on workloads"
-# Applied broadly, not just one pod (control-plane, data-plane, trustgate,
-# firewall, aispm, watchdog all consume the helper).
+# Applied broadly, not just one pod.
 ns_count=$(grep -c "dedicated: neuraltrust" "$TMP/global-nodeselector.yaml" || true)
 if [ "$ns_count" -lt 6 ]; then
   red "FAIL: global.nodeSelector applied to only $ns_count pod specs (expected >= 6)"
@@ -698,31 +752,36 @@ green "ok  - firewall worker carries no conflicting CPU-pool nodeSelector"
 # must skip every postgres-image consumer so the heavy image is never pulled:
 #   - in-cluster control-plane-postgresql Deployment,
 #   - control-plane API/scheduler wait-for-postgresql initContainers,
-#   - TrustGate + AISPM postgresql-init Jobs.
+#   - TrustGate postgresql-init Job.
 # The control-plane app init-db (Prisma migrations, app image) MUST stay.
 blue "scenario 26: global.postgresql.deploy=false skips all postgres-image consumers"
 render "$TMP/pg-external.yaml" \
   --set trustgate.enabled=true \
-  --set neuraltrust-aispm.aispm.enabled=true \
   --set neuraltrust-control-plane.controlPlane.enabled=true \
   --set neuraltrust-data-plane.dataPlane.enabled=true \
   --set global.postgresql.deploy=false
 assert_not_contains "$TMP/pg-external.yaml" "name: control-plane-postgresql"                "in-cluster PostgreSQL Deployment skipped (external)"
 assert_not_contains "$TMP/pg-external.yaml" "name: wait-for-postgresql"                      "wait-for-postgresql initContainers skipped (external)"
 assert_not_contains "$TMP/pg-external.yaml" "app.kubernetes.io/component: postgresql-init"   "TrustGate postgresql-init Job skipped (external)"
-assert_not_contains "$TMP/pg-external.yaml" "aispm-postgresql-init"                          "AISPM postgresql-init Job skipped (external)"
 assert_contains     "$TMP/pg-external.yaml" "name: init-db"                                  "control-plane app init-db (Prisma) still present (external)"
+
+assert_render_fails "deprecated root PostgreSQL alias fails with migration guidance" \
+  --set global.platformVersion=v1 \
+  --set infrastructure.postgresql.deploy=false
+
+render "$TMP/pg-legacy-component-disabled.yaml" \
+  --set neuraltrust-control-plane.controlPlane.enabled=true \
+  --set neuraltrust-control-plane.controlPlane.components.postgresql.installInCluster=false
+assert_not_contains "$TMP/pg-legacy-component-disabled.yaml" "name: control-plane-postgresql" "legacy installInCluster=false remains authoritative"
 
 # Scenario 26b: default (deploy=true) keeps every consumer (backward-compat).
 blue "scenario 26b: global.postgresql.deploy=true (default) keeps postgres-image consumers"
 render "$TMP/pg-incluster.yaml" \
   --set trustgate.enabled=true \
-  --set neuraltrust-aispm.aispm.enabled=true \
   --set neuraltrust-control-plane.controlPlane.enabled=true
 assert_contains "$TMP/pg-incluster.yaml" "name: control-plane-postgresql"              "in-cluster PostgreSQL Deployment present by default"
 assert_contains "$TMP/pg-incluster.yaml" "name: wait-for-postgresql"                   "wait-for-postgresql initContainers present by default"
 assert_contains "$TMP/pg-incluster.yaml" "app.kubernetes.io/component: postgresql-init" "TrustGate postgresql-init Job present by default"
-assert_contains "$TMP/pg-incluster.yaml" "aispm-postgresql-init"                       "AISPM postgresql-init Job present by default"
 
 # Scenario 27: HPA and PDB are opt-in (default OFF). A plain install must not
 # render any HorizontalPodAutoscaler or PodDisruptionBudget. Opting in per
@@ -804,9 +863,12 @@ assert_contains "$TMP/trustgate-postgres-existing-secret.yaml" "SERVER_SECRET_KE
 assert_contains "$TMP/trustgate-postgres-existing-secret.yaml" "DATABASE_URL:"           "TrustGate database URL still rendered for pods"
 assert_not_contains "$TMP/trustgate-postgres-existing-secret.yaml" "preserveExistingSecrets: true" "mixed mode does not require preserving all secrets"
 
-# Scenario 31: ClickHouse admin-password secret is prune-safe and re-renders deterministically.
+# Scenario 31: ClickHouse admin-password secret is prune-safe and re-renders
+# deterministically. Rendered in v2 EXTERNAL because ClickHouse no longer deploys
+# in the default hybrid mode (the secret template is version/mode-agnostic).
 blue "scenario 31: ClickHouse admin-password secret carries resource-policy keep"
 helm template test "$CHART_DIR" -f "$CHART_DIR/values-required.yaml" \
+  --set global.deploymentMode=external \
   --show-only charts/clickhouse/templates/secret.yaml > "$TMP/ch-secret.yaml"
 assert_contains "$TMP/ch-secret.yaml" "name: clickhouse"                "clickhouse admin-password secret rendered"
 assert_contains "$TMP/ch-secret.yaml" "helm.sh/resource-policy: keep"   "clickhouse secret carries resource-policy keep"
@@ -847,24 +909,23 @@ fi
 green "ok  - SERVER_SECRET_KEY is required (not optional) on TrustGate deployments"
 assert_contains "$TMP/trustgate-required-keys.yaml" "NEURAL_TRUST_FIREWALL_SECRET_KEY:" "firewall API key auto-populated in trustgate-secrets when firewall enabled"
 
-# Scenario 35: platform v2 OFF by default. Under v1 (the default), none of the
-# v2 subcharts render — backward-compatible with today.
-blue "scenario 35: platformVersion defaults to v1 (no v2 workloads)"
-assert_not_contains "$TMP/default.yaml" "name: agentgateway-proxy"        "agentgateway not rendered under v1 (default)"
-assert_not_contains "$TMP/default.yaml" "name: trustguard-data-plane"     "trustguard not rendered under v1 (default)"
-assert_not_contains "$TMP/default.yaml" "name: trustlens-worker"          "trustlens not rendered under v1 (default)"
-assert_not_contains "$TMP/default.yaml" "name: dataagent"                 "dataagent not rendered under v1 (default)"
-assert_not_contains "$TMP/default.yaml" "name: datacore"                  "datacore not rendered under v1 (default)"
-assert_not_contains "$TMP/default.yaml" "name: clickstack-collector"      "clickstack-otel-collector not rendered under v1 (default)"
-assert_not_contains "$TMP/default.yaml" "name: alertengine-api"           "alertengine not rendered under v1 (default)"
+# Scenario 35: explicit v1 escape hatch renders no v2 workloads.
+blue "scenario 35: explicit platformVersion=v1 keeps the legacy topology"
+assert_not_contains "$TMP/default.yaml" "name: agentgateway-proxy"        "agentgateway not rendered under explicit v1"
+assert_not_contains "$TMP/default.yaml" "name: trustguard-data-plane"     "trustguard not rendered under explicit v1"
+assert_not_contains "$TMP/default.yaml" "name: trustlens-worker"          "trustlens not rendered under explicit v1"
+assert_not_contains "$TMP/default.yaml" "name: dataagent"                 "dataagent not rendered under explicit v1"
+assert_not_contains "$TMP/default.yaml" "name: datacore"                  "datacore not rendered under explicit v1"
+assert_not_contains "$TMP/default.yaml" "name: clickstack-collector"      "clickstack omitted under explicit v1"
+assert_not_contains "$TMP/default.yaml" "name: alertengine-api"           "alertengine not rendered under explicit v1"
 
 # Scenario 36: v2 hybrid. The v2 data-plane workloads render on-prem
-# (agentgateway proxy + mcp, trustguard data-plane) plus the temporary
-# data-plane-api analytics shim (kept until TrustLens). TrustLens is off by
-# default. The control-planes (admin / control-plane) stay in SaaS => absent.
-# In-cluster Postgres + Redis + ClickHouse deploy by default; Kafka does not,
-# so kafka-workers (data-plane-worker) and kafka-connect stay disabled.
-blue "scenario 36: platformVersion=v2 hybrid renders data-plane workloads + data-plane-api shim"
+# (agentgateway proxy + mcp, trustguard data-plane). TrustLens is off by default.
+# The control-planes (admin / control-plane) stay in SaaS => absent. In-cluster
+# Postgres + Redis deploy by default; ClickHouse does NOT (analytics are SaaS-side)
+# and the data-plane-api read shim is therefore off unless pointed at an external
+# ClickHouse (see 36-ext). Kafka never renders, so kafka-workers/kafka-connect stay off.
+blue "scenario 36: platformVersion=v2 hybrid renders data-plane workloads (no ClickHouse / no shim)"
 render "$TMP/v2-hybrid.yaml" --set global.platformVersion=v2
 assert_contains     "$TMP/v2-hybrid.yaml" "name: agentgateway-proxy"       "agentgateway proxy (data) rendered under v2 hybrid"
 assert_contains     "$TMP/v2-hybrid.yaml" "name: agentgateway-mcp"         "agentgateway mcp (data) rendered under v2 hybrid"
@@ -873,27 +934,31 @@ assert_not_contains "$TMP/v2-hybrid.yaml" "name: trustlens-worker"         "trus
 assert_not_contains "$TMP/v2-hybrid.yaml" "name: agentgateway-admin"       "agentgateway admin (control) omitted in hybrid"
 assert_not_contains "$TMP/v2-hybrid.yaml" "name: trustguard-control-plane" "trustguard control-plane omitted in hybrid"
 assert_not_contains "$TMP/v2-hybrid.yaml" "name: trustlens-api"            "trustlens api (control) omitted in hybrid"
-# DataAgent bridges local reads to the SaaS DataBridge — hybrid only.
-assert_contains     "$TMP/v2-hybrid.yaml" "name: dataagent"                "dataagent rendered under v2 hybrid"
+# DataAgent is credential-gated and therefore absent from the default hybrid render.
+assert_not_contains "$TMP/v2-hybrid.yaml" "name: dataagent$"               "dataagent omitted without tenant/enrolment configuration"
 assert_not_contains "$TMP/v2-hybrid.yaml" "name: datacore"                 "datacore omitted in hybrid (external-only)"
 assert_not_contains "$TMP/v2-hybrid.yaml" "name: clickstack-collector"     "clickstack-otel-collector omitted in hybrid (external-only)"
 assert_not_contains "$TMP/v2-hybrid.yaml" "name: alertengine-api"          "alertengine omitted in hybrid (external-only)"
 assert_not_contains "$TMP/v2-hybrid.yaml" "name: alertengine-worker"       "alertengine worker omitted in hybrid (external-only)"
-# Temporary data-plane-api analytics shim: API renders, kafka-workers do not.
-assert_contains     "$TMP/v2-hybrid.yaml" 'name: "data-plane-api"'         "data-plane-api shim rendered under v2 hybrid"
-assert_contains     "$TMP/v2-hybrid.yaml" "name: clickhouse-secrets"       "clickhouse-secrets rendered for data-plane-api shim"
-assert_contains     "$TMP/v2-hybrid.yaml" "name: clickhouse-init-job"      "clickhouse-init-job ConfigMap rendered for data-plane-api shim"
-assert_contains     "$TMP/v2-hybrid.yaml" "name: data-plane-jwt-secret"    "data-plane-jwt-secret rendered for data-plane-api shim"
+# Hybrid runs NO in-cluster ClickHouse and NO data-plane-api shim by default
+# (analytics are SaaS-side); the shim is opt-in via an external ClickHouse (36-ext).
+assert_not_contains "$TMP/v2-hybrid.yaml" 'name: "data-plane-api"'         "data-plane-api shim omitted in hybrid default (no local ClickHouse)"
+assert_not_contains "$TMP/v2-hybrid.yaml" "name: clickhouse-secrets"       "clickhouse-secrets omitted in hybrid default"
+assert_not_contains "$TMP/v2-hybrid.yaml" "name: clickhouse-init-job"      "clickhouse-init-job omitted in hybrid default"
 assert_not_contains "$TMP/v2-hybrid.yaml" "name: data-plane-worker"        "kafka-workers (data-plane-worker) omitted under v2 hybrid"
 assert_not_contains "$TMP/v2-hybrid.yaml" "name: kafka-connect"            "kafka-connect omitted under v2 hybrid"
-# In-cluster datastores: Postgres + Redis + ClickHouse default ON in v2.
+# In-cluster datastores: Postgres + Redis default ON in v2; ClickHouse does NOT
+# deploy in hybrid (external-only / v1).
 assert_contains     "$TMP/v2-hybrid.yaml" "name: control-plane-postgresql" "in-cluster Postgres deployed by default under v2 hybrid"
 assert_contains     "$TMP/v2-hybrid.yaml" "name: v2-postgresql-init"       "v2 postgres-init Job rendered under v2 hybrid"
 assert_contains     "$TMP/v2-hybrid.yaml" "name: redis"                    "in-cluster Redis deployed by default under v2 hybrid"
-assert_contains     "$TMP/v2-hybrid.yaml" "name: clickhouse"               "in-cluster ClickHouse deployed by default under v2 hybrid"
+# Passwordless in-cluster Redis must disable protected-mode, otherwise it drops
+# non-loopback clients (cross-pod services crash with "write: broken pipe").
+assert_contains     "$TMP/v2-hybrid.yaml" "\-\-protected-mode"              "in-cluster Redis disables protected-mode for cross-pod clients"
+assert_not_contains "$TMP/v2-hybrid.yaml" "name: clickhouse$"              "in-cluster ClickHouse NOT deployed under v2 hybrid (external-only)"
 assert_not_contains "$TMP/v2-hybrid.yaml" "name: kafka-controller"         "Kafka omitted under v2 hybrid"
 # Dynamic wiring: shared client credentials, derived URLs, shared trustdata DB.
-assert_contains     "$TMP/v2-hybrid.yaml" "name: v2-trustguard-client-secret" "shared TrustGuard client-credentials Secret rendered under v2"
+assert_contains     "$TMP/v2-hybrid.yaml" "name: trustguard-client-credentials" "shared TrustGuard client-credentials Secret rendered under v2"
 assert_contains     "$TMP/v2-hybrid.yaml" "CLIENT_ID: \"agentgateway-platform\"" "shared client id defaults to agentgateway-platform"
 assert_contains     "$TMP/v2-hybrid.yaml" "name: TRUSTGUARD_CLIENT_SECRET"       "AgentGateway wires shared client secret via secretKeyRef"
 assert_contains     "$TMP/v2-hybrid.yaml" "name: TRUSTGUARD_PLATFORM_CLIENT_SECRET" "TrustGuard wires shared client secret via secretKeyRef"
@@ -906,12 +971,85 @@ assert_contains     "$TMP/v2-hybrid.yaml" "ensure_writer_schema \"trustdata\" \"
 assert_contains     "$TMP/v2-hybrid.yaml" "CREATE SCHEMA IF NOT EXISTS"          "hybrid writers each get their own schema"
 assert_contains     "$TMP/v2-hybrid.yaml" "grant_readonly \"trustdata\" \"dataagent\"" "v2 postgres-init grants the read-only dataagent role SELECT per writer schema"
 assert_contains     "$TMP/v2-hybrid.yaml" "search_path = .*agentgateway.*trustguard.*public" "dataagent reader search_path spans both writer schemas"
-assert_contains     "$TMP/v2-hybrid.yaml" "/trustdata\\?sslmode="                "DataAgent DSN assembled against the shared trustdata DB"
 # Raw-telemetry wiring so DataAgent actually has data to read in hybrid.
 assert_contains     "$TMP/v2-hybrid.yaml" "SENSIBLE_PG_DSN:"                     "hybrid data planes get a raw-telemetry Postgres DSN"
 assert_contains     "$TMP/v2-hybrid.yaml" "name: agentgateway-telemetry"        "agentgateway raw-telemetry exporters ConfigMap rendered (hybrid)"
 assert_contains     "$TMP/v2-hybrid.yaml" "name: trustguard-telemetry"          "trustguard raw-telemetry exporters ConfigMap rendered (hybrid)"
 assert_contains     "$TMP/v2-hybrid.yaml" "TELEMETRY_EXPORTERS_FILE: \"/etc/telemetry/telemetry.yaml\"" "hybrid data planes point TELEMETRY_EXPORTERS_FILE at the mounted profile"
+assert_contains     "$TMP/v2-hybrid.yaml" "TELEMETRY_ENABLED: \"true\""         "AgentGateway enables the configured hybrid telemetry pipeline"
+
+# Scenario 36-ext: hybrid + EXTERNAL ClickHouse. Pointing the data-plane-api shim
+# at a dotted (external) ClickHouse host turns it on WITHOUT deploying an in-cluster
+# ClickHouse — a bare host keeps it off (36 above).
+blue "scenario 36-ext: hybrid data-plane-api read shim opts in via an external ClickHouse"
+render_default "$TMP/v2-hybrid-extch.yaml" \
+  --set neuraltrust-data-plane.dataPlane.components.clickhouse.host=my-ch.example.com
+assert_contains     "$TMP/v2-hybrid-extch.yaml" 'name: "data-plane-api"'    "data-plane-api shim renders in hybrid when pointed at an external ClickHouse"
+assert_not_contains "$TMP/v2-hybrid-extch.yaml" "name: clickhouse$"         "external ClickHouse does not deploy the in-cluster ClickHouse in hybrid"
+assert_contains     "$TMP/v2-hybrid-extch.yaml" "CLICKHOUSE_HOST: $(printf '%s' 'my-ch.example.com' | base64)" "hybrid shim uses the external ClickHouse host verbatim"
+
+render_default "$TMP/v2-upgrade-lookupless.yaml" --is-upgrade
+assert_resource_state "$TMP/v2-upgrade-lookupless.yaml" "Secret" "agentgateway-secrets" "absent" "lookup-less upgrade does not rotate AgentGateway secrets"
+assert_resource_state "$TMP/v2-upgrade-lookupless.yaml" "Secret" "trustguard-secrets" "absent" "lookup-less upgrade does not rotate TrustGuard secrets"
+assert_resource_state "$TMP/v2-upgrade-lookupless.yaml" "Secret" "trustguard-client-credentials" "absent" "lookup-less upgrade does not rotate shared client credentials"
+
+render_default "$TMP/v2-upgrade-preserved-secrets.yaml" \
+  --is-upgrade \
+  --set global.preserveExistingSecrets=true
+assert_contains "$TMP/v2-upgrade-preserved-secrets.yaml" "name: v2-trustguard-client-secret" "lookup-less preserved upgrade keeps the prerelease client Secret reference"
+assert_resource_state "$TMP/v2-upgrade-preserved-secrets.yaml" "Secret" "trustguard-client-credentials" "absent" "preserved upgrade does not duplicate externally managed client credentials"
+
+render_default "$TMP/v2-install-preserved-secrets.yaml" \
+  --set global.preserveExistingSecrets=true
+assert_contains "$TMP/v2-install-preserved-secrets.yaml" "name: trustguard-client-credentials" "fresh externally managed install uses the canonical client Secret name"
+
+render_default "$TMP/v2-managed-client-secret.yaml" \
+  --set global.preserveExistingSecrets=true \
+  --set global.v2.trustguardClientSecretName=trustguard-client-credentials
+assert_contains "$TMP/v2-managed-client-secret.yaml" "name: trustguard-client-credentials" "externally managed client Secret name can use the canonical name"
+
+render_default "$TMP/v2-upgrade-confirmed.yaml" \
+  --is-upgrade \
+  --set global.confirmV2Migration=true
+assert_resource_state "$TMP/v2-upgrade-confirmed.yaml" "Secret" "agentgateway-secrets" "absent" "confirmation alone cannot rotate AgentGateway secrets without lookup"
+assert_resource_state "$TMP/v2-upgrade-confirmed.yaml" "Secret" "trustguard-secrets" "absent" "confirmation alone cannot rotate TrustGuard secrets without lookup"
+assert_resource_state "$TMP/v2-upgrade-confirmed.yaml" "Secret" "trustguard-client-credentials" "absent" "confirmation alone cannot rotate shared credentials without lookup"
+
+blue "scenario 36b: DataAgent renders only with tenant + enrolment Secret reference"
+render "$TMP/v2-hybrid-dataagent.yaml" \
+  --set global.platformVersion=v2 \
+  --set dataagent.tenantId=tenant-example \
+  --set dataagent.enrolmentTokenExistingSecret.name=dataagent-enrolment \
+  --set dataagent.enrolmentTokenExistingSecret.key=token
+assert_contains "$TMP/v2-hybrid-dataagent.yaml" "name: dataagent$" "DataAgent resources render with complete enrolment configuration"
+assert_contains "$TMP/v2-hybrid-dataagent.yaml" 'name: "dataagent-enrolment"' "DataAgent references the configured existing Secret"
+assert_contains "$TMP/v2-hybrid-dataagent.yaml" "key: \"token\"" "DataAgent references the configured token key"
+assert_contains "$TMP/v2-hybrid-dataagent.yaml" "/trustdata\\?sslmode=" "DataAgent DSN targets the shared trustdata DB"
+
+render "$TMP/v2-hybrid-dataagent-partial.yaml" \
+  --set global.platformVersion=v2 \
+  --set dataagent.tenantId=tenant-example
+assert_not_contains "$TMP/v2-hybrid-dataagent-partial.yaml" "name: dataagent$" "partial DataAgent configuration renders no resources"
+
+assert_render_fails "DataAgent inline token fails closed when chart secret generation is disabled" \
+  --set global.platformVersion=v2 \
+  --set global.autoGenerateSecrets=false \
+  --set dataagent.tenantId=tenant-example \
+  --set dataagent.enrolmentToken=token-placeholder
+
+assert_render_fails "DataAgent fails closed without its managed database Secret" \
+  --set global.platformVersion=v2 \
+  --set global.autoGenerateSecrets=false \
+  --set dataagent.tenantId=tenant-example \
+  --set dataagent.enrolmentTokenExistingSecret.name=dataagent-enrolment
+
+render_default "$TMP/v2-hybrid-dataagent-managed-secrets.yaml" \
+  --set global.autoGenerateSecrets=false \
+  --set dataagent.tenantId=tenant-example \
+  --set dataagent.enrolmentTokenExistingSecret.name=dataagent-enrolment \
+  --set dataagent.existingSecret.name=dataagent-runtime
+assert_contains "$TMP/v2-hybrid-dataagent-managed-secrets.yaml" 'name: "dataagent-runtime"' "DataAgent uses the configured managed database Secret"
+assert_resource_state "$TMP/v2-hybrid-dataagent-managed-secrets.yaml" "Secret" "dataagent-secrets" "absent" "chart does not duplicate externally managed DataAgent credentials"
 
 # Scenario 37: v2 full (DEPRECATED alias of external). Must render identically to
 # external: control + data planes + self-hosted analytics + in-cluster datastores.
@@ -961,7 +1099,7 @@ assert_contains     "$TMP/v2-external.yaml" "name: v2-postgresql-init"       "v2
 assert_contains     "$TMP/v2-external.yaml" "name: redis"                    "in-cluster Redis deployed by default under v2 external"
 assert_contains     "$TMP/v2-external.yaml" "name: clickhouse"               "in-cluster ClickHouse deployed by default under v2 external"
 # Shared client credentials + external audience URL from global.domain.
-assert_contains     "$TMP/v2-external.yaml" "name: v2-trustguard-client-secret" "shared TrustGuard client-credentials Secret rendered under v2 external"
+assert_contains     "$TMP/v2-external.yaml" "name: trustguard-client-credentials" "shared TrustGuard client-credentials Secret rendered under v2 external"
 assert_contains     "$TMP/v2-external.yaml" "TRUSTGUARD_BASE_URL: \"https://trustguard\\." "TrustGuard audience URL auto-derives from global.domain"
 # External: each service owns its OWN database (control planes run on-prem and own
 # their migrations); no shared trustdata DB and no DataAgent reader.
@@ -971,9 +1109,16 @@ assert_contains     "$TMP/v2-external.yaml" "ensure_owned_db \"agentgateway\" \"
 assert_contains     "$TMP/v2-external.yaml" "ensure_owned_db \"trustguard\" \"trustguard\""     "v2 postgres-init provisions the private trustguard DB under external"
 assert_not_contains "$TMP/v2-external.yaml" "ensure_writer_schema \"trustdata\""   "no shared trustdata schemas in external"
 assert_not_contains "$TMP/v2-external.yaml" "grant_readonly \"trustdata\""         "no read-only dataagent reader in external"
-# Raw telemetry stays out of Postgres in external (DataCore reads ClickHouse).
-assert_not_contains "$TMP/v2-external.yaml" "name: agentgateway-telemetry"         "no hybrid raw-telemetry ConfigMap in external"
-assert_not_contains "$TMP/v2-external.yaml" "SENSIBLE_PG_DSN:"                      "no raw-telemetry Postgres DSN in external"
+# Raw telemetry stays out of Postgres in external. AgentGateway and TrustGuard
+# instead mount mode-specific metadata/raw OTLP profiles targeting ClickStack.
+assert_not_contains "$TMP/v2-external.yaml" "SENSIBLE_PG_DSN:"                    "no raw-telemetry Postgres DSN in external"
+assert_contains     "$TMP/v2-external.yaml" "name: agentgateway-telemetry"       "AgentGateway external OTLP profile is rendered"
+assert_contains     "$TMP/v2-external.yaml" "name: trustguard-telemetry"         "TrustGuard external OTLP profile is rendered"
+assert_contains     "$TMP/v2-external.yaml" "name: metadata-otlp"                "external profiles export metadata over OTLP"
+assert_contains     "$TMP/v2-external.yaml" "name: raw-otlp"                     "external profiles export raw events over OTLP"
+assert_contains     "$TMP/v2-external.yaml" "OTEL_EXPORTER_OTLP_ENDPOINT: \"http://clickstack-collector\\." "v2 runtimes target the in-cluster ClickStack OTLP/HTTP endpoint"
+assert_contains     "$TMP/v2-external.yaml" "TELEMETRY_EXPORTERS_FILE: \"/etc/telemetry/telemetry.yaml\"" "external runtimes load the mounted telemetry profiles"
+assert_contains     "$TMP/v2-external.yaml" "OPENTELEMETRY_ENABLED: \"true\""     "TrustGuard runtime tracing targets ClickStack in external mode"
 # TrustGuard control-plane config-sync gRPC listener needs TLS in a deployed APP_ENV
 # (production default): the chart auto-generates + mounts a cert/key.
 assert_contains     "$TMP/v2-external.yaml" "name: trustguard-configsync-tls"      "trustguard config-sync gRPC TLS secret auto-generated under v2 external"
@@ -1010,27 +1155,33 @@ fi
 
 # Scenario 37d: TrustLens opt-in renders api + worker.
 blue "scenario 37d: trustlens.enabled=true renders TrustLens"
+assert_render_fails "TrustLens requires a manually pinned release image" \
+  --set global.platformVersion=v2 \
+  --set trustlens.enabled=true
 render "$TMP/v2-trustlens.yaml" \
   --set global.platformVersion=v2 \
   --set global.deploymentMode=external \
-  --set trustlens.enabled=true
+  --set trustlens.enabled=true \
+  --set trustlens.image.tag=v0.1.0
 assert_contains "$TMP/v2-trustlens.yaml" "name: trustlens-api"    "trustlens api rendered when enabled=true"
 assert_contains "$TMP/v2-trustlens.yaml" "name: trustlens-worker" "trustlens worker rendered when enabled=true"
+assert_contains "$TMP/v2-trustlens.yaml" 'value: "http://trustlens-api"' "app receives TrustLens URL when enabled"
+assert_contains "$TMP/v2-trustlens.yaml" "name: TRUSTLENS_JWT_SECRET" "app receives TrustLens JWT reference when enabled"
 
 # Scenario 38: v2 disables the legacy stack (single global switch). Under v2 the
-# Python control-plane API, trustgate, kafka, aispm and siem-connectors must not
-# render; firewall + clickhouse stay available. The data-plane-api analytics
-# shim is intentionally kept (temporary until TrustLens), but its kafka-workers
-# (data-plane-worker) and kafka-connect stay disabled.
+# Python control-plane API, trustgate, and kafka must not render; firewall stays
+# available. The data-plane-api analytics shim is intentionally kept (temporary
+# until TrustLens), but its kafka-workers (data-plane-worker) and kafka-connect
+# stay disabled. In hybrid the shim needs an external ClickHouse to render, so one
+# is set here (in-cluster ClickHouse does not deploy in hybrid).
 blue "scenario 38: platformVersion=v2 disables the legacy stack (keeps data-plane-api shim)"
 render "$TMP/v2-legacy-off.yaml" \
   --set global.platformVersion=v2 \
   --set trustgate.enabled=true \
   --set neuraltrust-control-plane.controlPlane.enabled=true \
   --set neuraltrust-data-plane.dataPlane.enabled=true \
-  --set infrastructure.kafka.deploy=true \
-  --set neuraltrust-aispm.aispm.enabled=true \
-  --set neuraltrust-siem-connectors.siemConnectors.enabled=true
+  --set neuraltrust-data-plane.dataPlane.components.clickhouse.host=my-ch.example.com \
+  --set infrastructure.kafka.deploy=true
 assert_not_contains "$TMP/v2-legacy-off.yaml" "name: trustgate-data-plane"  "legacy trustgate disabled under v2"
 assert_not_contains "$TMP/v2-legacy-off.yaml" "name: control-plane-api"     "legacy Python control-plane-api disabled under v2"
 assert_not_contains "$TMP/v2-legacy-off.yaml" "name: control-plane-scheduler" "legacy control-plane scheduler disabled under v2"
@@ -1042,12 +1193,13 @@ assert_not_contains "$TMP/v2-legacy-off.yaml" "name: kafka-controller"      "leg
 # Scenario 38b: legacy stack intact under v1 (backward-compat).
 blue "scenario 38b: legacy stack intact under v1"
 render "$TMP/v1-legacy-on.yaml" \
+  --set global.platformVersion=v1 \
   --set trustgate.enabled=true \
   --set neuraltrust-control-plane.controlPlane.enabled=true \
   --set neuraltrust-data-plane.dataPlane.enabled=true
 assert_contains "$TMP/v1-legacy-on.yaml" "name: trustgate-data-plane" "legacy trustgate present under v1"
 assert_contains "$TMP/v1-legacy-on.yaml" "name: control-plane-api"    "legacy control-plane-api present under v1"
-assert_contains "$TMP/v1-legacy-on.yaml" "name: data-plane-api"       "legacy data-plane present under v1"
+assert_contains "$TMP/v1-legacy-on.yaml" 'name: "data-plane-api"'     "legacy data-plane present under v1"
 
 # Scenario 38c: the product control-plane (API + App UI) auto-enables on-prem in v2
 # EXTERNAL (zero-SaaS) from the platform flags alone (NO controlPlane.enabled), but
@@ -1083,15 +1235,49 @@ assert_not_contains "$TMP/v2-ext-cp-url.yaml" "control-plane-app.example.com"   
 assert_contains     "$TMP/v2-ext-cp-url.yaml" "name: AGENTGATEWAY_URL"             "AGENTGATEWAY_URL wired into the app under v2"
 assert_contains     "$TMP/v2-ext-cp-url.yaml" "name: TRUSTGUARD_URL"               "TRUSTGUARD_URL wired into the app under v2"
 assert_contains     "$TMP/v2-ext-cp-url.yaml" "name: DATACORE_URL"                 "DATACORE_URL wired into the app under v2"
-assert_contains     "$TMP/v2-ext-cp-url.yaml" "name: ALERT_ENGINE_API_URL"         "ALERT_ENGINE_API_URL wired into the app under v2"
+assert_contains     "$TMP/v2-ext-cp-url.yaml" "name: ALERT_ENGINE_API_URL"        "ALERT_ENGINE_API_URL wired directly into the app under v2"
+yq e 'select(.kind == "Deployment" and .metadata.name == "control-plane-app")' "$TMP/v2-ext-cp-url.yaml" > "$TMP/v2-app.yaml"
+assert_contains     "$TMP/v2-app.yaml" 'value: "http://alertengine-api"'         "v2 app receives the in-cluster AlertEngine URL"
+assert_contains     "$TMP/v2-app.yaml" "name: TRUSTLENS_API_URL"                "v2 app receives TrustLens URL through the standard env pattern"
+assert_not_contains "$TMP/v2-ext-cp-url.yaml" "name: v2-app-backends"            "v2 app does not create a one-off backend URL ConfigMap"
+assert_contains     "$TMP/v2-app.yaml" "name: AUTH_SECRET"                       "v2 app receives AUTH_SECRET"
+assert_contains     "$TMP/v2-app.yaml" "name: NEXTAUTH_SECRET"                   "v2 app receives NEXTAUTH_SECRET alias"
+assert_env_value    "$TMP/v2-app.yaml" "FORCE_V2_UI" "true"                      "v2 app forces the v2 UI by default (no v1 UI to preserve on self-hosted v2)"
+assert_not_contains "$TMP/v2-app.yaml" "name: KAFKA_"                            "v2 app receives no Kafka env"
+assert_not_contains "$TMP/v2-app.yaml" "name: TRUSTGATE_"                        "v2 app receives no legacy TrustGate env"
+assert_not_contains "$TMP/v2-app.yaml" "name: POSTURE_"                          "v2 app receives no removed Posture env"
+
+render_default "$TMP/v2-alertengine-disabled.yaml" \
+  --set global.deploymentMode=external \
+  --set alertengine.enabled=false
+assert_resource_state "$TMP/v2-alertengine-disabled.yaml" "Deployment" "alertengine-api" "absent" "disabled AlertEngine omits its workload"
+assert_contains "$TMP/v2-alertengine-disabled.yaml" "name: ALERT_ENGINE_API_URL" "app backend URLs keep the standard direct env contract"
+
+render_default "$TMP/v2-alertengine-external-url.yaml" \
+  --set global.deploymentMode=external \
+  --set alertengine.enabled=false \
+  --set neuraltrust-control-plane.controlPlane.components.app.config.alertEngineApiUrl=http://alerts.example.com
+assert_contains "$TMP/v2-alertengine-external-url.yaml" 'value: "http://alerts.example.com"' "explicit external AlertEngine URL works without bundled subchart"
+auth_secret="$(yq e 'select(.kind == "Secret" and .metadata.name == "control-plane-secrets") | .data.AUTH_SECRET' "$TMP/v2-ext-cp-url.yaml")"
+nextauth_secret="$(yq e 'select(.kind == "Secret" and .metadata.name == "control-plane-secrets") | .data.NEXTAUTH_SECRET' "$TMP/v2-ext-cp-url.yaml")"
+if [ -z "$auth_secret" ] || [ "$auth_secret" != "$nextauth_secret" ]; then
+  red "FAIL: AUTH_SECRET and NEXTAUTH_SECRET must be identical"
+  exit 1
+fi
+green "ok  - AUTH_SECRET and NEXTAUTH_SECRET share one resolved value"
 
 # v1 keeps the corrected app URL but must NOT receive the v2 backend env.
 render "$TMP/v1-cp-url.yaml" \
+  --set global.platformVersion=v1 \
   --set neuraltrust-control-plane.controlPlane.enabled=true \
   --set global.domain=example.com
 assert_contains     "$TMP/v1-cp-url.yaml" "value: \"https://app.example.com\"" "v1 APP_URL/NEXTAUTH_URL use the app Ingress host too"
 assert_not_contains "$TMP/v1-cp-url.yaml" "name: AGENTGATEWAY_URL"             "v2 backend env absent under v1 (backward-compat)"
 assert_not_contains "$TMP/v1-cp-url.yaml" "name: TRUSTGUARD_URL"               "v2 trustguard env absent under v1 (backward-compat)"
+assert_not_contains "$TMP/v1-cp-url.yaml" "name: AUTH_SECRET"                  "v2 app auth env absent under v1 (backward-compat)"
+assert_not_contains "$TMP/v1-cp-url.yaml" "name: FORCE_V2_UI"                  "FORCE_V2_UI absent under v1 (shared SaaS app keeps its default UI)"
+assert_contains     "$TMP/v1-cp-url.yaml" "name: KAFKA_HOST"                   "explicit v1 app keeps Kafka env"
+assert_contains     "$TMP/v1-cp-url.yaml" "name: TRUSTGATE_CONTROL_PLANE_URL"  "explicit v1 app keeps TrustGate env"
 
 # Scenario 38d: shared ClickHouse secret. DataCore + AlertEngine read the password
 # from the in-cluster `clickhouse` secret (key admin-password), not their own.
@@ -1108,20 +1294,40 @@ else
 fi
 
 # Scenario 38e: optional IAM DB/Redis auth for the v2 Go services (default OFF).
-# When database.iamAuth=true the chart emits DB_IAM_AUTH/DB_AUTH_MODE and ships no
-# static DB_PASSWORD (service-side token minting lands separately).
-blue "scenario 38e: agentgateway IAM DB/Redis auth emits IAM env and drops static passwords"
+# When database.iamAuth=true the chart selects the binaries' POSTGRES_LOGIN=aws
+# mode and ships no static DB_PASSWORD.
+blue "scenario 38e: v2 service IAM DB/Redis auth emits IAM env and drops static passwords"
 render "$TMP/v2-iam.yaml" \
   --set global.platformVersion=v2 \
   --set global.deploymentMode=external \
   --set global.domain=v2.example.com \
   --set agentgateway.database.iamAuth=true \
-  --set agentgateway.redis.iamAuth=true
+  --set agentgateway.redis.iamAuth=true \
+  --set trustguard.database.iamAuth=true
 assert_contains     "$TMP/v2-iam.yaml" "DB_IAM_AUTH: \"true\""   "agentgateway emits DB_IAM_AUTH when iamAuth=true"
 assert_contains     "$TMP/v2-iam.yaml" "DB_AUTH_MODE: \"iam\""   "agentgateway emits DB_AUTH_MODE=iam when iamAuth=true"
+assert_contains     "$TMP/v2-iam.yaml" "POSTGRES_LOGIN: \"aws\"" "AgentGateway and TrustGuard select their AWS IAM login mode"
 assert_contains     "$TMP/v2-iam.yaml" "REDIS_IAM_AUTH: \"true\"" "agentgateway emits REDIS_IAM_AUTH when redis.iamAuth=true"
 # Default (password) path still ships DB_PASSWORD.
 assert_contains     "$TMP/v2-external.yaml" "DB_PASSWORD:"        "password mode still ships DB_PASSWORD (default)"
+assert_contains     "$TMP/v2-external.yaml" "STS_SIGNING_KEY:"    "AgentGateway MCP receives a lookup-preserved STS signing key"
+if yq eval 'select(.kind == "Secret" and .metadata.name == "agentgateway-secrets") | .stringData.STS_SIGNING_KEY' \
+    "$TMP/v2-external.yaml" | openssl rsa -noout -check >/dev/null 2>&1; then
+  green "ok  - AgentGateway MCP STS signing key is a valid RSA private key"
+else
+  red "FAIL: AgentGateway MCP STS signing key is not a valid private key"
+  exit 1
+fi
+assert_render_fails "invalid explicit AgentGateway MCP STS signing key is rejected" \
+  --set global.platformVersion=v2 \
+  --set-string agentgateway.stsSigningKey=not-a-private-key
+EC_STS_SIGNING_KEY=$(openssl ecparam -name prime256v1 -genkey 2>/dev/null | base64 | tr -d '\n\r')
+assert_render_fails "EC key is rejected for AgentGateway's RS256 signer" \
+  --set global.platformVersion=v2 \
+  --set-string agentgateway.stsSigningKey="$EC_STS_SIGNING_KEY"
+unset EC_STS_SIGNING_KEY
+assert_contains     "$TMP/v2-external.yaml" "REDIS_EVENTS_SECRET:" "TrustGuard receives a stable Redis events secret"
+assert_contains     "$TMP/v2-external.yaml" 'ENABLE_CACHE_PUBSUB: "true"' "TrustGuard cache pub/sub is enabled by default"
 
 # Scenario 38f: Postgres sslMode defaults to "prefer" across the v2 Go services
 # (works against both the non-TLS in-cluster PG and TLS hosted DBs). Operators set
@@ -1181,6 +1387,8 @@ render "$TMP/v2-mirror.yaml" \
   --set global.imageRegistry=mirror.example.com/nt
 assert_contains     "$TMP/v2-mirror.yaml" "image: \"mirror.example.com/nt/clickhouse/clickstack-otel-collector:" "clickstack image prepends mirror after stripping docker.clickhouse.com"
 assert_not_contains "$TMP/v2-mirror.yaml" "mirror.example.com/nt/docker.clickhouse.com" "clickstack image does not double up the vendor registry under a mirror"
+assert_contains     "$TMP/v2-mirror.yaml" "image: \"mirror.example.com/nt/redis-stack-server:7.2.0-v20\"" "v2 Redis honors the global image mirror"
+assert_contains     "$TMP/v2-mirror.yaml" "image: \"mirror.example.com/nt/postgres:17-alpine\"" "v2 PostgreSQL init honors the global image mirror"
 
 # Scenario 38j: control-plane-secrets follows the control-plane workloads. In v2 it
 # renders in external mode EVEN without controlPlane.enabled (the API + App
@@ -1219,6 +1427,7 @@ assert_not_contains "$TMP/v2-external.yaml"  "REDIS_TLS"                     "no
 # (matches DataCore's SaaS/prod overlays), not a non-existent `datacore` DB.
 blue "scenario 38l: DataCore CLICKHOUSE_DATABASE defaults to the built-in \"default\" DB"
 assert_contains     "$TMP/v2-external.yaml" "CLICKHOUSE_DATABASE: \"default\""  "datacore CLICKHOUSE_DATABASE defaults to default (matches SaaS)"
+assert_contains     "$TMP/v2-external.yaml" "CLICKHOUSE_OTEL_DATABASE: \"otel\"" "datacore reads the canonical OTel database"
 assert_not_contains "$TMP/v2-external.yaml" "CLICKHOUSE_DATABASE: \"datacore\"" "datacore no longer points at a non-existent datacore DB"
 
 # Scenario 38m: the ClickStack collector's metrics/promql pipeline is neutralized
@@ -1227,6 +1436,82 @@ assert_not_contains "$TMP/v2-external.yaml" "CLICKHOUSE_DATABASE: \"datacore\"" 
 blue "scenario 38m: clickstack metrics/promql pipeline is inert (nop) + HYPERDX_LOG_LEVEL set"
 assert_contains     "$TMP/v2-external.yaml" 'receivers: \[nop\]' "clickstack metrics/promql pipeline uses the inert nop receiver"
 assert_contains     "$TMP/v2-external.yaml" "HYPERDX_LOG_LEVEL"  "clickstack collector sets HYPERDX_LOG_LEVEL"
+
+# Scenario 38n: the optional legacy backup path has complete image and storage
+# defaults, so enabling it does not require defining a storage map just to render.
+blue "scenario 38n: ClickHouse backup renders with safe image/storage defaults"
+render "$TMP/v1-backup.yaml" \
+  --set global.platformVersion=v1 \
+  --set neuraltrust-data-plane.dataPlane.components.clickhouse.backup.enabled=true
+assert_contains "$TMP/v1-backup.yaml" "name: clickhouse-backup" "ClickHouse backup CronJob renders when enabled"
+assert_contains "$TMP/v1-backup.yaml" "image: \"europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/curl:8.20.0\"" "ClickHouse backup uses the tracked curl image"
+
+# Scenario 38o: data-plane-api's evaluation-progress cache backend is mode-derived
+# (v1 keeps the existing Kafka backend; v2 uses the shared Redis) unless a
+# consumer explicitly overrides it, and the REDIS_URL (with any ACL/IAM auth)
+# only ever lives in the Secret, never the plaintext env ConfigMap.
+blue "scenario 38o: data-plane-api evaluation-progress cache defaults to Kafka (v1) / Redis (v2)"
+render "$TMP/v1-dp-redis.yaml" --set global.platformVersion=v1
+assert_env_value "$TMP/v1-dp-redis.yaml" "EVALUATION_PROGRESS_BACKEND" "kafka" "data-plane-api defaults to the Kafka backend under v1"
+assert_not_contains "$TMP/v1-dp-redis.yaml" "REDIS_URL" "data-plane-api does not reference REDIS_URL under v1 (no new Redis dependency)"
+# v2 hybrid runs the data-plane-api shim only when pointed at an external ClickHouse
+# (dotted host), so set one here to exercise its Redis wiring.
+render_default "$TMP/v2-dp-redis.yaml" \
+  --set neuraltrust-data-plane.dataPlane.components.clickhouse.host=my-ch.example.com
+assert_env_value "$TMP/v2-dp-redis.yaml" "EVALUATION_PROGRESS_BACKEND" "redis" "data-plane-api defaults to the Redis backend under v2"
+assert_contains "$TMP/v2-dp-redis.yaml" "key: REDIS_URL" "data-plane-api reads REDIS_URL from the data-plane Secret under v2"
+assert_contains "$TMP/v2-dp-redis.yaml" "REDIS_URL: cmVkaXM6Ly9yZWRpczo2Mzc5LzA=" "v2 REDIS_URL defaults to the in-cluster shared Redis (redis://redis:6379/0)"
+render_default "$TMP/v2-dp-redis-acl.yaml" \
+  --set neuraltrust-data-plane.dataPlane.components.clickhouse.host=my-ch.example.com \
+  --set neuraltrust-data-plane.dataPlane.components.api.redis.host=my-redis.example.com \
+  --set neuraltrust-data-plane.dataPlane.components.api.redis.username=nt-acl \
+  --set neuraltrust-data-plane.dataPlane.components.api.redis.password=s3cr3t
+assert_contains "$TMP/v2-dp-redis-acl.yaml" "REDIS_URL: cmVkaXM6Ly9udC1hY2w6czNjcjN0QG15LXJlZGlzLmV4YW1wbGUuY29tOjYzNzkvMA==" "data-plane-api ACL username/password are embedded in REDIS_URL (redis-py honors it)"
+render_default "$TMP/v2-dp-redis-iam.yaml" \
+  --set neuraltrust-data-plane.dataPlane.components.clickhouse.host=my-ch.example.com \
+  --set neuraltrust-data-plane.dataPlane.components.api.redis.host=my-cache.abc.cache.amazonaws.com \
+  --set neuraltrust-data-plane.dataPlane.components.api.redis.iamAuth=true \
+  --set neuraltrust-data-plane.dataPlane.components.api.redis.iamUser=nt-user \
+  --set neuraltrust-data-plane.dataPlane.components.api.redis.iamCacheName=nt-cache
+assert_contains "$TMP/v2-dp-redis-iam.yaml" "REDIS_URL: cmVkaXNzOi8vbXktY2FjaGUuYWJjLmNhY2hlLmFtYXpvbmF3cy5jb206NjM3OS8w" "IAM-mode REDIS_URL uses rediss:// and carries no inline credentials"
+assert_env_value "$TMP/v2-dp-redis-iam.yaml" "REDIS_AUTH_MODE" "aws_iam" "data-plane-api IAM mode emits REDIS_AUTH_MODE=aws_iam"
+assert_env_value "$TMP/v2-dp-redis-iam.yaml" "REDIS_IAM_USER" "nt-user" "data-plane-api IAM mode emits REDIS_IAM_USER"
+
+# Scenario 38p: hybrid ClickStack OTLP export is opt-in (global.clickstack) and
+# DUAL-writes — the Postgres raw path (for DataAgent) stays, and the OTLP
+# meta/raw exporters + endpoint are added for AgentGateway and TrustGuard. The
+# bearer token only ever lives in the data-plane Secret, never the env ConfigMap.
+blue "scenario 38p: hybrid ClickStack OTLP export is opt-in and dual-writes"
+render_default "$TMP/v2-hybrid-noclickstack.yaml"
+assert_not_contains "$TMP/v2-hybrid-noclickstack.yaml" "name: raw-otlp" "hybrid default keeps product data on the Postgres raw path (no OTLP raw exporter)"
+assert_not_contains "$TMP/v2-hybrid-noclickstack.yaml" "name: metadata-otlp" "hybrid default emits no OTLP metadata exporter"
+assert_not_contains "$TMP/v2-hybrid-noclickstack.yaml" "OTEL_EXPORTER_OTLP_HEADERS" "hybrid default ships no ClickStack OTLP auth header"
+render_default "$TMP/v2-hybrid-clickstack.yaml" \
+  --set global.clickstack.enabled=true \
+  --set global.clickstack.endpoint=https://clickstack-collector.example.com/v1/logs \
+  --set global.clickstack.authToken=cs-token-123
+assert_contains "$TMP/v2-hybrid-clickstack.yaml" "name: sensible-pg" "ClickStack export keeps the Postgres raw path (dual-write)"
+assert_contains "$TMP/v2-hybrid-clickstack.yaml" "name: metadata-otlp" "ClickStack export adds the OTLP metadata exporter"
+assert_contains "$TMP/v2-hybrid-clickstack.yaml" "name: raw-otlp" "ClickStack export adds the OTLP raw exporter"
+assert_contains "$TMP/v2-hybrid-clickstack.yaml" "OTEL_EXPORTER_OTLP_ENDPOINT: .https://clickstack-collector.example.com/v1/logs." "ClickStack export sets the OTLP endpoint on the data planes"
+assert_contains "$TMP/v2-hybrid-clickstack.yaml" "OTEL_EXPORTER_OTLP_HEADERS: .authorization=Bearer cs-token-123." "ClickStack export ships the bearer token via the data-plane Secret"
+assert_render_fails "ClickStack export requires an endpoint when enabled" \
+  --set global.clickstack.enabled=true
+
+blue "scenario 39: invalid topology and retired components fail rendering"
+assert_render_fails "unknown platform generation is rejected" \
+  --set global.platformVersion=v3
+assert_render_fails "unknown v2 deployment mode is rejected" \
+  --set global.platformVersion=v2 \
+  --set global.deploymentMode=isolated
+render "$TMP/v1-ignored-mode.yaml" \
+  --set global.platformVersion=v1 \
+  --set global.deploymentMode=isolated
+assert_contains "$TMP/v1-ignored-mode.yaml" "name: trustgate-control-plane" "deploymentMode remains ignored under explicit v1"
+assert_render_fails "explicitly enabling retired AISPM is rejected" \
+  --set neuraltrust-aispm.aispm.enabled=true
+assert_render_fails "explicitly enabling retired SIEM Connectors is rejected" \
+  --set neuraltrust-siem-connectors.siemConnectors.enabled=true
 
 green ""
 green "All helm-render assertions passed."

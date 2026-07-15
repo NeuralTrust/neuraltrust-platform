@@ -260,7 +260,7 @@ both the API Deployment and its Jobs.
 */}}
 {{- define "data-plane.api.k8sJobs.image" -}}
 {{- $apiRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api" -}}
-{{- $apiTag := "v1.24.0" -}}
+{{- $apiTag := "v1.39.0" -}}
 {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.image -}}
   {{- if .Values.dataPlane.components.api.image.repository -}}{{- $apiRepo = .Values.dataPlane.components.api.image.repository -}}{{- end -}}
   {{- if .Values.dataPlane.components.api.image.tag -}}{{- $apiTag = .Values.dataPlane.components.api.image.tag -}}{{- end -}}

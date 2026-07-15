@@ -39,6 +39,15 @@ spec:
           args:
             - "--port"
             - {{ $port | quote }}
+            {{- /* Passwordless in-cluster cache reachable only via the ClusterIP
+                   Service. Redis' default protected-mode drops non-loopback
+                   clients when no auth is set (accepts the TCP connection, then
+                   closes it — clients see "write: broken pipe"), so the loopback
+                   readiness probe passes while cross-pod services
+                   (agentgateway/trustguard) crash. Disable it so in-cluster pods
+                   can connect. */}}
+            - "--protected-mode"
+            - "no"
             {{- if $persist.enabled }}
             - "--save"
             - "60 1"

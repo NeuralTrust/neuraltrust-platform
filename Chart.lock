@@ -1,10 +1,4 @@
 dependencies:
-- name: neuraltrust-aispm
-  repository: file://./charts/neuraltrust-aispm
-  version: 1.0.6
-- name: neuraltrust-siem-connectors
-  repository: file://./charts/neuraltrust-siem-connectors
-  version: 1.0.5
 - name: clickhouse
   repository: file://./charts/clickhouse
   version: 1.0.3
@@ -13,28 +7,28 @@ dependencies:
   version: 1.0.1
 - name: neuraltrust-data-plane
   repository: file://./charts/neuraltrust-data-plane
-  version: 1.2.48
+  version: 1.2.49
 - name: neuraltrust-control-plane
   repository: file://./charts/neuraltrust-control-plane
-  version: 1.2.43
+  version: 1.2.46
 - name: trustgate
   repository: file://./charts/trustgate
-  version: 1.2.33
+  version: 1.2.34
 - name: agentgateway
   repository: file://./charts/agentgateway
-  version: 0.1.3
+  version: 0.1.8
 - name: trustguard
   repository: file://./charts/trustguard
-  version: 0.1.3
+  version: 0.1.7
 - name: trustlens
   repository: file://./charts/trustlens
-  version: 0.1.0
+  version: 0.1.1
 - name: dataagent
   repository: file://./charts/dataagent
-  version: 0.1.0
+  version: 0.1.2
 - name: datacore
   repository: file://./charts/datacore
-  version: 0.1.1
+  version: 0.1.3
 - name: clickstack-otel-collector
   repository: file://./charts/clickstack-otel-collector
   version: 0.1.1
@@ -43,9 +37,9 @@ dependencies:
   version: 0.1.0
 - name: neuraltrust-firewall
   repository: file://./charts/neuraltrust-firewall
-  version: 2.0.15
+  version: 2.0.16
 - name: neuraltrust-watchdog
   repository: file://./charts/neuraltrust-watchdog
-  version: 0.2.5
-digest: sha256:051e51e3ebe5767077ea2ec5f380f60b90b21e7789e5b3db819384e343b1d42e
-generated: "2026-07-14T08:07:51.643028+02:00"
+  version: 0.2.6
+digest: sha256:9f27a64183631be12638fad6342ad9bbcea9444a2bf0b648c3c3666b4a292303
+generated: "2026-07-14T22:36:29.031373+02:00"

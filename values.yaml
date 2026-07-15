@@ -16,13 +16,15 @@ global:
   platform: "gcp"
   # Product generation switch. Selects WHICH stack the umbrella chart deploys.
   # This is NOT the cloud provider (that is `global.platform` above).
-  #   "v1" | "" | null → legacy stack, byte-identical to today (default).
-  #   "v2"             → next-gen stack: AgentGateway + TrustGuard + TrustLens
+  #   "v2" | "" | null → next-gen stack (default).
+  #   "v1"             → explicit legacy TrustGate/Kafka escape hatch.
   #                      control/data planes. Under v2 the legacy Python
-  #                      control-plane API, data-plane, trustgate, kafka, aispm
-  #                      and siem-connectors stop deploying.
-  # Switch to v2: --set global.platformVersion=v2
-  platformVersion: "v1"
+  #                      control-plane API, data-plane, trustgate, and kafka stop
+  #                      deploying. AISPM and legacy SIEM Connectors were removed.
+  platformVersion: "v2"
+  # Existing v1 releases are detected during a live upgrade and must opt in to
+  # workload replacement. New installs do not need this flag.
+  confirmV2Migration: false
   # Split-plane boundary for the v2 stack (ignored under v1).
   #   "hybrid"   → only data-plane components deploy at the customer; control
   #                planes stay in NeuralTrust SaaS (default, most customers).
@@ -40,12 +42,41 @@ global:
   deploymentMode: "hybrid"
   # v2-only knobs. The AgentGateway proxy authenticates to TrustGuard with a
   # shared client_credentials pair that TrustGuard validates; the umbrella owns
-  # both sides via the v2-trustguard-client-secret Secret so they always match.
+  # both sides via the trustguard-client-credentials Secret so they always match.
   # Leave the secret empty to auto-generate (needs autoGenerateSecrets), or set it
   # to integrate with an externally-managed platform client.
   v2:
     trustguardClientId: "agentgateway-platform"
     trustguardClientSecret: "" # Auto-generated when empty (global.autoGenerateSecrets)
+    # Existing/shared Secret name override. Leave empty for
+    # trustguard-client-credentials. Externally managed prerelease upgrades that
+    # cannot use lookup automatically keep v2-trustguard-client-secret.
+    trustguardClientSecretName: ""
+  # ClickStack OTLP export for the v2 DATA planes (AgentGateway + TrustGuard).
+  # External mode ALWAYS exports product data (meta/raw) to the in-cluster
+  # clickstack-otel-collector and ignores this block. In HYBRID mode the data
+  # planes persist raw payloads to Postgres for DataAgent by default; enable this
+  # block to ALSO dual-write product data over OTLP to a ClickStack collector
+  # (e.g. NeuralTrust's core-infrastructure collector) without dropping the
+  # Postgres/DataAgent path. Default OFF — existing hybrid installs are unaffected.
+  clickstack:
+    enabled: false
+    # OTLP/HTTP endpoint including the signal path, e.g.
+    #   https://clickstack-collector.neuraltrust.ai/v1/logs (public route), or
+    #   http://clickstack-collector.<collector-namespace>.svc.cluster.local:4318/v1/logs
+    # The public route exposes OTLP/HTTP only (:4318); raw OTLP/gRPC is not
+    # reachable through it. Required when enabled=true.
+    endpoint: ""
+    protocol: "http/protobuf"
+    # Leave false for the public TLS route (system-root verification). Only set
+    # true for a plaintext in-cluster collector Service.
+    insecure: false
+    # Bearer token securing the collector's OTLP receivers (its OTLP_AUTH_TOKEN).
+    # Stored in the data-plane Secret and sent as the Authorization header. Leave
+    # empty only if the target collector has auth disabled. With
+    # preserveExistingSecrets=true, add OTEL_EXPORTER_OTLP_HEADERS to the
+    # pre-created agentgateway-secrets / trustguard-secrets instead.
+    authToken: ""
   # Base domain for auto-generating service URLs and hostnames.
   # Used across all platforms for URL generation (e.g., "control-plane-api.{domain}").
   # Examples: "aws.neuraltrust.ai", "apps.mycluster.openshiftapps.com", "gcp.neuraltrust.ai"
@@ -56,6 +87,11 @@ global:
   imageRegistry: "" # Global image registry prefix (e.g., "europe-west1-docker.pkg.dev/project/repo"). If set, will be prepended to image repositories.
   autoGenerateSecrets: true # Auto-generate required secrets (JWT keys, passwords) if not explicitly provided. Uses lookup to preserve existing values on upgrades. Set to false to let subcharts manage their own secrets (required when using secret references).
   preserveExistingSecrets: false # Set to true to prevent Helm from creating/updating secrets (secrets are pre-generated). When true, secret templates (including the ClickHouse subchart) are NOT rendered. Recommended for deploy methods where `lookup` is unavailable (ArgoCD/Flux, `helm template`, restricted RBAC): install once, then set true so upgrades never re-generate/rotate secrets. Generated secrets carry `helm.sh/resource-policy: keep`, so flipping this on after install will not prune the live secrets.
+  # Canonical in-cluster PostgreSQL switch. `global.*` is propagated into every
+  # subchart, so one false value reliably disables the PostgreSQL workload and
+  # init Jobs. Legacy nested deploy values remain supported.
+  postgresql:
+    deploy: true
   security:
     allowInsecureImages: true # Allow Bitnami charts to use their container images
   storageClass: "" # Global storage class for persistent volumes
@@ -206,7 +242,8 @@ global:
   # by itself; the customer-minimal path has watchdog push check-status metrics
   # and ERROR/WARN logs directly to `hostedExport`.
   # In full-stack mode, component telemetry — Prometheus scrapes, OTLP traces
-  # from TrustGate/Firewall/AISPM, K8s events, kubeletstats — is funnelled
+  # from the selected gateway/runtime services and Firewall, K8s events,
+  # kubeletstats — is funnelled
   # through this collector. The hosted exporter ships collector-side telemetry
   # to NeuralTrust's managed observability endpoint when a bearer token is
   # provided (see `hostedExport` below).
@@ -233,8 +270,8 @@ global:
   # `values-self-monitoring.yaml.example` into your install:
   #
   #     helm upgrade --install neuraltrust . \
-  #         -f values-self-monitoring.yaml.example \
-  #         -f my-values.yaml
+  #         -f values-required.yaml \
+  #         -f values-self-monitoring.yaml.example
   #
   # Healing actions (Deployment restarts, Kafka Connect task restarts)
   # remain gated by `actions.dryRun: true` inside the watchdog config —
@@ -297,8 +334,8 @@ global:
       # Stable resource name (no release prefix). Override only when external
       # tooling still references the legacy <release>-otel-collector name.
       fullnameOverride: "otel-collector"
-      # Optional: route every component (TrustGate, Firewall, AISPM,
-      # Control Plane, Data Plane) at this OTLP endpoint. When set, the
+      # Optional: route every supported component (including gateway/runtime,
+      # Firewall, Control Plane, and Data Plane) at this OTLP endpoint. When set, the
       # subchart configmaps OVERRIDE their per-component defaults so
       # operators don't have to touch each one. Recommended value when
       # using the in-chart collector:
@@ -378,69 +415,6 @@ global:
         # `kubeletstats` receivers. Disable to keep RBAC namespace-scoped at
         # the cost of those signals.
         clusterScoped: true
-# Optional add-on services (off by default, listed first for visibility).
-# Toggle each one with its own enabled flag; everything else uses chart defaults.
-#
-# AI Security Posture Management (AISPM)
-# When enabled, the parent chart auto-populates:
-#   - control-plane-secrets/POSTURE_API_URL → http://aispm-api-service.<release-namespace>.svc.cluster.local:80
-# The control-plane-app reads POSTURE_API_URL (and falls back to DATA_PLANE_JWT_SECRET
-# for POSTURE_JWT_SECRET) automatically; no app code changes needed.
-neuraltrust-aispm:
-  aispm:
-    enabled: false
-    # imagePullSecrets: "gcr-secret"
-    # api:
-    #   replicas: 1
-    #   image: { repository: "...", tag: "v0.15.0", pullPolicy: IfNotPresent }
-    #   resources: { requests: {...}, limits: {...} }
-    #   autoscaling: { enabled: false, minReplicas: 1, maxReplicas: 4 }
-    #   podDisruptionBudget: { enabled: false, minAvailable: 1 }
-    #   extraEnv: []
-    #   extraEnvFrom: []
-    # worker: { replicas: 1, image: {...}, resources: {...}, autoscaling: { enabled: false } }
-    # beat:   { image: {...}, resources: {...} }
-    # config:
-    #   openaiModel: "gpt-4o-mini"
-    #   defaultSyncIntervalSeconds: "86400"
-    #   otelEnabled: "false"
-    #   aispmApiUrl: ""        # Empty = internal Service URL
-    # secrets:
-    #   authEncryptionKey: ""  # Auto-generated if empty (Fernet 44-char urlsafe base64)
-    #   dbPassword: ""         # Auto-generated if empty
-    #   openaiApiKey: ""       # Required at runtime; chart does not enforce
-    # database: { host: "control-plane-postgresql", user: "aispm", name: "aispm", sslMode: "disable" }
-    #   authMode: "password"   # "iam" = AWS RDS IAM auth (password-less). Skips the
-    #                          # DATABASE_PASSWORD requirement + init Job and emits
-    #                          # DATABASE_AUTH_MODE/DATABASE_IAM_AUTH. Needs an
-    #                          # IAM-capable image + IRSA + external RDS. See SECRETS.md.
-    # redis:    { host: "", port: "6379", database: "1" }   # Empty host shares TrustGate Redis
-    #   password: ""           # External Redis password (-> aispm-secrets `redis-password`)
-    #   username: ""           # Redis 6+ ACL username (-> REDIS_USERNAME)
-    #   tls: ""                # "true" for TLS-only managed Redis (-> REDIS_TLS)
-    #   authMode: "password"   # "iam" = ElastiCache IAM auth (password-less). Emits
-    #                          # REDIS_AUTH_MODE/REDIS_IAM_AUTH. Needs IAM-capable image + IRSA.
-    # kafka:    { bootstrapServers: "", postureTopic: "posture_alerts" }
-# SIEM forwarder
-# Internal-only worker that consumes Kafka audit/posture events and forwards
-# them to external SIEMs (Splunk, Sentinel, Datadog, Elasticsearch, …) using
-# per-team configuration stored in ClickHouse.
-neuraltrust-siem-connectors:
-  siemConnectors:
-    enabled: false
-    # imagePullSecrets: "gcr-secret"
-    # replicas: 1
-    # image: { repository: "...", tag: "latest", pullPolicy: IfNotPresent }
-    # resources: { requests: {...}, limits: {...} }
-    # autoscaling: { enabled: false, minReplicas: 1, maxReplicas: 4 }
-    # podDisruptionBudget: { enabled: false, minAvailable: 1 }
-    # config:
-    #   kafkaTopics: "audit_events,posture_alerts"
-    #   logLevel: "info"
-    #   port: "3000"
-    # kafka:      { brokers: "" }     # Empty => resolved from global.kafka.bootstrapServers
-    # clickhouse: { host: "", database: "neuraltrust", user: "neuraltrust",
-    #               secretName: "clickhouse-secrets", secretKey: "admin-password" }
 # Infrastructure Components
 # These can be deployed or configured to use pre-installed instances
 infrastructure:
@@ -448,10 +422,13 @@ infrastructure:
   clickhouse:
     # Set to true to deploy ClickHouse, false to use pre-installed instance
     # Default: true (deploy)
-    # NOTE (v2): ClickHouse deploys in ALL v2 modes (hybrid + external) — it backs
-    # the temporary data-plane-api analytics shim in every mode and the
-    # clickstack-otel-collector + DataCore stack in external mode. Set deploy=false
-    # and point the endpoints at a hosted instance to use external ClickHouse.
+    # NOTE (v2): in-cluster ClickHouse deploys ONLY in v2 EXTERNAL (and v1) — it
+    # backs the self-hosted clickstack-otel-collector + DataCore + data-plane-api
+    # analytics stack there. In v2 HYBRID the analytics store lives in NeuralTrust
+    # SaaS, so this subchart never renders regardless of this flag; the optional
+    # data-plane-api read shim, if wanted, is pointed at an EXTERNAL ClickHouse via
+    # neuraltrust-data-plane.dataPlane.components.clickhouse.host (dotted endpoint).
+    # In v2 external / v1, set deploy=false to use a hosted ClickHouse instead.
     deploy: true
     # External ClickHouse configuration (used when deploy: false)
     external:
@@ -477,17 +454,10 @@ infrastructure:
     # Kafka chart values (used when deploy: true) are in the root-level 'kafka:' section below.
   # PostgreSQL Configuration
   postgresql:
-    # Single switch for in-cluster vs external PostgreSQL across ALL subcharts
-    # (control-plane, TrustGate, AISPM). When false, the chart skips: the
-    # in-cluster PostgreSQL Deployment, the control-plane wait-for-postgresql
-    # initContainers, and the TrustGate/AISPM postgresql-init Jobs — so the
-    # heavy postgres image is never pulled. The operator must pre-create the
-    # users and databases on the external server.
-    # Legacy neuraltrust-control-plane.infrastructure.postgresql.deploy is still
-    # honored; this flag is the recommended single override for external Postgres.
+    # DEPRECATED deployment mirror: use global.postgresql.deploy as the single
+    # cross-subchart switch. A false value here without the global switch fails
+    # with migration guidance instead of silently leaving PostgreSQL running.
     deploy: true
-    # Note: in-cluster PostgreSQL deployment is also controlled by neuraltrust-control-plane.infrastructure.postgresql.deploy below
-    # Set deploy: true/false in either place to enable/disable in-cluster PostgreSQL deployment
     # External PostgreSQL configuration (used when deploy=false)
     external:
       host: "postgresql.postgresql.svc.cluster.local" # e.g., "postgresql.postgresql.svc.cluster.local"
@@ -511,7 +481,7 @@ infrastructure:
     deploy: true
     image:
       repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/redis-stack-server
-      tag: "7.4.0-v0"
+      tag: "7.2.0-v20"
       pullPolicy: IfNotPresent
     port: 6379
     resources:
@@ -955,6 +925,7 @@ neuraltrust-control-plane:
       annotations: {}
     secrets:
       controlPlaneJWTSecret: "" # Auto-generated if empty
+      authSecret: "" # Auto-generated once; exposed identically as AUTH_SECRET and NEXTAUTH_SECRET
       openaiApiKey: ""
       resendApiKey: ""
       resendAlertSender: ""
@@ -1038,7 +1009,7 @@ neuraltrust-control-plane:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api"
-          tag: "v1.22.1"
+          tag: "v1.23.0"
           pullPolicy: "Always"
         config:
           # URLs will be auto-generated from OpenShift Routes if global.openshift=true and global.openshiftDomain is set
@@ -1095,7 +1066,7 @@ neuraltrust-control-plane:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.89.0"
+          tag: "v1.92.0"
           pullPolicy: "Always"
         config:
           nodeEnv: production
@@ -1118,17 +1089,18 @@ neuraltrust-control-plane:
           # platform-v2 backend service URLs (only wired when global.platformVersion=v2).
           # Empty = in-cluster Service defaults (same namespace, port 80). JWT secrets are
           # read from each v2 subchart's own Secret (optional).
+          # Forces the v2 UI (bypasses the per-browser 'nt-ui' cookie preference —
+          # see app/constants/uiVersion.ts#isForceV2UiEnabled). Self-hosted v2
+          # installs have no v1 UI to preserve, so this defaults "true"; ignored
+          # under v1 (the shared SaaS app still ships v1 by default there).
+          forceV2Ui: "true"
           agentgatewayUrl: "" # Auto: http://agentgateway-admin (AgentGateway admin/control API)
           agentgatewayProxyUrl: "" # Auto: http://agentgateway-proxy (AgentGateway proxy/data plane)
           trustguardUrl: "" # Auto: http://trustguard-control-plane (TrustGuard admin API)
           datacoreUrl: "" # Auto: http://datacore (DataCore metrics read API)
           datacoreMetricsEnabled: "false" # "true" to enable DataCore-backed metrics in the console (needs datacore deployed)
           alertEngineApiUrl: "" # Auto: http://alertengine-api (AlertEngine API)
-          # POSTURE_API_URL — control-plane-app → AISPM API host (no path).
-          # Empty value lets the parent chart auto-resolve to
-          # http://aispm-api-service.<release-namespace>.svc.cluster.local:80
-          # when neuraltrust-aispm.aispm.enabled is true.
-          postureApiUrl: ""
+          trustlensApiUrl: "" # Auto: http://trustlens-api when trustlens.enabled=true
           modelScannerApiUrl: ""
           openaiModel: "gpt-4o-mini"
           kafkaHost: "kafka"
@@ -1216,32 +1188,32 @@ neuraltrust-control-plane:
 # AgentGateway (TrustGate v2): admin (control) + proxy/mcp (data)
 agentgateway:
   image:
-    tag: "v0.3.6" # Pin to a released AgentGateway tag in production
+    tag: "v0.6.0"
   database:
     # host auto-derives to the in-cluster control-plane-postgresql Service; set
     # only for external/CloudSQL Postgres. name is mode-derived when left empty:
     # external => private "agentgateway" DB (control owns migrations); hybrid =>
     # shared "trustdata" DB, own "agentgateway" schema. user defaults to "agentgateway".
     sslMode: "prefer" # TLS when available, plaintext fallback for the non-TLS in-cluster PG; use "require" for hosted DBs
-    iamAuth: false # AWS RDS IAM DB auth (chart-prepared; service token minting pending). false = password
+    iamAuth: false # AWS RDS IAM DB auth; the service mints a token at connect time. false = password
   redis:
     host: "redis" # In-cluster Redis svc; set to external/Memorystore host for hosted Redis
     iamAuth: false # AWS ElastiCache IAM auth (chart-prepared). false = password
     # username: ""  # Redis 6+ ACL username (e.g. ElastiCache user group) -> REDIS_USERNAME
     # tls: ""       # "true" for TLS-only managed Redis (e.g. ElastiCache Serverless) -> REDIS_TLS
     # trustguard.baseURL + client credentials are auto-wired (in-cluster Service URL
-    # + shared v2-trustguard-client-secret); no need to set them here.
+    # + shared trustguard-client-credentials); no need to set them here.
 # TrustGuard: control-plane (admin) + data-plane (runtime /v1/evaluate)
 trustguard:
   image:
-    tag: "v0.9.1"
+    tag: "v0.11.1"
   database:
     # host auto-derives to the in-cluster control-plane-postgresql Service; set
     # only for external Postgres. name is mode-derived when left empty: external =>
     # private "trustguard" DB (control owns migrations); hybrid => shared "trustdata"
     # DB, own "trustguard" schema. user defaults to "trustguard".
     sslMode: "prefer" # TLS when available, plaintext fallback for the non-TLS in-cluster PG; use "require" for hosted DBs
-    iamAuth: false # AWS RDS IAM DB auth (chart-prepared; service token minting pending). false = password
+    iamAuth: false # AWS RDS IAM DB auth; the service mints a token at connect time. false = password
   redis:
     host: "redis" # In-cluster Redis svc; set to external host for hosted Redis
     iamAuth: false # AWS ElastiCache IAM auth (chart-prepared). false = password
@@ -1251,15 +1223,16 @@ trustguard:
 trustlens:
   enabled: false # Opt-in; set true to deploy TrustLens under v2
   image:
-    tag: "latest"
+    tag: "" # Required when enabled; no release image is published yet
   database:
     host: "control-plane-postgresql" # In-cluster Postgres svc; set to external host for hosted DB
     sslMode: "prefer" # TLS when available, plaintext fallback for the non-TLS in-cluster PG; use "require" for hosted DBs
 # DataAgent (hybrid only): outbound-only agent bridging local reads to the SaaS
-# DataBridge. Renders when global.deploymentMode=hybrid.
+# DataBridge. Renders only when hybrid, tenantId is set, and an inline token or
+# existing Secret reference is configured.
 dataagent:
   image:
-    tag: "v0.1.0" # Pin to a released DataAgent tag in production
+    tag: "v0.1.1" # Pin to a released DataAgent tag in production
   databridge:
     # Defaults target the NeuralTrust SaaS DataBridge — override only for a
     # non-default region/endpoint or a self-hosted DataBridge.
@@ -1273,12 +1246,17 @@ dataagent:
   # to set. External: overlay database.host + database.password (user/name if renamed).
   database:
     sslMode: "prefer"
+  existingSecret:
+    name: "" # Existing Secret containing DATABASE_URL + DB_PASSWORD for externally managed secret workflows
   enrolmentToken: "" # Issued by SaaS (required for tls/mtls)
+  enrolmentTokenExistingSecret:
+    name: "" # Existing Secret containing the SaaS-issued token; enables DataAgent when tenantId is also set
+    key: "ENROLMENT_TOKEN"
 # DataCore (external only): residency query API over local ClickHouse. Renders
 # when global.deploymentMode=external.
 datacore:
   image:
-    tag: "v0.1.1"
+    tag: "v0.3.0"
   # CLICKHOUSE_PASSWORD is read from the shared `clickhouse` secret (same secret
   # AlertEngine uses) via clickhouse.existingSecret — no password set here.
   clickhouse:
@@ -1348,7 +1326,12 @@ neuraltrust-data-plane:
     components:
       clickhouse:
         enabled: true
-        host: "clickhouse" # Bare name ⇒ <name>.<namespace>.svc.cluster.local; a dotted host (external endpoint/FQDN) is used verbatim
+        # Bare name ⇒ <name>.<namespace>.svc.cluster.local; a dotted host (external
+        # endpoint/FQDN) is used verbatim. In v2 HYBRID there is no in-cluster
+        # ClickHouse, so the data-plane-api read shim renders ONLY when this is a
+        # dotted external host (otherwise the shim stays OFF). v2 external / v1 use
+        # the in-cluster store by default (bare "clickhouse").
+        host: "clickhouse"
         port: "8123"
         user: "neuraltrust"
         database: "neuraltrust"
@@ -1365,6 +1348,11 @@ neuraltrust-data-plane:
           name: "clickhouse-secrets"
         configmap:
           name: "clickhouse-init-job"
+        backup:
+          enabled: false
+          image:
+            repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/curl
+            tag: "8.20.0"
       kafka:
         enabled: true
         connect:
@@ -1413,7 +1401,7 @@ neuraltrust-data-plane:
         classifierModel: "gpt"
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.38.2
+          tag: v1.39.0
           pullPolicy: Always
         accessMode: ReadWriteOnce
         huggingfaceToken: ""
@@ -1465,6 +1453,32 @@ neuraltrust-data-plane:
         #     - secretRef:    { name: my-secret, optional: true }
         extraEnv: []
         extraEnvFrom: []
+        # Evaluation-progress cache backend (EVALUATION_PROGRESS_BACKEND). data-plane-api
+        # defaults this to "redis" when unset, so the chart pins an explicit mode default:
+        #   v1: "kafka" — Kafka already deploys and is wired above; no new Redis dependency.
+        #   v2: "redis" — v2 ships without Kafka. Points at the same umbrella-managed Redis
+        #       AgentGateway/TrustGuard use (see root 'infrastructure.redis' above): in-cluster
+        #       service "redis" by default, or infrastructure.redis.external when
+        #       infrastructure.redis.deploy=false (mirror that endpoint in host/password below).
+        redis:
+          backend: "" # Empty ⇒ mode default ("kafka" in v1, "redis" in v2). Set "redis"/"kafka" to override.
+          host: "redis" # In-cluster v2 Redis svc; set to external/Memorystore host for hosted Redis
+          port: 6379
+          db: "0" # Redis logical DB index
+          password: "" # Optional
+          # Optional Redis 6+ ACL username (e.g. ElastiCache user group). data-plane-api
+          # authenticates via the standard redis:// URL (redis-py honors the URL's
+          # username), so ACL auth is fully supported here (unlike TrustGate/AgentGateway).
+          username: ""
+          tls: "" # Set "true" for TLS-only managed Redis (uses the rediss:// scheme)
+          # AWS ElastiCache IAM auth. data-plane-api mints a SigV4 token at connect time
+          # (fully implemented — see cache_database.py), unlike the chart-prepared-only
+          # IAM flags on AgentGateway/TrustGuard. false = password/ACL.
+          iamAuth: false
+          iamUser: "" # ElastiCache IAM user name (must match the ElastiCache user id)
+          iamCacheName: "" # ElastiCache replication group / serverless cache name
+          iamRegion: "" # Empty ⇒ AWS_REGION / AWS_DEFAULT_REGION / us-east-1
+          iamServerless: false # true for ElastiCache Serverless
         # Run evaluation workloads as Kubernetes Jobs spawned by data-plane-api
         # (instead of FastAPI background tasks). Default OFF — matches
         # data-plane-api's K8S_JOBS_ENABLED=false when unset. Red teaming
@@ -1556,7 +1570,7 @@ neuraltrust-firewall:
       replicas: 2
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-        tag: "v2.13.0"
+        tag: "v2.14.0"
         pullPolicy: IfNotPresent
       resources:
         requests:
@@ -1590,7 +1604,7 @@ neuraltrust-firewall:
       deploymentStrategy: Recreate # Recreate | RollingUpdate — Recreate avoids 2× worker capacity during rollouts
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-        tag: "v2.13.0"
+        tag: "v2.14.0"
         pullPolicy: IfNotPresent
       replicas: 1
       # CPU-worker default: one HF transformer (~86M-class) per pod via ONNX.

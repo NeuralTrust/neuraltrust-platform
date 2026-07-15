@@ -431,14 +431,20 @@ runner:
 # later renders the bundled local Prometheus.
 enabledCheckIds:
   - clickhouse
+  - firewall-health
+  - pod-health
+v1EnabledCheckIds:
   - kafka-broker
   - kafka-connect
   - control-plane-synthetic
-  - data-plane-synthetic
   - trustgate-synthetic
-  - firewall-health
-  - pod-health
+  - data-plane-synthetic
   - deployment-health
+v2EnabledCheckIds:
+  - agentgateway-synthetic
+  - trustguard-synthetic
+  - v2-data-plane-synthetic
+  - v2-deployment-health
 # Additional checks merged after the default `checks` list. Use this from
 # umbrella/region values to add cross-namespace or account-specific probes
 # without replacing the entire default check catalog.
@@ -572,6 +578,15 @@ checks:
         # keep it on a separate check entry so a flaky downstream doesn't
         # mask a real API outage in the same alert.
         - {name: deep, url: 'http://data-plane-api-service/health/deep', expectedStatus: 200, latencyWarnMs: 1000, latencyCriticalMs: 3000}
+  # v2 keeps the temporary analytics API but removes Kafka, so do not call its
+  # legacy deep health endpoint. Readiness still verifies the v2 dependencies.
+  - id: v2-data-plane-synthetic
+    kind: httpsynthetic
+    enabled: false
+    target:
+      urls:
+        - {name: api, url: 'http://data-plane-api-service/health', expectedStatus: 200, latencyWarnMs: 500, latencyCriticalMs: 2000}
+        - {name: ready, url: 'http://data-plane-api-service/health/ready', expectedStatus: 200}
   - id: postgres-tcp
     kind: tcpsynthetic
     enabled: false
@@ -598,18 +613,25 @@ checks:
         - {name: control-plane, url: 'http://trustgate-control-plane/health'}
         - {name: data-plane, url: 'http://trustgate-data-plane/health'}
         - {name: actions, url: 'http://trustgate-actions/health'}
+  - id: agentgateway-synthetic
+    kind: httpsynthetic
+    enabled: false
+    target:
+      urls:
+        - {name: proxy, url: 'http://agentgateway-proxy/healthz'}
+        - {name: mcp, url: 'http://agentgateway-mcp/healthz'}
+  - id: trustguard-synthetic
+    kind: httpsynthetic
+    enabled: false
+    target:
+      urls:
+        - {name: data-plane, url: 'http://trustguard-data-plane/healthz'}
   - id: deploy-api-synthetic
     kind: httpsynthetic
     enabled: false
     target:
       urls:
         - {name: api, url: 'http://deploy-api-service.deploy-api/health'}
-  - id: aispm-synthetic
-    kind: httpsynthetic
-    enabled: false
-    target:
-      urls:
-        - {name: api, url: 'http://aispm-api-service.aispm/health'}
   - id: trustscan-synthetic
     kind: httpsynthetic
     enabled: false
@@ -705,12 +727,13 @@ checks:
     target:
       namespace: deploy-api
       deployments: [deploy-api]
-  - id: aispm-deployment-health
+  - id: v2-deployment-health
     kind: deployment_health
     enabled: false
     target:
-      namespace: aispm
-      deployments: [aispm-api, aispm-beat, aispm-worker]
+      namespace: ""
+      # MCP is optional, so the default check covers only always-on v2 workloads.
+      deployments: [agentgateway-proxy, trustguard-data-plane, data-plane-api]
   - id: trustscan-deployment-health
     kind: deployment_health
     enabled: false

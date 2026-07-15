@@ -2,5 +2,5 @@ apiVersion: v2
 name: trustlens
 description: TrustLens (WIP) — analytics/inventory backend. Single image, two runtimes (api + River worker), Postgres-only. Deployed only when global.platformVersion=v2.
 type: application
-version: 0.1.0
+version: 0.1.1
 appVersion: "0.1.0"
