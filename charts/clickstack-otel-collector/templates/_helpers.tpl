@@ -62,10 +62,10 @@ Usage: {{ include "clickstack-otel-collector.image" (dict "repository" .Values.i
 {{- $registry := "" }}
 {{- $repository := .repository }}
 {{- $tag := .tag }}
-{{- /* Default vendor registry for the third-party ClickStack image. Stripped so an
-       air-gapped mirror gets <mirror>/clickhouse/clickstack-otel-collector, not
-       <mirror>/docker.clickhouse.com/clickhouse/clickstack-otel-collector. */}}
-{{- $defaultRegistry := "docker.clickhouse.com" }}
+{{- /* Default NeuralTrust AR registry. Stripped so an air-gapped mirror gets
+       <mirror>/clickstack-otel-collector, not
+       <mirror>/europe-west1-docker.pkg.dev/.../clickstack-otel-collector. */}}
+{{- $defaultRegistry := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker" }}
 {{- if and .global .global.imageRegistry }}
   {{- $registry = .global.imageRegistry }}
 {{- end }}

@@ -330,18 +330,19 @@ source); the `envFrom` mounts map secret keys directly to env vars.
 |---|---|---|---|
 | AgentGateway server key | `agentgateway-secrets` | `SERVER_SECRET_KEY` | auto-generated |
 | AgentGateway MCP STS signing | `agentgateway-secrets` | `STS_SIGNING_KEY` | auto-generated RSA PKCS#1 private key (RS256), lookup-preserved so MCP tokens survive upgrades; use `create-secrets.sh` to validate and pre-provision an explicit PEM/base64-PEM key |
-| AgentGateway DB password | `agentgateway-secrets` | `DB_PASSWORD` | auto-generated (app reads `DB_PASSWORD`, not `DATABASE_PASSWORD`); **omitted when `agentgateway.database.iamAuth=true`** |
-| AgentGateway raw-telemetry DSN | `agentgateway-secrets` | `SENSIBLE_PG_DSN` | **hybrid only** — assembled DSN into the shared `trustdata` DB (own `agentgateway` schema); consumed by the postgres raw exporter so DataAgent has data. Omitted in external / when `iamAuth=true` |
+| AgentGateway DB password | `agentgateway-secrets` | `DB_PASSWORD` | auto-generated (app reads `DB_PASSWORD`, not `DATABASE_PASSWORD`); **omitted when `agentgateway.database.iamAuth=true`**, and **omitted in `shared-writer` layout** (sourced from `trustdata-secrets`) |
+| AgentGateway raw-telemetry DSN | `agentgateway-secrets` | `SENSIBLE_PG_DSN` | **hybrid only** — assembled DSN into the shared `trustdata` DB (own `agentgateway` schema); consumed by the postgres raw exporter so DataAgent has data. Omitted in external / when `iamAuth=true` / in `shared-writer` layout (comes from `trustdata-secrets`) |
 | TrustGuard admin JWT | `trustguard-secrets` | `ADMIN_JWT_SECRET` | auto-generated |
 | TrustGuard token signing | `trustguard-secrets` | `TRUSTGUARD_TOKEN_SIGNING_SECRET` | auto-generated |
 | TrustGuard Redis events | `trustguard-secrets` | `REDIS_EVENTS_SECRET` | auto-generated; authenticates cache pub/sub events |
-| TrustGuard DB password | `trustguard-secrets` | `DB_PASSWORD` | auto-generated; **omitted when `trustguard.database.iamAuth=true`** |
-| TrustGuard raw-telemetry DSN | `trustguard-secrets` | `SENSIBLE_PG_DSN` | **hybrid only** — assembled DSN into the shared `trustdata` DB (own `trustguard` schema); consumed by the postgres raw exporter so DataAgent has data. Omitted in external / when `iamAuth=true` |
+| TrustGuard DB password | `trustguard-secrets` | `DB_PASSWORD` | auto-generated; **omitted when `trustguard.database.iamAuth=true`**, and **omitted in `shared-writer` layout** (sourced from `trustdata-secrets`) |
+| TrustGuard raw-telemetry DSN | `trustguard-secrets` | `SENSIBLE_PG_DSN` | **hybrid only** — assembled DSN into the shared `trustdata` DB (own `trustguard` schema); consumed by the postgres raw exporter so DataAgent has data. Omitted in external / when `iamAuth=true` / in `shared-writer` layout (comes from `trustdata-secrets`) |
+| Shared telemetry writer | `trustdata-secrets` | `DB_PASSWORD` / `SENSIBLE_PG_DSN` | **hybrid `shared-writer` layout only** — one credential for the shared `trustdata` role. Generated once by the parent chart (lookup-preserved) and consumed by BOTH AgentGateway and TrustGuard (via the data-plane Deployment `envFrom`) and by the `v2-postgresql-init` Job, so all three agree. Pre-seed it for managed PostgreSQL. |
 | Shared TrustGuard client creds | `trustguard-client-credentials` | `CLIENT_ID` / `CLIENT_SECRET` | id defaults to `agentgateway-platform`; secret auto-generated (or `global.v2.trustguardClientSecret`). Injected into both AgentGateway (`TRUSTGUARD_CLIENT_ID`/`_SECRET`) and TrustGuard (`TRUSTGUARD_PLATFORM_CLIENT_ID`/`_SECRET`) so the pair matches. The prerelease `v2-trustguard-client-secret` values are copied during upgrade. |
 | TrustLens JWT | `trustlens-secrets` | `JWT_SECRET` | auto-generated (only when `trustlens.enabled=true`) |
 | TrustLens encryption keyset | `trustlens-secrets` | `ENCRYPTION_KEYSET` | auto-generated |
 | TrustLens DB password | `trustlens-secrets` | `DATABASE_PASSWORD` | auto-generated |
-| DataAgent DB password | `dataagent-secrets` | `DB_PASSWORD` | auto-generated (read-only `dataagent` role in `trustdata`; search_path spans both writer schemas) |
+| DataAgent DB password | `dataagent-secrets` | `DB_PASSWORD` | auto-generated (read-only `dataagent` role in `trustdata`; `search_path` spans the writer schema(s) — both per-service schemas in `separate`, or the single shared schema in `shared-writer`) |
 | DataAgent DB DSN | `dataagent-secrets` | `DATABASE_URL` | assembled from the `database` components (or `databaseUrl` override) |
 | DataAgent enrolment token | `dataagent-secrets` or operator Secret | `ENROLMENT_TOKEN` (configurable key) | **never** auto-generated — SaaS-issued, from `enrolmentToken` or `enrolmentTokenExistingSecret` |
 | AlertEngine DB password | `alertengine-secrets` | `DB_PASSWORD` | auto-generated (own `alertengine` DB; external only); **omitted when `alertengine.database.iamAuth=true`** |
@@ -356,14 +357,23 @@ v1-to-v2 migration must keep `global.confirmV2Migration: true` for its first v2
 reconciliation so missing v2 Secrets/keys can be created; later upgrades reuse
 them with `lookup`.
 
-- **Postgres (`v2-postgres-init`)**: `control-plane-postgresql` deploys by default
-  in all v2 modes; the Job's provisioning is **mode-derived**:
-  - **hybrid** — ONE shared database `trustdata`. AgentGateway and TrustGuard each get
-    their OWN schema (named after their role) with `search_path` defaulted there, from
-    their `DB_PASSWORD` above, so their identically-named migration trackers
-    (`migration_versions`) never collide. A read-only `dataagent` role (from
-    `dataagent-secrets/DB_PASSWORD`) is granted SELECT on both schemas and its
-    `search_path` spans them, so DataAgent's unqualified reads resolve.
+- **Postgres (`v2-postgres-init`)**: for in-cluster PostgreSQL the Job runs by
+  default (`global.postgresql.initJob.mode: auto`). For an **external managed**
+  PostgreSQL, set `initJob.mode: enabled` to run it **configure-only** (the DBA
+  pre-creates the database + login roles; the Job never creates roles nor resets
+  passwords, and needs an admin connection in `postgresql-secrets`), or
+  `initJob.mode: disabled` to have the DBA own schema/`search_path`/grants. The
+  Job's provisioning is **mode-derived**:
+  - **hybrid** — ONE shared database `trustdata`. The role layout is mode-derived:
+    - `shared-writer` (default) — AgentGateway and TrustGuard share ONE `trustdata`
+      role + schema (credential from `trustdata-secrets`).
+    - `separate` (set `global.postgresql.hybridRoleLayout: separate`) — each service
+      gets its OWN schema (named after its role) with `search_path` defaulted there,
+      from its `DB_PASSWORD` above, so their identically-named migration trackers
+      never collide.
+    In both, a read-only `dataagent` role (from `dataagent-secrets/DB_PASSWORD`) is
+    granted SELECT on the writer schema(s) and its `search_path` spans them, so
+    DataAgent's unqualified reads resolve.
   - **external** — each service gets its OWN database (`agentgateway`, `trustguard`)
     on `public`, since the control planes run on-prem and own their migrations;
     DataCore reads raw data from ClickHouse, so there is no shared Postgres reader.

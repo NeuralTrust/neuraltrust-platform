@@ -11,7 +11,7 @@ fullnameOverride: "alertengine"
 securityHardening: true
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/alertengine
-  tag: "v0.4.4"
+  tag: "v0.4.5"
   pullPolicy: IfNotPresent
 imagePullSecrets: "gcr-secret"
 serviceAccount:
