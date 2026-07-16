@@ -21,7 +21,8 @@ data:
   DB_HOST: {{ include "neuraltrust-platform.postgres.host" (dict "host" .Values.database.host) | quote }}
   DB_PORT: {{ .Values.database.port | quote }}
   DB_NAME: {{ include "neuraltrust-platform.v2.dbName" (dict "ctx" . "explicit" .Values.database.name "external" "agentgateway") | quote }}
-  DB_USER: {{ .Values.database.user | quote }}
+  # In hybrid shared-writer layout, AgentGateway connects as the shared writer role.
+  DB_USER: {{ include "neuraltrust-platform.v2.writerUser" (dict "ctx" . "explicit" .Values.database.user "default" "agentgateway") | quote }}
   DB_SSL_MODE: {{ .Values.database.sslMode | quote }}
   {{- if .Values.database.iamAuth }}
   # IAM (RDS) DB auth: no static DB_PASSWORD is shipped; the service mints a token.

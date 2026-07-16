@@ -120,10 +120,11 @@ deploys in-cluster only in **external** (and v1) — hybrid keeps analytics in S
 so no in-cluster ClickHouse renders there. Kafka is not part of Platform v2 and
 never renders.
 
-Hybrid PostgreSQL uses a shared `trustdata` database with isolated
-AgentGateway and TrustGuard schemas. When DataAgent is enabled, its read-only
-role is granted access to both schemas. The temporary `data-plane-api` read shim
-also runs on PostgreSQL by default in hybrid: it connects with the
+Hybrid PostgreSQL uses a shared `trustdata` database. The schema/role setup is
+performed by the chart's `v2-postgresql-init` Job (see **Hybrid PostgreSQL
+initialization** below); there is no external SQL script to run. The temporary
+`data-plane-api` read shim also runs on PostgreSQL by default in hybrid: it
+connects with the
 `postgresql-secrets` connection (host/port/user/password/database) and a
 `postgres-migrations` initContainer applies its own schema (`neuraltrust` schema
 + `tests`/`test_runs` tables). Point it at an external/managed ClickHouse instead
@@ -138,6 +139,49 @@ External gives control-plane services separate databases. AlertEngine also owns
 its own PostgreSQL database. In external mode the data-plane API shim stays on
 ClickHouse; ClickStack, DataCore, AlertEngine, and the data-plane API shim share
 the selected ClickHouse credentials through existing Kubernetes Secrets.
+
+### Hybrid PostgreSQL initialization
+
+The `trustdata` schema/role setup is owned by the chart's `v2-postgresql-init`
+Job. The role layout is **mode-derived** and needs no configuration.
+
+**Role layout (`hybridRoleLayout`)**
+
+| Mode | AgentGateway + TrustGuard | DataAgent |
+|---|---|---|
+| **hybrid** (`shared-writer`, default) | Share ONE writer role (`trustdata`) and one schema | Separate read-only role granted `SELECT` on the writer schema |
+| hybrid override (`hybridRoleLayout: separate`) | Each owns a login role and its own schema in `trustdata` | Read-only role granted `SELECT` on both schemas |
+| **external/full** (always `separate`) | Each owns its own per-service database | n/a (DataCore reads ClickHouse) |
+
+In hybrid the default `shared-writer` layout requires released AgentGateway/TrustGate
+and TrustGuard images whose telemetry migrations are namespaced
+(`trustgate_migration_versions` / `trustguard_migration_versions`, present in current
+release images). Set `global.postgresql.hybridRoleLayout: separate` to force the legacy
+per-service layout — for example an existing install that already has per-service-schema
+data, since switching layouts does **not** migrate data. `shared-writer` is hybrid-only
+and rejected in external/full, where control planes own their migrations and keep
+per-service databases. The privilege boundary is enforced by PostgreSQL: the writer role
+owns its schema; DataAgent only ever receives `USAGE` + `SELECT` (current and future
+tables) and never write access.
+
+**Init Job (`initJob.mode`)**
+
+| Value | In-cluster PostgreSQL | External / managed PostgreSQL |
+|---|---|---|
+| `auto` (default) | Runs (creates roles, database, schemas, grants) | Skipped |
+| `enabled` | Runs (local provisioning) | Runs **configure-only**: validates the DBA-created database/roles, then sets schema ownership, `search_path`, and grants — never creates roles nor resets passwords |
+| `disabled` | Never runs | Never runs (the DBA owns schema/`search_path`/grants) |
+
+For managed PostgreSQL with `initJob.mode: enabled`, `postgresql-secrets` must
+carry an **admin** connection (`POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`,
+`POSTGRES_PASSWORD`) able to `CREATE SCHEMA`/`ALTER ROLE ... IN DATABASE`/`GRANT`.
+If your DBAs will not place such a privileged credential in the namespace, set
+`initJob.mode: disabled` and have them apply the equivalent setup manually:
+create the `trustdata` database and login roles, create a writer-owned schema, set
+the writer's `search_path` to it, and grant the reader `USAGE` + `SELECT` (plus
+default privileges) on that schema. In `shared-writer` mode the AgentGateway and
+TrustGuard credentials come from a single `trustdata-secrets` Secret so both
+connect as the same writer role.
 
 The data-plane API shim also uses Redis for its evaluation-progress cache
 (`EVALUATION_PROGRESS_BACKEND`): v1 keeps the existing Kafka-backed behavior,

@@ -12,6 +12,15 @@ global:
   domain: "platform.example.com"
   imageRegistry: ""
   autoGenerateSecrets: true
+  # Shared "trustdata" database. In hybrid, AgentGateway + TrustGuard share ONE
+  # writer role/schema and DataAgent stays a separate read-only role (the default —
+  # no configuration needed). The schema/search_path/grant setup is owned by the
+  # chart's v2-postgresql-init Job. Only set global.postgresql for the two opt-ins:
+  #   - hybridRoleLayout: separate  # force the legacy per-service role+schema layout
+  #   - initJob.mode: enabled       # ALSO configure an EXTERNAL managed PostgreSQL
+  #                                 # (the DBA pre-creates the database + login roles;
+  #                                 # the Job never creates roles nor resets passwords)
+  #   - initJob.mode: disabled      # never run the Job (the DBA owns schema/grants)
   observability:
     hostedExport:
       enabled: true

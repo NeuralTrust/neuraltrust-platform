@@ -972,13 +972,15 @@ assert_contains     "$TMP/v2-hybrid.yaml" "name: TRUSTGUARD_CLIENT_SECRET"      
 assert_contains     "$TMP/v2-hybrid.yaml" "name: TRUSTGUARD_PLATFORM_CLIENT_SECRET" "TrustGuard wires shared client secret via secretKeyRef"
 assert_contains     "$TMP/v2-hybrid.yaml" "TRUSTGUARD_BASE_URL: \"http://trustguard-data-plane\\." "AgentGateway TRUSTGUARD_BASE_URL auto-derives to in-cluster Service"
 assert_contains     "$TMP/v2-hybrid.yaml" "DB_NAME: \"trustdata\""               "AgentGateway/TrustGuard default to shared trustdata DB in hybrid"
-# Hybrid: shared trustdata DB with PER-SERVICE schemas (not public) so identically
-# named migration trackers never collide; DataAgent's reader search_path spans both.
-assert_contains     "$TMP/v2-hybrid.yaml" "ensure_writer_schema \"trustdata\" \"agentgateway\"" "v2 postgres-init gives agentgateway its own schema in trustdata (hybrid)"
-assert_contains     "$TMP/v2-hybrid.yaml" "ensure_writer_schema \"trustdata\" \"trustguard\""   "v2 postgres-init gives trustguard its own schema in trustdata (hybrid)"
-assert_contains     "$TMP/v2-hybrid.yaml" "CREATE SCHEMA IF NOT EXISTS"          "hybrid writers each get their own schema"
-assert_contains     "$TMP/v2-hybrid.yaml" "grant_readonly \"trustdata\" \"dataagent\"" "v2 postgres-init grants the read-only dataagent role SELECT per writer schema"
-assert_contains     "$TMP/v2-hybrid.yaml" "search_path = .*agentgateway.*trustguard.*public" "dataagent reader search_path spans both writer schemas"
+# Hybrid defaults to the shared-writer layout: AgentGateway and TrustGuard share ONE
+# writer role + schema in trustdata, DataAgent is a separate read-only role.
+assert_contains     "$TMP/v2-hybrid.yaml" "DB_USER: \"trustdata\""               "hybrid default: AG+TG connect as the shared writer role"
+assert_contains     "$TMP/v2-hybrid.yaml" "name: trustdata-secrets"             "hybrid default: shared writer credential Secret rendered"
+assert_contains     "$TMP/v2-hybrid.yaml" "ensure_role \"trustdata\""            "v2 postgres-init provisions the shared writer role (hybrid)"
+assert_contains     "$TMP/v2-hybrid.yaml" "ensure_writer_schema \"trustdata\" \"trustdata\" \"trustdata\"" "v2 postgres-init gives the shared writer its schema in trustdata (hybrid)"
+assert_contains     "$TMP/v2-hybrid.yaml" "CREATE SCHEMA IF NOT EXISTS"          "hybrid shared writer gets a writer-owned schema"
+assert_contains     "$TMP/v2-hybrid.yaml" "grant_readonly \"trustdata\" \"dataagent\"" "v2 postgres-init grants the read-only dataagent role SELECT on the writer schema"
+assert_contains     "$TMP/v2-hybrid.yaml" "search_path = .*trustdata.*, public"  "dataagent reader search_path targets the shared writer schema"
 # Raw-telemetry wiring so DataAgent actually has data to read in hybrid.
 assert_contains     "$TMP/v2-hybrid.yaml" "SENSIBLE_PG_DSN:"                     "hybrid data planes get a raw-telemetry Postgres DSN"
 assert_contains     "$TMP/v2-hybrid.yaml" "name: agentgateway-telemetry"        "agentgateway raw-telemetry exporters ConfigMap rendered (hybrid)"
@@ -1436,16 +1438,16 @@ assert_contains     "$TMP/v2-extch.yaml" "CLICKHOUSE_HOST: $expected_ch_host" "e
 assert_contains     "$TMP/v2-extch.yaml" "name: \"my-ch-secret\""             "data-plane-api CLICKHOUSE_PASSWORD uses external existingSecret name"
 assert_contains     "$TMP/v2-extch.yaml" "key: \"password\""                  "data-plane-api CLICKHOUSE_PASSWORD uses external existingSecret key"
 
-# Scenario 38i: clickstack image mirror strips the vendor prefix so an air-gapped
-# registry gets <mirror>/clickhouse/clickstack-otel-collector, not <mirror>/docker.clickhouse.com/...
-blue "scenario 38i: clickstack-otel-collector image mirror strips the vendor prefix"
+# Scenario 38i: clickstack image mirror strips the AR prefix so an air-gapped
+# registry gets <mirror>/clickstack-otel-collector, not <mirror>/europe-west1-docker.pkg.dev/...
+blue "scenario 38i: clickstack-otel-collector image mirror strips the AR prefix"
 render "$TMP/v2-mirror.yaml" \
   --set global.platformVersion=v2 \
   --set global.deploymentMode=external \
   --set global.domain=v2.example.com \
   --set global.imageRegistry=mirror.example.com/nt
-assert_contains     "$TMP/v2-mirror.yaml" "image: \"mirror.example.com/nt/clickhouse/clickstack-otel-collector:" "clickstack image prepends mirror after stripping docker.clickhouse.com"
-assert_not_contains "$TMP/v2-mirror.yaml" "mirror.example.com/nt/docker.clickhouse.com" "clickstack image does not double up the vendor registry under a mirror"
+assert_contains     "$TMP/v2-mirror.yaml" "image: \"mirror.example.com/nt/clickstack-otel-collector:" "clickstack image prepends mirror after stripping the AR registry"
+assert_not_contains "$TMP/v2-mirror.yaml" "mirror.example.com/nt/europe-west1-docker.pkg.dev" "clickstack image does not double up the AR registry under a mirror"
 assert_contains     "$TMP/v2-mirror.yaml" "image: \"mirror.example.com/nt/redis-stack-server:7.2.0-v20\"" "v2 Redis honors the global image mirror"
 assert_contains     "$TMP/v2-mirror.yaml" "image: \"mirror.example.com/nt/postgres:17-alpine\"" "v2 PostgreSQL init honors the global image mirror"
 
@@ -1604,6 +1606,72 @@ assert_contains "$TMP/v2-hybrid-clickstack.yaml" "OTEL_EXPORTER_OTLP_ENDPOINT: .
 assert_contains "$TMP/v2-hybrid-clickstack.yaml" "OTEL_EXPORTER_OTLP_HEADERS: .authorization=cs-token-123." "ClickStack export ships the bearer token via the data-plane Secret"
 assert_render_fails "ClickStack export requires an endpoint when enabled" \
   --set global.clickstack.enabled=true
+
+# Scenario 40a: hybrid PostgreSQL init defaults to the SHARED-WRITER layout (mode-
+# derived, no configuration). AgentGateway and TrustGuard collapse onto ONE writer
+# role + schema (trustdata), the credential is generated once in trustdata-secrets,
+# and DataAgent stays a separate read-only role.
+blue "scenario 40a: default hybrid layout is shared-writer (one writer, one reader)"
+render_default "$TMP/v2-pg-shared-local.yaml"
+assert_contains     "$TMP/v2-pg-shared-local.yaml" 'DB_USER: "trustdata"'                "shared-writer default: AgentGateway and TrustGuard both connect as the shared writer role"
+assert_not_contains "$TMP/v2-pg-shared-local.yaml" 'DB_USER: "agentgateway"'             "shared-writer default: AgentGateway drops its per-service role"
+assert_not_contains "$TMP/v2-pg-shared-local.yaml" 'DB_USER: "trustguard"'               "shared-writer default: TrustGuard drops its per-service role"
+assert_contains     "$TMP/v2-pg-shared-local.yaml" "name: trustdata-secrets"             "shared-writer default: the shared writer Secret is generated"
+assert_contains     "$TMP/v2-pg-shared-local.yaml" 'ensure_role "trustdata"'             "shared-writer default: the shared writer role is provisioned locally"
+assert_contains     "$TMP/v2-pg-shared-local.yaml" 'ensure_writer_schema "trustdata" "trustdata" "trustdata"' "shared-writer default: one writer-owned schema"
+assert_contains     "$TMP/v2-pg-shared-local.yaml" 'ensure_role "dataagent"'             "shared-writer default: DataAgent stays a separate role"
+assert_contains     "$TMP/v2-pg-shared-local.yaml" 'grant_readonly "trustdata" "dataagent" "trustdata" "trustdata"' "shared-writer default: DataAgent gets read-only SELECT on the writer schema"
+assert_contains     "$TMP/v2-pg-shared-local.yaml" 'MANAGED=""'                          "shared-writer local: init Job runs in local (provisioning) mode"
+
+# Scenario 40b: the escape hatch. hybridRoleLayout=separate forces the legacy
+# per-service layout in hybrid — AgentGateway and TrustGuard each own a role +
+# schema, DataAgent reads both, and no shared writer identity exists.
+blue "scenario 40b: hybridRoleLayout=separate forces the legacy per-service layout"
+render_default "$TMP/v2-pg-separate.yaml" \
+  --set global.postgresql.hybridRoleLayout=separate
+assert_contains     "$TMP/v2-pg-separate.yaml" 'DB_USER: "agentgateway"'                 "separate: AgentGateway keeps its own DB role"
+assert_contains     "$TMP/v2-pg-separate.yaml" 'DB_USER: "trustguard"'                   "separate: TrustGuard keeps its own DB role"
+assert_contains     "$TMP/v2-pg-separate.yaml" 'ensure_writer_schema "trustdata" "agentgateway" "agentgateway"' "separate: AgentGateway gets its own schema"
+assert_contains     "$TMP/v2-pg-separate.yaml" 'ensure_writer_schema "trustdata" "trustguard" "trustguard"'     "separate: TrustGuard gets its own schema"
+assert_not_contains "$TMP/v2-pg-separate.yaml" "name: trustdata-secrets"                 "separate: no shared writer Secret is generated"
+assert_not_contains "$TMP/v2-pg-separate.yaml" 'ensure_role "trustdata"'                 "separate: no shared writer role is provisioned"
+
+# Scenario 40c: managed configure-only. With external PostgreSQL (deploy=false) and
+# initJob.mode=enabled the Job still renders but runs configure-only (MANAGED=1):
+# it validates DBA-created roles/db and only sets schemas/search_path/grants.
+blue "scenario 40c: managed initJob.mode=enabled renders configure-only Job"
+render_default "$TMP/v2-pg-managed.yaml" \
+  --set global.postgresql.deploy=false \
+  --set global.postgresql.initJob.mode=enabled
+assert_contains "$TMP/v2-pg-managed.yaml" "name: v2-postgresql-init"  "managed enabled: the init Job renders against external PostgreSQL"
+assert_contains "$TMP/v2-pg-managed.yaml" 'MANAGED="1"'               "managed enabled: the Job runs in configure-only mode"
+
+# Scenario 40d: DBA-controlled managed PostgreSQL. initJob.mode=disabled omits the
+# Job entirely so the DBA owns schema/search_path/grants.
+blue "scenario 40d: initJob.mode=disabled omits the init Job"
+render_default "$TMP/v2-pg-nojob.yaml" \
+  --set global.postgresql.deploy=false \
+  --set global.postgresql.initJob.mode=disabled
+assert_not_contains "$TMP/v2-pg-nojob.yaml" "name: v2-postgresql-init" "disabled: the init Job is not rendered"
+
+# Scenario 40e: shared-writer is hybrid-only. It must be rejected in external/full
+# where control planes own per-service databases + migrations.
+blue "scenario 40e: shared-writer is rejected outside hybrid"
+assert_render_fails "shared-writer layout is rejected in external mode" \
+  --set global.platformVersion=v2 \
+  --set global.deploymentMode=external \
+  --set global.postgresql.hybridRoleLayout=shared-writer
+
+# Scenario 40f: single source of truth for the shared credential. The generated
+# trustdata-secrets is consumed by the AgentGateway + TrustGuard Deployments AND the
+# init Job (3 references) so all three agree on the shared writer password/DSN.
+blue "scenario 40f: shared writer credential is consumed identically by AG, TG, and the Job"
+count=$(grep -c 'name: trustdata-secrets' "$TMP/v2-pg-shared-local.yaml")
+if [[ "$count" -lt 3 ]]; then
+  red "FAIL: expected trustdata-secrets referenced by AG + TG deployments and the init Job (>=3), got $count"
+  exit 1
+fi
+green "ok  - shared writer credential is referenced by AG, TG, and the init Job ($count references)"
 
 blue "scenario 39: invalid topology and retired components fail rendering"
 assert_render_fails "unknown platform generation is rejected" \

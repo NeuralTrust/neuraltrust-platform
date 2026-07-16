@@ -49,6 +49,14 @@ spec:
             name: trustguard-env-vars
         - secretRef:
             name: trustguard-secrets
+        {{- if eq (include "neuraltrust-platform.postgresql.hybridRoleLayout" .) "shared-writer" }}
+        # Hybrid shared-writer: DB_PASSWORD + SENSIBLE_PG_DSN come from the shared
+        # writer Secret (same values as AgentGateway). Listed after trustguard-secrets
+        # so the shared credential wins.
+        - secretRef:
+            name: trustdata-secrets
+            optional: true
+        {{- end }}
         env:
         {{- with .Values.dataPlane.extraEnv }}
         {{- toYaml . | nindent 8 }}
