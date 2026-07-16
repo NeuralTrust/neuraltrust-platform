@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.1.0] — 2026-07-16
+
 ### Changed
 
 - **`clickstack-otel-collector` defaults to the NeuralTrust AR mirror.** The subchart image repository is now `europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickstack-otel-collector` (tag `2.30.1`) instead of the public `docker.clickhouse.com` registry, with `imagePullSecrets: gcr-secret` by default. The image helper strips the AR prefix under `global.imageRegistry`, and `bump-images.yml` auto-detects tags from AR (bare `X.Y.Z`). Subchart `0.1.1 → 0.1.2`.
