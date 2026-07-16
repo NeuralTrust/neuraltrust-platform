@@ -92,6 +92,31 @@ global:
   # init Jobs. Legacy nested deploy values remain supported.
   postgresql:
     deploy: true
+    # Role layout for the shared telemetry database ("trustdata"). MODE-DERIVED —
+    # leave unset for the right default:
+    #   - hybrid  -> "shared-writer": AgentGateway and TrustGuard share ONE writer
+    #     role + schema; DataAgent stays a separate read-only role. (Default.)
+    #   - external/full -> always "separate" (control planes own per-service DBs).
+    # Override only to force the legacy per-service layout in hybrid (each service
+    # owns its own role + schema, DataAgent reads both) — e.g. an existing install
+    # that already has per-service-schema data (shared-writer does NOT migrate it):
+    #   hybridRoleLayout: separate
+    hybridRoleLayout: ""
+    # Shared writer identity (hybrid shared-writer layout).
+    sharedWriter:
+      user: trustdata
+      schema: trustdata
+    # v2 schema/role init Job (v2-postgresql-init):
+    #   - "auto" (default): runs only when in-cluster PostgreSQL is deployed
+    #     (deploy=true); skipped for external/managed PostgreSQL. Same behavior as
+    #     before this flag existed.
+    #   - "enabled": ALSO runs against external/managed PostgreSQL. Needs admin
+    #     credentials in postgresql-secrets. Against managed PostgreSQL it only
+    #     configures schemas, search_path and grants — it never creates login
+    #     roles or resets passwords (the DBA pre-creates the database and roles).
+    #   - "disabled": never runs. The DBA owns schema/search_path/grant setup.
+    initJob:
+      mode: auto
   security:
     allowInsecureImages: true # Allow Bitnami charts to use their container images
   storageClass: "" # Global storage class for persistent volumes
@@ -1066,7 +1091,7 @@ neuraltrust-control-plane:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.93.0"
+          tag: "v1.94.1"
           pullPolicy: "Always"
         config:
           nodeEnv: production
@@ -1206,7 +1231,7 @@ agentgateway:
 # TrustGuard: control-plane (admin) + data-plane (runtime /v1/evaluate)
 trustguard:
   image:
-    tag: "v0.12.0"
+    tag: "v0.12.1"
   database:
     # host auto-derives to the in-cluster control-plane-postgresql Service; set
     # only for external Postgres. name is mode-derived when left empty: external =>
@@ -1256,7 +1281,7 @@ dataagent:
 # when global.deploymentMode=external.
 datacore:
   image:
-    tag: "v0.6.0"
+    tag: "v0.8.0"
   # CLICKHOUSE_PASSWORD is read from the shared `clickhouse` secret (same secret
   # AlertEngine uses) via clickhouse.existingSecret — no password set here.
   clickhouse:
@@ -1268,7 +1293,8 @@ datacore:
 # Renders when global.deploymentMode=external.
 clickstack-otel-collector:
   image:
-    tag: "2.29.0"
+    tag: "2.30.1"
+    repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickstack-otel-collector
   clickhouse:
     endpoint: "http://clickhouse:8123" # In-cluster default; set to external/Cloud endpoint when infrastructure.clickhouse.deploy=false
     database: "otel"
@@ -1278,7 +1304,7 @@ clickstack-otel-collector:
 alertengine:
   enabled: true
   image:
-    tag: "v0.4.4"
+    tag: "v0.4.5"
   # Own Postgres database (separate migrations, NOT the shared trustdata DB).
   # host empty ⇒ in-cluster control-plane-postgresql; set for external Postgres.
   database:
@@ -1455,7 +1481,7 @@ neuraltrust-data-plane:
                   memory: 128Mi
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.40.0
+          tag: v1.41.0
           pullPolicy: Always
         accessMode: ReadWriteOnce
         huggingfaceToken: ""

@@ -11,6 +11,22 @@ intentionally emits no Kubernetes resource when validation succeeds.
 {{- if and (eq $version "v2") (not (has $mode (list "hybrid" "external" "full"))) -}}
   {{- fail (printf "global.deploymentMode must be one of: hybrid, external, full (got %q)" $mode) -}}
 {{- end -}}
+{{- /* v2 hybrid PostgreSQL role layout + init-Job mode. */ -}}
+{{- $pgGlobal := default dict $global.postgresql -}}
+{{- /* Layout is mode-derived (hybrid -> shared-writer, external/full -> separate).
+       Empty (unset) is the normal case; an explicit value only overrides in hybrid. */ -}}
+{{- $hybridRoleLayout := $pgGlobal.hybridRoleLayout | default "" -}}
+{{- if not (has $hybridRoleLayout (list "" "separate" "shared-writer")) -}}
+  {{- fail (printf "global.postgresql.hybridRoleLayout must be one of: separate, shared-writer (got %q)" $hybridRoleLayout) -}}
+{{- end -}}
+{{- if and (eq $hybridRoleLayout "shared-writer") (not (and (eq $version "v2") (eq $mode "hybrid"))) -}}
+  {{- fail "global.postgresql.hybridRoleLayout=shared-writer is only supported for v2 hybrid deployments. External/full control planes own their own migrations and keep per-service databases (always separate); do not set it there." -}}
+{{- end -}}
+{{- $initJob := default dict $pgGlobal.initJob -}}
+{{- $initJobMode := $initJob.mode | default "auto" -}}
+{{- if not (has $initJobMode (list "auto" "enabled" "disabled")) -}}
+  {{- fail (printf "global.postgresql.initJob.mode must be one of: auto, enabled, disabled (got %q)" $initJobMode) -}}
+{{- end -}}
 {{- $trustlens := default dict .Values.trustlens -}}
 {{- $trustlensImage := default dict $trustlens.image -}}
 {{- if and (eq $version "v2") ($trustlens.enabled | default false) (not ($trustlensImage.tag | default "")) -}}

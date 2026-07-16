@@ -375,6 +375,121 @@ Usage: {{ include "neuraltrust-platform.postgres.host" (dict "host" .Values.data
 {{- end }}
 
 {{/*
+v2 hybrid PostgreSQL role layout. Returns "shared-writer" or "separate".
+  - "separate" (default): AgentGateway and TrustGuard each own a login role +
+    schema in the shared "trustdata" database; DataAgent reads both.
+  - "shared-writer": AgentGateway and TrustGuard share ONE writer role + schema;
+    DataAgent stays a separate read-only role.
+The layout is MODE-DERIVED and needs no configuration:
+  - hybrid  -> "shared-writer" (default); set global.postgresql.hybridRoleLayout=separate
+               to force the per-service layout (e.g. an existing install that already
+               has per-service-schema data).
+  - external/full -> always "separate" (control planes own per-service databases).
+Usage: {{ include "neuraltrust-platform.postgresql.hybridRoleLayout" . }}
+*/}}
+{{- define "neuraltrust-platform.postgresql.hybridRoleLayout" -}}
+{{- $pg := default dict (default dict .Values.global).postgresql -}}
+{{- $override := $pg.hybridRoleLayout | default "" -}}
+{{- if eq (include "neuraltrust-platform.isHybrid" .) "true" -}}
+{{- if eq $override "separate" -}}separate{{- else -}}shared-writer{{- end -}}
+{{- else -}}
+separate
+{{- end -}}
+{{- end }}
+
+{{/*
+Shared writer login role used when hybridRoleLayout: shared-writer.
+Usage: {{ include "neuraltrust-platform.postgresql.sharedWriterUser" . }}
+*/}}
+{{- define "neuraltrust-platform.postgresql.sharedWriterUser" -}}
+{{- $pg := default dict (default dict .Values.global).postgresql -}}
+{{- $sw := default dict $pg.sharedWriter -}}
+{{- $sw.user | default "trustdata" -}}
+{{- end }}
+
+{{/*
+Shared writer schema used when hybridRoleLayout: shared-writer.
+Usage: {{ include "neuraltrust-platform.postgresql.sharedWriterSchema" . }}
+*/}}
+{{- define "neuraltrust-platform.postgresql.sharedWriterSchema" -}}
+{{- $pg := default dict (default dict .Values.global).postgresql -}}
+{{- $sw := default dict $pg.sharedWriter -}}
+{{- $sw.schema | default "trustdata" -}}
+{{- end }}
+
+{{/*
+Effective DB_USER for a v2 telemetry writer (AgentGateway / TrustGuard).
+In hybrid shared-writer mode both services connect as the shared writer role;
+otherwise the service's own value wins (falling back to the per-service default).
+Usage: {{ include "neuraltrust-platform.v2.writerUser" (dict "ctx" . "explicit" .Values.database.user "default" "agentgateway") }}
+*/}}
+{{- define "neuraltrust-platform.v2.writerUser" -}}
+{{- if eq (include "neuraltrust-platform.postgresql.hybridRoleLayout" .ctx) "shared-writer" -}}
+{{- include "neuraltrust-platform.postgresql.sharedWriterUser" .ctx -}}
+{{- else -}}
+{{- .explicit | default .default -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Resolve whether in-cluster PostgreSQL is deployed. Mirrors the historical
+$pgDeploy resolution used by v2-postgres-init.yaml and platform-secrets.yaml:
+default true, forced false by any of the legacy infra alias, the legacy
+installInCluster flag, or the canonical global.postgresql.deploy=false.
+Usage: {{ include "neuraltrust-platform.postgresql.inClusterDeploy" . }} (returns "true"/"")
+*/}}
+{{- define "neuraltrust-platform.postgresql.inClusterDeploy" -}}
+{{- $deploy := true -}}
+{{- $cp := index .Values "neuraltrust-control-plane" -}}
+{{- if and $cp $cp.infrastructure $cp.infrastructure.postgresql (hasKey $cp.infrastructure.postgresql "deploy") -}}
+  {{- $deploy = $cp.infrastructure.postgresql.deploy -}}
+{{- end -}}
+{{- if and $cp $cp.controlPlane $cp.controlPlane.components $cp.controlPlane.components.postgresql (hasKey $cp.controlPlane.components.postgresql "installInCluster") (not $cp.controlPlane.components.postgresql.installInCluster) -}}
+  {{- $deploy = false -}}
+{{- end -}}
+{{- if and .Values.global .Values.global.postgresql (hasKey .Values.global.postgresql "deploy") (not .Values.global.postgresql.deploy) -}}
+  {{- $deploy = false -}}
+{{- end -}}
+{{- if $deploy -}}true{{- end -}}
+{{- end }}
+
+{{/*
+Configured mode for the v2 schema/role init Job: auto | enabled | disabled.
+Usage: {{ include "neuraltrust-platform.postgresql.initJobMode" . }}
+*/}}
+{{- define "neuraltrust-platform.postgresql.initJobMode" -}}
+{{- $pg := default dict (default dict .Values.global).postgresql -}}
+{{- $ij := default dict $pg.initJob -}}
+{{- $mode := $ij.mode | default "auto" -}}
+{{- if has $mode (list "auto" "enabled" "disabled") -}}{{- $mode -}}{{- else -}}auto{{- end -}}
+{{- end }}
+
+{{/*
+Whether the v2 init Job should render. "auto" preserves the historical gate
+(runs only for in-cluster PostgreSQL); "enabled" always renders; "disabled"
+never renders.
+Usage: {{- if eq (include "neuraltrust-platform.postgresql.initJobEnabled" .) "true" }}
+*/}}
+{{- define "neuraltrust-platform.postgresql.initJobEnabled" -}}
+{{- $mode := include "neuraltrust-platform.postgresql.initJobMode" . -}}
+{{- if eq $mode "enabled" -}}true
+{{- else if eq $mode "disabled" -}}
+{{- else if eq (include "neuraltrust-platform.postgresql.inClusterDeploy" .) "true" -}}true
+{{- end -}}
+{{- end }}
+
+{{/*
+Whether the init Job runs in configure-only (managed) mode: mode=enabled while
+in-cluster PostgreSQL is NOT deployed. In this mode the Job validates that the
+DBA-created database and login roles exist and only configures schemas,
+search_path and grants — it never creates roles or resets passwords.
+Usage: {{- if eq (include "neuraltrust-platform.postgresql.initJobManaged" .) "true" }}
+*/}}
+{{- define "neuraltrust-platform.postgresql.initJobManaged" -}}
+{{- if and (eq (include "neuraltrust-platform.postgresql.initJobMode" .) "enabled") (ne (include "neuraltrust-platform.postgresql.inClusterDeploy" .) "true") -}}true{{- end -}}
+{{- end }}
+
+{{/*
 Render the shared TrustGuard client-credentials env (client_credentials pair the
 AgentGateway proxy presents to TrustGuard and TrustGuard validates). Both values
 come from one Secret so the id/secret stay identical across services. During

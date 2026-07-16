@@ -72,7 +72,7 @@ on:
         required: false
         default: ""
       clickstack_otel_collector_tag:
-        description: "clickstack-otel-collector (v2) tag (e.g. 2.29.0). External image (docker.clickhouse.com) — manual only, not auto-detected from AR."
+        description: "clickstack-otel-collector (v2) tag (e.g. 2.30.1). Empty = latest from AR (bare X.Y.Z)."
         required: false
         default: ""
       alertengine_tag:
@@ -208,12 +208,11 @@ jobs:
           TRUSTLENS="${{ inputs.trustlens_tag }}"
           DATAAGENT=$(resolve_tag "dataagent" "${{ inputs.dataagent_tag }}")
           DATACORE=$(resolve_tag "datacore" "${{ inputs.datacore_tag }}")
-          # clickstack-otel-collector is an external image (docker.clickhouse.com);
-          # it is not in AR, so honor the manual input only (no auto-detect).
-          CLICKSTACK_OTEL_COLLECTOR="${{ inputs.clickstack_otel_collector_tag }}"
           ALERTENGINE=$(resolve_tag "alertengine" "${{ inputs.alertengine_tag }}")
 
           # Infrastructure images (non-standard tag patterns, override default regex).
+          # clickstack-otel-collector is mirrored into AR from ClickHouse; tags are bare X.Y.Z.
+          CLICKSTACK_OTEL_COLLECTOR=$(resolve_tag "clickstack-otel-collector" "${{ inputs.clickstack_otel_collector_tag }}" '^[0-9]+\.[0-9]+\.[0-9]+$')
           CLICKHOUSE=$(resolve_tag "clickhouse-server" "${{ inputs.clickhouse_tag }}" '^[0-9]+\.[0-9]+(\.[0-9]+){0,2}$')
           KAFKA=$(resolve_tag "kafka" "${{ inputs.kafka_tag }}" '^[0-9]+\.[0-9]+\.[0-9]+$')
           REDIS=$(resolve_tag "redis-stack-server" "${{ inputs.redis_tag }}" '^[0-9]+\.[0-9]+\.[0-9]+-v[0-9]+$')
@@ -259,7 +258,7 @@ jobs:
           echo "| trustlens (v2) | \`${TRUSTLENS:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| dataagent (v2) | \`${DATAAGENT:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| datacore (v2) | \`${DATACORE:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| clickstack-otel-collector (v2, external image) | \`${CLICKSTACK_OTEL_COLLECTOR:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| clickstack-otel-collector (v2) | \`${CLICKSTACK_OTEL_COLLECTOR:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| alertengine (v2) | \`${ALERTENGINE:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| clickhouse-server | \`${CLICKHOUSE:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| kafka | \`${KAFKA:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
@@ -516,9 +515,8 @@ jobs:
 
           # =============================================
           # 11c. Platform v2 data pipeline (dataagent / datacore /
-          # clickstack-otel-collector). Same single .image.tag pattern; dataagent
-          # and datacore ship from AR, clickstack-otel-collector is an external
-          # image bumped by manual input only.
+          # clickstack-otel-collector). Same single .image.tag pattern; all three
+          # ship from AR (clickstack is a mirrored ClickHouse image).
           # =============================================
           TAG="${{ steps.tags.outputs.dataagent }}"
           if update_values_tag '.dataagent.image.tag' "$TAG" "dataagent (v2)"; then

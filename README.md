@@ -101,6 +101,17 @@ infrastructure:
 Use [`values-v2-managed-datastores.yaml.example`](./values-v2-managed-datastores.yaml.example)
 for the complete endpoint and existing-secret pattern.
 
+In hybrid, AgentGateway, TrustGuard, and DataAgent share the `trustdata` database.
+By default AgentGateway and TrustGuard share ONE writer role/schema and DataAgent is a
+separate read-only role — the schema/role setup is owned by the chart's
+`v2-postgresql-init` Job (no external SQL script). The layout is mode-derived
+(hybrid → shared writer, external → per-service databases); set
+`global.postgresql.hybridRoleLayout: separate` only to force the legacy per-service
+layout in hybrid. `global.postgresql.initJob.mode` (`auto`/`enabled`/`disabled`)
+controls whether the Job also configures an external managed PostgreSQL. See
+[`docs/platform-v2.md`](./docs/platform-v2.md) for the layout matrix and the managed
+configure-only behavior.
+
 ## Platform and ingress
 
 `global.platform` selects provider-specific ingress and security behavior:
