@@ -29,6 +29,8 @@ global:
   preserveExistingSecrets: true
   postgresql:
     deploy: false
+    # External mode keeps per-service databases (each control plane owns its
+    # migrations); the shared-writer layout is hybrid-only and not used here.
   observability:
     hostedExport:
       enabled: false
