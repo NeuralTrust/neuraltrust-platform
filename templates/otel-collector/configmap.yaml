@@ -66,23 +66,7 @@ data:
                 - source_labels: [__meta_kubernetes_pod_container_port_name]
                   regex: http
                   action: keep
-            {{- if ne (include "neuraltrust-platform.isV2" .) "true" }}
-            # Explicit v1: TrustGate exposes Prometheus on :9090.
-            - job_name: trustgate
-              scrape_interval: 30s
-              kubernetes_sd_configs:
-                - role: pod
-                  namespaces:
-                    names: [{{ .Release.Namespace }}]
-              relabel_configs:
-                - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
-                  regex: trustgate
-                  action: keep
-                - source_labels: [__meta_kubernetes_pod_container_port_number]
-                  regex: "9090"
-                  action: keep
-            {{- else }}
-            # Platform v2 runtime services expose /metrics on their HTTP ports.
+            # v2 runtime services expose /metrics on their HTTP ports.
             - job_name: agentgateway
               scrape_interval: 30s
               kubernetes_sd_configs:
@@ -109,7 +93,6 @@ data:
                 - source_labels: [__meta_kubernetes_pod_container_port_name]
                   regex: http
                   action: keep
-            {{- end }}
             # ClickHouse Prometheus endpoint (gated by clickhouse subchart).
             - job_name: clickhouse
               scrape_interval: 30s

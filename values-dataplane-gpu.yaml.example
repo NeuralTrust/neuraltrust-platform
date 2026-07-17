@@ -2,20 +2,15 @@
 # Layer over values-required.yaml and replace the registry and scheduling labels.
 
 global:
-  platformVersion: "v2"
   deploymentMode: "hybrid"
   platform: "kubernetes"
   domain: "platform.example.com"
-
-infrastructure:
-  kafka:
-    deploy: false
 
 dataagent:
   tenantId: ""
   enrolmentToken: ""
 
-neuraltrust-firewall:
+firewall:
   firewall:
     enabled: true
     gateway:

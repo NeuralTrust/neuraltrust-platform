@@ -1,6 +1,6 @@
 apiVersion: v2
 name: alertengine
-description: AlertEngine — cross-product alert engine. Single Go image, two runtimes (api + worker). Evaluates detection rules over TrustGuard/TrustGate telemetry in ClickHouse, dedupes alerts in Postgres, and forwards findings to SIEMs. Deployed only when global.platformVersion=v2 AND global.deploymentMode=external.
+description: AlertEngine — cross-product alert engine. Single Go image, two runtimes (api + worker). Evaluates detection rules over TrustGuard/TrustGate telemetry in ClickHouse, dedupes alerts in Postgres, and forwards findings to SIEMs. Deployed only when global.deploymentMode=external.
 type: application
-version: 0.1.2
+version: 0.1.3
 appVersion: "v0.4.5"

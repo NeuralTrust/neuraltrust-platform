@@ -327,12 +327,8 @@ while [[ $# -gt 0 ]]; do
             echo "  - RESEND_API_KEY"
             echo "  - HUGGINGFACE_TOKEN"
             echo "  - CLICKHOUSE_PASSWORD"
-            echo "  - KAFKA_USERNAME / KAFKA_PASSWORD (external Kafka SASL; optional)"
-            echo "  - KAFKA_BROKER_CA_FILE (external Kafka TLS CA; optional)"
             echo "  - POSTGRES_PASSWORD"
-            echo "  - TRUSTGATE_JWT_SECRET"
             echo "  - FIREWALL_JWT_SECRET"
-            echo "  - SERVER_SECRET_KEY (TrustGate)"
             echo "  - OBSERVABILITY_TOKEN (hosted OTLP bearer for collector.neuraltrust.ai)"
             echo "  - APP_AUTH_SECRET (written to AUTH_SECRET and NEXTAUTH_SECRET)"
             echo "  - AGENTGATEWAY_SERVER_SECRET_KEY / AGENTGATEWAY_STS_SIGNING_KEY (RSA PEM)"
@@ -433,7 +429,7 @@ ensure_generated_secret_key "dataagent-secrets" "DB_PASSWORD" "DATAAGENT_DB_PASS
 DATAAGENT_DB_PASSWORD_VALUE=$(kubectl get secret dataagent-secrets -n "$NAMESPACE" \
     -o jsonpath='{.data.DB_PASSWORD}' 2>/dev/null | base64 -d 2>/dev/null || true)
 DATAAGENT_DB_PASSWORD_ENCODED=$(url_encode "$DATAAGENT_DB_PASSWORD_VALUE")
-DATAAGENT_DATABASE_URL="${DATAAGENT_DATABASE_URL:-postgresql://${DATAAGENT_DB_USER:-dataagent}:${DATAAGENT_DB_PASSWORD_ENCODED}@${DATAAGENT_DB_HOST:-control-plane-postgresql}:${DATAAGENT_DB_PORT:-5432}/${DATAAGENT_DB_NAME:-trustdata}?sslmode=${DATAAGENT_DB_SSLMODE:-prefer}}"
+DATAAGENT_DATABASE_URL="${DATAAGENT_DATABASE_URL:-postgresql://${DATAAGENT_DB_USER:-neuraltrust}:${DATAAGENT_DB_PASSWORD_ENCODED}@${DATAAGENT_DB_HOST:-control-plane-postgresql}:${DATAAGENT_DB_PORT:-5432}/${DATAAGENT_DB_NAME:-neuraltrust}?sslmode=${DATAAGENT_DB_SSLMODE:-prefer}}"
 add_secret_key "dataagent-secrets" "DATABASE_URL" "$DATAAGENT_DATABASE_URL"
 unset DATAAGENT_DB_PASSWORD_VALUE DATAAGENT_DB_PASSWORD_ENCODED DATAAGENT_DATABASE_URL
 echo -e "${GREEN}✓ Platform v2 stable secret keys are ready (values not printed)${NC}"
@@ -603,38 +599,6 @@ RESEND_INVITE_SENDER=${RESEND_INVITE_SENDER:-""}
 add_secret_key "$SECRET_NAME" "resend-invite-sender" "$RESEND_INVITE_SENDER"
 echo ""
 
-# TrustGate JWT Secret
-echo "--- TrustGate JWT Secret ---"
-if kubectl get secret "$SECRET_NAME" -n "$NAMESPACE" &>/dev/null; then
-    EXISTING_TRUSTGATE_JWT=$(kubectl get secret "$SECRET_NAME" -n "$NAMESPACE" -o jsonpath='{.data.TRUSTGATE_JWT_SECRET}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
-    if [ -n "$EXISTING_TRUSTGATE_JWT" ]; then
-        # Key already exists - check if we should replace it
-        if should_replace_secret "$SECRET_NAME"; then
-            TRUSTGATE_JWT_SECRET=$(prompt_secret "TRUSTGATE_JWT_SECRET" "Enter TrustGate JWT Secret")
-            if [ -n "$TRUSTGATE_JWT_SECRET" ]; then
-                add_secret_key "$SECRET_NAME" "TRUSTGATE_JWT_SECRET" "$TRUSTGATE_JWT_SECRET"
-                echo -e "${GREEN}✓ Updated TRUSTGATE_JWT_SECRET${NC}"
-            fi
-        else
-            echo -e "${GREEN}TRUSTGATE_JWT_SECRET already exists in ${SECRET_NAME}${NC}"
-        fi
-    else
-        # Key doesn't exist - prompt for it
-        TRUSTGATE_JWT_SECRET=$(prompt_secret "TRUSTGATE_JWT_SECRET" "Enter TrustGate JWT Secret")
-        if [ -n "$TRUSTGATE_JWT_SECRET" ]; then
-            add_secret_key "$SECRET_NAME" "TRUSTGATE_JWT_SECRET" "$TRUSTGATE_JWT_SECRET"
-            echo -e "${GREEN}✓ Added TRUSTGATE_JWT_SECRET${NC}"
-        fi
-    fi
-else
-    # Secret doesn't exist - prompt for it
-    TRUSTGATE_JWT_SECRET=$(prompt_secret "TRUSTGATE_JWT_SECRET" "Enter TrustGate JWT Secret")
-    if [ -n "$TRUSTGATE_JWT_SECRET" ]; then
-        add_secret_key "$SECRET_NAME" "TRUSTGATE_JWT_SECRET" "$TRUSTGATE_JWT_SECRET"
-    fi
-fi
-echo ""
-
 # Firewall JWT Secret
 echo "--- Firewall JWT Secret (Optional) ---"
 FIREWALL_JWT_SECRET=$(prompt_secret "FIREWALL_JWT_SECRET" "Enter Firewall JWT Secret (optional)")
@@ -730,60 +694,6 @@ else
         -n "$NAMESPACE" \
         --dry-run=client -o yaml | kubectl apply -f -
     echo -e "${GREEN}✓ ClickHouse connection secret created${NC}"
-fi
-echo ""
-
-# External Kafka credentials (optional — only when global.kafka.auth/tls is configured)
-echo "--- External Kafka Credentials (optional) ---"
-KAFKA_CREDENTIALS_SECRET_NAME="${KAFKA_CREDENTIALS_SECRET_NAME:-kafka-credentials}"
-KAFKA_BROKER_CA_SECRET_NAME="${KAFKA_BROKER_CA_SECRET_NAME:-kafka-broker-ca}"
-
-if [ -n "${KAFKA_USERNAME:-}" ] && [ -n "${KAFKA_PASSWORD:-}" ]; then
-    if kubectl get secret "$KAFKA_CREDENTIALS_SECRET_NAME" -n "$NAMESPACE" &>/dev/null; then
-        if should_replace_secret "$KAFKA_CREDENTIALS_SECRET_NAME"; then
-            kubectl create secret generic "$KAFKA_CREDENTIALS_SECRET_NAME" \
-                --from-literal=username="$(trim_value "$KAFKA_USERNAME")" \
-                --from-literal=password="$(trim_value "$KAFKA_PASSWORD")" \
-                -n "$NAMESPACE" \
-                --dry-run=client -o yaml | kubectl apply -f -
-            echo -e "${GREEN}✓ Kafka credentials secret updated${NC}"
-        else
-            echo -e "${GREEN}Skipping ${KAFKA_CREDENTIALS_SECRET_NAME} (already exists)${NC}"
-        fi
-    else
-        kubectl create secret generic "$KAFKA_CREDENTIALS_SECRET_NAME" \
-            --from-literal=username="$(trim_value "$KAFKA_USERNAME")" \
-            --from-literal=password="$(trim_value "$KAFKA_PASSWORD")" \
-            -n "$NAMESPACE" \
-            --dry-run=client -o yaml | kubectl apply -f -
-        echo -e "${GREEN}✓ Kafka credentials secret created (${KAFKA_CREDENTIALS_SECRET_NAME})${NC}"
-    fi
-else
-    echo -e "${YELLOW}No KAFKA_USERNAME/KAFKA_PASSWORD — skipping ${KAFKA_CREDENTIALS_SECRET_NAME}.${NC}"
-    echo -e "${YELLOW}Required when global.kafka.auth.enabled and using an external broker.${NC}"
-fi
-
-if [ -n "${KAFKA_BROKER_CA_FILE:-}" ] && [ -f "$KAFKA_BROKER_CA_FILE" ]; then
-    if kubectl get secret "$KAFKA_BROKER_CA_SECRET_NAME" -n "$NAMESPACE" &>/dev/null; then
-        if should_replace_secret "$KAFKA_BROKER_CA_SECRET_NAME"; then
-            kubectl create secret generic "$KAFKA_BROKER_CA_SECRET_NAME" \
-                --from-file=ca.crt="$KAFKA_BROKER_CA_FILE" \
-                -n "$NAMESPACE" \
-                --dry-run=client -o yaml | kubectl apply -f -
-            echo -e "${GREEN}✓ Kafka broker CA secret updated${NC}"
-        else
-            echo -e "${GREEN}Skipping ${KAFKA_BROKER_CA_SECRET_NAME} (already exists)${NC}"
-        fi
-    else
-        kubectl create secret generic "$KAFKA_BROKER_CA_SECRET_NAME" \
-            --from-file=ca.crt="$KAFKA_BROKER_CA_FILE" \
-            -n "$NAMESPACE" \
-            --dry-run=client -o yaml | kubectl apply -f -
-        echo -e "${GREEN}✓ Kafka broker CA secret created (${KAFKA_BROKER_CA_SECRET_NAME})${NC}"
-    fi
-else
-    echo -e "${YELLOW}No KAFKA_BROKER_CA_FILE — skipping ${KAFKA_BROKER_CA_SECRET_NAME}.${NC}"
-    echo -e "${YELLOW}Required when global.kafka.tls.enabled and using an external broker.${NC}"
 fi
 echo ""
 
@@ -893,185 +803,9 @@ fi
 echo ""
 
 # ============================================================================
-# TRUSTGATE SECRETS
+# FIREWALL SECRETS
 # ============================================================================
-echo -e "${BLUE}=== TrustGate Secrets ===${NC}"
-
-# TrustGate Server Secret Key
-echo "--- TrustGate Server Secret Key ---"
-TRUSTGATE_SECRET_NAME="trustgate-secrets"
-if kubectl get secret "$TRUSTGATE_SECRET_NAME" -n "$NAMESPACE" &>/dev/null; then
-    EXISTING_SERVER_SECRET_KEY=$(kubectl get secret "$TRUSTGATE_SECRET_NAME" -n "$NAMESPACE" -o jsonpath='{.data.SERVER_SECRET_KEY}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
-    if [ -n "$EXISTING_SERVER_SECRET_KEY" ]; then
-        # Key already exists - check if we should replace it
-        if should_replace_secret "$TRUSTGATE_SECRET_NAME"; then
-            SERVER_SECRET_KEY=$(prompt_secret "SERVER_SECRET_KEY" "Enter TrustGate Server Secret Key")
-            if [ -n "$SERVER_SECRET_KEY" ]; then
-                add_secret_key "$TRUSTGATE_SECRET_NAME" "SERVER_SECRET_KEY" "$SERVER_SECRET_KEY"
-                echo -e "${GREEN}✓ Updated SERVER_SECRET_KEY${NC}"
-            fi
-        else
-            echo -e "${GREEN}SERVER_SECRET_KEY already exists in ${TRUSTGATE_SECRET_NAME}${NC}"
-        fi
-    else
-        # Key doesn't exist - prompt for it
-        SERVER_SECRET_KEY=$(prompt_secret "SERVER_SECRET_KEY" "Enter TrustGate Server Secret Key")
-        if [ -n "$SERVER_SECRET_KEY" ]; then
-            add_secret_key "$TRUSTGATE_SECRET_NAME" "SERVER_SECRET_KEY" "$SERVER_SECRET_KEY"
-            echo -e "${GREEN}✓ Added SERVER_SECRET_KEY${NC}"
-        fi
-    fi
-else
-    # Secret doesn't exist - prompt for it
-    SERVER_SECRET_KEY=$(prompt_secret "SERVER_SECRET_KEY" "Enter TrustGate Server Secret Key")
-    if [ -n "$SERVER_SECRET_KEY" ]; then
-        create_secret "$TRUSTGATE_SECRET_NAME" "SERVER_SECRET_KEY" "$SERVER_SECRET_KEY" "TrustGate Server Secret Key"
-    fi
-fi
-echo ""
-
-# PostgreSQL Connection (for TrustGate - stored in trustgate-secrets)
-# Note: TrustGate uses a separate database from the control-plane
-echo "--- PostgreSQL Connection for TrustGate (Separate Database) ---"
-echo -e "${YELLOW}Note: TrustGate requires its own PostgreSQL database, user, and credentials${NC}"
-echo ""
-
-# Check if database connection info already exists in trustgate-secrets
-EXISTING_DB_HOST=""
-EXISTING_DB_PORT=""
-EXISTING_DB_USER=""
-EXISTING_DB_PASSWORD=""
-EXISTING_DB_NAME=""
-SHOULD_REPLACE_DB=false
-
-if kubectl get secret "$TRUSTGATE_SECRET_NAME" -n "$NAMESPACE" &>/dev/null; then
-    EXISTING_DB_HOST=$(kubectl get secret "$TRUSTGATE_SECRET_NAME" -n "$NAMESPACE" -o jsonpath='{.data.DATABASE_HOST}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
-    if [ -n "$EXISTING_DB_HOST" ]; then
-        EXISTING_DB_PORT=$(kubectl get secret "$TRUSTGATE_SECRET_NAME" -n "$NAMESPACE" -o jsonpath='{.data.DATABASE_PORT}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
-        EXISTING_DB_USER=$(kubectl get secret "$TRUSTGATE_SECRET_NAME" -n "$NAMESPACE" -o jsonpath='{.data.DATABASE_USER}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
-        EXISTING_DB_PASSWORD=$(kubectl get secret "$TRUSTGATE_SECRET_NAME" -n "$NAMESPACE" -o jsonpath='{.data.DATABASE_PASSWORD}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
-        EXISTING_DB_NAME=$(kubectl get secret "$TRUSTGATE_SECRET_NAME" -n "$NAMESPACE" -o jsonpath='{.data.DATABASE_NAME}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
-        
-        echo -e "${GREEN}Existing PostgreSQL connection found in ${TRUSTGATE_SECRET_NAME}:${NC}"
-        echo -e "  Host: ${EXISTING_DB_HOST}"
-        echo -e "  Port: ${EXISTING_DB_PORT}"
-        echo -e "  User: ${EXISTING_DB_USER}"
-        echo -e "  Database: ${EXISTING_DB_NAME}"
-        echo ""
-        if should_replace_secret "${TRUSTGATE_SECRET_NAME}-database-connection"; then
-            SHOULD_REPLACE_DB=true
-        else
-            echo -e "${GREEN}Keeping existing PostgreSQL connection in ${TRUSTGATE_SECRET_NAME}${NC}"
-            echo ""
-            # Use existing values
-            DATABASE_HOST="$EXISTING_DB_HOST"
-            DATABASE_PORT="$EXISTING_DB_PORT"
-            DATABASE_USER="$EXISTING_DB_USER"
-            DATABASE_PASSWORD="$EXISTING_DB_PASSWORD"
-            DATABASE_NAME="$EXISTING_DB_NAME"
-        fi
-    fi
-fi
-
-# Only prompt if we need to replace or if values don't exist
-if [ "$SHOULD_REPLACE_DB" = true ] || [ -z "$EXISTING_DB_HOST" ]; then
-    # Build prompt messages with defaults
-    if [ -n "$EXISTING_DB_HOST" ]; then
-        HOST_PROMPT="Enter Database Host for TrustGate (current: $EXISTING_DB_HOST, default: control-plane-postgresql)"
-    else
-        HOST_PROMPT="Enter Database Host for TrustGate (default: control-plane-postgresql)"
-    fi
-    DATABASE_HOST=$(prompt_secret "TRUSTGATE_DATABASE_HOST" "$HOST_PROMPT")
-    DATABASE_HOST=${DATABASE_HOST:-${EXISTING_DB_HOST:-control-plane-postgresql}}
-    if [ -z "$DATABASE_HOST" ]; then
-        echo -e "${RED}Error: Database host is required for TrustGate${NC}"
-        exit 1
-    fi
-
-    if [ -n "$EXISTING_DB_PORT" ]; then
-        PORT_PROMPT="Enter Database Port for TrustGate (current: $EXISTING_DB_PORT, default: 5432)"
-    else
-        PORT_PROMPT="Enter Database Port for TrustGate (default: 5432)"
-    fi
-    DATABASE_PORT=$(prompt_secret "TRUSTGATE_DATABASE_PORT" "$PORT_PROMPT")
-    DATABASE_PORT=${DATABASE_PORT:-${EXISTING_DB_PORT:-5432}}
-
-    if [ -n "$EXISTING_DB_USER" ]; then
-        USER_PROMPT="Enter Database User for TrustGate (current: $EXISTING_DB_USER, default: trustgate)"
-    else
-        USER_PROMPT="Enter Database User for TrustGate (default: trustgate)"
-    fi
-    DATABASE_USER=$(prompt_secret "TRUSTGATE_DATABASE_USER" "$USER_PROMPT")
-    DATABASE_USER=${DATABASE_USER:-${EXISTING_DB_USER:-trustgate}}
-
-    if [ -n "$EXISTING_DB_PASSWORD" ]; then
-        PASSWORD_PROMPT="Enter Database Password for TrustGate (press Enter to keep existing)"
-    else
-        PASSWORD_PROMPT="Enter Database Password for TrustGate (required)"
-    fi
-    DATABASE_PASSWORD=$(prompt_secret "TRUSTGATE_DATABASE_PASSWORD" "$PASSWORD_PROMPT")
-    if [ -z "$DATABASE_PASSWORD" ] && [ -z "$EXISTING_DB_PASSWORD" ]; then
-        echo -e "${RED}Error: Database password is required for TrustGate${NC}"
-        exit 1
-    fi
-    DATABASE_PASSWORD=${DATABASE_PASSWORD:-$EXISTING_DB_PASSWORD}
-
-    if [ -n "$EXISTING_DB_NAME" ]; then
-        NAME_PROMPT="Enter Database Name for TrustGate (current: $EXISTING_DB_NAME, default: trustgate)"
-    else
-        NAME_PROMPT="Enter Database Name for TrustGate (default: trustgate)"
-    fi
-    DATABASE_NAME=$(prompt_secret "TRUSTGATE_DATABASE_NAME" "$NAME_PROMPT")
-    DATABASE_NAME=${DATABASE_NAME:-${EXISTING_DB_NAME:-trustgate}}
-fi
-
-# Only update/create if we have values to set AND (we're replacing OR values don't exist)
-# Skip update if user chose to keep existing values
-if [ -n "$DATABASE_HOST" ] && [ -n "$DATABASE_PASSWORD" ] && ([ "$SHOULD_REPLACE_DB" = true ] || [ -z "$EXISTING_DB_HOST" ]); then
-    # Trim all values to remove newlines and whitespace
-    DATABASE_HOST=$(trim_value "$DATABASE_HOST")
-    DATABASE_PORT=$(trim_value "$DATABASE_PORT")
-    DATABASE_USER=$(trim_value "$DATABASE_USER")
-    DATABASE_PASSWORD=$(trim_value "$DATABASE_PASSWORD")
-    DATABASE_NAME=$(trim_value "$DATABASE_NAME")
-    
-    # Create PostgreSQL connection string (values are already trimmed)
-    DATABASE_PASSWORD_ENCODED=$(url_encode "$DATABASE_PASSWORD")
-    DATABASE_URL="postgresql://${DATABASE_USER}:${DATABASE_PASSWORD_ENCODED}@${DATABASE_HOST}:${DATABASE_PORT}/${DATABASE_NAME}?connection_limit=15"
-    # Remove any newlines from DATABASE_URL
-    DATABASE_URL=$(printf '%s' "$DATABASE_URL" | tr -d '\n\r')
-    
-    # Add to trustgate-secrets (values are already trimmed)
-    if kubectl get secret "$TRUSTGATE_SECRET_NAME" -n "$NAMESPACE" &>/dev/null; then
-        add_secret_key "$TRUSTGATE_SECRET_NAME" "DATABASE_HOST" "$DATABASE_HOST"
-        add_secret_key "$TRUSTGATE_SECRET_NAME" "DATABASE_PORT" "$DATABASE_PORT"
-        add_secret_key "$TRUSTGATE_SECRET_NAME" "DATABASE_USER" "$DATABASE_USER"
-        add_secret_key "$TRUSTGATE_SECRET_NAME" "DATABASE_PASSWORD" "$DATABASE_PASSWORD"
-        add_secret_key "$TRUSTGATE_SECRET_NAME" "DATABASE_NAME" "$DATABASE_NAME"
-        add_secret_key "$TRUSTGATE_SECRET_NAME" "DATABASE_URL" "$DATABASE_URL"
-        if [ "$SHOULD_REPLACE_DB" = true ]; then
-            echo -e "${GREEN}✓ Updated PostgreSQL connection info in ${TRUSTGATE_SECRET_NAME}${NC}"
-        else
-            echo -e "${GREEN}✓ Verified PostgreSQL connection info in ${TRUSTGATE_SECRET_NAME}${NC}"
-        fi
-    else
-        # Create trustgate-secrets with PostgreSQL connection info (values are already trimmed)
-        kubectl create secret generic "$TRUSTGATE_SECRET_NAME" \
-            --from-literal=DATABASE_HOST="$DATABASE_HOST" \
-            --from-literal=DATABASE_PORT="$DATABASE_PORT" \
-            --from-literal=DATABASE_USER="$DATABASE_USER" \
-            --from-literal=DATABASE_PASSWORD="$DATABASE_PASSWORD" \
-            --from-literal=DATABASE_NAME="$DATABASE_NAME" \
-            --from-literal=DATABASE_URL="$DATABASE_URL" \
-            -n "$NAMESPACE" \
-            --dry-run=client -o yaml | kubectl apply -f -
-        echo -e "${GREEN}✓ Created ${TRUSTGATE_SECRET_NAME} with PostgreSQL connection info${NC}"
-    fi
-elif [ -n "$EXISTING_DB_HOST" ] && [ "$SHOULD_REPLACE_DB" != true ]; then
-    # User chose to keep existing values - no update needed
-    echo -e "${GREEN}Skipping update - keeping existing PostgreSQL connection in ${TRUSTGATE_SECRET_NAME}${NC}"
-fi
-echo ""
+echo -e "${BLUE}=== Firewall Secrets ===${NC}"
 
 # Hugging Face API Key for Firewall
 echo "--- Hugging Face API Key for Firewall (Optional) ---"

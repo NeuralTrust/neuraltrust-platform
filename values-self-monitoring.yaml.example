@@ -1,15 +1,13 @@
 # Curated Platform v2 self-monitoring overlay.
-# Kafka, Kafka Connect, worker-lag, and legacy TrustGate checks are excluded.
 
 global:
-  platformVersion: "v2"
   deploymentMode: "hybrid"
   selfMonitoring:
     enabled: true
   observability:
     enabled: true
 
-neuraltrust-watchdog:
+watchdog:
   enabled: true
   actions:
     dryRun: true

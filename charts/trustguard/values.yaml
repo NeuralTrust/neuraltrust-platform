@@ -1,6 +1,6 @@
 # TrustGuard subchart.
-# Renders ONLY when global.platformVersion=v2. control-plane (admin API) renders
-# only in external mode; data-plane (runtime /v1/guard) renders in hybrid + external.
+# Core v2 runtime. control-plane (admin API) renders only in external mode;
+# data-plane (runtime /v1/guard) renders in hybrid + external.
 # NOTE: the control/data split is in progress upstream; args + ports below are
 # placeholders modeled on the split branch — confirm before GA.
 nameOverride: ""
@@ -8,7 +8,7 @@ fullnameOverride: "trustguard"
 securityHardening: true
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustguard
-  tag: "v0.12.1"
+  tag: "v0.13.1"
   pullPolicy: IfNotPresent
 imagePullSecrets: "gcr-secret"
 serviceAccount:
@@ -19,22 +19,20 @@ config:
   logLevel: "info"
   appEnv: "production"
 # PostgreSQL connection (external-capable). Password lives in the secret.
-# DB_NAME is mode-derived from an EMPTY name:
-#   external → private "trustguard" DB (control plane owns its migrations);
-#   hybrid   → shared "trustdata" DB, where the data plane writes raw telemetry into
-#              its OWN "trustguard" schema (set by v2-postgresql-init) so AgentGateway's
-#              identically-named migration tracker never collides and DataAgent's single
-#              reader (search_path spanning both schemas) resolves both tables.
-# Set an explicit name only to override the mode default.
+# In v2 hybrid this block is IGNORED — hybrid workloads envFrom the shared
+# `postgresql-secrets` rendered from `global.postgresql.*` (default user +
+# database = neuraltrust). In v2 external the data plane connects to its
+# private "trustguard" DB (control plane owns its migrations); DB_NAME is
+# mode-derived from an EMPTY name — set an explicit name only to override.
 database:
   host: "" # Empty ⇒ in-cluster control-plane-postgresql; set for external/CloudSQL
   port: 5432
-  name: "" # Empty ⇒ mode-derived (external: "trustguard"; hybrid: shared "trustdata")
-  user: "trustguard" # Owns its schema in trustdata (hybrid) / its own DB (external)
+  name: "" # Empty ⇒ mode-derived (external: "trustguard"; hybrid: shared "neuraltrust")
+  user: "trustguard" # v2 external only; hybrid overrides via global.postgresql.user
   password: "" # Auto-generated if empty
   sslMode: "prefer" # TLS when available, plaintext fallback for the non-TLS in-cluster PG; use "require" for hosted DBs
-  # IAM (e.g. AWS RDS) database auth. Chart-prepared (emits DB_IAM_AUTH/DB_AUTH_MODE
-  # and omits the static DB_PASSWORD); service-side token minting lands separately.
+  # IAM (e.g. AWS RDS) database auth. Emits DB_IAM_AUTH/DB_AUTH_MODE/POSTGRES_LOGIN=aws
+  # and omits the static DB_PASSWORD; the service mints a SigV4 token at connect time.
   # Requires an IRSA-annotated serviceAccount. Leave false for password auth.
   iamAuth: false
 redis:
@@ -43,9 +41,13 @@ redis:
   password: "" # Optional
   username: "" # Optional Redis 6+ ACL username (e.g. ElastiCache user group). Emits REDIS_USERNAME.
   tls: "" # Set "true" for TLS-only managed Redis (e.g. ElastiCache Serverless). Emits REDIS_TLS.
-  # IAM (e.g. AWS ElastiCache) Redis auth. Chart-prepared (emits REDIS_IAM_AUTH and
-  # omits REDIS_PASSWORD); service-side token minting lands separately. false = password.
+  # IAM (e.g. AWS ElastiCache) Redis auth. When true, emits REDIS_LOGIN=aws +
+  # REDIS_IAM_AUTH and omits REDIS_PASSWORD. Requires username + tls + cacheName
+  # (and awsServerless=true for ElastiCache Serverless). Needs an IRSA role with
+  # elasticache:Connect. false = password.
   iamAuth: false
+  cacheName: "" # ElastiCache replication-group / serverless cache name → REDIS_CACHE_NAME
+  awsServerless: false # true for ElastiCache Serverless → REDIS_AWS_SERVERLESS
   enableCachePubSub: true # Publish cache invalidations between replicas
 # Admin API JWT signing key + runtime token signing key.
 adminJwtSecret: "" # Auto-generated if empty

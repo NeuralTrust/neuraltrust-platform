@@ -1,0 +1,664 @@
+# neuraltrust-watchdog Helm values.
+#
+# All settings are additive: the chart installs cleanly with the
+# defaults below. When this chart is included as a subchart of
+# neuraltrust-platform, set `watchdog.enabled` from the umbrella; in that
+# mode the rest of these defaults still apply.
+
+enabled: false
+# Drop the release-name prefix so resources are named "neuraltrust-watchdog"
+# (matching clickhouse, data-plane-api, …) instead of
+# "<release>-neuraltrust-watchdog". Stable, predictable names that external
+# tooling (monitoring, network policies) can rely on.
+fullnameOverride: "neuraltrust-watchdog"
+image:
+  repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/watchdog
+  tag: v0.13.1 # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+# Pull secret(s) for private nt-docker images (watchdog + bundled Prometheus).
+# Defaults to gcr-secret like the rest of the chart. Set to [] on clusters that
+# pull via IAM / Workload Identity and have no pull Secret.
+imagePullSecrets:
+  - name: gcr-secret
+# Watchdog is a singleton controller, not a stateless service: HPA is
+# unsupported and replicaCount stays 1. A second replica would duplicate
+# healing actions/notifications, tail every pod twice, and double per-check
+# metric series. Scale vertically (resources below) and by scoping logExport
+# sources / the enabled check set. Active/passive HA via k8s Lease leader
+# election is an optional, deferrable follow-up — not load-based
+# scaling — so replicaCount > 1 is unsafe until that lands.
+replicaCount: 1
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+# Persisted operational state (internal/sqlitedb + internal/statestore): the
+# shared embedded SQLite DB on a PVC that survives pod restarts — incident dedup
+# (no duplicate pages), recovery notifications, log tail checkpoints, delta-check
+# priming, and a warm GET /logs ring buffer. ON by default so a restart never
+# re-pages or loses incident state; the watchdog then renders as a StatefulSet
+# with the volumeClaimTemplate below. Set to false for ephemeral/PVC-less
+# clusters (the binary degrades gracefully to pure in-memory). overlay.enabled
+# implies persistence; persistence can also stand alone (durable incident state
+# without the live config overlay).
+persistence:
+  enabled: true
+  # Shared SQLite file path on the PVC. Backs both statestore and the overlay.
+  dbPath: /var/lib/watchdog/watchdog.db
+  # Empty => cluster default StorageClass (cloud-agnostic: GKE pd-balanced,
+  # EKS gp3, AKS managed-csi, bare-metal local-path). Set explicitly for
+  # locked-down clusters or to pin a class.
+  storageClass: ""
+  size: 1Gi
+# Live config overlay (internal/configstore): operator/UI policy edits, layered
+# over the ConfigMap seed (effective = seed ⊕ overlay). OFF by default — customers
+# stay pure GitOps/Helm. Enabling it implies persistence (shares persistence.dbPath)
+# and exposes the bearer-gated /config write API.
+overlay:
+  enabled: false
+  # true (default) = local edits win at runtime (air-gapped-friendly,
+  # local-authoritative). false = strict mode: write API is read-only and the
+  # cluster tracks pure seed/GitOps.
+  allowLocalOverride: true
+  # Gate on the two highest-blast-radius policy fields (dryRun, actions). false
+  # (default) means a UI user can tune thresholds/intervals but cannot arm
+  # healing — that stays an operator change in the seed. Mutation ALSO still
+  # requires the RBAC verb regardless; this is defense in depth.
+  allowActionEdits: false
+service:
+  type: ClusterIP
+  port: 8080
+  metricsPort: 8080
+# Bundled short-retention Prometheus. Customer-minimal installs do NOT render it:
+# watchdog now pushes check-status gauges over OTLP directly, and direct-probe
+# checks do not need a local query engine. It renders only when:
+#   - prometheus.enabled=true, OR
+#   - an enabled check has kind red/promql/scrape_staleness.
+# It is alerting-only: no Alertmanager, no rules, no remote_write.
+prometheus:
+  enabled: false
+  reuseExisting: "" # Set to an existing in-cluster Prometheus URL to skip the bundled instance.
+  # Optional host:port override for the Collector Prometheus exporter. When
+  # empty, bundled Prometheus discovers the in-chart Collector in the release
+  # namespace by label/port name.
+  collectorTarget: ""
+  image:
+    # Mirrored from prom/prometheus via crane into nt-docker (not Docker Hub).
+    repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/prometheus
+    tag: v3.12.0
+    pullPolicy: IfNotPresent
+  retentionTime: 3h
+  retentionSize: 512MB
+  scrapeInterval: 30s
+  scrapeTimeout: 10s
+  service:
+    port: 9090
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  serviceAccount:
+    name: ""
+    annotations: {}
+  podAnnotations: {}
+  podLabels: {}
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    runAsGroup: 65534
+    fsGroup: 65534
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+# Monitoring resources. Five independent capability-gated toggles, so
+# every cluster can pick the combination its stack supports. The
+# annotation baseline is universal; the rest are opt-in CRD-bound
+# resources that only render when both the chart toggle is true AND the
+# matching CRD exists.
+monitoring:
+  # Pod scrape annotations on the Deployment. Universal contract — works
+  # with Prometheus Operator additionalScrapeConfigs, Google Managed
+  # Prometheus, Amazon Managed Prometheus agent in annotation mode,
+  # Azure Monitor for Containers, and the in-chart OTel collector.
+  scrapeAnnotations:
+    enabled: true
+  # PodMonitor (monitoring.coreos.com/v1) — Prometheus Operator path.
+  podMonitor:
+    enabled: true
+    additionalLabels: {}
+    interval: 30s
+    scrapeTimeout: 10s
+  # PrometheusRule (monitoring.coreos.com/v1) — chart-side alerts.
+  prometheusRule:
+    enabled: true
+    additionalLabels: {}
+    alertLabels:
+      team: platform
+  # PodMonitoring (monitoring.googleapis.com/v1) — Google Managed
+  # Prometheus path. Off by default; GMP-native customers flip it on.
+  podMonitoring:
+    enabled: false
+    additionalLabels: {}
+    interval: 30s
+    scrapeTimeout: 10s
+  # Rules (monitoring.googleapis.com/v1) — GMP-native alerts.
+  gmpRules:
+    enabled: false
+    additionalLabels: {}
+    alertLabels:
+      team: platform
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+# RBAC defaults are minimal: read-only access to namespace resources.
+# Healing actions that mutate (k8s.restart_deployment) require explicit
+# opt-in via rbac.actions.restartDeployment.enabled below.
+rbac:
+  create: true
+  # When watchAllNamespaces is true, ClusterRole + ClusterRoleBinding
+  # are rendered. Otherwise namespace-scoped Role + RoleBinding.
+  watchAllNamespaces: false
+  actions:
+    restartDeployment:
+      enabled: false
+  # RBAC half of the log-bridge double-gate. When true the SA gets the
+  # `pods/log` get verb. Tailing still also requires logExport.enabled=true.
+  logExport:
+    enabled: false
+  # READ-ONLY RBAC for the platformState helm-diff preflight. helm needs to read
+  # its release Secret (sh.helm.release.v1.*) in the platform release namespace
+  # to compute a diff. Grants get/list/watch on Secrets in that namespace ONLY —
+  # NO write/patch verbs, so it cannot mutate workloads even if granted. This is
+  # the dry-run RBAC; real `helm upgrade` mutation would require additional
+  # write verbs that are intentionally NOT provided here. Defaults off.
+  platformApply:
+    enabled: false
+# Pod-level overrides.
+podAnnotations: {}
+podLabels: {}
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+nodeSelector: {}
+tolerations: []
+affinity: {}
+priorityClassName: ""
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+networkPolicy:
+  enabled: false
+  # Allow ingress from these namespace selectors when networkPolicy.enabled.
+  ingressFromNamespaces: []
+  egress:
+    enabled: true
+    # extraEgress is appended verbatim; allows custom cluster-scoped
+    # egress rules for the watchdog (e.g. to a managed observability SaaS).
+    extraEgress: []
+# Telemetry: when otlp.endpoint is empty the umbrella can inject the hosted OTLP
+# endpoint from global.observability.hostedExport. When both are empty the OTel
+# SDK is initialized with no-op providers (graceful no-egress).
+telemetry:
+  serviceName: neuraltrust-watchdog
+  # clusterName is an operator label for THIS deployment (e.g. "acme-eks"). 
+  # It is surfaced on every Slack alert (header context line +
+  # push-notification prefix) and stamped as the nt.cluster OTLP resource
+  # attribute, so an alert names where to act when the same binary runs across
+  # many customer clusters. Not topology — safe to expose. Falls back to
+  # global.observability.clusterName when this is empty; omitted when both are.
+  clusterName: ""
+  otlp:
+    endpoint: ""
+    headers: ""
+  tenantId: ""
+  enableTraces: true
+  enableLogs: true
+  # Push curated check-status gauges (watchdog.check.status,
+  # watchdog.check.consecutive_failures, watchdog.up) over OTLP so a remote
+  # backend can answer "is everything running?" without scraping /metrics.
+  enableMetrics: true
+# HTTP server.
+server:
+  listenAddr: ":8080"
+  authToken:
+    # Optional bearer token securing POST /checks/{id}/run.
+    # Provide either `value` (rendered into a Secret) or `existingSecret`.
+    value: ""
+    existingSecret: ""
+    secretKey: token
+# Notification + healing action defaults.
+actions:
+  # Global default for all mutating actions; per-check override allowed
+  # via checks[].dryRun.
+  dryRun: true
+  # Applied to every check that declares no actions of its own. Notifiers only —
+  # mutating/healing actions (e.g. k8s.restart_deployment) are never defaulted
+  # on and stay explicit per check (safety rule).
+  defaultActions: [notify.otlp, notify.slack]
+  slack:
+    # When webhookUrl is empty, notify.slack is a silent no-op.
+    webhookUrl: ""
+    existingSecret: ""
+    secretKey: webhook
+  otlp:
+    endpointEnv: OTEL_EXPORTER_OTLP_ENDPOINT
+# Per-kind presets deep-merged UNDER each check of that kind (per-check value
+# wins). Declares shared thresholds/timing once instead of on every check.
+kindDefaults:
+  red:
+    # "for duration": interval (60s) x failureThreshold = breach must persist
+    # ~5 min before paging, so a short self-recovering spike never alerts.
+    failureThreshold: 5
+  deployment_health:
+    thresholds: {maxRestartsPerInterval: 3, minAvailableRatio: 1.0}
+# Log bridge: tail ERROR/WARN from selected workloads, redact secrets, and ship
+# over OTLP push / HTTP pull / air-gapped bundle. For customer-minimal installs,
+# hosted export auto-renders this block as enabled and defaults sources to the
+# release namespace, so ERROR/WARN logs reach SaaS with no extra values. Set
+# global.observability.hostedExport.enabled=false for pure in-cluster/no-egress
+# installs. GET /logs and POST /logs/export are always bearer-gated, so set
+# server.authToken when using the pull transport. See README.md.
+logExport:
+  # When true, hostedExport automatically enables ERROR/WARN OTLP log export.
+  # Set false to keep hosted check-status metrics while disabling remote logs.
+  autoEnabled: true
+  enabled: false
+  severities: [error, warn]
+  # Workloads to tail. Use an explicit `namespace:` in namespace-scoped RBAC
+  # mode; `namespaceSelector:` requires rbac.watchAllNamespaces=true.
+  sources: []
+  #  - { namespace: "", podSelector: "app in (control-plane-api, data-plane-api, agentgateway, trustguard, firewall)" }
+  #    Empty namespace => Helm release namespace (see platformNamespace).
+  # Replay window on FIRST connect / cold restart only. Stream reconnects
+  # resume from an in-memory checkpoint (SinceTime) and drop the boundary
+  # overlap, so reconnects do not re-export the same lines.
+  sinceSeconds: 300
+  maxLinesPerPodPerMinute: 120
+  # Max simultaneous pod-log streams. Targets beyond the cap are skipped and
+  # counted (watchdog_logexport_tail_cap_skipped_total; discovered vs active
+  # gauges) so coverage gaps are visible, not silent.
+  maxConcurrentTails: 100
+  resyncInterval: 30s
+  redaction:
+    builtins: [bearer, password, dsn, apikey, email]
+    extraPatterns: []
+  transports:
+    otlp: {enabled: true}
+    pull: {enabled: true, bufferSize: 1000}
+    bundle: {enabled: false, outputDir: /var/run/watchdog/logbundles}
+# Product usage bridge (external customers only): discovers teams from
+# in-cluster data-plane-api, polls aggregate counters for each team, and pushes
+# them over OTLP. Default OFF — SaaS/hybrid keep the admin-console UsageSnapshot
+# job. When enabled, reuses the platform data-plane-jwt-secret
+# (DATA_PLANE_JWT_SECRET) to mint discovery and per-team JWTs.
+usageExport:
+  enabled: false
+  # In-cluster data-plane-api base URL (Service DNS, no public ingress).
+  endpoint: "http://data-plane-api-service:80"
+  jwtSecret:
+    existingSecret: data-plane-jwt-secret
+    secretKey: DATA_PLANE_JWT_SECRET
+  # In-cluster control-plane-api base URL for automatic Red Teaming target discovery.
+  controlPlaneEndpoint: "http://control-plane-api-service:80"
+  controlPlaneJwtSecret:
+    existingSecret: control-plane-secrets
+    secretKey: CONTROL_PLANE_JWT_SECRET
+  # Automatic per-team target discovery (default true). Set false to export
+  # data-plane-only counters without querying control-plane-api.
+  targetDiscovery: true
+  interval: 1h
+  timeout: 30s
+# Desired-state pull from deploy-api (the SaaS control plane). When enabled, the
+# watchdog reports observed state (per-service status + versions) to deploy-api
+# so the cluster appears on the admin-console fleet page, and pulls desired
+# monitoring policy revisions. OFF by default — customers stay pure GitOps/Helm.
+#
+# endpoint/clusterId are plain values; the ingest bearer token is referenced from
+# an existing Secret (never inlined). The watchdog binary reads the address via
+# fixed env-var names (DEPLOY_API_URL / DEPLOY_API_CLUSTER_ID / WATCHDOG_INGEST_TOKEN).
+desiredState:
+  enabled: false
+  # deploy-api base URL including the API prefix, e.g.
+  # http://deploy-api-service.deploy-api.svc.cluster.local/api/v1
+  endpoint: ""
+  # Cluster id identifying THIS cluster to deploy-api (fleet rollup +
+  # GET /desired-state/by-cluster/{id}). e.g. "prod".
+  clusterId: ""
+  # Bearer token for deploy-api ingest (WATCHDOG_INGEST_TOKEN). Provide EITHER
+  # `value` (the chart renders a managed Secret "<fullname>-deploy-api", same
+  # idiom as server.authToken / actions.slack) OR `existingSecret` to reference
+  # a pre-existing Secret. `existingSecret` wins when both are set. Must match
+  # the WATCHDOG_INGEST_TOKEN that deploy-api validates.
+  token:
+    value: ""
+    existingSecret: ""
+    secretKey: token
+  pollInterval: 60s
+# Remote neuraltrust-platform image-tag applier (internal/platformstate). When
+# enabled, the watchdog pulls the active desired-state revision for this cluster
+# and applies ONLY image tags to the in-cluster Helm release via
+# `helm upgrade --install --reuse-values --set <path>=<tag>`, after a
+# `helm diff upgrade` preflight that ABORTS if any non-image-tag field would
+# change.
+#
+# TRIPLE-GATED + DEFAULT-SAFE:
+#   1. enabled: false by default.
+#   2. dryRun: true by default — even when enabled, it only computes + reports
+#      the helm-diff; it never mutates the release until dryRun is set false.
+#   3. The diff guard refuses to apply if anything other than image tags changes.
+# Mutating apply ALSO requires rbac.platformApply.enabled (read-only by default).
+# Reuses the same deploy-api endpoint/clusterId/token as desiredState above.
+# Namespace for platform-scoped check targets (pod-health, deployment-health,
+# cert-renewal, log-error-rate, …). Empty => the Helm release namespace.
+# Cross-namespace checks (deploy-api, aispm, …) set an explicit namespace on
+# the check target and are not overridden.
+platformNamespace: ""
+platformState:
+  enabled: false
+  dryRun: true
+  # When false (default), only image-tag changes pass the diff guard. When true,
+  # the watchdog may apply reviewed full rendered values (requires dryRun:false
+  # AND expanded rbac.platformApply write verbs). Keep false until real apply
+  # is explicitly gated.
+  fullValuesApply: false
+  # Helm release name to diff/upgrade. Defaults to the umbrella release.
+  releaseName: neuraltrust-platform
+  # Namespace of the platform Helm release. Empty => the release namespace.
+  namespace: ""
+  pollInterval: 120s
+  # OCI registry auth so helm can pull the chart referenced by the desired
+  # revision (chart_source) for diffing. Points HELM_REGISTRY_CONFIG at an
+  # existing dockerconfigjson Secret (e.g. the image-pull gcr-secret). Read-only.
+  registryConfig:
+    existingSecret: gcr-secret
+    secretKey: .dockerconfigjson
+# Connection envs sourced from existing cluster secrets.
+secretEnv:
+  clickhouse:
+    # Reuse platform ClickHouse secrets (see create-secrets.sh / data-plane hook).
+    userSecret: clickhouse-secrets
+    userKey: CLICKHOUSE_USER
+    passwordSecret: clickhouse
+    passwordKey: admin-password
+  redis:
+    passwordSecret: ""
+    passwordKey: password
+# Where the runner schedules checks. defaultInterval applies to checks
+# that omit `interval`. failureThreshold gates healing actions: only
+# fire after N consecutive non-OK results. Actions/notifications then fire
+# ONCE per incident (alerting edge / severity escalation) plus a single
+# recovery notice — never every failing tick. Set a per-check `reAlertAfter`
+# (e.g. 30m) to re-notify a sustained incident on a backoff.
+#
+# A check may override this global with its own `failureThreshold` — combined
+# with its `interval` that is the watchdog's "for duration" (e.g. interval 60s +
+# failureThreshold 5 = alert only after ~5 min of sustained breach). The RED
+# checks below use 5 so a short, self-recovering spike never pages.
+runner:
+  defaultInterval: 60s
+  defaultTimeout: 15s
+  failureThreshold: 3
+  # Env var holding the Prometheus query-API base URL. Applied as the default
+  # target.endpointEnv for red/promql/scrape_staleness checks that omit it, so
+  # the address is declared once. The bundled local Prometheus sets this.
+  prometheusQueryEnv: PROMETHEUS_QUERY_URL
+# Customer-minimal default: direct probes only (no local Prometheus required).
+# These checks answer "are the main services running?" and the watchdog pushes
+# their status over OTLP metrics. Adding any red/promql/scrape_staleness id here
+# later renders the bundled local Prometheus.
+enabledCheckIds:
+  - clickhouse
+  - firewall-health
+  - pod-health
+v2EnabledCheckIds:
+  - agentgateway-synthetic
+  - trustguard-synthetic
+  - v2-data-plane-synthetic
+  - v2-deployment-health
+# Additional checks merged after the default `checks` list. Use this from
+# umbrella/region values to add cross-namespace or account-specific probes
+# without replacing the entire default check catalog.
+extraChecks: []
+# Default check set. Override / extend via the watchdog.checks key in
+# customer values. Each entry is passed to the Go watchdog as-is. Set
+# enabled: false to skip a check; the corresponding components do not
+# need to exist in-cluster.
+checks:
+  - id: clickhouse
+    kind: clickhouse
+    enabled: false
+    target:
+      address: clickhouse:9000
+      database: neuraltrust
+      usernameEnv: CLICKHOUSE_USER
+      passwordEnv: CLICKHOUSE_PASSWORD
+    thresholds:
+      diskFreePctMin: 15
+      mutationsMaxAgeSeconds: 1800
+      replicationQueueMax: 100
+      memoryUsageRatioMax: 0.85
+      partsPerPartitionMax: 300
+      maxErrorsPerInterval: 50
+      longQueryMaxSeconds: 900
+      maxLongQueries: 0
+      queryLogLookbackSeconds: 900
+      queryLogExceptionsMax: 0
+  # The three red-* checks use the built-in `red` kind: the PromQL is compiled
+  # in the watchdog binary from `target.signal` (requestRate | errorRatio |
+  # latencyP95), so there is no hand-written query to drift or mistype, and the
+  # query always groups by service_name so the alert names the offending
+  # service. Tune thresholds and the "for duration" (failureThreshold) here;
+  # the query itself is not customer-editable by design.
+  - id: red-request-rate
+    kind: red
+    enabled: false
+    # "for duration": interval (60s) x failureThreshold = the breach must
+    # persist ~5 min before paging, so a short traffic burst that self-recovers
+    # never alerts.
+    failureThreshold: 5
+    target:
+      endpointEnv: PROMETHEUS_QUERY_URL
+      signal: requestRate
+    thresholds:
+      operator: ">"
+      warning: 500
+      critical: 1000
+      noDataStatus: unknown
+  - id: red-error-rate
+    kind: red
+    enabled: false
+    failureThreshold: 5 # ~5 min sustained before paging (see red-request-rate)
+    target:
+      endpointEnv: PROMETHEUS_QUERY_URL
+      signal: errorRatio
+    thresholds:
+      operator: ">"
+      warning: 0.05
+      critical: 0.15
+      noDataStatus: unknown
+  - id: red-duration-p95
+    kind: red
+    enabled: false
+    failureThreshold: 5 # ~5 min sustained before paging (see red-request-rate)
+    target:
+      endpointEnv: PROMETHEUS_QUERY_URL
+      signal: latencyP95
+    thresholds:
+      operator: ">"
+      warning: 1
+      critical: 3
+      noDataStatus: unknown
+  # Watchdog self-metric staleness. The bundled local Prometheus
+  # scrapes watchdog's own /metrics (job watchdog-self), so an absent
+  # watchdog_checks_runs_total means the monitor itself has gone silent — the
+  # one signal a process-local liveness probe can never catch. Observe-only:
+  # notify actions only, never a self-restart. Disable only if you point
+  # prometheus.reuseExisting at a Prometheus that does not scrape watchdog.
+  - id: watchdog-self-staleness
+    kind: scrape_staleness
+    enabled: false
+    target:
+      endpointEnv: PROMETHEUS_QUERY_URL
+      series: watchdog_checks_runs_total
+      window: 10m
+    thresholds:
+      staleStatus: critical
+  - id: control-plane-synthetic
+    kind: httpsynthetic
+    enabled: false
+    target:
+      urls:
+        - {name: api, url: 'http://control-plane-api-service/health', expectedStatus: 200, latencyWarnMs: 500, latencyCriticalMs: 2000}
+        - {name: app, url: 'http://control-plane-app-service/api/health', expectedStatus: 200}
+  # v2 keeps the temporary analytics API. Readiness verifies the v2 dependencies.
+  - id: v2-data-plane-synthetic
+    kind: httpsynthetic
+    enabled: false
+    target:
+      urls:
+        - {name: api, url: 'http://data-plane-api-service/health', expectedStatus: 200, latencyWarnMs: 500, latencyCriticalMs: 2000}
+        - {name: ready, url: 'http://data-plane-api-service/health/ready', expectedStatus: 200}
+  - id: postgres-tcp
+    kind: tcpsynthetic
+    enabled: false
+    target:
+      host: postgresql
+      port: 5432
+  # Smoke probe — Cloud SQL CPU/memory/disk stays in cloud-infrastructure TF.
+  - id: postgres-ping
+    kind: postgres_ping
+    enabled: false
+    target:
+      dsnEnv: POSTGRES_DSN
+    thresholds:
+      connectionUsageRatioMax: 0.8
+      longQueryMaxAge: 10m
+      maxLongQueries: 0
+      replicationLagMaxSeconds: 60
+    actions: [notify.otlp]
+  - id: agentgateway-synthetic
+    kind: httpsynthetic
+    enabled: false
+    target:
+      urls:
+        - {name: proxy, url: 'http://agentgateway-proxy/healthz'}
+        - {name: mcp, url: 'http://agentgateway-mcp/healthz'}
+  - id: trustguard-synthetic
+    kind: httpsynthetic
+    enabled: false
+    target:
+      urls:
+        - {name: data-plane, url: 'http://trustguard-data-plane/healthz'}
+  - id: deploy-api-synthetic
+    kind: httpsynthetic
+    enabled: false
+    target:
+      urls:
+        - {name: api, url: 'http://deploy-api-service.deploy-api/health'}
+  - id: trustscan-synthetic
+    kind: httpsynthetic
+    enabled: false
+    target:
+      urls:
+        - {name: api, url: 'http://trustscan.trustscan:8000/health'}
+  - id: firewall-health
+    kind: firewall_health
+    enabled: false
+    target:
+      url: http://firewall/health
+      namespace: "" # resolved to the platform release namespace
+      gatewayLabelSelector: app.kubernetes.io/name=firewall
+      workerLabelSelector: app.kubernetes.io/component=worker
+    thresholds:
+      minReadyPods: 1
+      minReadyWorkerPods: 1
+      maxUnhealthyWorkers: 0
+  # Watches cert-manager Certificates across the listed namespaces.
+  - id: cert-renewal
+    kind: cert_renewal
+    enabled: false
+    target:
+      namespaces: [] # empty => Helm release namespace
+    thresholds:
+      renewalWarnDays: 14
+      renewalCriticalDays: 3
+  - id: otel-collector
+    kind: otel_collector
+    enabled: false
+    target:
+      url: http://opentelemetry-collector.opentelemetry:13133/
+      namespace: opentelemetry
+      labelSelector: app.kubernetes.io/name=opentelemetry-collector
+    thresholds:
+      minReadyPods: 1
+  # Replaces gcp/metric_based_alerts.tf pod_crash_alert.
+  - id: pod-health
+    kind: pod_health
+    enabled: false
+    target:
+      namespaces: [] # empty => Helm release namespace
+      reasons: [CrashLoopBackOff, OOMKilled, ImagePullBackOff, ErrImagePull, CreateContainerConfigError]
+    thresholds:
+      maxFailingPods: 0
+  - id: deploy-api-deployment-health
+    kind: deployment_health
+    enabled: false
+    target:
+      namespace: deploy-api
+      deployments: [deploy-api]
+  - id: v2-deployment-health
+    kind: deployment_health
+    enabled: false
+    target:
+      namespace: ""
+      # MCP is optional, so the default check covers only always-on v2 workloads.
+      deployments: [agentgateway-proxy, trustguard-data-plane, data-plane-api]
+  - id: trustscan-deployment-health
+    kind: deployment_health
+    enabled: false
+    target:
+      namespace: trustscan
+      deployments: [trustscan-api, trustscan-integration-created-worker, trustscan-scan-chunk-completed-worker, trustscan-scan-requested-worker]
+  # Alerts on a high volume of ERROR/WARN container-log lines per workload,
+  # read from the in-cluster log bridge (no Prometheus needed). REQUIRES
+  # logExport.enabled — without the bridge it reports unknown. Notify-only.
+  - id: log-error-rate
+    kind: log_error_rate
+    enabled: false
+    target:
+      namespace: "" # empty => Helm release namespace
+    thresholds:
+      severity: error
+      window: 5m
+      warning: 20 # error log lines/min per workload
+      critical: 100
+# Inherited from the umbrella chart. Local overrides win.
+global:
+  proxy:
+    enabled: false
+    httpProxy: ""
+    httpsProxy: ""
+    noProxy: ""

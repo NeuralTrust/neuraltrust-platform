@@ -1,5 +1,5 @@
 # AlertEngine subchart.
-# Renders ONLY when global.platformVersion=v2 AND global.deploymentMode=external.
+# Renders ONLY when global.deploymentMode=external.
 # One Go image, two runtimes:
 #   api    (args ["api"])    → HTTP :8085, consumed in-cluster by the app BFF
 #   worker (args ["worker"]) → rule evaluation + SIEM forwarding loops (health :8086)
@@ -30,10 +30,11 @@ config:
   workerHealthPort: 8086
   workerEvalInterval: "45s"
   workerForwardInterval: "30s"
-# PostgreSQL connection (own database, separate from the shared trustdata DB).
-# host empty → auto-derives to the in-cluster control-plane-postgresql Service.
-# For external Postgres, pre-create the alertengine role + database and set
-# host/user/name/password below.
+# PostgreSQL connection (own "alertengine" database + role; AlertEngine renders
+# in v2 external only and does not use the hybrid `global.postgresql` shared
+# block). host empty → auto-derives to the in-cluster control-plane-postgresql
+# Service. For external Postgres, pre-create the alertengine role + database
+# and set host/user/name/password below.
 database:
   host: ""
   port: 5432
@@ -41,10 +42,12 @@ database:
   user: "alertengine"
   password: "" # Auto-generated if empty (in-cluster PG)
   sslMode: "prefer" # TLS when available, plaintext fallback for the non-TLS in-cluster PG; use "require" for hosted DBs
-  # IAM (e.g. AWS RDS) database auth. Chart-prepared (emits DB_IAM_AUTH/DB_AUTH_MODE
-  # and omits the static DB_PASSWORD); service-side token minting lands separately.
-  # Requires an IRSA-annotated serviceAccount. Leave false for password auth.
+  # IAM (e.g. AWS RDS) database auth. When true, emits DB_AUTH_MODE=iam /
+  # DB_IAM_AUTH and omits DB_PASSWORD. AlertEngine (v0.4.0+) mints a SigV4 token
+  # per connection. Requires an IRSA-annotated serviceAccount + awsRegion.
+  # Leave false for password auth.
   iamAuth: false
+  awsRegion: "" # Required when iamAuth=true → AWS_REGION (also accepts AWS_DEFAULT_REGION / DB_AWS_REGION in the binary)
 # ClickHouse (native protocol, port 9000). Defaults to the in-cluster clickhouse
 # subchart; set host/nativePort to your endpoint when infrastructure.clickhouse.deploy=false.
 clickhouse:

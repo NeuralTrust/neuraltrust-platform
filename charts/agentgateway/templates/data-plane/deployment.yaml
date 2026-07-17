@@ -44,12 +44,16 @@ spec:
             name: agentgateway-env-vars
         - secretRef:
             name: agentgateway-secrets
-        {{- if eq (include "neuraltrust-platform.postgresql.hybridRoleLayout" .) "shared-writer" }}
-        # Hybrid shared-writer: DB_PASSWORD + SENSIBLE_PG_DSN come from the shared
-        # writer Secret (same values as TrustGuard). Listed after agentgateway-secrets
-        # so the shared credential wins.
+        {{- if eq (include "neuraltrust-platform.isHybrid" .) "true" }}
+        # v2 hybrid: DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME/DB_SSL_MODE +
+        # SENSIBLE_PG_DSN come from the shared `postgresql-secrets` Secret, and
+        # REDIS_HOST/REDIS_PORT/REDIS_PASSWORD from `redis-secrets`. Listed last
+        # so the shared credentials win over any legacy per-service overrides.
         - secretRef:
-            name: trustdata-secrets
+            name: {{ include "neuraltrust-platform.v2.hybridPg.secretName" . | quote }}
+            optional: true
+        - secretRef:
+            name: {{ include "neuraltrust-platform.v2.hybridRedis.secretName" . | quote }}
             optional: true
         {{- end }}
         env:
@@ -61,6 +65,11 @@ spec:
         {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "go" "ctx" .) | nindent 8 }}
         {{- include "neuraltrust-platform.configSyncEnv" (dict "ctx" . "product" "agentgateway") | nindent 8 }}
         {{- include "neuraltrust-platform.appVersionEnv" (dict "tag" .Values.image.tag) | nindent 8 }}
+        {{- if and (eq (include "neuraltrust-platform.clickstackHybridEnabled" .) "true") (eq (include "neuraltrust-platform.clickstack.usesExistingSecret" .) "true") }}
+        {{- include "neuraltrust-platform.clickstack.otlpHeadersEnv" . | nindent 8 }}
+        {{- else if eq (include "neuraltrust-platform.isExternal" .) "true" }}
+        {{- include "neuraltrust-platform.clickstack.externalOtlpHeadersEnv" . | nindent 8 }}
+        {{- end }}
         {{- if .Values.securityHardening }}
         securityContext:
           allowPrivilegeEscalation: false

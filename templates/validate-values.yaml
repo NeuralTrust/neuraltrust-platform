@@ -1,58 +1,20 @@
 {{- /*
-Fail early for unsupported topology values and retired components. This template
-intentionally emits no Kubernetes resource when validation succeeds.
+Fail early for unsupported topology values. This template intentionally emits
+no Kubernetes resource when validation succeeds.
 */ -}}
 {{- $global := default dict .Values.global -}}
-{{- $version := $global.platformVersion | default "v2" -}}
-{{- if not (has $version (list "v1" "v2")) -}}
-  {{- fail (printf "global.platformVersion must be one of: v1, v2 (got %q)" $version) -}}
-{{- end -}}
 {{- $mode := $global.deploymentMode | default "hybrid" -}}
-{{- if and (eq $version "v2") (not (has $mode (list "hybrid" "external" "full"))) -}}
-  {{- fail (printf "global.deploymentMode must be one of: hybrid, external, full (got %q)" $mode) -}}
+{{- if not (has $mode (list "hybrid" "external")) -}}
+  {{- fail (printf "global.deploymentMode must be one of: hybrid, external (got %q)" $mode) -}}
 {{- end -}}
-{{- /* v2 hybrid PostgreSQL role layout + init-Job mode. */ -}}
-{{- $pgGlobal := default dict $global.postgresql -}}
-{{- /* Layout is mode-derived (hybrid -> shared-writer, external/full -> separate).
-       Empty (unset) is the normal case; an explicit value only overrides in hybrid. */ -}}
-{{- $hybridRoleLayout := $pgGlobal.hybridRoleLayout | default "" -}}
-{{- if not (has $hybridRoleLayout (list "" "separate" "shared-writer")) -}}
-  {{- fail (printf "global.postgresql.hybridRoleLayout must be one of: separate, shared-writer (got %q)" $hybridRoleLayout) -}}
-{{- end -}}
-{{- if and (eq $hybridRoleLayout "shared-writer") (not (and (eq $version "v2") (eq $mode "hybrid"))) -}}
-  {{- fail "global.postgresql.hybridRoleLayout=shared-writer is only supported for v2 hybrid deployments. External/full control planes own their own migrations and keep per-service databases (always separate); do not set it there." -}}
-{{- end -}}
-{{- $initJob := default dict $pgGlobal.initJob -}}
-{{- $initJobMode := $initJob.mode | default "auto" -}}
-{{- if not (has $initJobMode (list "auto" "enabled" "disabled")) -}}
-  {{- fail (printf "global.postgresql.initJob.mode must be one of: auto, enabled, disabled (got %q)" $initJobMode) -}}
-{{- end -}}
+
 {{- $trustlens := default dict .Values.trustlens -}}
 {{- $trustlensImage := default dict $trustlens.image -}}
-{{- if and (eq $version "v2") ($trustlens.enabled | default false) (not ($trustlensImage.tag | default "")) -}}
+{{- if and ($trustlens.enabled | default false) (not ($trustlensImage.tag | default "")) -}}
   {{- fail "trustlens.image.tag is required when trustlens.enabled=true; no default TrustLens release image is published yet." -}}
 {{- end -}}
-{{- if and .Release.IsUpgrade (eq $version "v2") (not ($global.confirmV2Migration | default false)) -}}
-  {{- $legacyTrustgate := lookup "apps/v1" "Deployment" .Release.Namespace "trustgate-control-plane" -}}
-  {{- $legacyKafka := lookup "apps/v1" "StatefulSet" .Release.Namespace "kafka" -}}
-  {{- $legacyWorker := lookup "apps/v1" "Deployment" .Release.Namespace "data-plane-worker" -}}
-  {{- $existingControlPlane := lookup "apps/v1" "Deployment" .Release.Namespace "control-plane-api" -}}
-  {{- $existingDataPlane := lookup "apps/v1" "Deployment" .Release.Namespace "data-plane-api" -}}
-  {{- $v2AgentGateway := lookup "apps/v1" "Deployment" .Release.Namespace "agentgateway-proxy" -}}
-  {{- $v2TrustGuard := lookup "apps/v1" "Deployment" .Release.Namespace "trustguard-data-plane" -}}
-  {{- $legacyApiOnly := and (or $existingControlPlane $existingDataPlane) (not (or $v2AgentGateway $v2TrustGuard)) -}}
-  {{- if or $legacyTrustgate $legacyKafka $legacyWorker $legacyApiOnly -}}
-    {{- fail "Existing v1 workloads were detected. Set global.platformVersion=v1 to keep the legacy stack, or set global.confirmV2Migration=true after completing the chart 2.0 migration checklist." -}}
-  {{- end -}}
-{{- end -}}
-{{- $rootInfrastructure := default dict .Values.infrastructure -}}
-{{- $rootPostgresql := default dict $rootInfrastructure.postgresql -}}
-{{- $globalPostgresql := default dict $global.postgresql -}}
-{{- $globalPostgresqlDeploy := true -}}
-{{- if hasKey $globalPostgresql "deploy" -}}{{- $globalPostgresqlDeploy = $globalPostgresql.deploy -}}{{- end -}}
-{{- if and (hasKey $rootPostgresql "deploy") (not $rootPostgresql.deploy) $globalPostgresqlDeploy -}}
-  {{- fail "infrastructure.postgresql.deploy is a deprecated parent-only alias. Set global.postgresql.deploy=false so the value reaches every subchart." -}}
-{{- end -}}
+
+{{- /* DataAgent hybrid guard rails. */ -}}
 {{- $dataagent := default dict .Values.dataagent -}}
 {{- $existingTokenRef := default dict $dataagent.enrolmentTokenExistingSecret -}}
 {{- $existingDataRef := default dict $dataagent.existingSecret -}}
@@ -68,7 +30,6 @@ intentionally emits no Kubernetes resource when validation succeeds.
 {{- $preserveExisting := false -}}
 {{- if hasKey $global "preserveExistingSecrets" -}}{{- $preserveExisting = $global.preserveExistingSecrets -}}{{- end -}}
 {{- if and
-  (eq $version "v2")
   (eq $mode "hybrid")
   $dataagent.tenantId
   $dataagent.enrolmentToken
@@ -80,7 +41,6 @@ intentionally emits no Kubernetes resource when validation succeeds.
 {{- end -}}
 {{- $dataagentTokenConfigured := or $dataagent.enrolmentToken ($existingTokenRef.name | default "") $hasManagedToken -}}
 {{- if and
-  (eq $version "v2")
   (eq $mode "hybrid")
   $dataagent.tenantId
   $dataagentTokenConfigured
@@ -90,23 +50,30 @@ intentionally emits no Kubernetes resource when validation succeeds.
 -}}
   {{- fail "DataAgent requires dataagent.existingSecret.name containing DATABASE_URL and DB_PASSWORD when chart secret generation is disabled." -}}
 {{- end -}}
-{{- if and (eq $version "v2") (has $mode (list "external" "full")) $preserveExisting -}}
+{{- if and (eq $mode "external") $preserveExisting -}}
   {{- $existingControlPlane := lookup "v1" "Secret" .Release.Namespace "control-plane-secrets" -}}
   {{- if and $existingControlPlane (kindIs "map" $existingControlPlane) $existingControlPlane.data -}}
     {{- if or (not (hasKey $existingControlPlane.data "AUTH_SECRET")) (not (hasKey $existingControlPlane.data "NEXTAUTH_SECRET")) -}}
-      {{- fail "preserveExistingSecrets=true requires control-plane-secrets to contain both AUTH_SECRET and NEXTAUTH_SECRET before a v2 external upgrade." -}}
+      {{- fail "preserveExistingSecrets=true requires control-plane-secrets to contain both AUTH_SECRET and NEXTAUTH_SECRET before an external upgrade." -}}
     {{- end -}}
   {{- end -}}
 {{- end -}}
 
+{{- /* Hybrid ClickStack: mandatory bearer token unless the air-gap escape hatch. */ -}}
 {{- $clickstack := default dict $global.clickstack -}}
-{{- if and (eq $version "v2") (eq $mode "hybrid") ($clickstack.enabled | default false) (not ($clickstack.endpoint | default "")) -}}
-  {{- fail "global.clickstack.enabled=true requires global.clickstack.endpoint (the collector's OTLP/HTTP URL, e.g. https://clickstack-collector.<domain>/v1/logs)." -}}
+{{- $clickstackEnabled := true -}}
+{{- if hasKey $clickstack "enabled" -}}{{- $clickstackEnabled = $clickstack.enabled -}}{{- end -}}
+{{- if and (eq $mode "hybrid") $clickstackEnabled -}}
+  {{- $csExistingRef := default dict $clickstack.existingSecret -}}
+  {{- $hasInlineToken := and ($clickstack.authToken | default "") (ne ($clickstack.authToken | toString) "") -}}
+  {{- $hasExistingRef := ne ($csExistingRef.name | default "") "" -}}
+  {{- if and (not $hasInlineToken) (not $hasExistingRef) -}}
+    {{- fail "v2 hybrid ClickStack export requires a bearer token: set `global.clickstack.authToken` OR `global.clickstack.existingSecret.name` (pointing at a Secret carrying `OTEL_EXPORTER_OTLP_HEADERS`). Set `global.clickstack.enabled: false` for an air-gapped install with no OTLP dual-write." -}}
+  {{- end -}}
 {{- end -}}
-{{- /* data-plane-api SQL backend: validate the explicit override and guard the  */ -}}
-{{- /* v2 hybrid ClickHouse path (needs an external, dotted host — no in-cluster  */ -}}
-{{- /* ClickHouse renders in hybrid).                                            */ -}}
-{{- $dpRoot := default dict (index .Values "neuraltrust-data-plane") -}}
+
+{{- /* data-plane-api SQL backend validation. */ -}}
+{{- $dpRoot := default dict (index .Values "data-plane-api") -}}
 {{- $dpComponents := default dict (default dict $dpRoot.dataPlane).components -}}
 {{- $dpApi := default dict $dpComponents.api -}}
 {{- $dpApiEnabled := true -}}
@@ -114,22 +81,12 @@ intentionally emits no Kubernetes resource when validation succeeds.
 {{- $dpApiDatabase := default dict $dpApi.database -}}
 {{- $dpBackend := $dpApiDatabase.backend | default "" | toString | lower -}}
 {{- if and $dpBackend (not (has $dpBackend (list "postgres" "postgresql" "clickhouse" "auto"))) -}}
-  {{- fail (printf "neuraltrust-data-plane.dataPlane.components.api.database.backend must be one of: postgres, clickhouse, auto (got %q)" $dpBackend) -}}
+  {{- fail (printf "data-plane-api.dataPlane.components.api.database.backend must be one of: postgres, clickhouse, auto (got %q)" $dpBackend) -}}
 {{- end -}}
-{{- if and (eq $version "v2") (eq $mode "hybrid") $dpApiEnabled (eq $dpBackend "clickhouse") -}}
+{{- if and (eq $mode "hybrid") $dpApiEnabled (eq $dpBackend "clickhouse") -}}
   {{- $dpCh := default dict $dpComponents.clickhouse -}}
   {{- $dpChHost := $dpCh.host | default "clickhouse" -}}
   {{- if not (contains "." $dpChHost) -}}
-    {{- fail "neuraltrust-data-plane.dataPlane.components.api.database.backend=clickhouse in v2 hybrid requires an external ClickHouse: set neuraltrust-data-plane.dataPlane.components.clickhouse.host to a dotted (external) endpoint, or use the default PostgreSQL backend." -}}
+    {{- fail "data-plane-api.dataPlane.components.api.database.backend=clickhouse in v2 hybrid requires an external ClickHouse: set data-plane-api.dataPlane.components.clickhouse.host to a dotted (external) endpoint, or use the default PostgreSQL backend." -}}
   {{- end -}}
-{{- end -}}
-{{- $aispm := default dict (index .Values "neuraltrust-aispm") -}}
-{{- $aispmConfig := default dict $aispm.aispm -}}
-{{- if $aispmConfig.enabled -}}
-  {{- fail "neuraltrust-aispm was removed in chart 2.0. Remove neuraltrust-aispm.aispm.enabled and its values before upgrading." -}}
-{{- end -}}
-{{- $siem := default dict (index .Values "neuraltrust-siem-connectors") -}}
-{{- $siemConfig := default dict $siem.siemConnectors -}}
-{{- if $siemConfig.enabled -}}
-  {{- fail "neuraltrust-siem-connectors was removed in chart 2.0. Remove neuraltrust-siem-connectors.siemConnectors.enabled and its values before upgrading. AlertEngine SIEM forwarding remains supported." -}}
 {{- end -}}
