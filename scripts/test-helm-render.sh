@@ -174,6 +174,10 @@ assert_contains "$out3" 'name: agentgateway-admin' \
   "external: agentgateway admin control plane renders"
 assert_contains "$out3" 'name: trustguard-control-plane' \
   "external: trustguard control plane renders"
+assert_contains "$out3" 'NEURAL_TRUST_FIREWALL_BASE_URL: "http://firewall.default.svc.cluster.local"' \
+  "external: TrustGuard wires in-cluster Firewall base URL"
+assert_contains "$out3" 'name: NEURAL_TRUST_FIREWALL_SECRET_KEY'$'\n''          valueFrom:'$'\n''            secretKeyRef:'$'\n''              name: "firewall-secrets"' \
+  "external: TrustGuard mounts firewall-secrets JWT_SECRET"
 assert_contains "$out3" 'OTEL_EXPORTER_OTLP_ENDPOINT: "http://clickstack-collector.default.svc.cluster.local:4318"' \
   "external: OTLP endpoint is collector base URL (no /v1/logs)"
 assert_not_contains "$out3" 'OTEL_EXPORTER_OTLP_ENDPOINT: "http://clickstack-collector.default.svc.cluster.local:4318/v1/logs"' \

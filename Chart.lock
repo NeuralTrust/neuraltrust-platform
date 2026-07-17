@@ -16,7 +16,7 @@ dependencies:
   version: 0.1.14
 - name: trustguard
   repository: file://./charts/trustguard
-  version: 0.1.14
+  version: 0.1.15
 - name: trustlens
   repository: file://./charts/trustlens
   version: 0.1.1
@@ -38,5 +38,5 @@ dependencies:
 - name: watchdog
   repository: file://./charts/watchdog
   version: 0.3.0
-digest: sha256:5ced0f36607bd1affa77128f061e481227b4435f509a227088f34ccf92b332a6
-generated: "2026-07-17T12:45:53.273212+02:00"
+digest: sha256:a979447649f5dfaf3b284dde4daf027bb48592565a35c908b760da211578fdc1
+generated: "2026-07-17T14:04:02.58449+02:00"

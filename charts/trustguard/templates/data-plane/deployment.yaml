@@ -79,6 +79,15 @@ spec:
         {{- else if eq (include "neuraltrust-platform.isExternal" .) "true" }}
         {{- include "neuraltrust-platform.clickstack.externalOtlpHeadersEnv" . | nindent 8 }}
         {{- end }}
+        {{- $fw := default dict .Values.firewall }}
+        {{- if $fw.enabled }}
+        {{- $fwSecret := default dict $fw.existingSecret }}
+        - name: NEURAL_TRUST_FIREWALL_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ $fwSecret.name | default "firewall-secrets" | quote }}
+              key: {{ $fwSecret.key | default "JWT_SECRET" | quote }}
+        {{- end }}
         {{- if .Values.securityHardening }}
         securityContext:
           allowPrivilegeEscalation: false
