@@ -1,9 +1,7 @@
 # Platform v2 external with every supported optional component enabled.
-# Retired AISPM and SIEM Connector workloads are intentionally absent.
-# Kafka is explicitly disabled and never renders in v2.
+# External mode self-hosts the control and data planes plus the analytics stack.
 
 global:
-  platformVersion: "v2"
   deploymentMode: "external"
   platform: "kubernetes"
   domain: "platform.example.com"
@@ -18,14 +16,8 @@ global:
     enabled: true
 
 infrastructure:
-  postgresql:
-    deploy: true
-  redis:
-    deploy: true
   clickhouse:
     deploy: true
-  kafka:
-    deploy: false
 
 # WIP component; keep disabled until a TrustLens release image is published.
 trustlens:
@@ -34,11 +26,11 @@ trustlens:
 alertengine:
   enabled: true
 
-neuraltrust-firewall:
+firewall:
   firewall:
     enabled: true
 
-neuraltrust-watchdog:
+watchdog:
   enabled: true
   actions:
     dryRun: true

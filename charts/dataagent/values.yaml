@@ -37,20 +37,18 @@ instanceId: "" # Defaults to the pod hostname when empty
 # Local store the agent reads (read-only). `memory` is dev-only.
 store:
   backend: "postgres" # postgres | memory
-# Read-only Postgres connection into the shared "trustdata" DB. AgentGateway and
-# TrustGuard each write their raw telemetry into their OWN schema in that DB; the
-# read-only "dataagent" role (provisioned by v2-postgresql-init) is granted SELECT on
-# both schemas and its search_path is set to span them, so DataAgent's unqualified
-# reads (SELECT ... FROM "trustgate_data" / "trustguard_data") resolve without any
-# schema qualification. The assembled DSN + enrolment token live in the secret.
-# In-cluster: everything auto-derives (host = control-plane-postgresql, password
-# auto-generated). External: overlay host + password (and user/name only if renamed).
+# DataAgent reads the shared hybrid Postgres alongside AgentGateway and
+# TrustGuard: it envFrom's the shared `postgresql-secrets` rendered from
+# `global.postgresql.*` (default user + database = neuraltrust), so the DSN
+# and password auto-derive from the umbrella. This block is only consulted
+# when the operator opts out of the shared credential via `databaseUrl` or
+# `existingSecret.name`; otherwise leave it at the defaults.
 database:
   host: "" # Empty ⇒ in-cluster control-plane-postgresql
   port: 5432
-  name: "trustdata" # Shared v2 DB (hybrid only)
-  user: "dataagent" # Read-only role; search_path spans both writer schemas (set by v2-postgresql-init)
-  password: "" # Auto-generated when empty (global.autoGenerateSecrets)
+  name: "" # Empty ⇒ inherits global.postgresql.database (hybrid default: neuraltrust)
+  user: "" # Empty ⇒ inherits global.postgresql.user (hybrid default: neuraltrust)
+  password: "" # Empty ⇒ inherits from shared postgresql-secrets
   sslMode: "prefer"
 # DEPRECATED escape hatch: a full DSN that overrides the `database` block above.
 # Prefer the components. Kept for backward compatibility.

@@ -1,6 +1,6 @@
 apiVersion: v2
 name: datacore
-description: DataCore — residency query API. Reads OTel logs written to ClickHouse by clickstack-otel-collector and serves a tenant-scoped REST API. Deployed only when global.platformVersion=v2 AND global.deploymentMode=external.
+description: DataCore — residency query API. Reads OTel logs written to ClickHouse by clickstack-otel-collector and serves a tenant-scoped REST API. Deployed only when global.deploymentMode=external.
 type: application
-version: 0.1.5
-appVersion: "v0.8.0"
+version: 0.1.6
+appVersion: "v0.10.0"

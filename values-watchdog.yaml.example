@@ -2,12 +2,11 @@
 # Healing remains dry-run until both RBAC and per-check policy are approved.
 
 global:
-  platformVersion: "v2"
   deploymentMode: "hybrid"
   observability:
     enabled: true
 
-neuraltrust-watchdog:
+watchdog:
   enabled: true
   rbac:
     create: true

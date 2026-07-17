@@ -21,7 +21,6 @@
 # See SECRETS.md for the complete per-component contract.
 
 global:
-  platformVersion: "v2"
   deploymentMode: "external"
   platform: "kubernetes"
   domain: "platform.example.com"
@@ -30,22 +29,16 @@ global:
   postgresql:
     deploy: false
     # External mode keeps per-service databases (each control plane owns its
-    # migrations); the shared-writer layout is hybrid-only and not used here.
+    # migrations); the shared `global.postgresql` block is hybrid-only and is
+    # not consulted here — per-service `database` overlays remain the source
+    # of truth.
+  redis:
+    deploy: false
   observability:
     hostedExport:
       enabled: false
 
 infrastructure:
-  postgresql:
-    deploy: false
-    external:
-      host: "postgres.example.com"
-      port: "5432"
-  redis:
-    deploy: false
-    external:
-      host: "redis.example.com"
-      port: "6379"
   clickhouse:
     deploy: false
     external:
@@ -55,8 +48,6 @@ infrastructure:
       database: "neuraltrust"
       secretName: "managed-clickhouse"
       secretKey: "password"
-  kafka:
-    deploy: false
 
 agentgateway:
   database:
@@ -103,7 +94,7 @@ clickstack-otel-collector:
       name: "managed-clickhouse"
       key: "password"
 
-neuraltrust-data-plane:
+data-plane-api:
   dataPlane:
     components:
       clickhouse:
@@ -117,10 +108,8 @@ neuraltrust-data-plane:
           host: "redis.example.com"
           tls: "true"
 
-neuraltrust-control-plane:
-  infrastructure:
-    postgresql:
-      deploy: false
+# Control-plane split (external only). Point both charts at the managed Postgres.
+control-plane-api:
   controlPlane:
     components:
       postgresql:
@@ -128,3 +117,10 @@ neuraltrust-control-plane:
           host: "postgres.example.com"
           port: "5432"
 
+control-plane-app:
+  controlPlane:
+    components:
+      postgresql:
+        secrets:
+          host: "postgres.example.com"
+          port: "5432"

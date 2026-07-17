@@ -1,9 +1,9 @@
 # NeuralTrust Platform
 
-Deploy NeuralTrust on Kubernetes with one Helm umbrella chart. Platform v2 in
-`hybrid` mode is the default operator path.
+Deploy NeuralTrust on Kubernetes with one Helm umbrella chart. This chart
+(2.x) is v2-only; `hybrid` mode is the default operator path.
 
-## Default topology: v2 hybrid
+## Default topology: hybrid
 
 Hybrid keeps control-plane services in NeuralTrust SaaS and runs the data path
 in your cluster:
@@ -20,11 +20,10 @@ NeuralTrust provides both a tenant identifier and enrolment token. With a
 complete enrolment, it makes an outbound TLS connection to DataBridge; it
 exposes no operator-facing ingress.
 
-Kafka never renders under Platform v2. The v1 AISPM and SIEM Connector
-subcharts are retired. In v2 external deployments, AlertEngine provides the
-supported detection, SIEM, and integration path.
+In external deployments, AlertEngine provides the supported detection, SIEM,
+and integration path.
 
-## Self-hosted topology: v2 external
+## Self-hosted topology: external
 
 Set `global.deploymentMode: external` for a self-hosted deployment. It adds:
 
@@ -48,15 +47,16 @@ helm upgrade --install neuraltrust-platform \
   -f values-required.yaml
 ```
 
-`values-required.yaml` is the minimal v2-hybrid starting point. Set the cloud
+`values-required.yaml` is the minimal hybrid starting point. Set the cloud
 provider and domain, then enable DataAgent only after enrolment:
 
 ```yaml
 global:
-  platformVersion: "v2"
   deploymentMode: "hybrid"
   platform: "kubernetes"
   domain: "platform.example.com"
+  clickstack:
+    authToken: "<CLICKSTACK_OTLP_TOKEN>"
 
 dataagent:
   tenantId: ""
@@ -74,12 +74,9 @@ reference pre-created Kubernetes Secrets; see [SECRETS.md](./SECRETS.md).
 | `hybrid` (default) | Yes | AgentGateway data plane, TrustGuard data plane, data-plane API shim (PostgreSQL) | Analytics in SaaS; optional enrolled DataAgent bridges entitled reads. No in-cluster ClickHouse |
 | `external` | No | Control and data planes, product API/app, DataCore, AlertEngine | ClickStack OTel Collector writes to ClickHouse; data-plane API shim reads ClickHouse |
 
-`full` remains a deprecated alias for `external`. New configuration must use
-`external`.
-
 ## Datastores
 
-Platform v2 deploys PostgreSQL and Redis in-cluster by default in both modes;
+The chart deploys PostgreSQL and Redis in-cluster by default in both modes;
 in-cluster ClickHouse renders only in `external` (hybrid keeps analytics in SaaS
 and runs the data-plane API shim on PostgreSQL). Each can be replaced with a
 managed service:
@@ -94,23 +91,22 @@ infrastructure:
     deploy: false
   clickhouse:
     deploy: false
-  kafka:
-    deploy: false # explicit documentation; Kafka is always absent in v2
 ```
 
 Use [`values-v2-managed-datastores.yaml.example`](./values-v2-managed-datastores.yaml.example)
 for the complete endpoint and existing-secret pattern.
 
-In hybrid, AgentGateway, TrustGuard, and DataAgent share the `trustdata` database.
-By default AgentGateway and TrustGuard share ONE writer role/schema and DataAgent is a
-separate read-only role — the schema/role setup is owned by the chart's
-`v2-postgresql-init` Job (no external SQL script). The layout is mode-derived
-(hybrid → shared writer, external → per-service databases); set
-`global.postgresql.hybridRoleLayout: separate` only to force the legacy per-service
-layout in hybrid. `global.postgresql.initJob.mode` (`auto`/`enabled`/`disabled`)
-controls whether the Job also configures an external managed PostgreSQL. See
-[`docs/platform-v2.md`](./docs/platform-v2.md) for the layout matrix and the managed
-configure-only behavior.
+In hybrid, AgentGateway, TrustGuard, DataAgent, and the `data-plane-api` read
+shim share ONE PostgreSQL role owning ONE database, driven by the top-level
+`global.postgresql` block (defaults: user `neuraltrust`, database `neuraltrust`).
+The chart renders one shared `postgresql-secrets` Secret with the DB_* aliases
+every hybrid workload `envFrom`'s. There is no chart-managed init Job —
+application migrations own their tables. For external / managed PostgreSQL,
+pre-create the role and database, then point the chart at it via
+`global.postgresql.deploy: false` + host/user/password (or
+`global.postgresql.existingSecret.name`). External deployments keep the classic
+per-service database overlays. See [`docs/platform-v2.md`](./docs/platform-v2.md)
+for the full contract.
 
 ## Platform and ingress
 
@@ -129,9 +125,9 @@ Set `global.domain` to derive service hostnames. Set
 
 ## Supported optional components
 
-- `neuraltrust-firewall`: prompt and response safety, with CPU or GPU workers
-- `trustlens`: v2 analytics/inventory service; still opt-in while WIP
-- `neuraltrust-watchdog`: dry-run-first self-monitoring and self-healing
+- `firewall`: prompt and response safety, with CPU or GPU workers
+- `trustlens`: analytics/inventory service; still opt-in while WIP
+- `watchdog`: dry-run-first self-monitoring and self-healing (stable Kubernetes name `neuraltrust-watchdog`)
 - umbrella OTel Collector: portable cluster observability
 - AlertEngine: external-mode alert evaluation and SIEM/integration forwarding
 
@@ -139,39 +135,24 @@ Set `global.domain` to derive service hostnames. Set
 
 | File | Purpose |
 |---|---|
-| `values-required.yaml` | Minimal v2 hybrid |
-| `values-v2.yaml.example` | Documented v2 hybrid overlay |
-| `values-v2-external.yaml.example` | Minimal self-hosted v2 external |
-| `values-all-deployed.yaml.example` | v2 external with supported optional components |
-| `values-v2-managed-datastores.yaml.example` | v2 with managed PostgreSQL, Redis, and ClickHouse |
-| `values-openshift.yaml` | v2 hybrid on OpenShift Routes |
-| `values-openshift-ingress.yaml.example` | v2 hybrid on OpenShift Ingress |
-| `values-dataplane-gpu.yaml.example` | v2 hybrid with GPU Firewall workers |
-| `values-aws-ipv6.yaml.example` | v2 hybrid AWS/IPv6 overlay |
+| `values-required.yaml` | Minimal hybrid |
+| `values-v2.yaml.example` | Documented hybrid overlay |
+| `values-v2-hybrid.yaml.example` | Hybrid topology overlay |
+| `values-v2-external.yaml.example` | Minimal self-hosted external |
+| `values-all-deployed.yaml.example` | External with supported optional components |
+| `values-v2-managed-datastores.yaml.example` | Managed PostgreSQL, Redis, and ClickHouse |
+| `values-openshift.yaml` | Hybrid on OpenShift Routes |
+| `values-openshift-ingress.yaml.example` | Hybrid on OpenShift Ingress |
+| `values-dataplane-gpu.yaml.example` | Hybrid with GPU Firewall workers |
+| `values-aws-ipv6.yaml.example` | Hybrid AWS/IPv6 overlay |
 | `values-minimal-observability.yaml.example` | hosted observability without the in-chart collector |
 | `values-observability-self-hosted.yaml.example` | local-only observability |
-| `values-self-monitoring.yaml.example` | v2 watchdog and curated checks |
-| `values-v1-legacy.yaml.example` | explicit legacy v1 |
-| `values-external-services.yaml.example` | legacy v1 with external datastores and Kafka |
+| `values-self-monitoring.yaml.example` | watchdog and curated checks |
 
 ## Legacy v1
 
-Platform v1 is supported for upgrades but is no longer the default path. Pin it
-explicitly:
-
-```yaml
-global:
-  platformVersion: "v1"
-```
-
-Only v1 can deploy legacy TrustGate, Kafka workers/Kafka Connect, the scheduler,
-and in-cluster or external Kafka. AISPM and the SIEM Connector subcharts are
-retired and should not be used for new deployments.
-
-Live upgrades with detected v1 workloads fail closed unless v1 is pinned or the
-operator explicitly sets `global.confirmV2Migration: true`. Complete the staged
-migration checklist in [Platform v2 architecture](./docs/platform-v2.md) before
-authorizing replacement.
+v1 (legacy TrustGate/Kafka) is maintained only on the `v1.14.x` release line;
+pin `--version ~1.14.0` to install it. This chart (2.x) is v2-only.
 
 ## Further reading
 

@@ -41,6 +41,14 @@ spec:
             name: dataagent-env-vars
         - secretRef:
             name: {{ (default dict .Values.existingSecret).name | default "dataagent-secrets" | quote }}
+        {{- if eq (include "neuraltrust-platform.isHybrid" .) "true" }}
+        # v2 hybrid: DATABASE_URL + DB_HOST/PORT/USER/PASSWORD/NAME/SSL_MODE arrive
+        # through the shared `postgresql-secrets` Secret. Listed after the per-service
+        # Secret so the shared credential wins.
+        - secretRef:
+            name: {{ include "neuraltrust-platform.v2.hybridPg.secretName" . | quote }}
+            optional: true
+        {{- end }}
         env:
         {{- with .Values.enrolmentTokenExistingSecret.name }}
         - name: ENROLMENT_TOKEN

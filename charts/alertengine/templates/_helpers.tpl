@@ -55,7 +55,7 @@ Service account name
 {{- end }}
 
 {{/*
-Renders ONLY when global.platformVersion=v2 AND global.deploymentMode=external
+Renders ONLY when global.deploymentMode=external
 AND the subchart is enabled.
 */}}
 {{- define "alertengine.deploy" -}}

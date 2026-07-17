@@ -2,11 +2,10 @@
 # Layer over values-required.yaml and values-watchdog.yaml.example.
 
 global:
-  platformVersion: "v2"
   deploymentMode: "hybrid"
   platform: "gcp"
 
-neuraltrust-watchdog:
+watchdog:
   enabled: true
   monitoring:
     scrapeAnnotations:

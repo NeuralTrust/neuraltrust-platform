@@ -1,6 +1,7 @@
 # OpenShift Deployment Guide
 
-The default OpenShift path is Platform v2 hybrid with native Routes.
+This chart (2.x) is v2-only. The default OpenShift path is hybrid mode with
+native Routes.
 
 ## Prerequisites
 
@@ -27,10 +28,13 @@ helm upgrade --install neuraltrust-platform \
 
 ```yaml
 global:
-  platformVersion: "v2"
   deploymentMode: "hybrid"
   platform: "openshift"
 ```
+
+Hybrid always dual-writes to the NeuralTrust SaaS ClickStack collector; supply
+the bearer token via `--set global.clickstack.authToken=<token>` or an
+`existingSecret` reference (see [SECRETS.md](./SECRETS.md)).
 
 DataAgent stays disabled until the deployment is enrolled. Add the tenant and
 enrolment token only after they are issued.
@@ -42,7 +46,7 @@ With `global.platform: openshift`, native Routes are the default. Use
 Kubernetes Ingress.
 
 Both paths use `global.domain`. Route names remain stable; Ingress hostnames are
-derived from each v2 service's `hostPrefix`.
+derived from each service's `hostPrefix`.
 
 ## Self-hosted external mode
 
@@ -57,7 +61,7 @@ helm upgrade --install neuraltrust-platform <chart> \
   --set global.domain=apps.example.com
 ```
 
-External mode runs the product API/app, v2 control and data planes, DataCore,
+External mode runs the product API/app, control and data planes, DataCore,
 AlertEngine, and the ClickStack OTel Collector in the cluster. DataAgent is
 absent. Disable hosted export for a no-egress deployment.
 
@@ -89,12 +93,7 @@ helm template neuraltrust-platform <chart> \
   --api-versions route.openshift.io/v1
 ```
 
-For v2, confirm Kafka, Kafka Connect, Kafka workers, AISPM, and the legacy SIEM
-Connector do not render.
-
 ## Legacy v1
 
-Legacy OpenShift deployments must pin `global.platformVersion: v1` explicitly.
-Use `values-v1-legacy.yaml.example` as the base, then apply OpenShift provider
-settings. New OpenShift deployments should not enable the retired AISPM or SIEM
-Connector components.
+v1 (legacy TrustGate/Kafka) is maintained only on the `v1.14.x` release line;
+pin `--version ~1.14.0` to install it. This chart (2.x) is v2-only.
