@@ -135,6 +135,21 @@ assert_contains "$out2" 'cGcuaW50ZXJuYWwuZXhhbXBsZS5jb20=' \
   "external PG: host reaches templates (base64-encoded in Secret)"
 
 # ---------------------------------------------------------------------------
+# 2b. autoGenerateSecrets=false fallback still emits postgresql-secrets
+# ---------------------------------------------------------------------------
+blue "==> Scenario 2b: postgresql-secrets via autoGenerateSecrets=false fallback"
+out2b="$TMP/scenario-pg-secrets-fallback.yaml"
+render_default "$out2b" \
+  --set global.autoGenerateSecrets=false \
+  --set global.preserveExistingSecrets=false \
+  --set global.postgresql.password=fallback-pg-secret
+
+assert_contains "$out2b" 'name: postgresql-secrets' \
+  "autoGenerate=false: postgresql-secrets fallback renders"
+assert_contains "$out2b" 'ZmFsbGJhY2stcGctc2VjcmV0' \
+  "autoGenerate=false: explicit password reaches postgresql-secrets"
+
+# ---------------------------------------------------------------------------
 # 3. External mode — full on-prem
 # ---------------------------------------------------------------------------
 blue "==> Scenario 3: external (full on-prem) mode"

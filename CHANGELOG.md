@@ -6,6 +6,11 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ### Fixed
 
+- **Restore `templates/postgresql/secrets.yaml` fallback.** With the
+  control-plane split, the `autoGenerateSecrets: false` path stopped emitting
+  `postgresql-secrets` while in-cluster Postgres still referenced it. The
+  umbrella fallback Secret is back (mutually exclusive with
+  `platform-secrets.yaml`).
 - **control-plane-app external-only gate.** Templates now honor
   `control-plane-app.enabled` (same pattern as `control-plane-api`), so hybrid
   installs no longer render the App Deployment/Service/Ingress against missing
