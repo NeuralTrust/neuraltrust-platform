@@ -1,7 +1,7 @@
 # NeuralTrust Platform (v2 only)
 # =============================================================================
 # v1 is maintained only on the v1.14.x release line — do not install this
-# chart on a v1 cluster. Chart 2.2.0 is the first v2-only rebrand release.
+# chart on a v1 cluster. Chart 2.0.0 is the official v2-only GA release.
 # =============================================================================
 
 global:
@@ -540,7 +540,7 @@ control-plane-app:
 # AgentGateway (v2 TrustGate replacement): admin + proxy/mcp.
 agentgateway:
   image:
-    tag: "v0.8.0"
+    tag: "v0.10.3"
   database:
     sslMode: "prefer"
     iamAuth: false
@@ -550,7 +550,7 @@ agentgateway:
 # TrustGuard: control-plane + data-plane (/v1/evaluate).
 trustguard:
   image:
-    tag: "v0.13.1"
+    tag: "v0.13.3"
   database:
     sslMode: "prefer"
     iamAuth: false
@@ -587,7 +587,7 @@ dataagent:
 # DataCore (v2 external only): residency API over local ClickHouse.
 datacore:
   image:
-    tag: "v0.10.0"
+    tag: "v0.11.0"
   clickhouse:
     host: "clickhouse"
     nativePort: 9000
