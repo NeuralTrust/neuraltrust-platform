@@ -291,11 +291,11 @@ spec:
       - name: api
         {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.image }}
         {{- $apiRepo := .Values.dataPlane.components.api.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api" }}
-        {{- $apiTag := .Values.dataPlane.components.api.image.tag | default "v1.41.0" }}
+        {{- $apiTag := .Values.dataPlane.components.api.image.tag | default "v1.42.0" }}
         image: {{ include "data-plane.image" (dict "repository" $apiRepo "tag" $apiTag "global" .Values.global) | quote }}
         imagePullPolicy: {{ .Values.dataPlane.components.api.image.pullPolicy | default "Always" }}
         {{- else }}
-        {{- $fallbackApiTag := "v1.41.0" }}
+        {{- $fallbackApiTag := "v1.42.0" }}
         image: {{ include "data-plane.image" (dict "repository" "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api" "tag" $fallbackApiTag "global" .Values.global) | quote }}
         imagePullPolicy: Always
         {{- end }}
