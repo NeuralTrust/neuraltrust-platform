@@ -134,7 +134,7 @@ NeuralTrust SaaS telemetry egress.
 | data-plane API shim | yes (PostgreSQL) | yes (ClickHouse) | Temporary read API — PostgreSQL by default in hybrid, ClickHouse in external |
 | DataAgent | enrolled only | no | Outbound entitled-query bridge |
 | ClickStack OTel Collector | no | yes | OTLP to ClickHouse |
-| DataCore | no | yes | Residency query API |
+| DataCore | no | yes | Residency query API (ClickHouse + Postgres metadata) |
 | AlertEngine | no | yes | Alert evaluation and SIEM/integration forwarding |
 | TrustLens | opt-in | opt-in | WIP analytics/inventory replacement |
 | Firewall | optional | optional | Prompt and response safety |

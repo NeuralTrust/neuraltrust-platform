@@ -4,6 +4,20 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Changed
+
+- **DataCore `v0.12.1` + RDS IAM auth.** Bumped the default image to `v0.12.1`.
+  The `datacore` subchart now supports `database.iamAuth` / `database.awsRegion`
+  (`POSTGRES_LOGIN=aws`, omits `POSTGRES_PASSWORD`, requires TLS SSL modes).
+
+### Fixed
+
+- **DataCore Postgres wiring (external).** DataCore now requires `POSTGRES_HOST` /
+  `POSTGRES_DATABASE` (and related `POSTGRES_*` env) for deployment metadata unless
+  `RESIDENCY_ALLOW_STUB=true`. The `datacore` subchart emits those from
+  `datacore.database.*`, stores `POSTGRES_PASSWORD` in `datacore-secrets`, and
+  defaults to the own `datacore` role/database (same pattern as AlertEngine).
+
 ## [2.0.0] — 2026-07-17
 
 **Official GA** of the NeuralTrust Platform **v2-only** umbrella chart.

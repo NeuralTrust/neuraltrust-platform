@@ -9,6 +9,19 @@ data:
   RESIDENCY_BACKEND: {{ .Values.config.residencyBackend | quote }}
   LOG_LEVEL: {{ .Values.config.logLevel | quote }}
   HTTP_ADDR: {{ .Values.config.httpAddr | quote }}
+  POSTGRES_HOST: {{ include "neuraltrust-platform.postgres.host" (dict "host" .Values.database.host) | quote }}
+  POSTGRES_PORT: {{ .Values.database.port | quote }}
+  POSTGRES_DATABASE: {{ .Values.database.name | quote }}
+  POSTGRES_USER: {{ .Values.database.user | quote }}
+  POSTGRES_SSLMODE: {{ .Values.database.sslMode | quote }}
+  {{- if .Values.database.iamAuth }}
+  # IAM (RDS) DB auth: DataCore mints a SigV4 token per connection (POSTGRES_LOGIN=aws).
+  # No static POSTGRES_PASSWORD is shipped. AWS_REGION is required by the binary.
+  POSTGRES_LOGIN: "aws"
+  {{- if and .Values.database.awsRegion (ne (.Values.database.awsRegion | toString) "") }}
+  AWS_REGION: {{ .Values.database.awsRegion | quote }}
+  {{- end }}
+  {{- end }}
   CLICKHOUSE_ADDR: {{ printf "%s:%v" .Values.clickhouse.host .Values.clickhouse.nativePort | quote }}
   CLICKHOUSE_DATABASE: {{ .Values.clickhouse.database | quote }}
   CLICKHOUSE_OTEL_DATABASE: {{ .Values.clickhouse.otelDatabase | quote }}
