@@ -34,7 +34,7 @@ dependencies:
       - v2
   # Control-plane App/UI — v2 external only (SaaS-side in hybrid).
   - name: control-plane-app
-    version: 0.1.4
+    version: 0.1.5
     repository: file://./charts/control-plane-app
     tags:
       - neuraltrust

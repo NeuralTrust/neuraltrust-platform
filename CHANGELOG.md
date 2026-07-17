@@ -6,6 +6,10 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ### Fixed
 
+- **control-plane-app external-only gate.** Templates now honor
+  `control-plane-app.enabled` (same pattern as `control-plane-api`), so hybrid
+  installs no longer render the App Deployment/Service/Ingress against missing
+  `control-plane` SA / secrets. Subchart `0.1.4 → 0.1.5`.
 - **External ClickStack OTLP auth + endpoint for TrustGuard / AgentGateway.**
   In-cluster ClickStack requires `Authorization` on OTLP HTTP; external mode
   never wired it, so TrustGuard traces failed with `401 … missing or empty

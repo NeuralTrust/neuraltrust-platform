@@ -1,4 +1,5 @@
-{{- /* platform-v2: App UI stays SaaS-side in v2 hybrid; rendered in v1 and v2 external */ -}}
+{{- /* platform-v2: App UI stays SaaS-side in hybrid; rendered only in external. */ -}}
+{{- if eq (include "control-plane-app.enabled" .) "true" }}
 
 apiVersion: apps/v1
 kind: Deployment
@@ -584,3 +585,4 @@ spec:
         {{- end }}
       {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" .) | nindent 6 }}
       {{- include "neuraltrust-platform.tolerations" (dict "ctx" .) | nindent 6 }}
+{{- end }}

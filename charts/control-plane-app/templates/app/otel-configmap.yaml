@@ -1,3 +1,5 @@
+{{- /* platform-v2: App UI stays SaaS-side in hybrid; rendered only in external. */ -}}
+{{- if eq (include "control-plane-app.enabled" .) "true" }}
 {{- /*
   OTel routing for control-plane-app (Next.js).
 
@@ -25,4 +27,5 @@ data:
   # Emit stable HTTP semconv (http.server.request.duration) so watchdog RED
   # alerting sees the same series the collector and GMP expect.
   OTEL_SEMCONV_STABILITY_OPT_IN: "http"
+{{- end }}
 {{- end }}
