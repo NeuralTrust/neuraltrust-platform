@@ -2,7 +2,6 @@
 # Pre-create `neuraltrust-observability-token` with key `token`.
 
 global:
-  platformVersion: "v2"
   deploymentMode: "hybrid"
   observability:
     enabled: false
@@ -14,7 +13,7 @@ global:
         tokenSecretName: "neuraltrust-observability-token"
         tokenSecretKey: "token"
 
-neuraltrust-watchdog:
+watchdog:
   enabled: true
   actions:
     dryRun: true

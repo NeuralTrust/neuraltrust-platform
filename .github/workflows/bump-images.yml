@@ -2,6 +2,9 @@
 # Updates: values.yaml, template hardcoded fallbacks, subchart defaults,
 # and bumps chart versions (patch).
 #
+# v2-only: v1 (TrustGate/Kafka) is maintained on the v1.14.x release line and is
+# not bumped here.
+#
 # For each image, provide a specific tag or leave empty to auto-detect
 # the latest release from Google Artifact Registry.
 #
@@ -15,32 +18,16 @@ name: Bump Image Versions
 on:
   workflow_dispatch:
     inputs:
-      trustgate_tag:
-        description: "trustgate-ee tag (e.g. v1.9.51). Empty = latest from AR."
-        required: false
-        default: ""
       control_plane_api_tag:
         description: "control-plane-api tag (e.g. v1.8.3). Empty = latest from AR."
         required: false
         default: ""
-      scheduler_tag:
-        description: "scheduler tag (e.g. v1.8.1). Empty = latest from AR."
-        required: false
-        default: ""
       app_tag:
-        description: "app (frontend) tag (e.g. v1.8.1). Empty = latest from AR."
+        description: "control-plane-app (frontend) tag (e.g. v1.8.1). Empty = latest from AR."
         required: false
         default: ""
       data_plane_api_tag:
         description: "data-plane-api tag (e.g. v1.8.4). Empty = latest from AR."
-        required: false
-        default: ""
-      workers_tag:
-        description: "workers tag (e.g. v1.5.0). Empty = latest from AR."
-        required: false
-        default: ""
-      kafka_connect_tag:
-        description: "kafka-connect tag (e.g. v0.0.2). Empty = latest from AR."
         required: false
         default: ""
       firewall_tag:
@@ -52,39 +39,35 @@ on:
         required: false
         default: ""
       agentgateway_tag:
-        description: "agentgateway (v2) tag (e.g. v0.2.9). Empty = latest from AR."
+        description: "agentgateway tag (e.g. v0.2.9). Empty = latest from AR."
         required: false
         default: ""
       trustguard_tag:
-        description: "trustguard (v2) tag (e.g. v0.1.0). Empty = latest from AR."
+        description: "trustguard tag (e.g. v0.1.0). Empty = latest from AR."
         required: false
         default: ""
       trustlens_tag:
-        description: "trustlens (v2) tag (e.g. v0.1.0). Manual only until the AR repository exists."
+        description: "trustlens tag (e.g. v0.1.0). Manual only until the AR repository exists."
         required: false
         default: ""
       dataagent_tag:
-        description: "dataagent (v2) tag (e.g. v0.1.0). Empty = latest from AR."
+        description: "dataagent tag (e.g. v0.1.0). Empty = latest from AR."
         required: false
         default: ""
       datacore_tag:
-        description: "datacore (v2) tag (e.g. v0.1.0). Empty = latest from AR."
+        description: "datacore tag (e.g. v0.1.0). Empty = latest from AR."
         required: false
         default: ""
       clickstack_otel_collector_tag:
-        description: "clickstack-otel-collector (v2) tag (e.g. 2.30.1). Empty = latest from AR (bare X.Y.Z)."
+        description: "clickstack-otel-collector tag (e.g. 2.30.1). Empty = latest from AR (bare X.Y.Z)."
         required: false
         default: ""
       alertengine_tag:
-        description: "alertengine (v2) tag (e.g. v0.1.0). Empty = latest from AR."
+        description: "alertengine tag (e.g. v0.1.0). Empty = latest from AR."
         required: false
         default: ""
       clickhouse_tag:
         description: "clickhouse-server tag (e.g. 25.8 or 25.10.1). Empty = latest from AR (matches X.Y, X.Y.Z, X.Y.Z.W)."
-        required: false
-        default: ""
-      kafka_tag:
-        description: "kafka tag (e.g. 4.2.0). Empty = latest bare semver from AR (no v prefix)."
         required: false
         default: ""
       redis_tag:
@@ -92,11 +75,7 @@ on:
         required: false
         default: ""
       postgres_tag:
-        description: "postgres tag (e.g. 17-alpine). Empty = latest matching N-alpine from AR (used by trustgate db-init and control-plane in-cluster postgres)."
-        required: false
-        default: ""
-      curl_tag:
-        description: "curl tag (e.g. 8.19.0). Empty = latest bare semver from AR (used by the ClickHouse backup cronjob)."
+        description: "postgres tag (e.g. 17-alpine). Empty = latest matching N-alpine from AR (in-cluster postgres + migration initContainers)."
         required: false
         default: ""
       fetch_latest:
@@ -193,13 +172,9 @@ jobs:
             echo "$latest"
           }
 
-          TRUSTGATE=$(resolve_tag "trustgate-ee" "${{ inputs.trustgate_tag }}")
           CONTROL_PLANE_API=$(resolve_tag "control-plane-api" "${{ inputs.control_plane_api_tag }}")
-          SCHEDULER=$(resolve_tag "scheduler" "${{ inputs.scheduler_tag }}")
           APP=$(resolve_tag "app" "${{ inputs.app_tag }}")
           DATA_PLANE_API=$(resolve_tag "data-plane-api" "${{ inputs.data_plane_api_tag }}")
-          WORKERS=$(resolve_tag "workers" "${{ inputs.workers_tag }}")
-          KAFKA_CONNECT=$(resolve_tag "kafka-connect" "${{ inputs.kafka_connect_tag }}")
           FIREWALL=$(resolve_tag "firewall-cpu" "${{ inputs.firewall_tag }}")
           WATCHDOG=$(resolve_tag "watchdog" "${{ inputs.watchdog_tag }}")
           AGENTGATEWAY=$(resolve_tag "agentgateway" "${{ inputs.agentgateway_tag }}")
@@ -214,18 +189,12 @@ jobs:
           # clickstack-otel-collector is mirrored into AR from ClickHouse; tags are bare X.Y.Z.
           CLICKSTACK_OTEL_COLLECTOR=$(resolve_tag "clickstack-otel-collector" "${{ inputs.clickstack_otel_collector_tag }}" '^[0-9]+\.[0-9]+\.[0-9]+$')
           CLICKHOUSE=$(resolve_tag "clickhouse-server" "${{ inputs.clickhouse_tag }}" '^[0-9]+\.[0-9]+(\.[0-9]+){0,2}$')
-          KAFKA=$(resolve_tag "kafka" "${{ inputs.kafka_tag }}" '^[0-9]+\.[0-9]+\.[0-9]+$')
           REDIS=$(resolve_tag "redis-stack-server" "${{ inputs.redis_tag }}" '^[0-9]+\.[0-9]+\.[0-9]+-v[0-9]+$')
           POSTGRES=$(resolve_tag "postgres" "${{ inputs.postgres_tag }}" '^[0-9]+-alpine$')
-          CURL=$(resolve_tag "curl" "${{ inputs.curl_tag }}" '^[0-9]+\.[0-9]+\.[0-9]+$')
 
-          echo "trustgate=${TRUSTGATE}" >> "$GITHUB_OUTPUT"
           echo "control_plane_api=${CONTROL_PLANE_API}" >> "$GITHUB_OUTPUT"
-          echo "scheduler=${SCHEDULER}" >> "$GITHUB_OUTPUT"
           echo "app=${APP}" >> "$GITHUB_OUTPUT"
           echo "data_plane_api=${DATA_PLANE_API}" >> "$GITHUB_OUTPUT"
-          echo "workers=${WORKERS}" >> "$GITHUB_OUTPUT"
-          echo "kafka_connect=${KAFKA_CONNECT}" >> "$GITHUB_OUTPUT"
           echo "firewall=${FIREWALL}" >> "$GITHUB_OUTPUT"
           echo "watchdog=${WATCHDOG}" >> "$GITHUB_OUTPUT"
           echo "agentgateway=${AGENTGATEWAY}" >> "$GITHUB_OUTPUT"
@@ -236,43 +205,35 @@ jobs:
           echo "clickstack_otel_collector=${CLICKSTACK_OTEL_COLLECTOR}" >> "$GITHUB_OUTPUT"
           echo "alertengine=${ALERTENGINE}" >> "$GITHUB_OUTPUT"
           echo "clickhouse=${CLICKHOUSE}" >> "$GITHUB_OUTPUT"
-          echo "kafka=${KAFKA}" >> "$GITHUB_OUTPUT"
           echo "redis=${REDIS}" >> "$GITHUB_OUTPUT"
           echo "postgres=${POSTGRES}" >> "$GITHUB_OUTPUT"
-          echo "curl=${CURL}" >> "$GITHUB_OUTPUT"
 
           echo "### Resolved Tags" >> "$GITHUB_STEP_SUMMARY"
           echo "| Image | Tag |" >> "$GITHUB_STEP_SUMMARY"
           echo "|-------|-----|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| trustgate-ee | \`${TRUSTGATE:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| control-plane-api | \`${CONTROL_PLANE_API:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| scheduler | \`${SCHEDULER:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| app | \`${APP:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| control-plane-app (app) | \`${APP:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| data-plane-api | \`${DATA_PLANE_API:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| workers | \`${WORKERS:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| kafka-connect | \`${KAFKA_CONNECT:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| firewall-cpu (tag shared with firewall-gpu) | \`${FIREWALL:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| watchdog (neuraltrust-watchdog subchart) | \`${WATCHDOG:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| agentgateway (v2) | \`${AGENTGATEWAY:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| trustguard (v2) | \`${TRUSTGUARD:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| trustlens (v2) | \`${TRUSTLENS:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| dataagent (v2) | \`${DATAAGENT:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| datacore (v2) | \`${DATACORE:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| clickstack-otel-collector (v2) | \`${CLICKSTACK_OTEL_COLLECTOR:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| alertengine (v2) | \`${ALERTENGINE:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| watchdog | \`${WATCHDOG:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| agentgateway | \`${AGENTGATEWAY:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| trustguard | \`${TRUSTGUARD:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| trustlens | \`${TRUSTLENS:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| dataagent | \`${DATAAGENT:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| datacore | \`${DATACORE:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| clickstack-otel-collector | \`${CLICKSTACK_OTEL_COLLECTOR:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| alertengine | \`${ALERTENGINE:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| clickhouse-server | \`${CLICKHOUSE:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| kafka | \`${KAFKA:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| redis-stack-server | \`${REDIS:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| postgres (trustgate db-init + control-plane in-cluster) | \`${POSTGRES:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| curl (clickhouse backup cronjob) | \`${CURL:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| postgres (in-cluster + migrations) | \`${POSTGRES:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Update values.yaml and template defaults
         id: update
         run: |
           CHANGES=()
-          BUMP_CONTROL_PLANE=false
-          BUMP_DATA_PLANE=false
-          BUMP_TRUSTGATE=false
+          BUMP_CONTROL_PLANE_API=false
+          BUMP_CONTROL_PLANE_APP=false
+          BUMP_DATA_PLANE_API=false
           BUMP_FIREWALL=false
           BUMP_WATCHDOG=false
           BUMP_AGENTGATEWAY=false
@@ -283,7 +244,6 @@ jobs:
           BUMP_CLICKSTACK_OTEL_COLLECTOR=false
           BUMP_ALERTENGINE=false
           BUMP_CLICKHOUSE=false
-          BUMP_KAFKA=false
 
           # --- Helper: update a tag in values.yaml via yq ---
           update_values_tag() {
@@ -312,8 +272,8 @@ jobs:
 
           # --- Helper: update hardcoded fallback tag in a Go template file ---
           # Handles both patterns:
-          #   {{- $var := "TAG" }}                        (control-plane style)
-          #   {{- $var := .Values.path | default "TAG" }} (data-plane style)
+          #   {{- $var := "TAG" }}
+          #   {{- $var := .Values.path | default "TAG" }}
           # Always returns 0 (safe under set -e). Sets TEMPLATE_TAG_CHANGED=1 if
           # the file was actually modified, 0 otherwise (no match / already at this tag).
           TEMPLATE_TAG_CHANGED=0
@@ -363,370 +323,201 @@ jobs:
           }
 
           # =============================================
-          # 1. TrustGate EE
-          # =============================================
-          TAG="${{ steps.tags.outputs.trustgate }}"
-          if update_values_tag '.trustgate.global.image.tag' "$TAG" "trustgate-ee"; then
-            BUMP_TRUSTGATE=true
-            # Sync trustgate subchart default values
-            yq eval -i ".global.image.tag = \"${TAG}\"" charts/trustgate/values.yaml
-            yq eval -i ".appVersion = \"${TAG}\"" charts/trustgate/Chart.yaml
-            echo "  Synced charts/trustgate/values.yaml"
-          fi
-
-          # =============================================
-          # 2. Control Plane API
+          # 1. Control-plane API (external)
           # =============================================
           TAG="${{ steps.tags.outputs.control_plane_api }}"
-          if update_values_tag '.["neuraltrust-control-plane"].controlPlane.components.api.image.tag' "$TAG" "control-plane-api"; then
-            BUMP_CONTROL_PLANE=true
-            update_template_tag "charts/neuraltrust-control-plane/templates/api/deployment.yaml" "apiImageTag" "$TAG"
+          if update_values_tag '.["control-plane-api"].controlPlane.components.api.image.tag' "$TAG" "control-plane-api"; then
+            BUMP_CONTROL_PLANE_API=true
+            update_template_tag "charts/control-plane-api/templates/api/deployment.yaml" "apiImageTag" "$TAG"
           fi
 
           # =============================================
-          # 3. Scheduler
-          # =============================================
-          TAG="${{ steps.tags.outputs.scheduler }}"
-          if update_values_tag '.["neuraltrust-control-plane"].controlPlane.components.scheduler.image.tag' "$TAG" "scheduler"; then
-            BUMP_CONTROL_PLANE=true
-            update_template_tag "charts/neuraltrust-control-plane/templates/scheduler/deployment.yaml" "imageTag" "$TAG"
-          fi
-
-          # =============================================
-          # 4. App (frontend) — updates both initContainer and main container
+          # 2. Control-plane App/UI (external) — initContainer + main container
           # =============================================
           TAG="${{ steps.tags.outputs.app }}"
-          if update_values_tag '.["neuraltrust-control-plane"].controlPlane.components.app.image.tag' "$TAG" "app"; then
-            BUMP_CONTROL_PLANE=true
-            update_template_tag "charts/neuraltrust-control-plane/templates/app/deployment.yaml" "initImageTag" "$TAG"
-            update_template_tag "charts/neuraltrust-control-plane/templates/app/deployment.yaml" "appImageTag" "$TAG"
+          if update_values_tag '.["control-plane-app"].controlPlane.components.app.image.tag' "$TAG" "control-plane-app (app)"; then
+            BUMP_CONTROL_PLANE_APP=true
+            update_template_tag "charts/control-plane-app/templates/app/deployment.yaml" "initImageTag" "$TAG"
+            update_template_tag "charts/control-plane-app/templates/app/deployment.yaml" "appImageTag" "$TAG"
           fi
 
           # =============================================
-          # 5. Data Plane API
+          # 3. Data-plane API shim
           # =============================================
           TAG="${{ steps.tags.outputs.data_plane_api }}"
-          if update_values_tag '.["neuraltrust-data-plane"].dataPlane.components.api.image.tag' "$TAG" "data-plane-api"; then
-            BUMP_DATA_PLANE=true
+          if update_values_tag '.["data-plane-api"].dataPlane.components.api.image.tag' "$TAG" "data-plane-api"; then
+            BUMP_DATA_PLANE_API=true
           fi
-          update_template_tag "charts/neuraltrust-data-plane/templates/api/deployment.yaml" "apiTag" "$TAG"
-          if [[ "$TEMPLATE_TAG_CHANGED" == "1" ]]; then
-            BUMP_DATA_PLANE=true
-          fi
-          update_template_tag "charts/neuraltrust-data-plane/templates/api/deployment.yaml" "fallbackApiTag" "$TAG"
-          if [[ "$TEMPLATE_TAG_CHANGED" == "1" ]]; then
-            BUMP_DATA_PLANE=true
-          fi
-          update_template_tag "charts/neuraltrust-data-plane/templates/_helpers.tpl" "apiTag" "$TAG"
-          if [[ "$TEMPLATE_TAG_CHANGED" == "1" ]]; then
-            BUMP_DATA_PLANE=true
-          fi
+          update_template_tag "charts/data-plane-api/templates/api/deployment.yaml" "apiTag" "$TAG"
+          if [[ "$TEMPLATE_TAG_CHANGED" == "1" ]]; then BUMP_DATA_PLANE_API=true; fi
+          update_template_tag "charts/data-plane-api/templates/api/deployment.yaml" "fallbackApiTag" "$TAG"
+          if [[ "$TEMPLATE_TAG_CHANGED" == "1" ]]; then BUMP_DATA_PLANE_API=true; fi
+          update_template_tag "charts/data-plane-api/templates/_helpers.tpl" "apiTag" "$TAG"
+          if [[ "$TEMPLATE_TAG_CHANGED" == "1" ]]; then BUMP_DATA_PLANE_API=true; fi
 
           # =============================================
-          # 6. Workers
-          # =============================================
-          TAG="${{ steps.tags.outputs.workers }}"
-          if update_values_tag '.["neuraltrust-data-plane"].dataPlane.components.worker.image.tag' "$TAG" "workers"; then
-            BUMP_DATA_PLANE=true
-            update_template_tag "charts/neuraltrust-data-plane/templates/worker/deployment.yaml" "workerTag" "$TAG"
-          fi
-
-          # =============================================
-          # 7. Kafka Connect
-          # =============================================
-          TAG="${{ steps.tags.outputs.kafka_connect }}"
-          if [[ -n "$TAG" ]]; then
-            if update_values_tag '.["neuraltrust-data-plane"].dataPlane.components.kafka.connect.image.tag' "$TAG" "kafka-connect"; then
-              BUMP_DATA_PLANE=true
-            fi
-            update_template_tag "charts/neuraltrust-data-plane/templates/kafka-components/deployment.yaml" "defaultKafkaConnectTag" "$TAG"
-            if [[ "$TEMPLATE_TAG_CHANGED" == "1" ]]; then
-              BUMP_DATA_PLANE=true
-            fi
-          fi
-
-          # =============================================
-          # 8. Firewall (gateway + worker share a single tag/image)
-          # Touches: two parent values paths, the firewall subchart's own
-          # values.yaml mirror, and the hardcoded fallbacks in both
-          # gateway-deployment.yaml ($gwTag) and worker-deployment.yaml ($wTag).
-          # NOTE: the orphan .["neuraltrust-firewall"].firewall.image.tag in
-          # parent values.yaml is intentionally NOT touched — no template reads
-          # it. It remains for backward-compat with any external --set callers.
+          # 4. Firewall (gateway + worker share a single tag/image)
           # =============================================
           TAG="${{ steps.tags.outputs.firewall }}"
           if [[ -n "$TAG" ]]; then
-            if update_values_tag '.["neuraltrust-firewall"].firewall.gateway.image.tag' "$TAG" "firewall-cpu (gateway)"; then
+            if update_values_tag '.firewall.firewall.gateway.image.tag' "$TAG" "firewall-cpu (gateway)"; then
               BUMP_FIREWALL=true
-              yq eval -i ".firewall.gateway.image.tag = \"${TAG}\"" charts/neuraltrust-firewall/values.yaml
-              echo "  Synced charts/neuraltrust-firewall/values.yaml firewall.gateway.image.tag"
-              update_template_tag "charts/neuraltrust-firewall/templates/gateway-deployment.yaml" "gwTag" "$TAG"
+              yq eval -i ".firewall.gateway.image.tag = \"${TAG}\"" charts/firewall/values.yaml
+              echo "  Synced charts/firewall/values.yaml firewall.gateway.image.tag"
+              update_template_tag "charts/firewall/templates/gateway-deployment.yaml" "gwTag" "$TAG"
             fi
-            if update_values_tag '.["neuraltrust-firewall"].firewall.workerDefaults.image.tag' "$TAG" "firewall-cpu (worker)"; then
+            if update_values_tag '.firewall.firewall.workerDefaults.image.tag' "$TAG" "firewall-cpu (worker)"; then
               BUMP_FIREWALL=true
-              yq eval -i ".firewall.workerDefaults.image.tag = \"${TAG}\"" charts/neuraltrust-firewall/values.yaml
-              echo "  Synced charts/neuraltrust-firewall/values.yaml firewall.workerDefaults.image.tag"
-              update_template_tag "charts/neuraltrust-firewall/templates/worker-deployment.yaml" "wTag" "$TAG"
+              yq eval -i ".firewall.workerDefaults.image.tag = \"${TAG}\"" charts/firewall/values.yaml
+              echo "  Synced charts/firewall/values.yaml firewall.workerDefaults.image.tag"
+              update_template_tag "charts/firewall/templates/worker-deployment.yaml" "wTag" "$TAG"
             fi
             if [[ "$BUMP_FIREWALL" == "true" ]]; then
-              yq eval -i ".appVersion = \"${TAG}\"" charts/neuraltrust-firewall/Chart.yaml
-              echo "  Synced charts/neuraltrust-firewall/Chart.yaml appVersion"
+              yq eval -i ".appVersion = \"${TAG}\"" charts/firewall/Chart.yaml
+              echo "  Synced charts/firewall/Chart.yaml appVersion"
             fi
           fi
 
           # =============================================
-          # 9. Watchdog
+          # 5. Watchdog
           # The watchdog subchart image tag defaults to Chart.appVersion when
           # empty, so keep both the explicit default tag and appVersion aligned.
           # =============================================
           TAG="${{ steps.tags.outputs.watchdog }}"
-          if update_values_tag '.image.tag' "$TAG" "watchdog" "charts/neuraltrust-watchdog/values.yaml"; then
+          if update_values_tag '.image.tag' "$TAG" "watchdog" "charts/watchdog/values.yaml"; then
             BUMP_WATCHDOG=true
-            yq eval -i ".appVersion = \"${TAG}\"" charts/neuraltrust-watchdog/Chart.yaml
-            echo "  Synced charts/neuraltrust-watchdog/Chart.yaml appVersion"
+            yq eval -i ".appVersion = \"${TAG}\"" charts/watchdog/Chart.yaml
+            echo "  Synced charts/watchdog/Chart.yaml appVersion"
           fi
 
           # =============================================
-          # 10. Platform v2 subcharts (agentgateway / trustguard / trustlens)
-          # Each has its own values.yaml with a single .image.tag and no
-          # hardcoded template fallback (image resolved via the subchart helper).
-          # Only deployed when global.platformVersion=v2.
+          # 6. In-cluster runtime subcharts (agentgateway / trustguard / trustlens)
+          # Each has its own values.yaml with a single .image.tag.
           # =============================================
           TAG="${{ steps.tags.outputs.agentgateway }}"
-          if update_values_tag '.agentgateway.image.tag' "$TAG" "agentgateway (v2)"; then
+          if update_values_tag '.agentgateway.image.tag' "$TAG" "agentgateway"; then
             BUMP_AGENTGATEWAY=true
             yq eval -i ".image.tag = \"${TAG}\"" charts/agentgateway/values.yaml
             yq eval -i ".appVersion = \"${TAG}\"" charts/agentgateway/Chart.yaml
           fi
 
           TAG="${{ steps.tags.outputs.trustguard }}"
-          if update_values_tag '.trustguard.image.tag' "$TAG" "trustguard (v2)"; then
+          if update_values_tag '.trustguard.image.tag' "$TAG" "trustguard"; then
             BUMP_TRUSTGUARD=true
             yq eval -i ".image.tag = \"${TAG}\"" charts/trustguard/values.yaml
             yq eval -i ".appVersion = \"${TAG}\"" charts/trustguard/Chart.yaml
           fi
 
           TAG="${{ steps.tags.outputs.trustlens }}"
-          if update_values_tag '.trustlens.image.tag' "$TAG" "trustlens (v2)"; then
+          if update_values_tag '.trustlens.image.tag' "$TAG" "trustlens"; then
             BUMP_TRUSTLENS=true
             yq eval -i ".image.tag = \"${TAG}\"" charts/trustlens/values.yaml
             yq eval -i ".appVersion = \"${TAG}\"" charts/trustlens/Chart.yaml
           fi
 
           # =============================================
-          # 11c. Platform v2 data pipeline (dataagent / datacore /
-          # clickstack-otel-collector). Same single .image.tag pattern; all three
-          # ship from AR (clickstack is a mirrored ClickHouse image).
+          # 7. Data pipeline (dataagent / datacore / clickstack-otel-collector /
+          # alertengine). Same single .image.tag pattern.
           # =============================================
           TAG="${{ steps.tags.outputs.dataagent }}"
-          if update_values_tag '.dataagent.image.tag' "$TAG" "dataagent (v2)"; then
+          if update_values_tag '.dataagent.image.tag' "$TAG" "dataagent"; then
             BUMP_DATAAGENT=true
             yq eval -i ".image.tag = \"${TAG}\"" charts/dataagent/values.yaml
             yq eval -i ".appVersion = \"${TAG}\"" charts/dataagent/Chart.yaml
           fi
 
           TAG="${{ steps.tags.outputs.datacore }}"
-          if update_values_tag '.datacore.image.tag' "$TAG" "datacore (v2)"; then
+          if update_values_tag '.datacore.image.tag' "$TAG" "datacore"; then
             BUMP_DATACORE=true
             yq eval -i ".image.tag = \"${TAG}\"" charts/datacore/values.yaml
             yq eval -i ".appVersion = \"${TAG}\"" charts/datacore/Chart.yaml
           fi
 
           TAG="${{ steps.tags.outputs.clickstack_otel_collector }}"
-          if update_values_tag '.["clickstack-otel-collector"].image.tag' "$TAG" "clickstack-otel-collector (v2)"; then
+          if update_values_tag '.["clickstack-otel-collector"].image.tag' "$TAG" "clickstack-otel-collector"; then
             BUMP_CLICKSTACK_OTEL_COLLECTOR=true
             yq eval -i ".image.tag = \"${TAG}\"" charts/clickstack-otel-collector/values.yaml
             yq eval -i ".appVersion = \"${TAG}\"" charts/clickstack-otel-collector/Chart.yaml
           fi
 
           TAG="${{ steps.tags.outputs.alertengine }}"
-          if update_values_tag '.alertengine.image.tag' "$TAG" "alertengine (v2)"; then
+          if update_values_tag '.alertengine.image.tag' "$TAG" "alertengine"; then
             BUMP_ALERTENGINE=true
             yq eval -i ".image.tag = \"${TAG}\"" charts/alertengine/values.yaml
             yq eval -i ".appVersion = \"${TAG}\"" charts/alertengine/Chart.yaml
           fi
 
           # =============================================
-          # 12. Infrastructure: ClickHouse (clickhouse-server)
+          # 8. Infrastructure: ClickHouse (external analytics)
           # No subchart values.yaml — parent values.yaml is the sole source.
-          # No template fallback (charts/clickhouse uses .Values.image directly).
           # =============================================
           TAG="${{ steps.tags.outputs.clickhouse }}"
           if update_values_tag '.clickhouse.image.tag' "$TAG" "clickhouse-server"; then
             BUMP_CLICKHOUSE=true
             yq eval -i ".appVersion = \"${TAG}\"" charts/clickhouse/Chart.yaml
           fi
-          update_template_tag "charts/neuraltrust-data-plane/templates/api/deployment.yaml" "chMigrationTag" "$TAG"
-          if [[ "$TEMPLATE_TAG_CHANGED" == "1" ]]; then
-            BUMP_DATA_PLANE=true
-          fi
-          update_template_tag "charts/neuraltrust-data-plane/templates/clickhouse-config/init-job.yaml" "chInitTag" "$TAG"
-          if [[ "$TEMPLATE_TAG_CHANGED" == "1" ]]; then
-            BUMP_DATA_PLANE=true
-          fi
+          update_template_tag "charts/data-plane-api/templates/api/deployment.yaml" "chMigrationTag" "$TAG"
+          if [[ "$TEMPLATE_TAG_CHANGED" == "1" ]]; then BUMP_DATA_PLANE_API=true; fi
 
           # =============================================
-          # 13. Infrastructure: Kafka
-          # No subchart values.yaml — parent values.yaml is the sole source.
-          # =============================================
-          TAG="${{ steps.tags.outputs.kafka }}"
-          if update_values_tag '.kafka.image.tag' "$TAG" "kafka"; then
-            BUMP_KAFKA=true
-            yq eval -i ".appVersion = \"${TAG}\"" charts/kafka/Chart.yaml
-          fi
-
-          # =============================================
-          # 14. Infrastructure: Redis (redis-stack-server, used by trustgate)
-          # Lives under .trustgate.redis.image — also mirrored in the trustgate
-          # subchart's own values.yaml. No hardcoded template fallback.
+          # 9. Infrastructure: Redis (in-cluster, umbrella-managed)
           # =============================================
           TAG="${{ steps.tags.outputs.redis }}"
-          if update_values_tag '.trustgate.redis.image.tag' "$TAG" "redis-stack-server (parent)"; then
-            BUMP_TRUSTGATE=true
-            yq eval -i ".redis.image.tag = \"${TAG}\"" charts/trustgate/values.yaml
-            echo "  Synced charts/trustgate/values.yaml redis.image.tag"
-          fi
-          # v2 in-cluster Redis (umbrella-managed) shares the same redis-stack-server image.
-          if update_values_tag '.infrastructure.redis.image.tag' "$TAG" "redis (v2 in-cluster)"; then
+          if update_values_tag '.infrastructure.redis.image.tag' "$TAG" "redis (in-cluster)"; then
             :
           fi
           update_template_tag "templates/redis/_helpers.tpl" "tag" "$TAG"
           if [[ "$TEMPLATE_TAG_CHANGED" == "1" ]]; then
-            CHANGES+=("redis (v2 in-cluster fallback): → ${TAG}")
+            CHANGES+=("redis (in-cluster fallback): → ${TAG}")
           fi
 
           # =============================================
-          # 15. Infrastructure: Postgres (used by trustgate db-init job
-          # and the control-plane in-cluster postgres)
-          # Two parent paths + three template fallbacks.
+          # 10. Infrastructure: Postgres (in-cluster + migration initContainers)
           # =============================================
           TAG="${{ steps.tags.outputs.postgres }}"
           if [[ -n "$TAG" ]]; then
-            if update_values_tag '.trustgate.global.postgresql.image.tag' "$TAG" "postgres (trustgate)"; then
-              BUMP_TRUSTGATE=true
-              update_template_tag "charts/trustgate/templates/postgresql-init-job.yaml" "postgresImageTag" "$TAG"
+            if update_values_tag '.global.postgresql.image.tag' "$TAG" "postgres (in-cluster)"; then
+              :
             fi
-            if update_values_tag '.["neuraltrust-control-plane"].controlPlane.components.postgresql.image.tag' "$TAG" "postgres (control-plane)"; then
-              BUMP_CONTROL_PLANE=true
-              update_template_tag "charts/neuraltrust-control-plane/templates/api/deployment.yaml" "pgWaitImageTag" "$TAG"
-              update_template_tag "charts/neuraltrust-control-plane/templates/scheduler/deployment.yaml" "pgWaitImageTag" "$TAG"
-            fi
-            # data-plane-api PostgreSQL migration initContainer (psql client) tracks
-            # the same postgres image as the rest of the platform.
-            if update_values_tag '.["neuraltrust-data-plane"].dataPlane.components.api.database.postgresql.migration.image.tag' "$TAG" "postgres (data-plane-api migration)"; then
-              BUMP_DATA_PLANE=true
-            fi
-            update_template_tag "templates/v2-postgres-init.yaml" "pgImageTag" "$TAG"
-          fi
-
-          # =============================================
-          # 16. Infrastructure: curl (ClickHouse backup cronjob)
-          # The only functional curl usage is the data-plane backup-cronjob
-          # template fallback (gated by backup.enabled).
-          # =============================================
-          TAG="${{ steps.tags.outputs.curl }}"
-          if [[ -n "$TAG" ]]; then
-            if update_values_tag '.["neuraltrust-data-plane"].dataPlane.components.clickhouse.backup.image.tag' "$TAG" "curl (clickhouse backup)"; then
-              BUMP_DATA_PLANE=true
-            fi
-            update_template_tag "charts/neuraltrust-data-plane/templates/clickhouse-config/backup-cronjob.yaml" "backupTag" "$TAG"
+            update_template_tag "templates/postgresql/deployment.yaml" "tag" "$TAG"
             if [[ "$TEMPLATE_TAG_CHANGED" == "1" ]]; then
-              CHANGES+=("curl (clickhouse backup-cronjob fallback): → ${TAG}")
-              BUMP_DATA_PLANE=true
+              CHANGES+=("postgres (in-cluster fallback): → ${TAG}")
             fi
+            update_template_tag "charts/control-plane-api/templates/api/deployment.yaml" "pgWaitImageTag" "$TAG"
+            if [[ "$TEMPLATE_TAG_CHANGED" == "1" ]]; then BUMP_CONTROL_PLANE_API=true; fi
+            update_template_tag "charts/data-plane-api/templates/api/deployment.yaml" "pgMigTag" "$TAG"
+            if [[ "$TEMPLATE_TAG_CHANGED" == "1" ]]; then BUMP_DATA_PLANE_API=true; fi
           fi
 
           # =============================================
-          # Bump chart versions (patch) for changed subcharts
+          # Bump chart versions (patch) for changed subcharts + sync dep refs.
+          # Root chart VERSION is handled by auto-release.yml on merge.
           # =============================================
           echo ""
           echo "=== Chart Version Bumps ==="
 
-          # Bump subchart versions (patch) and sync dependency refs in root Chart.yaml
-          # Note: root chart VERSION is handled by auto-release.yml on merge
-          if [[ "$BUMP_CONTROL_PLANE" == "true" ]]; then
-            NEW_VER=$(bump_chart_version "charts/neuraltrust-control-plane/Chart.yaml")
-            yq eval -i "(.dependencies[] | select(.name == \"neuraltrust-control-plane\")).version = \"${NEW_VER}\"" Chart.yaml
-            echo "  Updated root Chart.yaml dep: neuraltrust-control-plane → ${NEW_VER}"
-          fi
+          bump_dep() {
+            local chart_dir="$1"
+            local dep_name="$2"
+            local new_ver
+            new_ver=$(bump_chart_version "charts/${chart_dir}/Chart.yaml")
+            yq eval -i "(.dependencies[] | select(.name == \"${dep_name}\")).version = \"${new_ver}\"" Chart.yaml
+            echo "  Updated root Chart.yaml dep: ${dep_name} → ${new_ver}"
+          }
 
-          if [[ "$BUMP_DATA_PLANE" == "true" ]]; then
-            NEW_VER=$(bump_chart_version "charts/neuraltrust-data-plane/Chart.yaml")
-            yq eval -i "(.dependencies[] | select(.name == \"neuraltrust-data-plane\")).version = \"${NEW_VER}\"" Chart.yaml
-            echo "  Updated root Chart.yaml dep: neuraltrust-data-plane → ${NEW_VER}"
-          fi
-
-          if [[ "$BUMP_TRUSTGATE" == "true" ]]; then
-            NEW_VER=$(bump_chart_version "charts/trustgate/Chart.yaml")
-            yq eval -i "(.dependencies[] | select(.name == \"trustgate\")).version = \"${NEW_VER}\"" Chart.yaml
-            echo "  Updated root Chart.yaml dep: trustgate → ${NEW_VER}"
-          fi
-
-          if [[ "$BUMP_FIREWALL" == "true" ]]; then
-            NEW_VER=$(bump_chart_version "charts/neuraltrust-firewall/Chart.yaml")
-            yq eval -i "(.dependencies[] | select(.name == \"neuraltrust-firewall\")).version = \"${NEW_VER}\"" Chart.yaml
-            echo "  Updated root Chart.yaml dep: neuraltrust-firewall → ${NEW_VER}"
-          fi
-
-          if [[ "$BUMP_WATCHDOG" == "true" ]]; then
-            NEW_VER=$(bump_chart_version "charts/neuraltrust-watchdog/Chart.yaml")
-            yq eval -i "(.dependencies[] | select(.name == \"neuraltrust-watchdog\")).version = \"${NEW_VER}\"" Chart.yaml
-            echo "  Updated root Chart.yaml dep: neuraltrust-watchdog → ${NEW_VER}"
-          fi
-
-          if [[ "$BUMP_AGENTGATEWAY" == "true" ]]; then
-            NEW_VER=$(bump_chart_version "charts/agentgateway/Chart.yaml")
-            yq eval -i "(.dependencies[] | select(.name == \"agentgateway\")).version = \"${NEW_VER}\"" Chart.yaml
-            echo "  Updated root Chart.yaml dep: agentgateway → ${NEW_VER}"
-          fi
-
-          if [[ "$BUMP_TRUSTGUARD" == "true" ]]; then
-            NEW_VER=$(bump_chart_version "charts/trustguard/Chart.yaml")
-            yq eval -i "(.dependencies[] | select(.name == \"trustguard\")).version = \"${NEW_VER}\"" Chart.yaml
-            echo "  Updated root Chart.yaml dep: trustguard → ${NEW_VER}"
-          fi
-
-          if [[ "$BUMP_TRUSTLENS" == "true" ]]; then
-            NEW_VER=$(bump_chart_version "charts/trustlens/Chart.yaml")
-            yq eval -i "(.dependencies[] | select(.name == \"trustlens\")).version = \"${NEW_VER}\"" Chart.yaml
-            echo "  Updated root Chart.yaml dep: trustlens → ${NEW_VER}"
-          fi
-
-          if [[ "$BUMP_DATAAGENT" == "true" ]]; then
-            NEW_VER=$(bump_chart_version "charts/dataagent/Chart.yaml")
-            yq eval -i "(.dependencies[] | select(.name == \"dataagent\")).version = \"${NEW_VER}\"" Chart.yaml
-            echo "  Updated root Chart.yaml dep: dataagent → ${NEW_VER}"
-          fi
-
-          if [[ "$BUMP_DATACORE" == "true" ]]; then
-            NEW_VER=$(bump_chart_version "charts/datacore/Chart.yaml")
-            yq eval -i "(.dependencies[] | select(.name == \"datacore\")).version = \"${NEW_VER}\"" Chart.yaml
-            echo "  Updated root Chart.yaml dep: datacore → ${NEW_VER}"
-          fi
-
-          if [[ "$BUMP_ALERTENGINE" == "true" ]]; then
-            NEW_VER=$(bump_chart_version "charts/alertengine/Chart.yaml")
-            yq eval -i "(.dependencies[] | select(.name == \"alertengine\")).version = \"${NEW_VER}\"" Chart.yaml
-            echo "  Updated root Chart.yaml dep: alertengine → ${NEW_VER}"
-          fi
-
-          if [[ "$BUMP_CLICKSTACK_OTEL_COLLECTOR" == "true" ]]; then
-            NEW_VER=$(bump_chart_version "charts/clickstack-otel-collector/Chart.yaml")
-            yq eval -i "(.dependencies[] | select(.name == \"clickstack-otel-collector\")).version = \"${NEW_VER}\"" Chart.yaml
-            echo "  Updated root Chart.yaml dep: clickstack-otel-collector → ${NEW_VER}"
-          fi
-
-          if [[ "$BUMP_CLICKHOUSE" == "true" ]]; then
-            NEW_VER=$(bump_chart_version "charts/clickhouse/Chart.yaml")
-            yq eval -i "(.dependencies[] | select(.name == \"clickhouse\")).version = \"${NEW_VER}\"" Chart.yaml
-            echo "  Updated root Chart.yaml dep: clickhouse → ${NEW_VER}"
-          fi
-
-          if [[ "$BUMP_KAFKA" == "true" ]]; then
-            NEW_VER=$(bump_chart_version "charts/kafka/Chart.yaml")
-            yq eval -i "(.dependencies[] | select(.name == \"kafka\")).version = \"${NEW_VER}\"" Chart.yaml
-            echo "  Updated root Chart.yaml dep: kafka → ${NEW_VER}"
-          fi
+          [[ "$BUMP_CONTROL_PLANE_API" == "true" ]] && bump_dep "control-plane-api" "control-plane-api"
+          [[ "$BUMP_CONTROL_PLANE_APP" == "true" ]] && bump_dep "control-plane-app" "control-plane-app"
+          [[ "$BUMP_DATA_PLANE_API" == "true" ]] && bump_dep "data-plane-api" "data-plane-api"
+          [[ "$BUMP_FIREWALL" == "true" ]] && bump_dep "firewall" "firewall"
+          [[ "$BUMP_WATCHDOG" == "true" ]] && bump_dep "watchdog" "watchdog"
+          [[ "$BUMP_AGENTGATEWAY" == "true" ]] && bump_dep "agentgateway" "agentgateway"
+          [[ "$BUMP_TRUSTGUARD" == "true" ]] && bump_dep "trustguard" "trustguard"
+          [[ "$BUMP_TRUSTLENS" == "true" ]] && bump_dep "trustlens" "trustlens"
+          [[ "$BUMP_DATAAGENT" == "true" ]] && bump_dep "dataagent" "dataagent"
+          [[ "$BUMP_DATACORE" == "true" ]] && bump_dep "datacore" "datacore"
+          [[ "$BUMP_CLICKSTACK_OTEL_COLLECTOR" == "true" ]] && bump_dep "clickstack-otel-collector" "clickstack-otel-collector"
+          [[ "$BUMP_ALERTENGINE" == "true" ]] && bump_dep "alertengine" "alertengine"
+          [[ "$BUMP_CLICKHOUSE" == "true" ]] && bump_dep "clickhouse" "clickhouse"
 
           # Save changes summary
           if [[ ${#CHANGES[@]} -eq 0 ]]; then
@@ -775,18 +566,19 @@ jobs:
             values.yaml \
             Chart.yaml \
             Chart.lock \
-            charts/trustgate/values.yaml \
-            charts/trustgate/Chart.yaml \
-            charts/trustgate/templates/ \
-            charts/neuraltrust-control-plane/Chart.yaml \
-            charts/neuraltrust-control-plane/templates/ \
-            charts/neuraltrust-data-plane/Chart.yaml \
-            charts/neuraltrust-data-plane/templates/ \
-            charts/neuraltrust-firewall/values.yaml \
-            charts/neuraltrust-firewall/Chart.yaml \
-            charts/neuraltrust-firewall/templates/ \
-            charts/neuraltrust-watchdog/values.yaml \
-            charts/neuraltrust-watchdog/Chart.yaml \
+            templates/redis/_helpers.tpl \
+            templates/postgresql/deployment.yaml \
+            charts/control-plane-api/Chart.yaml \
+            charts/control-plane-api/templates/ \
+            charts/control-plane-app/Chart.yaml \
+            charts/control-plane-app/templates/ \
+            charts/data-plane-api/Chart.yaml \
+            charts/data-plane-api/templates/ \
+            charts/firewall/values.yaml \
+            charts/firewall/Chart.yaml \
+            charts/firewall/templates/ \
+            charts/watchdog/values.yaml \
+            charts/watchdog/Chart.yaml \
             charts/agentgateway/values.yaml \
             charts/agentgateway/Chart.yaml \
             charts/trustguard/values.yaml \
@@ -801,11 +593,7 @@ jobs:
             charts/clickstack-otel-collector/Chart.yaml \
             charts/alertengine/values.yaml \
             charts/alertengine/Chart.yaml \
-            charts/clickhouse/Chart.yaml \
-            charts/kafka/Chart.yaml \
-            charts/kafka/templates/ \
-            templates/redis/_helpers.tpl \
-            templates/v2-postgres-init.yaml
+            charts/clickhouse/Chart.yaml
           git commit -m "$(cat <<COMMIT
           chore: bump image versions
 

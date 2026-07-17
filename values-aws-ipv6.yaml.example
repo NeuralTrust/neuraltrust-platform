@@ -1,9 +1,8 @@
 # Platform v2 hybrid on AWS EKS with IPv6 pod networking.
-# v2 Redis uses the image's dual-stack defaults; legacy TrustGate Redis bind
-# overrides are not applicable. Layer this over values-required.yaml.
+# The in-cluster Redis uses the image's dual-stack defaults. Layer this over
+# values-required.yaml.
 
 global:
-  platformVersion: "v2"
   deploymentMode: "hybrid"
   platform: "aws"
   domain: "platform.example.com"
@@ -13,10 +12,6 @@ global:
       targetType: "ip"
       groupName: "neuraltrust-platform"
       sslRedirect: "443"
-
-infrastructure:
-  kafka:
-    deploy: false
 
 dataagent:
   tenantId: ""

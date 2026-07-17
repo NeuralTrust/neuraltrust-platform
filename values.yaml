@@ -1,382 +1,210 @@
-# Unified NeuralTrust Platform Values (Optimized)
-# This file contains all configuration for deploying NeuralTrust platform components
-# including infrastructure (ClickHouse, Kafka, PostgreSQL), NeuralTrust services,
-# and TrustGate components.
+# NeuralTrust Platform (v2 only)
+# =============================================================================
+# v1 is maintained only on the v1.14.x release line — do not install this
+# chart on a v1 cluster. Chart 2.2.0 is the first v2-only rebrand release.
+# =============================================================================
 
-# Global settings
 global:
-  # Platform/cloud provider. Auto-configures ingress, security contexts, and routing.
+  # Cloud platform / Kubernetes flavour. Auto-configures ingress, security
+  # contexts, and routing.
   # Supported: "aws" | "gcp" | "azure" | "openshift" | "kubernetes"
-  #   aws       → Ingress: ALB (requires AWS LB Controller), standard security contexts
-  #   gcp       → Ingress: GCE (built-in on GKE), standard security contexts
-  #   azure     → Ingress: AGIC (requires AGIC add-on), standard security contexts
-  #   openshift → Routes (when ingress disabled) or Ingress, relaxed security contexts (SCC)
-  #   kubernetes → Generic Kubernetes, no cloud-specific annotations
-  # Switch platform: --set global.platform=gcp
   platform: "gcp"
-  # Product generation switch. Selects WHICH stack the umbrella chart deploys.
-  # This is NOT the cloud provider (that is `global.platform` above).
-  #   "v2" | "" | null → next-gen stack (default).
-  #   "v1"             → explicit legacy TrustGate/Kafka escape hatch.
-  #                      control/data planes. Under v2 the legacy Python
-  #                      control-plane API, data-plane, trustgate, and kafka stop
-  #                      deploying. AISPM and legacy SIEM Connectors were removed.
-  platformVersion: "v2"
-  # Existing v1 releases are detected during a live upgrade and must opt in to
-  # workload replacement. New installs do not need this flag.
-  confirmV2Migration: false
-  # Split-plane boundary for the v2 stack (ignored under v1).
+  # Split-plane boundary.
   #   "hybrid"   → only data-plane components deploy at the customer; control
-  #                planes stay in NeuralTrust SaaS (default, most customers).
-  #                DataAgent bridges local reads to the SaaS DataBridge.
-  #                In-cluster Postgres + Redis + ClickHouse deploy by default;
-  #                the temporary data-plane-api analytics shim runs over
-  #                ClickHouse (kept until TrustLens).
-  #   "external" → control-plane AND data-plane components deploy on-prem PLUS
-  #                the self-hosted analytics stack (clickstack-otel-collector +
-  #                DataCore over local ClickHouse). No SaaS dependency; DataAgent
-  #                is not deployed. In-cluster Postgres + Redis + ClickHouse
-  #                deploy by default. Set global.observability.hostedExport.enabled=false
-  #                to keep telemetry fully in-cluster.
-  #   "full"     → DEPRECATED alias for "external"; renders identically.
+  #                planes stay in NeuralTrust SaaS (default). DataAgent bridges
+  #                local reads to the SaaS DataBridge. In-cluster Postgres +
+  #                Redis deploy by default; ClickHouse does NOT deploy.
+  #   "external" → control planes AND data planes deploy on-prem PLUS the
+  #                self-hosted analytics stack (clickstack-otel-collector +
+  #                DataCore over local ClickHouse). No SaaS dependency;
+  #                DataAgent is not deployed.
   deploymentMode: "hybrid"
-  # v2-only knobs. The AgentGateway proxy authenticates to TrustGuard with a
-  # shared client_credentials pair that TrustGuard validates; the umbrella owns
-  # both sides via the trustguard-client-credentials Secret so they always match.
-  # Leave the secret empty to auto-generate (needs autoGenerateSecrets), or set it
-  # to integrate with an externally-managed platform client.
+  # v2 knobs: shared client_credentials pair AgentGateway presents to
+  # TrustGuard. Both sides read the same Secret so id/secret stay in sync.
   v2:
     trustguardClientId: "agentgateway-platform"
     trustguardClientSecret: "" # Auto-generated when empty (global.autoGenerateSecrets)
-    # Existing/shared Secret name override. Leave empty for
-    # trustguard-client-credentials. Externally managed prerelease upgrades that
-    # cannot use lookup automatically keep v2-trustguard-client-secret.
     trustguardClientSecretName: ""
-  # ClickStack OTLP export for the v2 DATA planes (AgentGateway + TrustGuard).
-  # External mode ALWAYS exports product data (meta/raw) to the in-cluster
-  # clickstack-otel-collector and ignores this block. In HYBRID mode the data
-  # planes persist raw payloads to Postgres for DataAgent by default; enable this
-  # block to ALSO dual-write product data over OTLP to a ClickStack collector
-  # (e.g. NeuralTrust's core-infrastructure collector) without dropping the
-  # Postgres/DataAgent path. Default OFF — existing hybrid installs are unaffected.
+  # ClickStack OTLP export for the v2 data planes (AgentGateway + TrustGuard).
+  #
+  # In v2 HYBRID this block is ALWAYS ON with fixed SaaS defaults:
+  #   endpoint: https://clickstack-collector.neuraltrust.ai/v1/logs
+  #   protocol: http/protobuf
+  #   insecure: false
+  # Operators supply ONLY the bearer token — either inline via `authToken` or
+  # by pointing `existingSecret.name` at a pre-created Secret. Rendering fails
+  # closed when neither is set. Air-gap escape hatch: set `enabled: false`.
+  #
+  # In v2 external, product data (meta/raw) is always exported to the
+  # in-cluster clickstack-otel-collector and this block is ignored.
   clickstack:
-    enabled: false
-    # OTLP/HTTP endpoint including the signal path, e.g.
-    #   https://clickstack-collector.neuraltrust.ai/v1/logs (public route), or
-    #   http://clickstack-collector.<collector-namespace>.svc.cluster.local:4318/v1/logs
-    # The public route exposes OTLP/HTTP only (:4318); raw OTLP/gRPC is not
-    # reachable through it. Required when enabled=true.
-    endpoint: ""
-    protocol: "http/protobuf"
-    # Leave false for the public TLS route (system-root verification). Only set
-    # true for a plaintext in-cluster collector Service.
+    enabled: true
+    endpoint: "" # Deprecated override; leave empty in production hybrid
+    protocol: ""
     insecure: false
-    # Bearer token securing the collector's OTLP receivers (its OTLP_AUTH_TOKEN).
-    # Stored in the data-plane Secret and sent as the Authorization header. Leave
-    # empty only if the target collector has auth disabled. With
-    # preserveExistingSecrets=true, add OTEL_EXPORTER_OTLP_HEADERS to the
-    # pre-created agentgateway-secrets / trustguard-secrets instead.
-    authToken: ""
-  # Base domain for auto-generating service URLs and hostnames.
-  # Used across all platforms for URL generation (e.g., "control-plane-api.{domain}").
-  # Examples: "aws.neuraltrust.ai", "apps.mycluster.openshiftapps.com", "gcp.neuraltrust.ai"
+    authToken: "" # Required for v2 hybrid installs (or use existingSecret below)
+    existingSecret:
+      name: ""
+      key: "OTEL_EXPORTER_OTLP_HEADERS"
+  # Base domain used for URL generation (<hostPrefix>.<domain>).
   domain: "neuraltrust.ai"
-  # DEPRECATED: Use platform: "openshift" and domain instead.
-  openshift: false
-  openshiftDomain: ""
-  imageRegistry: "" # Global image registry prefix (e.g., "europe-west1-docker.pkg.dev/project/repo"). If set, will be prepended to image repositories.
-  autoGenerateSecrets: true # Auto-generate required secrets (JWT keys, passwords) if not explicitly provided. Uses lookup to preserve existing values on upgrades. Set to false to let subcharts manage their own secrets (required when using secret references).
-  preserveExistingSecrets: false # Set to true to prevent Helm from creating/updating secrets (secrets are pre-generated). When true, secret templates (including the ClickHouse subchart) are NOT rendered. Recommended for deploy methods where `lookup` is unavailable (ArgoCD/Flux, `helm template`, restricted RBAC): install once, then set true so upgrades never re-generate/rotate secrets. Generated secrets carry `helm.sh/resource-policy: keep`, so flipping this on after install will not prune the live secrets.
-  # Canonical in-cluster PostgreSQL switch. `global.*` is propagated into every
-  # subchart, so one false value reliably disables the PostgreSQL workload and
-  # init Jobs. Legacy nested deploy values remain supported.
+  imageRegistry: "" # Global registry mirror; empty = per-component defaults
+  imagePullSecrets: [] # Optional global pull-secret list applied to platform workloads
+  autoGenerateSecrets: true
+  preserveExistingSecrets: false
+  # Shared PostgreSQL (v2 hybrid + external).
+  # In v2 hybrid every service (AgentGateway, TrustGuard, DataAgent,
+  # data-plane-api) connects to ONE shared database via envFrom on the
+  # `postgresql-secrets` Secret rendered from this block. Set `deploy: false`
+  # and `host`/credentials to point at a hosted instance. Application
+  # migrations own their tables; there is no chart-managed schema init.
   postgresql:
     deploy: true
-    # Role layout for the shared telemetry database ("trustdata"). MODE-DERIVED —
-    # leave unset for the right default:
-    #   - hybrid  -> "shared-writer": AgentGateway and TrustGuard share ONE writer
-    #     role + schema; DataAgent stays a separate read-only role. (Default.)
-    #   - external/full -> always "separate" (control planes own per-service DBs).
-    # Override only to force the legacy per-service layout in hybrid (each service
-    # owns its own role + schema, DataAgent reads both) — e.g. an existing install
-    # that already has per-service-schema data (shared-writer does NOT migrate it):
-    #   hybridRoleLayout: separate
-    hybridRoleLayout: ""
-    # Shared writer identity (hybrid shared-writer layout).
-    sharedWriter:
-      user: trustdata
-      schema: trustdata
-    # v2 schema/role init Job (v2-postgresql-init):
-    #   - "auto" (default): runs only when in-cluster PostgreSQL is deployed
-    #     (deploy=true); skipped for external/managed PostgreSQL. Same behavior as
-    #     before this flag existed.
-    #   - "enabled": ALSO runs against external/managed PostgreSQL. Needs admin
-    #     credentials in postgresql-secrets. Against managed PostgreSQL it only
-    #     configures schemas, search_path and grants — it never creates login
-    #     roles or resets passwords (the DBA pre-creates the database and roles).
-    #   - "disabled": never runs. The DBA owns schema/search_path/grant setup.
-    initJob:
-      mode: auto
+    host: "" # Empty + deploy=true resolves to the in-cluster "control-plane-postgresql" Service
+    port: 5432
+    user: neuraltrust
+    database: neuraltrust
+    password: "" # Empty auto-generates and stores it in postgresql-secrets
+    sslMode: prefer
+    # authMode: password | iam (external Postgres only; ignored when deploy=true).
+    # awsRegion is required for IAM token minting on control-plane api/app.
+    authMode: "password"
+    awsRegion: ""
+    existingSecret:
+      name: ""
+      keys:
+        host: "DB_HOST"
+        port: "DB_PORT"
+        user: "DB_USER"
+        password: "DB_PASSWORD"
+        database: "DB_NAME"
+        sslMode: "DB_SSL_MODE"
+    # In-cluster PostgreSQL Deployment image/resources/persistence knobs.
+    image:
+      repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/postgres
+      tag: "17-alpine"
+      pullPolicy: IfNotPresent
+      imagePullSecrets: []
+    resources:
+      requests:
+        memory: 2Gi
+        cpu: 500m
+      limits:
+        memory: 4Gi
+        cpu: 2000m
+    persistence:
+      enabled: true
+      size: 10Gi
+      storageClass: ""
+      preserveOnDelete: true
+    service:
+      type: ClusterIP
+      port: 5432
+  # Shared Redis (v2 hybrid).
+  redis:
+    deploy: true
+    host: "" # Empty + deploy=true resolves to the in-cluster "redis" Service
+    port: 6379
+    password: ""
+    username: ""
+    tls: ""
+    existingSecret:
+      name: ""
+      keys:
+        host: "REDIS_HOST"
+        port: "REDIS_PORT"
+        password: "REDIS_PASSWORD"
+        username: "REDIS_USERNAME"
+        tls: "REDIS_TLS"
   security:
-    allowInsecureImages: true # Allow Bitnami charts to use their container images
-  storageClass: "" # Global storage class for persistent volumes
-  # Pin EVERY platform workload (all subcharts + parent-chart workloads) to a
-  # node pool with one setting. Per-component nodeSelector still works and is
-  # merged on top (per-component keys win on conflicts). Default {} = no pinning,
-  # so existing releases are unaffected.
-  # Example (dedicated pool): nodeSelector: { dedicated: neuraltrust }
+    allowInsecureImages: true # Bitnami charts require this
+  storageClass: ""
   nodeSelector: {}
-  # Tolerations applied to EVERY platform workload. Companion to
-  # global.nodeSelector for an *exclusive* (tainted) node pool — a nodeSelector
-  # alone won't keep other tenants off a tainted pool. Global tolerations are
-  # concatenated with any per-component tolerations. Default [] = none.
-  # Example: tolerations: [ { key: dedicated, operator: Equal, value: neuraltrust, effect: NoSchedule } ]
   tolerations: []
-  # When enabled, HTTP_PROXY/HTTPS_PROXY/NO_PROXY (upper+lowercase) are injected into every workload.
   proxy:
     enabled: false
-    httpProxy: "" # e.g. "http://proxy.corp:3128"
-    httpsProxy: "" # e.g. "http://proxy.corp:3128"
+    httpProxy: ""
+    httpsProxy: ""
     noProxy: "localhost,127.0.0.1,.cluster.local,.svc"
-  # Corporate / internal CA trust. When enabled, the CA bundle stored in the
-  # referenced secret is mounted into every component and the runtime-correct
-  # trust env var is set (NODE_EXTRA_CA_CERTS for Node, SSL_CERT_FILE for Go/Java,
-  # REQUESTS_CA_BUNDLE + SSL_CERT_FILE for Python), so outbound HTTPS to internal
-  # endpoints using a private PKI is trusted. Default OFF.
-  #
-  # IMPORTANT: SSL_CERT_FILE / REQUESTS_CA_BUNDLE *replace* the system trust store
-  # (only NODE_EXTRA_CA_CERTS is additive). Components here also call public
-  # endpoints (LLM providers, HuggingFace), so the bundle MUST be a FULL bundle
-  # (public roots + your corporate CA), not the corporate CA alone, or public TLS
-  # will fail. Java/Kafka-Connect honors a JVM truststore, not SSL_CERT_FILE — the
-  # file is mounted but JVM trust must be configured separately if needed.
-  #
-  # Does NOT enable Kafka broker TLS. In-cluster Kafka stays PLAINTEXT on
-  # kafka:9092 unless global.kafka.tls.enabled is set explicitly.
-  #
-  # The secret is referenced, never created (existingSecret pattern):
-  #   kubectl create secret generic <secretName> --from-file=ca.crt=<full-bundle>.pem
   customCaCert:
     enabled: false
-    secretName: "" # Required when enabled: existing secret holding the CA bundle
-    key: ca.crt # Key within the secret that holds the PEM bundle
-    mountPath: /etc/ssl/certs/custom-ca.crt # File path the bundle is mounted at
-  # External Kafka connection (visible to all subcharts via global merge).
-  # Leave bootstrapServers and brokers empty for in-cluster Kafka (kafka:9092).
-  # When using a pre-installed broker, set infrastructure.kafka.deploy: false
-  # and configure bootstrapServers (plus auth/tls when required) here.
-  kafka:
-    bootstrapServers: "" # e.g. "kafka-bootstrap.kafka.svc.cluster.local:9093"
-    brokers: [] # Alternative to bootstrapServers: ["broker-0:9093", "broker-1:9093"]
-    auth:
-      enabled: false
-      mechanism: "SCRAM-SHA-512" # SCRAM-SHA-512 | SCRAM-SHA-256 | PLAIN
-      username: "" # Optional inline username (prefer existingSecret in production)
-      password: "" # Optional inline password (prefer existingSecret in production)
-      existingSecret: "" # Pre-created Secret with username/password (or jaasConfigKey)
-      usernameKey: "username"
-      passwordKey: "password"
-      jaasConfigKey: "" # Optional: read full sasl.jaas.config from this key instead
-    tls:
-      enabled: false
-      existingSecret: "" # Broker CA bundle; when enabled and empty, may reuse global.customCaCert.secretName
-      caKey: "ca.crt"
-      mountPath: "" # Empty = /etc/kafka/ssl/ca.crt (or global.customCaCert.mountPath when TLS enabled + customCa set)
-  # AWS IAM Roles for Service Accounts (IRSA). When roleArn is set, service
-  # accounts that include the shared helper receive the
-  # eks.amazonaws.com/role-arn annotation. Per-component annotations can still
-  # add extra keys.
+    secretName: ""
+    key: ca.crt
+    mountPath: /etc/ssl/certs/custom-ca.crt
   irsa:
     roleArn: ""
     applyGlobally: false
-  # Private Service Connect (PSC) -- GCP only
-  # Services listed in negNames get a standalone NEG (PSC-only, no public Ingress).
-  # Services NOT listed keep their regular {"ingress": true} annotation.
   psc:
     negNames: {}
-    #   trustgate-data-plane: "trustgate-data-plane-psc-neg"
-    #   trustgate-control-plane: "trustgate-control-plane-psc-neg"
-    #   trustgate-actions: "trustgate-actions-psc-neg"
-    #   control-plane-api: "control-plane-api-psc-neg"
-    #   control-plane-app: "control-plane-app-psc-neg"
-    #   control-plane-scheduler: "control-plane-scheduler-psc-neg"
-    #   data-plane-api: "data-plane-api-psc-neg"
-    #   firewall: "firewall-psc-neg"
-  # Global Ingress Configuration
-  # These settings are applied to ALL Ingress resources across all subcharts.
-  # Per-service ingress settings (className, annotations) override these globals when set.
   ingress:
-    # Ingress provider — auto-detected from global.platform if empty.
-    # Override to decouple ingress from platform (e.g., OpenShift with a custom ingress controller).
-    # Values: "aws" | "gcp" | "azure" | "openshift" | "none" | "" (auto-detect)
     provider: ""
-    className: "" # Override auto-detected className (leave empty to use provider default)
-    annotations: {} # Global annotations applied to all Ingress resources (merged with provider annotations)
+    className: ""
+    annotations: {}
     tls:
-      autoGenerate: true # Create one shared self-signed kubernetes.io/tls secret by default on install/upgrade (unless preserveExistingSecrets=true).
-      secretName: "neuraltrust-ingress-tls" # Shared fallback TLS secret used whenever an ingress enables TLS without a per-ingress secretName.
-      commonName: "neuraltrust.local" # Fallback CN/SAN for the generated certificate when ingress hosts are empty.
-      durationDays: 3650 # Validity period for the generated self-signed certificate.
-      # Notes:
-      # - This shared secret is created by default even before any ingress references it.
-      # - This is only used for controllers that terminate TLS from Kubernetes TLS secrets.
-      # - Cloud-managed TLS paths (AWS ACM, GKE managed certificates, Azure Application Gateway certs)
-      #   do NOT render spec.tls and therefore do not use this secret.
-      # - Set per-ingress tls.secretName to reuse an existing secret instead of the generated one.
-    # AWS ALB Ingress Controller settings (used when provider=aws)
-    # Requires: AWS Load Balancer Controller installed in the EKS cluster
-    # Install: https://kubernetes-sigs.github.io/aws-load-balancer-controller/
+      autoGenerate: true
+      secretName: "neuraltrust-ingress-tls"
+      commonName: "neuraltrust.local"
+      durationDays: 3650
     aws:
-      scheme: "internet-facing" # "internet-facing" (public) or "internal" (private VPC only)
-      targetType: "ip" # "ip" (recommended, required for Fargate) or "instance"
-      groupName: "neuraltrust" # Share a single ALB across all ingresses. Empty = one ALB per Ingress.
-      certificateArn: "" # ACM certificate ARN for TLS termination (e.g., "arn:aws:acm:us-east-1:123456789:certificate/abc-123")
-      sslRedirect: "443" # Redirect HTTP to HTTPS port (set to "" to disable)
-      wafAclArn: "" # Optional: WAF v2 Web ACL ARN for additional security
-      additionalAnnotations: {} # Any additional ALB annotations as key-value pairs
-    # GCP GCE Ingress Controller settings (used when provider=gcp)
-    # Built-in on GKE — no extra installation needed.
-    # Creates a Google Cloud Load Balancer (GCLB) per Ingress.
+      scheme: "internet-facing"
+      targetType: "ip"
+      groupName: "neuraltrust"
+      certificateArn: ""
+      sslRedirect: "443"
+      wafAclArn: ""
+      additionalAnnotations: {}
     gcp:
-      staticIpName: "" # Optional: pre-reserved static IP name (gcloud compute addresses create ...). Empty = ephemeral IP.
-      managedCertificates: "" # Optional: comma-separated Google-managed certificate names (e.g., "neuraltrust-cert")
-      backendConfig: "" # Optional GKE-only BackendConfig name to reuse on ingress-backed Services. Empty = chart creates per-service /health BackendConfigs where supported.
-      sslRedirect: false # Set to true to redirect HTTP→HTTPS (requires managedCertificates or pre-provisioned cert)
+      staticIpName: ""
+      managedCertificates: ""
+      backendConfig: ""
+      sslRedirect: false
       neg:
-        enabled: true # Enable NEG (Network Endpoint Groups) annotations on services backing Ingress resources.
-        # Required on non-autopilot GKE clusters when services are ClusterIP (default).
-        # Adds cloud.google.com/neg: '{"ingress": true}' to service metadata.
-        # On autopilot clusters this is a safe no-op.
-      additionalAnnotations: {} # Any additional GCE annotations as key-value pairs
-    # Azure Application Gateway Ingress Controller settings (used when provider=azure)
-    # Requires: AGIC add-on enabled on AKS cluster
-    # Docs: https://learn.microsoft.com/en-us/azure/application-gateway/ingress-controller-overview
+        enabled: true
+      additionalAnnotations: {}
     azure:
-      appGatewayName: "" # Optional: Application Gateway name (if multiple gateways)
-      sslCertificate: "" # Optional: name of SSL certificate configured on Application Gateway
-      sslRedirect: false # Set to true to redirect HTTP→HTTPS
-      wafPolicyId: "" # Optional: WAF policy resource ID
-      requestTimeout: "" # Optional: backend request timeout in seconds (e.g., "30")
-      additionalAnnotations: {} # Any additional AGIC annotations as key-value pairs
-  # ----------------------------------------------------------------------
-  # In-chart OpenTelemetry Collector + optional hosted observability egress.
-  # ----------------------------------------------------------------------
-  # When `global.observability.enabled` is true, the chart deploys a
-  # single-replica OTel Collector (Contrib) under the release namespace.
-  # Default OFF. `neuraltrust-watchdog.enabled` no longer renders this collector
-  # by itself; the customer-minimal path has watchdog push check-status metrics
-  # and ERROR/WARN logs directly to `hostedExport`.
-  # In full-stack mode, component telemetry — Prometheus scrapes, OTLP traces
-  # from the selected gateway/runtime services and Firewall, K8s events,
-  # kubeletstats — is funnelled
-  # through this collector. The hosted exporter ships collector-side telemetry
-  # to NeuralTrust's managed observability endpoint when a bearer token is
-  # provided (see `hostedExport` below).
-  #
-  # GRACEFUL DEGRADATION: if no token is resolvable (Secret missing,
-  # tokenValue empty, lookup returns nothing), the hosted exporter is
-  # silently OMITTED. The collector still runs locally and never blocks
-  # install in air-gapped environments. Two flag-level opt-outs:
-  #   - global.observability.enabled: true        # render full local collector
-  #   - neuraltrust-watchdog.enabled: true        # render watchdog only
-  #   - global.observability.enabled: false       # remove collector
-  #   - global.observability.hostedExport.enabled: false  # local-only collector
-  # ----------------------------------------------------------------------
-  # Single-switch self-monitoring (watchdog + curated default checks).
-  # ----------------------------------------------------------------------
-  # When `enabled: true`, the operator opts into the full self-monitoring
-  # stack: the watchdog subchart is turned on AND a curated subset of
-  # checks (control plane / data plane / trustgate / firewall HTTP
-  # probes, plus pod-health and deployment-health) flip from
-  # observe-only defaults to active.
-  #
-  # This flag is informational at the umbrella level — child-chart values
-  # cannot be mutated from here at render time. To opt in, merge
-  # `values-self-monitoring.yaml.example` into your install:
-  #
-  #     helm upgrade --install neuraltrust . \
-  #         -f values-required.yaml \
-  #         -f values-self-monitoring.yaml.example
-  #
-  # Healing actions (Deployment restarts, Kafka Connect task restarts)
-  # remain gated by `actions.dryRun: true` inside the watchdog config —
-  # operators flip them off per-check after parity has been validated.
+      appGatewayName: ""
+      sslCertificate: ""
+      sslRedirect: false
+      wafPolicyId: ""
+      requestTimeout: ""
+      additionalAnnotations: {}
   selfMonitoring:
     enabled: false
-  # Optional integration with the Prometheus Operator. When enabled AND
-  # the cluster ships the monitoring.coreos.com/v1 CRDs, every subchart
-  # renders a ServiceMonitor + PrometheusRule under
-  # `charts/<sub>/templates/monitoring/`. If the CRDs are missing the
-  # blocks are silently skipped — `helm install` still succeeds. Customers
-  # who don't run Prometheus Operator can leave this OFF and rely on the
-  # in-chart OTel Collector + watchdog instead.
   monitoring:
     enabled: false
-    # Apply to every PrometheusRule/ServiceMonitor so the operator selectors
-    # only pick up our resources (e.g. `release: kube-prometheus-stack`).
     additionalLabels: {}
-    # Default scrape interval applied to every ServiceMonitor unless
-    # overridden per-subchart.
     interval: 30s
-    # Default alert severity label so customers can route via Alertmanager
-    # without editing the rules.
     alertLabels:
       team: platform
   observability:
-    # Full in-cluster OTel Collector stack. Keep false for the customer-minimal
-    # path: watchdog can push check-status metrics and ERROR/WARN logs directly
-    # to hostedExport without rendering the collector or bundled Prometheus.
     enabled: false
-    tenantId: "" # Sent as nt.tenant_id resource attribute (optional).
-    # clusterName labels this deployment on watchdog Slack alerts (header
-    # context line + push-notification prefix) and as the nt.cluster OTLP
-    # resource attribute, so a page names which cluster to act on. Set per
-    # install, e.g. "acme-eks-prod". Optional.
+    tenantId: ""
     clusterName: ""
     hostedExport:
       enabled: true
-      endpoint: "https://collector.neuraltrust.ai" # OTLP/HTTP via external Gateway (443)
+      endpoint: "https://collector.neuraltrust.ai"
       auth:
-        # Bearer token. resolveSecret order: tokenValue > existingSecret > lookup.
-        # When all three are empty, the otlphttp/neuraltrust exporter is omitted.
         tokenSecretName: "neuraltrust-observability-token"
         tokenSecretKey: "token"
         tokenValue: ""
-      tlsCaSecretName: "" # Optional custom CA Secret (key: ca.crt) for proxies that MITM TLS.
+      tlsCaSecretName: ""
       sendingQueue:
         enabled: true
-        storage: file_storage # disk-backed buffer
-        maxSize: 1000 # max items in queue, oldest dropped on overflow
+        storage: file_storage
+        maxSize: 1000
       retry:
         initialInterval: 5s
         maxInterval: 30s
-        maxElapsedTime: 0s # never give up
-    # sendLogs covers the K8s events receiver + watchdog log records;
-    # NEVER application payloads. Enable carefully.
+        maxElapsedTime: 0s
     sendLogs: false
     sendTraces: true
     collector:
-      # Stable resource name (no release prefix). Override only when external
-      # tooling still references the legacy <release>-otel-collector name.
       fullnameOverride: "otel-collector"
-      # Optional: route every supported component (including gateway/runtime,
-      # Firewall, Control Plane, and Data Plane) at this OTLP endpoint. When set, the
-      # subchart configmaps OVERRIDE their per-component defaults so
-      # operators don't have to touch each one. Recommended value when
-      # using the in-chart collector:
-      #   http://otel-collector.<NAMESPACE>.svc.cluster.local:4318
-      # Leave empty to keep each subchart pointing at whatever its own
-      # `*.config.otel*Endpoint` already references (preserves the prior
-      # behaviour for upgrades).
       endpoint: ""
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/opentelemetry-collector-contrib
         tag: "0.153.0"
         pullPolicy: IfNotPresent
-      # Pull secret for the (private) collector image. Defaults to "gcr-secret"
-      # like the rest of the chart. global.imagePullSecrets (if set) takes
-      # precedence. Set to "none" (or "") on clusters that pull via IAM /
-      # Workload Identity and have no pull Secret.
       imagePullSecret: "gcr-secret"
       replicas: 1
       autoscaling:
@@ -400,7 +228,7 @@ global:
       bufferPVC:
         enabled: true
         size: 2Gi
-        storageClass: "" # Falls back to global.storageClass.
+        storageClass: ""
       podSecurityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -418,92 +246,35 @@ global:
       nodeSelector: {}
       tolerations: []
       affinity: {}
-      debug: false # When true, adds the OTel `debug` exporter for local troubleshooting.
-      # extraReceivers / extraProcessors / extraExporters / extraServicePipelines
-      # are merged into the rendered config without escaping. Use to point a
-      # second exporter at the customer's own collector or to enable e.g.
-      # the `googlecloudmonitoring` receiver.
+      debug: false
       extraReceivers: {}
       extraProcessors: {}
       extraExporters: {}
       extraServicePipelines: {}
-      # Service account for the collector. The k8s_events + kubeletstats
-      # receivers require cluster-scoped read permissions; gated by RBAC below.
       serviceAccount:
         create: true
         name: ""
         annotations: {}
       rbac:
         create: true
-        # When true, ClusterRole + ClusterRoleBinding give cluster-wide read of
-        # events + kubeletstats. Required for the `k8s_events` and
-        # `kubeletstats` receivers. Disable to keep RBAC namespace-scoped at
-        # the cost of those signals.
         clusterScoped: true
-# Infrastructure Components
-# These can be deployed or configured to use pre-installed instances
+# Infrastructure toggles.
 infrastructure:
-  # ClickHouse Configuration
+  # In-cluster ClickHouse deploys ONLY in v2 external (hybrid stores analytics
+  # in NeuralTrust SaaS). Set deploy=false to point at a hosted ClickHouse.
   clickhouse:
-    # Set to true to deploy ClickHouse, false to use pre-installed instance
-    # Default: true (deploy)
-    # NOTE (v2): in-cluster ClickHouse deploys ONLY in v2 EXTERNAL (and v1) — it
-    # backs the self-hosted clickstack-otel-collector + DataCore + data-plane-api
-    # analytics stack there. In v2 HYBRID the analytics store lives in NeuralTrust
-    # SaaS, so this subchart never renders regardless of this flag; the optional
-    # data-plane-api read shim, if wanted, is pointed at an EXTERNAL ClickHouse via
-    # neuraltrust-data-plane.dataPlane.components.clickhouse.host (dotted endpoint).
-    # In v2 external / v1, set deploy=false to use a hosted ClickHouse instead.
     deploy: true
-    # External ClickHouse configuration (used when deploy: false)
     external:
-      host: "clickhouse.clickhouse.svc.cluster.local" # e.g., "clickhouse.clickhouse.svc.cluster.local"
+      host: "clickhouse.clickhouse.svc.cluster.local"
       port: "8123"
       user: "neuraltrust"
-      password: "" # Auto-generated if empty (only used when deploy: false)
+      password: ""
       database: "neuraltrust"
-      # Secret reference for external ClickHouse credentials
-      secretName: "clickhouse" # Optional: secret containing CLICKHOUSE_PASSWORD
-      secretKey: "admin-password" # Key in secret for password
-      # ClickHouse chart values (used when deploy: true)
-      # Values are passed via root-level 'clickhouse:' section below
-  # Kafka Configuration
-  kafka:
-    # Set to true to deploy Kafka, false to use a pre-installed broker.
-    # When false, configure global.kafka.bootstrapServers (and auth/tls if needed).
-    # Default: true (deploy).
-    # NOTE (v2): Kafka is not part of the v2 stack — every charts/kafka template
-    # is isV2-guarded and renders to empty under global.platformVersion=v2,
-    # regardless of this flag. No need to set deploy: false for v2.
-    deploy: true
-    # Kafka chart values (used when deploy: true) are in the root-level 'kafka:' section below.
-  # PostgreSQL Configuration
-  postgresql:
-    # DEPRECATED deployment mirror: use global.postgresql.deploy as the single
-    # cross-subchart switch. A false value here without the global switch fails
-    # with migration guidance instead of silently leaving PostgreSQL running.
-    deploy: true
-    # External PostgreSQL configuration (used when deploy=false)
-    external:
-      host: "postgresql.postgresql.svc.cluster.local" # e.g., "postgresql.postgresql.svc.cluster.local"
-      port: "5432"
-      user: "postgres" # Default: "postgres" for external, "neuraltrust" for in-cluster
-      password: "" # Auto-generated if empty (only used when deploy: false)
-      database: "neuraltrust"
-      # Secret reference for external PostgreSQL credentials
-      secretName: "" # Optional: secret containing POSTGRES_PASSWORD
-      secretKey: "" # Optional: key in secret for password
-      # PostgreSQL chart values (used when deploy: true)
-      # Values are passed via 'neuraltrust-control-plane.controlPlane.components.postgresql:' section below
-  # Redis Configuration
-  # v1: Redis is deployed as part of TrustGate (see 'trustgate.redis' below).
-  # v2: an umbrella-managed in-cluster Redis (service name "redis") deploys by
-  #     default in ALL v2 deployment modes for AgentGateway/TrustGuard sessions
-  #     and cache. Rendered only when global.platformVersion=v2 AND deploy=true.
-  #     Set deploy=false and point the services at infrastructure.redis.external
-  #     (or a hosted Redis/Memorystore) to use an external instance.
+      secretName: "clickhouse"
+      secretKey: "admin-password"
+  # In-cluster Redis Deployment knobs. host/port/password flow through
+  # global.redis; the block below controls how the in-cluster Redis renders.
   redis:
-    deploy: true
     image:
       repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/redis-stack-server
       tag: "7.2.0-v20"
@@ -522,16 +293,9 @@ infrastructure:
       storageClass: ""
     nodeSelector: {}
     tolerations: []
-    # External Redis (used when deploy=false). Point agentgateway.redis.host /
-    # trustguard.redis.host here (or at a hosted endpoint) in that case.
-    external:
-      host: ""
-      port: "6379"
-      password: "" # Optional
-# ClickHouse subchart values (passed directly to clickhouse subchart)
-# These values are used when infrastructure.clickhouse.deploy=true
+# ClickHouse subchart values (rendered only in v2 external).
 clickhouse:
-  securityHardening: true # Adds readOnlyRootFilesystem, drops capabilities, seccomp profile. Set to false to restore prior behavior.
+  securityHardening: true
   fullnameOverride: "clickhouse"
   replicaCount: 1
   imagePullSecrets: "gcr-secret"
@@ -543,13 +307,8 @@ clickhouse:
     imagePullSecrets: []
   auth:
     username: "neuraltrust"
-    # Auto-generated if empty. Preserved across upgrades via lookup; the rendered
-    # Secret carries helm.sh/resource-policy: keep and is skipped on upgrade when no
-    # value is resolvable, so it is never rotated. For deploy methods without lookup
-    # (ArgoCD/Flux, helm template, restricted RBAC), set this explicitly or use
-    # global.preserveExistingSecrets: true after the first install.
     password: ""
-    existingSecret: "" # Set to "" if you want Helm to create/manage the secret
+    existingSecret: ""
     existingSecretKey: "admin-password"
     database: "neuraltrust"
   persistence:
@@ -561,52 +320,40 @@ clickhouse:
   affinity: {}
   resources:
     requests:
-      memory: 4Gi # Do NOT lower: ClickHouse has no in-chart memory caps; <4Gi risks MEMORY_LIMIT_EXCEEDED / OOM.
-      cpu: 1 # CPU request relaxed (2->1) to ease bin-packing on small nodes; bursts to the 4-core limit.
+      memory: 4Gi
+      cpu: 1
     limits:
-      memory: 8Gi # Hard floor for the limit — internal infra runs 8-26Gi. Keep at 8Gi minimum.
+      memory: 8Gi
       cpu: 4
   logLevel: "fatal"
-  # ClickHouse `<listen_host>`. Defaults to `::` so a single value works on
-  # IPv4-only, dual-stack, and IPv6-only clusters (Linux `bindv6only=0`).
-  # Set to "0.0.0.0" to force IPv4-only.
   listenHost: "::"
-  # ClickHouse backup configuration (optional)
   backup:
-    enabled: false # Set to true to enable scheduled backups to object storage
-    schedule: "0 2 * * *" # Cron schedule (default: daily at 2 AM UTC)
-    database: "" # Database to back up; defaults to auth.database (neuraltrust)
+    enabled: false
+    schedule: "0 2 * * *"
+    database: ""
     storage:
-      # Storage backend. Supported: s3 (also covers GCS via S3-compatible API), azblob
       type: s3
       s3:
-        # Full S3 or S3-compatible endpoint including bucket and path prefix.
-        # S3:  https://s3.<region>.amazonaws.com/<bucket>/<prefix>
-        # GCS: https://storage.googleapis.com/<bucket>/<prefix>
-        # MinIO or other S3-compatible: https://<host>/<bucket>/<prefix>
-        endpoint: "" # Required
-        accessKeyId: "" # Leave empty to use IAM instance profile / IRSA
-        secretAccessKey: "" # Leave empty to use IAM instance profile / IRSA
-        # Optional: reference an existing Secret instead of inline credentials above.
-        # The secret must contain the keys defined by existingSecretKey*.
+        endpoint: ""
+        accessKeyId: ""
+        secretAccessKey: ""
         existingSecret: ""
         existingSecretKeyAccessKeyId: access-key-id
         existingSecretKeySecretAccessKey: secret-access-key
       azblob:
-        connectionString: "" # Azure Blob Storage connection string. Required.
-        container: "" # Blob container name. Required.
-        path: "clickhouse-backups/" # Path prefix inside the container
-        # Optional: reference an existing Secret instead of inline credentials above.
+        connectionString: ""
+        container: ""
+        path: "clickhouse-backups/"
         existingSecret: ""
         existingSecretKeyConnectionString: connection-string
     image:
-      repository: "" # Backup job image; defaults to the ClickHouse image (includes clickhouse-client)
-      tag: "" # Defaults to the ClickHouse image tag
+      repository: ""
+      tag: ""
       pullPolicy: IfNotPresent
     serviceAccount:
-      create: false # Set to true to create a dedicated ServiceAccount (e.g. for GKE Workload Identity)
-      name: "" # Auto-generated when create=true; leave empty to use the default SA
-      annotations: {} # e.g. iam.gke.io/gcp-service-account: sa@project.iam.gserviceaccount.com
+      create: false
+      name: ""
+      annotations: {}
     resources:
       requests:
         cpu: "200m"
@@ -619,432 +366,53 @@ clickhouse:
     nodeSelector: {}
     tolerations: []
     affinity: {}
-# Kafka subchart values (passed directly to kafka subchart)
-# These values are used when infrastructure.kafka.deploy=true
-kafka:
-  securityHardening: true # Adds readOnlyRootFilesystem, drops capabilities, seccomp profile. Set to false to restore prior behavior.
-  fullnameOverride: "kafka"
-  replicaCount: 1
+# =============================================================================
+# Control-plane split (v2 external only).
+# =============================================================================
+# Both charts share the umbrella-owned `control-plane` ServiceAccount and
+# `control-plane-secrets` Secret (templates/control-plane/). Component config
+# lives inside each chart's own root; put shared knobs (secrets, image pull
+# secret) under either root — the umbrella reads from both.
+control-plane-api:
   imagePullSecrets: "gcr-secret"
-  image:
-    repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka
-    tag: "4.3.0"
-    pullPolicy: IfNotPresent
-  global:
-    imagePullSecrets: []
-  config:
-    defaultReplicationFactor: 1
-    offsetsTopicReplicationFactor: 1
-    transactionStateLogReplicationFactor: 1
-    transactionStateLogMinIsr: 1
-    minInsyncReplicas: 1
-  persistence:
-    enabled: true
-    size: 10Gi
-    storageClass: ""
-  nodeSelector: {}
-  tolerations: []
-  affinity: {}
-  resources:
-    requests:
-      memory: 1Gi
-      cpu: 500m
-    limits:
-      memory: 2Gi
-      cpu: 1
-  # DEPRECATED: kafka.connectorMonitor was removed in chart v1.13.0.
-  # The CronJob has been replaced by the long-running neuraltrust-watchdog
-  # service (subchart `neuraltrust-watchdog`) which polls Kafka Connect via
-  # `kafka_connect_connectors` and can restart FAILED tasks behind a dryRun
-  # flag. Migration:
-  #   1. Set `neuraltrust-watchdog.enabled: true`.
-  #   2. Add (or keep) the `kafka-connect` check in the watchdog's checks
-  #      list pointing at your Kafka Connect URL.
-  # The values block below is intentionally left as an empty placeholder so
-  # existing values.yaml files referencing
-  # `kafka.connectorMonitor.*` do not fail Helm rendering. Helm garbage-
-  # collects the old CronJob + Secret on the next upgrade.
-  connectorMonitor: {}
-# TrustGate Configuration
-trustgate:
-  securityHardening: true # Adds readOnlyRootFilesystem, drops capabilities, seccomp profile. Set to false to restore prior behavior.
-  enabled: true
-  global:
-    version: "ee" # can be "ce" or "ee"
-    imageRegistry: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker"
-    storageClass: ""
-    deploymentType: shared # shared or dedicated
-    huggingface:
-      apiKeySecret: "hf-api-key"
-    image:
-      pullPolicy: Always
-      image: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustgate-ee"
-      tag: "v1.28.4"
-      # imagePullSecrets: if not set, will fall back to parent chart's global.imagePullSecrets
-      imagePullSecrets: ["gcr-secret"] # Set to array of secret names, e.g., ["secret-name"] or leave empty to use parent global.imagePullSecrets
-    postgresql:
-      # PostgreSQL image used for TrustGate database initialization job
-      image:
-        repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/postgres" # PostgreSQL image repository
-        tag: "17-alpine" # PostgreSQL image tag
-    env:
-      SERVER_SECRET_KEY: "" # Auto-generated if empty (shared with trustgateJwtSecret)
-      SERVER_BASE_DOMAIN: "yourdomain.com" # Set to your domain
-      SERVER_ADMIN_PORT: "8080"
-      SERVER_METRICS_PORT: "9090"
-      SERVER_PROXY_PORT: "8081"
-      SERVER_ACTIONS_PORT: "8084"
-      # Database connection (uses infrastructure.postgresql config)
-      # When control-plane PostgreSQL is installed in-cluster, use:
-      # - DATABASE_HOST: "control-plane-postgresql" (service name)
-      # - DATABASE_USER: "neuraltrust" (matches control-plane PostgreSQL user)
-      # - DATABASE_PASSWORD: same as control-plane PostgreSQL password
-      DATABASE_HOST: "control-plane-postgresql" # Use control-plane PostgreSQL service name when infrastructure.postgresql.deploy=true
-      DATABASE_PORT: "5432"
-      DATABASE_USER: "trustgate"
-      DATABASE_PASSWORD: "" # Auto-generated if empty
-      DATABASE_NAME: "trustgate"
-      # PostgreSQL SSL mode (disable, require, verify-ca, verify-full)
-      # Use "disable" when infrastructure.postgresql.deploy=true, "require" for external PostgreSQL
-      DATABASE_SSL_MODE: "disable" # Use "disable" for in-cluster PostgreSQL, "require" for external
-      # Redis connection
-      REDIS_HOST: "" # Will be auto-configured if redis.enabled
-      REDIS_PORT: "6379"
-      REDIS_DB: "0"
-      # Optional upstream HTTP timeouts (e.g. "300s"). Omit or leave empty for TrustGate defaults.
-      UPSTREAM_READ_TIMEOUT: ""
-      UPSTREAM_WRITE_TIMEOUT: ""
-      UPSTREAM_STREAM_TIMEOUT: ""
-      UPSTREAM_PROVIDER_TIMEOUT: ""
-  # PostgreSQL initialization job resource overrides
-  postgresqlInit:
-    resources: {} # Override init job container resources (default: requests 250m/64Mi, limits 500m/128Mi)
-  # Optional pre-existing Secret containing only TrustGate PostgreSQL connection
-  # fields. The parent chart still renders trustgate-secrets and auto-generates
-  # SERVER_SECRET_KEY, firewall keys, Redis internals, etc. Leave empty to use
-  # trustgate.global.env values and normal secret generation.
-  postgresql:
-    existingSecret: ""
-    existingSecretKeys:
-      host: DATABASE_HOST
-      port: DATABASE_PORT
-      user: DATABASE_USER
-      password: DATABASE_PASSWORD
-      database: DATABASE_NAME
-      sslMode: DATABASE_SSL_MODE
-      authMode: DATABASE_AUTH_MODE
-  # Service Account configuration
-  serviceAccount:
-    create: true
-    name: "trustgate"
-    annotations: {}
-  # Common configurations
-  config:
-    logLevel: "info"
-    baseDomain: "yourdomain.com" # Set to your domain
-    providers: {}
-  # Control Plane settings
   controlPlane:
-    name: trustgate-control-plane
-    replicas: 2
-    ports:
-      http: 8080
-    podSecurityContext:
-      fsGroup: 1001
-    resources:
-      requests:
-        cpu: 250m
-        memory: 1Gi
-      limits:
-        cpu: 500m
-        memory: 2Gi
-    podDisruptionBudget:
-      enabled: false
-      minAvailable: 1
-    autoscaling:
-      enabled: false
-      minReplicas: 1
-      maxReplicas: 10
-      targetCPUUtilizationPercentage: 80
-      targetMemoryUtilizationPercentage: 80
-    nodeSelector: {}
-    tolerations: []
-    affinity:
-      podAntiAffinity:
-        preferredDuringSchedulingIgnoredDuringExecution:
-          - weight: 100
-            podAffinityTerm:
-              labelSelector:
-                matchExpressions:
-                  - key: app
-                    operator: In
-                    values:
-                      - trustgate-control-plane
-              topologyKey: kubernetes.io/hostname
-    service:
-      type: ClusterIP
-      port: 8080
-    # Extra env hooks — see neuraltrust-data-plane.dataPlane.components.api below
-    # for syntax. extraEnvFrom entries are appended to the existing
-    # envFrom: [configMapRef: trustgate-env-vars] list.
-    extraEnv: []
-    extraEnvFrom: []
-  # Data Plane settings
-  dataPlane:
-    name: trustgate-data-plane
-    replicas: 2
-    resources:
-      requests:
-        cpu: 1000m
-        memory: 3Gi
-      limits:
-        cpu: 2000m
-        memory: 6Gi
-    ports:
-      http: 8081
-    podDisruptionBudget:
-      enabled: false
-      minAvailable: 1
-    autoscaling:
-      enabled: false
-      minReplicas: 1
-      maxReplicas: 20
-      targetCPUUtilizationPercentage: 75
-      targetMemoryUtilizationPercentage: 75
-    nodeSelector: {}
-    tolerations: []
-    affinity:
-      podAntiAffinity:
-        requiredDuringSchedulingIgnoredDuringExecution:
-          - labelSelector:
-              matchExpressions:
-                - key: app
-                  operator: In
-                  values:
-                    - trustgate-data-plane
-            topologyKey: kubernetes.io/hostname
-    service:
-      type: ClusterIP
-      port: 8081
-    # Extra env hooks — see neuraltrust-data-plane.dataPlane.components.api below
-    # for syntax. extraEnvFrom entries are appended to the existing
-    # envFrom: [configMapRef: trustgate-env-vars] list.
-    extraEnv: []
-    extraEnvFrom: []
-  # Actions settings
-  actions:
-    name: trustgate-actions
-    replicas: 2
-    ports:
-      http: 8084
-    podSecurityContext:
-      fsGroup: 1001
-    resources:
-      requests:
-        cpu: 250m
-        memory: 1Gi
-      limits:
-        cpu: 500m
-        memory: 2Gi
-    podDisruptionBudget:
-      enabled: false
-      minAvailable: 1
-    autoscaling:
-      enabled: false
-      minReplicas: 1
-      maxReplicas: 5
-      targetCPUUtilizationPercentage: 80
-      targetMemoryUtilizationPercentage: 80
-    nodeSelector: {}
-    tolerations: []
-    affinity:
-      podAntiAffinity:
-        preferredDuringSchedulingIgnoredDuringExecution:
-          - weight: 100
-            podAffinityTerm:
-              labelSelector:
-                matchExpressions:
-                  - key: app
-                    operator: In
-                    values:
-                      - trustgate-actions
-              topologyKey: kubernetes.io/hostname
-    service:
-      type: ClusterIP
-      port: 8084
-    # Extra env hooks — see neuraltrust-data-plane.dataPlane.components.api below
-    # for syntax. extraEnvFrom entries are appended to the existing
-    # envFrom: [configMapRef: trustgate-env-vars] list.
-    extraEnv: []
-    extraEnvFrom: []
-  # Redis configuration
-  # Note: Redis is deployed as part of TrustGate (not as a separate infrastructure subchart)
-  # Set enabled: false to use external Redis, then configure trustgate.redis.external below
-  redis:
-    enabled: true
-    image:
-      repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/redis-stack-server
-      tag: 7.2.0-v20
-      pullPolicy: Always
-      imagePullSecrets: []
-    # External Redis configuration if redis.enabled is false
-    external:
-      host: ""
-      port: 6379
-      password: "" # Optional - recommended when using external Redis (redis.enabled: false)
-    master:
-      service:
-        port: 6379
-      persistence:
-        enabled: true
-        size: 10Gi
-      resources:
-        requests:
-          cpu: 500m
-          memory: 1Gi
-        limits:
-          cpu: 1000m
-          memory: 2Gi
-    replica:
-      replicaCount: 1
-      service:
-        port: 6379
-  ingress:
-    enabled: true # Enable Ingress (Ingress supports TLS secrets via secretName)
-    className: "" # Per-service override for ingress class (leave empty to use global.ingress.className)
-    annotations: {} # Per-service annotations (merged with global and AWS auto-generated annotations)
-    controlPlane:
-      host: "" # Optional: set to your domain (e.g., "admin.yourdomain.com"). Empty = auto-derive as <hostPrefix>.<global.domain> when both are set, otherwise use ALB auto-generated URL.
-      hostPrefix: "admin" # Default subdomain prefix when host is empty and global.domain is set. Set to "" to disable auto-derive.
-    dataPlane:
-      host: "" # Optional: set to your domain (e.g., "gateway.yourdomain.com"). Empty = auto-derive as <hostPrefix>.<global.domain> when both are set, otherwise use ALB auto-generated URL.
-      hostPrefix: "gateway" # Default subdomain prefix when host is empty and global.domain is set. Set to "" to disable auto-derive.
-    actions:
-      host: "" # Optional: set to your domain (e.g., "actions.yourdomain.com"). Empty = auto-derive as <hostPrefix>.<global.domain> when both are set, otherwise use ALB auto-generated URL.
-      hostPrefix: "actions" # Default subdomain prefix when host is empty and global.domain is set. Set to "" to disable auto-derive.
-    # TLS configuration for Ingress
-    # HTTPS is enabled by default for bundled ingresses.
-    # The shared secret from global.ingress.tls.secretName is created by default.
-    # If secretName is empty, this ingress uses that shared self-signed secret.
-    # To use an existing wildcard TLS secret instead, set tls.secretName to that secret name.
-    # The secret must be type kubernetes.io/tls and contain tls.crt and tls.key.
-    tls:
-      enabled: true
-      secretName: "" # Optional override for this ingress; empty = use shared generated/global secret
-# NeuralTrust Control Plane subchart values
-# Helm requires values to be passed to subcharts using the subchart name as a prefix
-neuraltrust-control-plane:
-  securityHardening: true # Adds readOnlyRootFilesystem, drops capabilities, seccomp profile. Set to false to restore prior behavior (e.g. for PostgreSQL).
-  infrastructure:
-    postgresql:
-      deploy: true # Deploy PostgreSQL in-cluster (set to false to use external PostgreSQL)
-  controlPlane:
-    # In v1 this opt-in gates the whole control-plane. In v2 the console (api + app)
-    # is SaaS-side, EXCEPT global.deploymentMode=external where api + app auto-enable
-    # from the platform flags (this toggle is ignored). The scheduler is force-off in v2.
-    enabled: false
-    imagePullSecrets: "gcr-secret" # Set imagePullSecrets for all control-plane components (scheduler, api, app, postgresql)
+    imagePullSecrets: "gcr-secret"
     serviceAccount:
       create: true
       name: control-plane
       annotations: {}
     secrets:
-      controlPlaneJWTSecret: "" # Auto-generated if empty
-      authSecret: "" # Auto-generated once; exposed identically as AUTH_SECRET and NEXTAUTH_SECRET
+      controlPlaneJWTSecret: ""
+      authSecret: ""
       openaiApiKey: ""
       resendApiKey: ""
       resendAlertSender: ""
       resendInviteSender: ""
-      trustgateJwtSecret: "" # Auto-generated if empty (= SERVER_SECRET_KEY)
+      trustgateJwtSecret: ""
       firewallJwtSecret: ""
       modelScannerSecret: ""
     components:
-      scheduler:
-        enabled: true
-        host: "" # Optional: full hostname override. Empty = auto-derive as <hostPrefix>.<global.domain> when both are set, otherwise use ALB auto-generated URL.
-        hostPrefix: "scheduler" # Default subdomain prefix when host is empty and global.domain is set. Set to "" to disable auto-derive.
-        service:
-          type: ClusterIP
-        ingress:
-          enabled: true # Enable Ingress (Ingress supports TLS secrets)
-          className: "" # Per-service override (leave empty to use global.ingress.className)
-          annotations: {}
-          # TLS configuration for Ingress
-          # HTTPS is enabled by default for bundled ingresses.
-          # The shared secret from global.ingress.tls.secretName is created by default.
-          # If secretName is empty, this ingress uses that shared self-signed secret.
-          # Set secretName to use a pre-created kubernetes.io/tls secret instead.
-          tls:
-            enabled: true
-            secretName: "" # Optional override for this ingress; empty = use shared generated/global secret
-        replicaCount: 1
-        image:
-          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/scheduler"
-          tag: "v1.10.0"
-          pullPolicy: "Always"
-        config:
-          # URLs will be auto-generated from OpenShift Routes if global.openshift=true and global.openshiftDomain is set
-          # Otherwise, set these manually or they will default to internal service URLs
-          controlPlaneApiUrl: "" # Auto: https://control-plane-api.{global.openshiftDomain} or http://control-plane-api-service.{namespace}.svc.cluster.local
-          dataPlaneApiUrl: "" # Auto: https://data-plane-api.{global.openshiftDomain} or http://data-plane-api-service.{namespace}.svc.cluster.local
-        # initContainerResources: override for wait-for-postgresql initContainer (default: requests 250m/64Mi, limits 500m/128Mi)
-        # initContainerResources:
-        #   requests: { cpu: 250m, memory: 64Mi }
-        #   limits: { cpu: 500m, memory: 128Mi }
-        resources:
-          requests:
-            memory: 256Mi
-            cpu: 100m
-          limits:
-            memory: 512Mi
-            cpu: 200m
-        healthProbes:
-          path: "/v1/health" # Scheduler mounts routes under /v1; /health alone returns 401 from auth middleware
-        autoscaling:
-          enabled: false
-          minReplicas: 1
-          maxReplicas: 5
-          targetCPUUtilizationPercentage: 80
-          targetMemoryUtilizationPercentage: 80
-        podDisruptionBudget:
-          enabled: false
-          minAvailable: 1
-        # Extra env hooks — see neuraltrust-data-plane.dataPlane.components.api above
-        # for syntax (EnvVar list and EnvFromSource list).
-        extraEnv: []
-        extraEnvFrom: []
       api:
         enabled: true
-        host: "" # Optional: full hostname override. Empty = auto-derive as <hostPrefix>.<global.domain> when both are set, otherwise use ALB auto-generated URL.
-        hostPrefix: "api" # Default subdomain prefix when host is empty and global.domain is set. Set to "" to disable auto-derive.
+        host: ""
+        hostPrefix: "api"
         service:
           type: ClusterIP
         ingress:
-          enabled: true # Enable Ingress (Ingress supports TLS secrets)
-          className: "" # Per-service override (leave empty to use global.ingress.className)
+          enabled: true
+          className: ""
           annotations: {}
-          # TLS configuration for Ingress
-          # HTTPS is enabled by default for bundled ingresses.
-          # The shared secret from global.ingress.tls.secretName is created by default.
-          # If secretName is empty, this ingress uses that shared self-signed secret.
-          # Set secretName to use a pre-created kubernetes.io/tls secret instead.
           tls:
             enabled: true
-            secretName: "" # Optional override for this ingress; empty = use shared generated/global secret
+            secretName: ""
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api"
           tag: "v1.23.0"
           pullPolicy: "Always"
         config:
-          # URLs will be auto-generated from OpenShift Routes if global.openshift=true and global.openshiftDomain is set
-          # Otherwise, set these manually or they will default to internal service URLs
-          controlPlaneApiUrl: "" # Auto: https://control-plane-api.{global.openshiftDomain} or http://control-plane-api-service.{namespace}.svc.cluster.local
-          dataPlaneApiUrl: "" # Auto: https://data-plane-api.{global.openshiftDomain} or http://data-plane-api-service.{namespace}.svc.cluster.local
-        # initContainerResources: override for wait-for-postgresql initContainer (default: requests 250m/64Mi, limits 500m/128Mi)
-        # initContainerResources:
-        #   requests: { cpu: 250m, memory: 64Mi }
-        #   limits: { cpu: 500m, memory: 128Mi }
+          controlPlaneApiUrl: ""
+          dataPlaneApiUrl: ""
         resources:
           requests:
             memory: 1Gi
@@ -1061,79 +429,71 @@ neuraltrust-control-plane:
         podDisruptionBudget:
           enabled: false
           minAvailable: 1
-        # Extra env hooks — see neuraltrust-data-plane.dataPlane.components.api above
-        # for syntax (EnvVar list and EnvFromSource list).
         extraEnv: []
         extraEnvFrom: []
+      postgresql:
+        # Per-service Postgres wiring for v2 external. Ignored in hybrid.
+        # authMode: password | iam. IAM requires IRSA + awsRegion; the Python
+        # API uses POSTGRES_CONNECTION_TYPE=aurora (emitted into postgresql-secrets).
+        authMode: "password"
+        awsRegion: "" # Required when authMode=iam → AWS_REGION (or set global.postgresql.awsRegion)
+        secrets:
+          name: "postgresql-secrets"
+          user: "neuraltrust"
+          password: ""
+          database: "neuraltrust"
+          host: "control-plane-postgresql"
+          port: "5432"
+control-plane-app:
+  imagePullSecrets: "gcr-secret"
+  controlPlane:
+    imagePullSecrets: "gcr-secret"
+    serviceAccount:
+      create: true
+      name: control-plane
+      annotations: {}
+    components:
       app:
         enabled: true
-        host: "" # Optional: full hostname override. Empty = auto-derive as <hostPrefix>.<global.domain> when both are set, otherwise use ALB auto-generated URL.
-        hostPrefix: "app" # Default subdomain prefix when host is empty and global.domain is set. Set to "" to disable auto-derive.
-        # Node.js HOSTNAME env (Next.js bind address). Defaults to `::` so a
-        # single value works on IPv4-only, dual-stack, and IPv6-only clusters
-        # (Linux `bindv6only=0`). Set to "0.0.0.0" to force IPv4-only.
+        host: ""
+        hostPrefix: "app"
         hostname: "::"
         secondaryHost: ""
         service:
           type: ClusterIP
         ingress:
-          enabled: true # Enable Ingress (Ingress supports TLS secrets)
-          className: "" # Per-service override (leave empty to use global.ingress.className)
+          enabled: true
+          className: ""
           annotations: {}
-          # TLS configuration for Ingress
-          # HTTPS is enabled by default for bundled ingresses.
-          # The shared secret from global.ingress.tls.secretName is created by default.
-          # If secretName is empty, this ingress uses that shared self-signed secret.
-          # Set secretName to use a pre-created kubernetes.io/tls secret instead.
           tls:
             enabled: true
-            secretName: "" # Optional override for this ingress; empty = use shared generated/global secret
+            secretName: ""
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.94.1"
+          tag: "v1.97.0"
           pullPolicy: "Always"
         config:
           nodeEnv: production
           port: 3000
-          # URLs will be auto-generated from OpenShift Routes if global.openshift=true and global.openshiftDomain is set
-          # Otherwise, set these manually or they will default to internal service URLs
-          controlPlaneApiUrl: "" # Auto: https://control-plane-api.{global.openshiftDomain} or http://control-plane-api-service:80 (same namespace)
-          dataPlaneApiUrl: "" # Auto: https://data-plane-api.{global.openshiftDomain} or http://data-plane-api-service:80 (same namespace)
-          schedulerUrl: "" # Auto: https://control-plane-scheduler.{global.openshiftDomain} or http://control-plane-scheduler-service:80 (same namespace)
-          trustgateControlPlaneUrl: "" # Auto: https://trustgate-admin.{global.openshiftDomain} or http://trustgate-control-plane:80 (same namespace)
-          trustgateDataPlaneUrl: "" # Auto: https://trustgate-gateway.{global.openshiftDomain} or http://trustgate-data-plane:80 (same namespace)
-          trustgateActionsUrl: "" # Auto: https://trustgate-actions.{global.openshiftDomain} or http://trustgate-actions:80 (same namespace)
-          # APP_URL / NEXTAUTH_URL auto-resolve to the app's real ingress host:
-          # explicit app.host > <app.hostPrefix ("app")>.<global.domain> > in-cluster
-          # "control-plane-app" (OpenShift keeps control-plane-app.<domain> to match its Route).
-          # Set these only to override that (e.g. a custom auth domain).
-          appUrl: "" # Auto: https://<app.hostPrefix>.<global.domain> (drives magic-link / callback URLs)
-          nextAuthUrl: "" # Auto: same as appUrl; set to override the NextAuth callback base
+          controlPlaneApiUrl: ""
+          dataPlaneApiUrl: ""
+          appUrl: ""
+          nextAuthUrl: ""
           firewallApiUrl: ""
-          # platform-v2 backend service URLs (only wired when global.platformVersion=v2).
-          # Empty = in-cluster Service defaults (same namespace, port 80). JWT secrets are
-          # read from each v2 subchart's own Secret (optional).
-          # Forces the v2 UI (bypasses the per-browser 'nt-ui' cookie preference —
-          # see app/constants/uiVersion.ts#isForceV2UiEnabled). Self-hosted v2
-          # installs have no v1 UI to preserve, so this defaults "true"; ignored
-          # under v1 (the shared SaaS app still ships v1 by default there).
           forceV2Ui: "true"
-          agentgatewayUrl: "" # Auto: http://agentgateway-admin (AgentGateway admin/control API)
-          agentgatewayProxyUrl: "" # Auto: http://agentgateway-proxy (AgentGateway proxy/data plane)
-          trustguardUrl: "" # Auto: http://trustguard-control-plane (TrustGuard admin API)
-          datacoreUrl: "" # Auto: http://datacore (DataCore metrics read API)
-          datacoreMetricsEnabled: "false" # "true" to enable DataCore-backed metrics in the console (needs datacore deployed)
-          alertEngineApiUrl: "" # Auto: http://alertengine-api (AlertEngine API)
-          trustlensApiUrl: "" # Auto: http://trustlens-api when trustlens.enabled=true
+          # Prefer platform env email (SES/SMTP/Resend) over per-org DB config.
+          # Default true because this chart only renders in external mode.
+          authEmailForceEnv: "true"
+          agentgatewayUrl: ""
+          agentgatewayProxyUrl: ""
+          trustguardUrl: ""
+          datacoreUrl: ""
+          datacoreMetricsEnabled: "false"
+          alertEngineApiUrl: ""
+          trustlensApiUrl: ""
           modelScannerApiUrl: ""
           openaiModel: "gpt-4o-mini"
-          kafkaHost: "kafka"
-          kafkaPort: "9092"
-        # initContainerResources: override for init-db initContainer (default: requests 250m/256Mi, limits 500m/512Mi)
-        # initContainerResources:
-        #   requests: { cpu: 250m, memory: 256Mi }
-        #   limits: { cpu: 500m, memory: 512Mi }
         resources:
           requests:
             memory: 512Mi
@@ -1158,177 +518,112 @@ neuraltrust-control-plane:
         podDisruptionBudget:
           enabled: false
           minAvailable: 1
-        # Extra env hooks — see neuraltrust-data-plane.dataPlane.components.api above
-        # for syntax (EnvVar list and EnvFromSource list).
         extraEnv: []
         extraEnvFrom: []
       postgresql:
-        # password | iam. "iam" = AWS RDS IAM auth (password-less): the chart emits
-        # a password-less DATABASE_URL + DATABASE_AUTH_MODE/DATABASE_IAM_AUTH so the
-        # api/app/scheduler can mint SigV4 tokens. Only honored for EXTERNAL Postgres
-        # (infrastructure.postgresql.deploy=false) — the bundled in-cluster PG always
-        # uses a password. Needs an IAM-capable image + IRSA. See SECRETS.md.
+        # Per-service Postgres wiring for v2 external.
+        # authMode: password | iam. IAM requires IRSA + awsRegion; the Next.js
+        # app uses POSTGRES_AUTH_MODE=iam and mints a token for Prisma migrate.
         authMode: "password"
+        awsRegion: "" # Required when authMode=iam → AWS_REGION (or set global.postgresql.awsRegion)
         secrets:
           name: "postgresql-secrets"
-          user: "neuraltrust" # PostgreSQL user (default: "neuraltrust" for in-cluster, "postgres" for external)
-          password: "" # Auto-generated if empty
-          database: "neuraltrust" # PostgreSQL database name
-          host: "control-plane-postgresql" # PostgreSQL host (set to "control-plane-postgresql" when infrastructure.postgresql.deploy=true, or external host when using external PostgreSQL)
-          port: "5432" # PostgreSQL port
-        image:
-          repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/postgres"
-          tag: "17-alpine"
-          pullPolicy: "Always"
-          # Component-level override; leave empty so the postgresql/deployment.yaml
-          # template falls back to controlPlane.imagePullSecrets ("gcr-secret" by default).
-          # Set to e.g. [{name: my-registry-secret}] to override per component.
-          imagePullSecrets: []
-        persistence:
-          enabled: true
-          size: 10Gi
-          storageClass: ""
-          preserveOnDelete: true
-        resources:
-          requests:
-            memory: 2Gi
-            cpu: 1000m
-          limits:
-            memory: 4Gi
-            cpu: 2000m
-        service:
-          type: ClusterIP
-          port: 5432
-# ----------------------------------------------------------------------
-# Platform v2 subcharts (rendered only when global.platformVersion=v2).
-# Full defaults live in each subchart's values.yaml; the blocks below surface
-# the operator knobs you typically must set for a v2 customer deployment.
-# In hybrid mode only the data-plane workloads deploy; set
-# global.deploymentMode=external to also deploy the control-planes + analytics
-# stack on-prem. Postgres and Redis deploy in-cluster by default (see
-# infrastructure.postgresql / infrastructure.redis), so the DB/Redis hosts
-# below default to the in-cluster service names. Point them at external
-# endpoints (and set the matching infrastructure.*.deploy=false) for hosted DBs.
-# ----------------------------------------------------------------------
-# AgentGateway (TrustGate v2): admin (control) + proxy/mcp (data)
+          user: "neuraltrust"
+          password: ""
+          database: "neuraltrust"
+          host: "control-plane-postgresql"
+          port: "5432"
+# =============================================================================
+# Platform v2 in-cluster services.
+# =============================================================================
+
+# AgentGateway (v2 TrustGate replacement): admin + proxy/mcp.
 agentgateway:
   image:
-    tag: "v0.7.0"
+    tag: "v0.8.0"
   database:
-    # host auto-derives to the in-cluster control-plane-postgresql Service; set
-    # only for external/CloudSQL Postgres. name is mode-derived when left empty:
-    # external => private "agentgateway" DB (control owns migrations); hybrid =>
-    # shared "trustdata" DB, own "agentgateway" schema. user defaults to "agentgateway".
-    sslMode: "prefer" # TLS when available, plaintext fallback for the non-TLS in-cluster PG; use "require" for hosted DBs
-    iamAuth: false # AWS RDS IAM DB auth; the service mints a token at connect time. false = password
+    sslMode: "prefer"
+    iamAuth: false
   redis:
-    host: "redis" # In-cluster Redis svc; set to external/Memorystore host for hosted Redis
-    iamAuth: false # AWS ElastiCache IAM auth (chart-prepared). false = password
-    # username: ""  # Redis 6+ ACL username (e.g. ElastiCache user group) -> REDIS_USERNAME
-    # tls: ""       # "true" for TLS-only managed Redis (e.g. ElastiCache Serverless) -> REDIS_TLS
-    # trustguard.baseURL + client credentials are auto-wired (in-cluster Service URL
-    # + shared trustguard-client-credentials); no need to set them here.
-# TrustGuard: control-plane (admin) + data-plane (runtime /v1/evaluate)
+    host: "redis"
+    iamAuth: false
+# TrustGuard: control-plane + data-plane (/v1/evaluate).
 trustguard:
   image:
-    tag: "v0.12.1"
+    tag: "v0.13.1"
   database:
-    # host auto-derives to the in-cluster control-plane-postgresql Service; set
-    # only for external Postgres. name is mode-derived when left empty: external =>
-    # private "trustguard" DB (control owns migrations); hybrid => shared "trustdata"
-    # DB, own "trustguard" schema. user defaults to "trustguard".
-    sslMode: "prefer" # TLS when available, plaintext fallback for the non-TLS in-cluster PG; use "require" for hosted DBs
-    iamAuth: false # AWS RDS IAM DB auth; the service mints a token at connect time. false = password
+    sslMode: "prefer"
+    iamAuth: false
   redis:
-    host: "redis" # In-cluster Redis svc; set to external host for hosted Redis
-    iamAuth: false # AWS ElastiCache IAM auth (chart-prepared). false = password
-    # username: ""  # Redis 6+ ACL username (e.g. ElastiCache user group) -> REDIS_USERNAME
-    # tls: ""       # "true" for TLS-only managed Redis (e.g. ElastiCache Serverless) -> REDIS_TLS
-# TrustLens (WIP): api (control) + worker (data), Postgres-only. Disabled by default.
+    host: "redis"
+    iamAuth: false
+# TrustLens (opt-in, WIP).
 trustlens:
-  enabled: false # Opt-in; set true to deploy TrustLens under v2
+  enabled: false
   image:
-    tag: "" # Required when enabled; no release image is published yet
+    tag: ""
   database:
-    host: "control-plane-postgresql" # In-cluster Postgres svc; set to external host for hosted DB
-    sslMode: "prefer" # TLS when available, plaintext fallback for the non-TLS in-cluster PG; use "require" for hosted DBs
-# DataAgent (hybrid only): outbound-only agent bridging local reads to the SaaS
-# DataBridge. Renders only when hybrid, tenantId is set, and an inline token or
-# existing Secret reference is configured.
+    host: "control-plane-postgresql"
+    sslMode: "prefer"
+# DataAgent (hybrid-only outbound bridge to SaaS DataBridge).
 dataagent:
   image:
-    tag: "v0.1.2" # Pin to a released DataAgent tag in production
+    tag: "v0.1.2"
   databridge:
-    # Defaults target the NeuralTrust SaaS DataBridge — override only for a
-    # non-default region/endpoint or a self-hosted DataBridge.
-    addr: "databridge.neuraltrust.ai:443" # SaaS DataBridge gRPC host:port
-    serverName: "databridge.neuraltrust.ai" # TLS SNI / server identity pin
-  tenantId: "" # Required: tenant identity on the stream
-  # Read-only connection into the shared "trustdata" DB (hybrid). AgentGateway and
-  # TrustGuard each write raw telemetry into their OWN schema; the read-only role's
-  # search_path spans both, so DataAgent's unqualified reads resolve. In-cluster: host
-  # + password auto-derive and the role is provisioned by v2-postgresql-init — nothing
-  # to set. External: overlay database.host + database.password (user/name if renamed).
+    addr: "databridge.neuraltrust.ai:443"
+    serverName: "databridge.neuraltrust.ai"
+  tenantId: ""
   database:
     sslMode: "prefer"
   existingSecret:
-    name: "" # Existing Secret containing DATABASE_URL + DB_PASSWORD for externally managed secret workflows
-  enrolmentToken: "" # Issued by SaaS (required for tls/mtls)
+    name: ""
+  enrolmentToken: ""
   enrolmentTokenExistingSecret:
-    name: "" # Existing Secret containing the SaaS-issued token; enables DataAgent when tenantId is also set
+    name: ""
     key: "ENROLMENT_TOKEN"
-# DataCore (external only): residency query API over local ClickHouse. Renders
-# when global.deploymentMode=external.
+# DataCore (v2 external only): residency API over local ClickHouse.
 datacore:
   image:
-    tag: "v0.8.0"
-  # CLICKHOUSE_PASSWORD is read from the shared `clickhouse` secret (same secret
-  # AlertEngine uses) via clickhouse.existingSecret — no password set here.
+    tag: "v0.10.0"
   clickhouse:
-    host: "clickhouse" # In-cluster default; set to your endpoint when infrastructure.clickhouse.deploy=false
+    host: "clickhouse"
     nativePort: 9000
-    database: "default" # DataCore writes its tables/MVs here; matches DataCore's SaaS overlays (built-in ClickHouse DB, no creation needed)
-    otelDatabase: "otel" # DataCore reads {otelDatabase}.otel_logs, written by clickstack-otel-collector
-# clickstack-otel-collector (external only): OTLP gateway writing to ClickHouse.
-# Renders when global.deploymentMode=external.
+    database: "default"
+    otelDatabase: "otel"
+# ClickStack OTel collector (v2 external only): OTLP-to-ClickHouse pipeline.
 clickstack-otel-collector:
   image:
     tag: "2.30.1"
     repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickstack-otel-collector
   clickhouse:
-    endpoint: "http://clickhouse:8123" # In-cluster default; set to external/Cloud endpoint when infrastructure.clickhouse.deploy=false
+    endpoint: "http://clickhouse:8123"
     database: "otel"
-# alertengine (external only): api + worker; evaluates detection rules over
-# ClickHouse telemetry, dedupes alerts in its own Postgres DB, forwards to SIEMs.
-# Renders when global.deploymentMode=external. Enabled by default (no-op elsewhere).
+# AlertEngine (v2 external only): detection rules over ClickHouse telemetry.
 alertengine:
   enabled: true
   image:
     tag: "v0.4.5"
-  # Own Postgres database (separate migrations, NOT the shared trustdata DB).
-  # host empty ⇒ in-cluster control-plane-postgresql; set for external Postgres.
   database:
     host: ""
     port: 5432
     name: "alertengine"
     user: "alertengine"
-    sslMode: "prefer" # TLS when available, plaintext fallback for the non-TLS in-cluster PG; use "require" for hosted DBs
-    iamAuth: false # AWS RDS IAM DB auth (chart-prepared; service token minting pending). false = password
-  # CLICKHOUSE_PASSWORD is read from the shared `clickhouse` secret (same secret
-  # DataCore uses) via clickhouse.existingSecret — no password set here.
+    sslMode: "prefer"
+    iamAuth: false
   clickhouse:
-    host: "clickhouse" # In-cluster default; set to your endpoint when infrastructure.clickhouse.deploy=false
+    host: "clickhouse"
     nativePort: 9000
-    database: "otel" # DB where clickstack-otel-collector writes telemetry events
+    database: "otel"
     username: "neuraltrust"
     secure: false
-# NeuralTrust Data Plane subchart values
-# Helm requires values to be passed to subcharts using the subchart name as a prefix
-neuraltrust-data-plane:
-  securityHardening: true # Adds readOnlyRootFilesystem, drops capabilities, seccomp profile. Set to false to restore prior behavior.
+# =============================================================================
+# data-plane-api shim (kept until TrustLens supersedes it).
+# =============================================================================
+data-plane-api:
+  securityHardening: true
   dataPlane:
     enabled: true
-    imagePullSecrets: "gcr-secret" # Set imagePullSecrets for all data-plane components (api, worker, kafka-connect)
+    imagePullSecrets: "gcr-secret"
     serviceAccount:
       create: true
       name: data-plane
@@ -1341,30 +636,16 @@ neuraltrust-data-plane:
       resendApiKeySecretName: "resend-secrets"
       resendApiKey: ""
       dataPlaneJWTSecretName: "data-plane-jwt-secret"
-      dataPlaneJWTSecret: "" # Auto-generated if empty
-      # OPTIONAL: the data-plane image bundles its own model (fastText) and does
-      # not need a Hugging Face token to run. The token is only forwarded to
-      # spawned evaluation Jobs when set, and only matters if those Jobs use
-      # HF-gated models. Leave empty for standard installs. The env var is
-      # mounted with optional:true, so an absent token never blocks startup.
+      dataPlaneJWTSecret: ""
       huggingFaceTokenSecretName: "huggingface-secrets"
       huggingFaceToken: ""
     components:
       clickhouse:
         enabled: true
-        # Bare name ⇒ <name>.<namespace>.svc.cluster.local; a dotted host (external
-        # endpoint/FQDN) is used verbatim. In v2 HYBRID there is no in-cluster
-        # ClickHouse, so the data-plane-api read shim renders ONLY when this is a
-        # dotted external host (otherwise the shim stays OFF). v2 external / v1 use
-        # the in-cluster store by default (bare "clickhouse").
         host: "clickhouse"
         port: "8123"
         user: "neuraltrust"
         database: "neuraltrust"
-        # CLICKHOUSE_PASSWORD source. Defaults to the shared in-cluster `clickhouse`
-        # secret (key admin-password). For EXTERNAL ClickHouse
-        # (infrastructure.clickhouse.deploy=false) point this at your secret to match
-        # infrastructure.clickhouse.external.secretName/secretKey.
         existingSecret:
           name: "clickhouse"
           key: "admin-password"
@@ -1374,83 +655,27 @@ neuraltrust-data-plane:
           name: "clickhouse-secrets"
         configmap:
           name: "clickhouse-init-job"
-        backup:
-          enabled: false
-          image:
-            repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/curl
-            tag: "8.20.0"
-      kafka:
-        enabled: true
-        connect:
-          replicas: 1
-          bootstrapServers: "" # Empty = resolved from global.kafka.bootstrapServers
-          extraEnv: []
-          extraEnvFrom: []
-          image:
-            repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/kafka-connect
-            tag: v0.5.1
-            pullPolicy: Always
-          resources:
-            limits:
-              cpu: "1"
-              memory: 4Gi
-            requests:
-              cpu: 500m
-              memory: 2Gi
-          autoscaling:
-            enabled: false
-            minReplicas: 1
-            maxReplicas: 4
-            targetCPUUtilizationPercentage: 80
-            targetMemoryUtilizationPercentage: 85
-          podDisruptionBudget:
-            enabled: false
-            minAvailable: 1
       api:
         enabled: true
-        host: "" # Optional: full hostname override. Empty = auto-derive as <hostPrefix>.<global.domain> when both are set, otherwise use ALB auto-generated URL.
-        hostPrefix: "data-plane-api" # Default subdomain prefix when host is empty and global.domain is set. Set to "" to disable auto-derive.
+        host: ""
+        hostPrefix: "data-plane-api"
         service:
           type: ClusterIP
         ingress:
-          enabled: true # Enable Ingress (Ingress supports TLS secrets)
-          className: "" # Per-service override (leave empty to use global.ingress.className)
+          enabled: true
+          className: ""
           annotations: {}
-          # TLS configuration for Ingress
-          # HTTPS is enabled by default for bundled ingresses.
-          # The shared secret from global.ingress.tls.secretName is created by default.
-          # If secretName is empty, this ingress uses that shared self-signed secret.
-          # Set secretName to use a pre-created kubernetes.io/tls secret instead.
           tls:
             enabled: true
-            secretName: "" # Optional override for this ingress; empty = use shared generated/global secret
+            secretName: ""
         classifierModel: "gpt"
-        # SQL store for data-plane-api (SQL_DATABASE). The image (>= v1.40.0)
-        # supports a PostgreSQL evaluation store in addition to ClickHouse.
-        #   backend: "" (auto) | "postgres" | "clickhouse"
-        #     auto → PostgreSQL in v2 hybrid (reusing the umbrella PostgreSQL),
-        #            ClickHouse in v2 external and v1. In v2 hybrid, auto still
-        #            resolves to ClickHouse when a dotted (external) ClickHouse
-        #            host is set (see components.clickhouse.host), preserving
-        #            existing external-ClickHouse hybrid installs.
-        #     postgres/clickhouse → force that backend (rollback / advanced).
         database:
           backend: ""
-          # PostgreSQL connection (used when the resolved backend is postgres).
-          # Scalar host/port/user/database override the matching key from the
-          # existingSecret; leave empty to source them from that Secret. The
-          # password is ALWAYS read from the Secret (never inlined). Defaults to
-          # the umbrella-managed `postgresql-secrets`, so bundled in-cluster
-          # PostgreSQL is reused automatically. For EXTERNAL PostgreSQL, set the
-          # scalars and/or point existingSecret at a pre-created Secret.
           postgresql:
             host: ""
             port: ""
             user: ""
             database: ""
-            # sslMode → PGSSLMODE. "prefer" works against the non-TLS in-cluster
-            # PostgreSQL (plaintext fallback) and TLS hosted DBs; set "require"
-            # to force TLS.
             sslMode: "prefer"
             existingSecret:
               name: "postgresql-secrets"
@@ -1459,13 +684,7 @@ neuraltrust-data-plane:
                 port: "POSTGRES_PORT"
                 user: "POSTGRES_USER"
                 password: "POSTGRES_PASSWORD"
-                # Platform Secret stores the DB name under POSTGRES_DB; it is
-                # mapped to the binary's POSTGRES_DATABASE env.
                 database: "POSTGRES_DB"
-            # Schema migration initContainer (postgres-migrations). Applies the
-            # bundled idempotent DDL (schema neuraltrust + tests/test_runs) under
-            # a transaction-scoped advisory lock. Disable if the schema is
-            # provisioned externally.
             migration:
               enabled: true
               image:
@@ -1486,9 +705,6 @@ neuraltrust-data-plane:
         accessMode: ReadWriteOnce
         huggingfaceToken: ""
         storage: 10Gi
-        # TrustTest configuration: mounts charts/neuraltrust-data-plane/files/.trusttest_config.json
-        # at /app/.trusttest_config.json on data-plane-api (and evaluation Job pods).
-        # Set enabled: true to opt in.
         trustTestConfig:
           enabled: false
         replicas: 2
@@ -1501,10 +717,6 @@ neuraltrust-data-plane:
         podDisruptionBudget:
           enabled: false
           minAvailable: 1
-        # initContainerResources: override for clickhouse-migrations initContainer (default: requests 250m/256Mi, limits 500m/512Mi)
-        # initContainerResources:
-        #   requests: { cpu: 250m, memory: 256Mi }
-        #   limits: { cpu: 500m, memory: 512Mi }
         resources:
           requests:
             cpu: 1
@@ -1512,89 +724,35 @@ neuraltrust-data-plane:
           limits:
             cpu: 2
             memory: 6Gi
-        # Per-component env injection hooks (available on every main service container
-        # across the NT charts: control-plane api/app/scheduler, data-plane api/worker,
-        # firewall gateway/workers.<name>, trustgate controlPlane/dataPlane/actions).
-        #
-        # extraEnv     — list of EnvVar entries appended to the container env (name+value
-        #                or name+valueFrom.{secretKeyRef,configMapKeyRef,fieldRef}).
-        # extraEnvFrom — list of EnvFromSource entries (configMapRef / secretRef) used to
-        #                load whole ConfigMaps or Secrets as env vars in a single line.
-        #
-        # Example:
-        #   extraEnv:
-        #     - name: MY_VAR
-        #       value: "literal"
-        #     - name: DB_PASSWORD
-        #       valueFrom:
-        #         secretKeyRef: { name: my-secret, key: password }
-        #   extraEnvFrom:
-        #     - configMapRef: { name: my-configmap }
-        #     - secretRef:    { name: my-secret, optional: true }
         extraEnv: []
         extraEnvFrom: []
-        # Evaluation-progress cache backend (EVALUATION_PROGRESS_BACKEND). data-plane-api
-        # defaults this to "redis" when unset, so the chart pins an explicit mode default:
-        #   v1: "kafka" — Kafka already deploys and is wired above; no new Redis dependency.
-        #   v2: "redis" — v2 ships without Kafka. Points at the same umbrella-managed Redis
-        #       AgentGateway/TrustGuard use (see root 'infrastructure.redis' above): in-cluster
-        #       service "redis" by default, or infrastructure.redis.external when
-        #       infrastructure.redis.deploy=false (mirror that endpoint in host/password below).
         redis:
-          backend: "" # Empty ⇒ mode default ("kafka" in v1, "redis" in v2). Set "redis"/"kafka" to override.
-          host: "redis" # In-cluster v2 Redis svc; set to external/Memorystore host for hosted Redis
+          backend: "" # Empty ⇒ "redis"
+          host: "redis"
           port: 6379
-          db: "0" # Redis logical DB index
-          password: "" # Optional
-          # Optional Redis 6+ ACL username (e.g. ElastiCache user group). data-plane-api
-          # authenticates via the standard redis:// URL (redis-py honors the URL's
-          # username), so ACL auth is fully supported here (unlike TrustGate/AgentGateway).
+          db: "0"
+          password: ""
           username: ""
-          tls: "" # Set "true" for TLS-only managed Redis (uses the rediss:// scheme)
-          # AWS ElastiCache IAM auth. data-plane-api mints a SigV4 token at connect time
-          # (fully implemented — see cache_database.py), unlike the chart-prepared-only
-          # IAM flags on AgentGateway/TrustGuard. false = password/ACL.
+          tls: ""
           iamAuth: false
-          iamUser: "" # ElastiCache IAM user name (must match the ElastiCache user id)
-          iamCacheName: "" # ElastiCache replication group / serverless cache name
-          iamRegion: "" # Empty ⇒ AWS_REGION / AWS_DEFAULT_REGION / us-east-1
-          iamServerless: false # true for ElastiCache Serverless
-          maxConnections: 100 # Maximum Redis connection-pool size
-          mgetChunkSize: 200 # Keys fetched per Redis MGET during progress reads
-          connectTimeoutSeconds: "" # Empty ⇒ data-plane-api default (5 seconds)
-          socketTimeoutSeconds: "" # Empty ⇒ data-plane-api default (5 seconds)
-          healthCheckIntervalSeconds: "" # Empty ⇒ data-plane-api default (30 seconds)
-        # Run evaluation workloads as Kubernetes Jobs spawned by data-plane-api
-        # (instead of FastAPI background tasks). Default OFF — matches
-        # data-plane-api's K8S_JOBS_ENABLED=false when unset. Red teaming
-        # runs in-process via FastAPI background tasks unless opted in here.
-        #
-        # When enabled, the API propagates its own env vars into each Job pod
-        # spec at job-creation time — no Secret object, no CSI mount, no
-        # SecretProviderClass needed. Works identically on Helm (on-prem,
-        # secretKeyRef-based) and Flux + Secret Manager (SaaS, CSI-based)
-        # because the API doesn't care how its own env was populated.
-        #
-        # Requires data-plane-api >= v1.25.0. Set k8sJobs.enabled: true to opt in.
-        #
-        # The API pod and the Job pods it spawns both run under the existing
-        # `data-plane` ServiceAccount (dataPlane.serviceAccount, shared with
-        # the worker / kafka-connect components and the app's own
-        # K8S_JOB_SERVICE_ACCOUNT default). Enabling k8sJobs only adds the
-        # `data-plane-job-creator` Role + RoleBinding to that SA — no separate
-        # ServiceAccount is created.
+          iamUser: ""
+          iamCacheName: ""
+          iamRegion: ""
+          iamServerless: false
+          maxConnections: 100
+          mgetChunkSize: 200
+          connectTimeoutSeconds: ""
+          socketTimeoutSeconds: ""
+          healthCheckIntervalSeconds: ""
         k8sJobs:
           enabled: false
-          # Namespace where Jobs are created. Empty = release namespace.
           namespace: ""
           rbac:
-            create: true # Role data-plane-job-creator + RoleBinding on the data-plane SA
-          # Job container image. Empty fields fall back to the API image above.
+            create: true
           jobImage:
             repository: ""
             tag: ""
             pullPolicy: ""
-          # Per-Job pod resources.
           resources:
             requests:
               cpu: 100m
@@ -1606,51 +764,15 @@ neuraltrust-data-plane:
           backoffLimit: 0
           maxConcurrentJobs: 10
           waitTimeoutSeconds: 1800
-      worker:
-        enabled: true
-        replicas: 1
-        autoscaling:
-          enabled: false
-          minReplicas: 1
-          maxReplicas: 10
-          targetCPUUtilizationPercentage: 80
-          targetMemoryUtilizationPercentage: 85
-        podDisruptionBudget:
-          enabled: false
-          minAvailable: 1
-        image:
-          repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/workers
-          tag: v1.8.2
-          pullPolicy: Always
-        resources:
-          requests:
-            memory: 3Gi # Loads SetFit + spaCy en_core_web_lg in-process; keep >=3Gi headroom.
-            cpu: 750m
-          limits:
-            memory: 6Gi
-            cpu: 2000m
-        # See api.extraEnv / api.extraEnvFrom above for syntax and semantics.
-        extraEnv: []
-        extraEnvFrom: []
-# NeuralTrust Firewall subchart values
-# Default: ON (gateway + 5 workers using firewall-cpu, CPU only). To disable, set
-# neuraltrust-firewall.firewall.enabled: false. To run workers on GPU, override
-# workerDefaults.image to firewall-gpu and add nvidia.com/gpu resources,
-# nodeSelector, tolerations, and hostIPC (see values-dataplane-gpu.yaml.example
-# for GPU patterns).
-#
-# When firewall is enabled, the parent chart auto-populates:
-#   - trustgate-secrets/NEURAL_TRUST_FIREWALL_URL  → http://firewall.<release-namespace>.svc.cluster.local
-#   - control-plane-secrets/FIREWALL_API_URL       → same FQDN
-# When firewall is disabled, FIREWALL_API_URL falls back to the data-plane API service.
-# Cross-namespace or external firewall? Override trustgate.global.env.NEURAL_TRUST_FIREWALL_URL
-# (and controlPlane.components.app.config.firewallApiUrl) explicitly.
-neuraltrust-firewall:
-  securityHardening: true # Adds readOnlyRootFilesystem, drops capabilities, seccomp profile. Set to false to restore prior behavior.
+# =============================================================================
+# Firewall (optional; default on): CPU workers.
+# =============================================================================
+firewall:
+  enabled: true
+  securityHardening: true
   firewall:
     enabled: true
     imagePullSecrets: "gcr-secret"
-    # --- Gateway ---
     gateway:
       replicas: 2
       image:
@@ -1675,26 +797,15 @@ neuraltrust-firewall:
       podDisruptionBudget:
         enabled: false
         minAvailable: 1
-      # Extra env hooks — see neuraltrust-data-plane.dataPlane.components.api above
-      # for syntax. extraEnvFrom is appended to the existing
-      # envFrom: [configMapRef: firewall-config] list.
       extraEnv: []
       extraEnvFrom: []
-    # --- Worker defaults (shared by all workers) ---
-    # Default: CPU image, no GPU scheduling. For GPU, override with:
-    #   workerDefaults.image.repository: .../firewall-gpu
-    #   workerDefaults.resources.requests/limits: nvidia.com/gpu: "1"
-    #   workerDefaults.nodeSelector / tolerations / hostIPC: true
     workerDefaults:
-      deploymentStrategy: Recreate # Recreate | RollingUpdate — Recreate avoids 2× worker capacity during rollouts
+      deploymentStrategy: Recreate
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
         tag: "v2.14.0"
         pullPolicy: IfNotPresent
       replicas: 1
-      # CPU-worker default: one HF transformer (~86M-class) per pod via ONNX.
-      # 3Gi/4Gi gives ONNX runtime headroom under concurrent requests. The heavier
-      # prompt-moderation worker (e5-base embedder + 13 LightGBM) overrides this below.
       resources:
         requests:
           cpu: "1000m"
@@ -1716,10 +827,6 @@ neuraltrust-firewall:
       podDisruptionBudget:
         enabled: false
         minAvailable: 1
-    # --- Workers ---
-    # Per-worker extraEnv / extraEnvFrom default to empty; add them under a worker
-    # entry to inject extra env vars or envFrom sources into that specific worker
-    # container. See neuraltrust-data-plane.dataPlane.components.api above for syntax.
     workers:
       toxicity:
         enabled: true
@@ -1739,8 +846,6 @@ neuraltrust-firewall:
       prompt-moderation:
         enabled: true
         module: src.workers.prompt_moderation.app:app
-        # Heaviest CPU worker: loads intfloat/multilingual-e5-base embedder + 13
-        # LightGBM classifiers. Override workerDefaults with a larger floor.
         resources:
           requests:
             cpu: "1"
@@ -1755,7 +860,6 @@ neuraltrust-firewall:
         module: src.workers.response_jailbreak.app:app
         extraEnv: []
         extraEnvFrom: []
-    # --- Shared settings ---
     config:
       pythonUnbuffered: "1"
       pythonDontWriteBytecode: "1"
@@ -1764,9 +868,6 @@ neuraltrust-firewall:
       otelEnabled: "false"
     secrets:
       jwtSecret: ""
-      # OPTIONAL: official firewall images bundle all ML models at build time
-      # (TRANSFORMERS_OFFLINE=1), so no Hugging Face token is needed at runtime.
-      # Leave empty. Only set for custom images that download models at runtime.
       huggingFaceToken: ""
     serviceAccount:
       create: true
@@ -1786,16 +887,8 @@ neuraltrust-firewall:
       enabled: false
     image:
       tag: v2.7.0
-# ----------------------------------------------------------------------
-# neuraltrust-watchdog (subchart)
-# ----------------------------------------------------------------------
-# Self-monitoring + self-healing controller. OFF by default. When
-# enabled, the watchdog runs as a single Deployment in the release
-# namespace and periodically probes the platform components configured
-# under `neuraltrust-watchdog.checks`. Mutating actions default to
-# dryRun: true so adoption can be incremental.
-#
-# Full reference: charts/neuraltrust-watchdog/values.yaml
-# Example: values-watchdog.yaml.example
-neuraltrust-watchdog:
+# =============================================================================
+# Watchdog (optional): self-monitoring + self-healing.
+# =============================================================================
+watchdog:
   enabled: false

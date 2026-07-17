@@ -1,5 +1,5 @@
 # TrustLens subchart (WIP).
-# Renders ONLY when global.platformVersion=v2 AND enabled=true. Single image, two runtimes:
+# Renders ONLY when enabled=true. Single image, two runtimes:
 #   worker (data-plane, args /worker) → hybrid + external
 #   api    (control-plane, args /api) → external only
 # Postgres-only (no Redis/Kafka/ClickHouse). Migrations run embedded on startup.

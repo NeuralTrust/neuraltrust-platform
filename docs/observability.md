@@ -1,6 +1,6 @@
 # Observability and self-healing
 
-Platform v2 has two distinct OpenTelemetry collector roles.
+This chart (2.x) is v2-only. It has two distinct OpenTelemetry collector roles.
 
 ## Umbrella OTel Collector
 
@@ -25,7 +25,7 @@ the chart renders ServiceMonitor, PodMonitor, and PrometheusRule resources.
 
 ## ClickStack OTel Collector
 
-The ClickStack collector is a Platform v2 external component, not a replacement
+The ClickStack collector is an external-mode component, not a replacement
 for the umbrella collector. It receives product OTLP on ports 4317/4318 and
 writes traces, metrics, and logs to ClickHouse.
 
@@ -34,34 +34,32 @@ telemetry and AlertEngine evaluates rules over it.
 
 ## AlertEngine SIEM and integrations
 
-AlertEngine is the supported v2 external alert and integration path. Its worker:
+AlertEngine is the supported external-mode alert and integration path. Its
+worker:
 
 - evaluates configured detection rules over ClickHouse telemetry
 - stores alert state in its PostgreSQL database
 - deduplicates findings
 - forwards findings to configured SIEM and integration destinations
 
-This preserves SIEM/integration capability after retirement of the legacy SIEM
-Connector subchart. Disabling hosted observability export does not disable
-AlertEngine or the ClickStack-to-ClickHouse pipeline.
+Disabling hosted observability export does not disable AlertEngine or the
+ClickStack-to-ClickHouse pipeline.
 
 ## Watchdog
 
-`neuraltrust-watchdog` provides direct probes and optional healing actions.
-Start with every action in dry-run:
+`watchdog` (stable Kubernetes name `neuraltrust-watchdog`) provides direct
+probes and optional healing actions. Start with every action in dry-run:
 
 ```yaml
-neuraltrust-watchdog:
+watchdog:
   enabled: true
   actions:
     dryRun: true
 ```
 
-For v2, use checks that target rendered v2 or shared resources, such as
-ClickHouse, the data-plane API shim, Firewall, pod health, deployment health,
-certificate renewal, and the umbrella collector. Kafka, Kafka Connect,
-data-plane worker lag, and legacy TrustGate checks apply only to explicit v1
-deployments.
+Use checks that target rendered or shared resources, such as ClickHouse, the
+data-plane API shim, Firewall, pod health, deployment health, certificate
+renewal, and the umbrella collector.
 
 Promote healing actions one check at a time after observing alert parity.
 Mutating actions require both `actions.dryRun: false` and the corresponding
@@ -73,17 +71,16 @@ RBAC action permission.
   directly to hosted observability; umbrella collector stays off
 - `values-observability-self-hosted.yaml.example`: umbrella collector and
   Prometheus Operator resources, hosted export off
-- `values-self-monitoring.yaml.example`: curated v2 check identifiers
-- `values-watchdog.yaml.example`: detailed dry-run-first v2 configuration
+- `values-self-monitoring.yaml.example`: curated check identifiers
+- `values-watchdog.yaml.example`: detailed dry-run-first configuration
 - `values-watchdog-gmp.yaml.example`: Google Managed Prometheus resources
 
 ## Air-gapped external deployment
 
-Use v2 external, disable hosted export, and mirror all images:
+Use external mode, disable hosted export, and mirror all images:
 
 ```yaml
 global:
-  platformVersion: "v2"
   deploymentMode: "external"
   imageRegistry: "<registry>/neuraltrust"
   observability:
@@ -95,9 +92,7 @@ The umbrella collector remains local. ClickStack continues writing to the
 configured local or managed ClickHouse. AlertEngine continues evaluating and
 forwarding to destinations reachable from the cluster.
 
-## Legacy v1 appendix
+## Legacy v1
 
-Legacy Kafka and TrustGate watchdog checks are valid only when
-`global.platformVersion: v1` is pinned. Kafka never renders in v2, so enabling
-those checks in a v2 deployment produces expected target failures rather than
-useful health signals.
+v1 (legacy TrustGate/Kafka) is maintained only on the `v1.14.x` release line;
+pin `--version ~1.14.0` to install it. This chart (2.x) is v2-only.

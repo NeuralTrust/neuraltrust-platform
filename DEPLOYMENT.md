@@ -1,16 +1,16 @@
 # Deployment Guide
 
-This guide covers the default Platform v2 deployment paths. Install a released
-OCI chart whenever possible; replace `<chart>` below with the OCI URL, a release
-archive, or `.` when testing the source tree.
+This chart (2.x) is v2-only. This guide covers the default deployment paths.
+Install a released OCI chart whenever possible; replace `<chart>` below with
+the OCI URL, a release archive, or `.` when testing the source tree.
 
 ## 1. Choose a topology
 
 ### Hybrid (default)
 
 Hybrid runs AgentGateway and TrustGuard data-plane workloads in the cluster.
-Their control planes stay in NeuralTrust SaaS. PostgreSQL, Redis, and
-ClickHouse deploy in-cluster by default.
+Their control planes stay in NeuralTrust SaaS. PostgreSQL and Redis deploy
+in-cluster by default; ClickHouse is not part of hybrid.
 
 ```bash
 helm upgrade --install neuraltrust-platform <chart> \
@@ -49,9 +49,8 @@ OTLP senders -> ClickStack OTel Collector -> ClickHouse
                                             `-> AlertEngine -> SIEM/integrations
 ```
 
-ClickStack does not run in hybrid mode. AlertEngine is the supported v2
-replacement for the retired SIEM Connector component and preserves SIEM and
-integration forwarding.
+ClickStack does not run in hybrid mode. AlertEngine provides the supported
+alert evaluation, SIEM, and integration forwarding path.
 
 ## 2. Configure cluster integration
 
@@ -71,30 +70,29 @@ identity already authorizes image pulls.
 
 ## 3. Choose datastore placement
 
-Platform v2 uses PostgreSQL, Redis, and ClickHouse. Kafka is not part of v2 and
-never renders, regardless of `infrastructure.kafka.deploy`.
-
-For managed datastores:
+The chart uses PostgreSQL, Redis, and (external mode only) ClickHouse. In
+hybrid, PostgreSQL and Redis are driven by the single `global.postgresql` and
+`global.redis` blocks. For managed datastores:
 
 ```yaml
-infrastructure:
+global:
   postgresql:
     deploy: false
+
+infrastructure:
   redis:
     deploy: false
   clickhouse:
     deploy: false
-  kafka:
-    deploy: false
 ```
 
-Then provide the service-specific database, Redis, and ClickHouse endpoints.
-Reference existing Kubernetes Secrets for passwords. The full pattern is in
+Then provide the host/user/password (or `existingSecret`) for each. Reference
+existing Kubernetes Secrets for passwords. The full pattern is in
 [`values-v2-managed-datastores.yaml.example`](./values-v2-managed-datastores.yaml.example).
 
-When external PostgreSQL is selected, pre-create each required role and
-database. The chart initialization Job only provisions the in-cluster
-PostgreSQL instance.
+There is no chart-managed database init Job. When external PostgreSQL is
+selected, pre-create the role and database before installing; application
+migrations own their own tables.
 
 ## 4. Configure observability
 
@@ -117,12 +115,11 @@ See [docs/observability.md](./docs/observability.md).
 
 ## 5. Optional Firewall
 
-The Firewall remains supported in v2. CPU workers use chart defaults. GPU
-workers require a GPU image, resource limit, node selection, toleration, and
-`hostIPC`:
+CPU workers use chart defaults. GPU workers require a GPU image, resource
+limit, node selection, toleration, and `hostIPC`:
 
 ```yaml
-neuraltrust-firewall:
+firewall:
   firewall:
     enabled: true
     workerDefaults:
@@ -141,7 +138,7 @@ neuraltrust-firewall:
 ```
 
 Use [`values-dataplane-gpu.yaml.example`](./values-dataplane-gpu.yaml.example)
-as the complete v2 overlay.
+as the complete overlay.
 
 ## 6. Validate before rollout
 
@@ -152,13 +149,10 @@ helm template neuraltrust-platform <chart> \
   -f <values-file> > /tmp/neuraltrust-rendered.yaml
 ```
 
-For v2, verify the rendered output contains no Kafka, Kafka Connect,
-data-plane worker, AISPM, or legacy SIEM Connector workloads.
-
 ## OpenShift
 
 Use `values-openshift.yaml` for Routes or
-`values-openshift-ingress.yaml.example` for Ingress. Both select v2 hybrid.
+`values-openshift-ingress.yaml.example` for Ingress. Both select hybrid mode.
 See [README-OPENSHIFT.md](./README-OPENSHIFT.md).
 
 ## Upgrades and secrets
@@ -170,16 +164,7 @@ pre-create secrets and set `global.preserveExistingSecrets: true`.
 Persistent volume claims are retained by default. Review release notes before
 each upgrade.
 
-## Legacy v1 appendix
+## Legacy v1
 
-Use [`values-v1-legacy.yaml.example`](./values-v1-legacy.yaml.example) and pin:
-
-```yaml
-global:
-  platformVersion: "v1"
-```
-
-v1 is the only topology that can run legacy TrustGate, Kafka, Kafka Connect,
-Kafka workers, and the scheduler. The legacy external-Kafka example is
-`values-external-services.yaml.example`. AISPM and SIEM Connector workloads are
-retired; migrate SIEM/integration flows to external-mode AlertEngine.
+v1 (legacy TrustGate/Kafka) is maintained only on the `v1.14.x` release line;
+pin `--version ~1.14.0` to install it. This chart (2.x) is v2-only.

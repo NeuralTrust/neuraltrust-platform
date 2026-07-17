@@ -1,4 +1,5 @@
 {{- if eq (include "neuraltrust-platform.isV2" .) "true" }}
+{{- $isHybrid := eq (include "neuraltrust-platform.isHybrid" .) "true" }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -14,14 +15,19 @@ data:
   GATEWAY_BASE_DOMAIN: {{ .Values.config.gatewayBaseDomain | default (include "neuraltrust-platform.domain" .) | quote }}
   MCP_BASE_DOMAIN: {{ .Values.config.mcpBaseDomain | default (printf "mcp.%s" (include "neuraltrust-platform.domain" .)) | quote }}
   GATEWAY_DISCOVERY_MODE: {{ .Values.config.gatewayDiscoveryMode | quote }}
-  # App reads DB_* (not DATABASE_*). Host auto-derives to the in-cluster
-  # control-plane-postgresql Service; override .Values.database.host for external
-  # Postgres. DB_NAME is mode-derived: external => private "agentgateway" DB (control
-  # owns migrations); hybrid => shared "trustdata" DB (isolation is by schema).
+  {{- if $isHybrid }}
+  # v2 hybrid: DB_HOST/DB_PORT/DB_USER/DB_NAME/DB_PASSWORD/DB_SSL_MODE are supplied
+  # through the shared `postgresql-secrets` Secret (via envFrom on the Deployment).
+  # A single `neuraltrust` role owns the shared `neuraltrust` database, so no
+  # per-service overrides are needed here.
+  REDIS_DB: {{ .Values.redis.db | default "0" | quote }}
+  {{- else }}
+  # v2 external: each service points at its own PostgreSQL role/database. Host
+  # defaults to the in-cluster `control-plane-postgresql` Service; override
+  # `.Values.database.host` for hosted/managed PostgreSQL.
   DB_HOST: {{ include "neuraltrust-platform.postgres.host" (dict "host" .Values.database.host) | quote }}
   DB_PORT: {{ .Values.database.port | quote }}
   DB_NAME: {{ include "neuraltrust-platform.v2.dbName" (dict "ctx" . "explicit" .Values.database.name "external" "agentgateway") | quote }}
-  # In hybrid shared-writer layout, AgentGateway connects as the shared writer role.
   DB_USER: {{ include "neuraltrust-platform.v2.writerUser" (dict "ctx" . "explicit" .Values.database.user "default" "agentgateway") | quote }}
   DB_SSL_MODE: {{ .Values.database.sslMode | quote }}
   {{- if .Values.database.iamAuth }}
@@ -45,15 +51,26 @@ data:
   REDIS_TLS_INSECURE_VERIFY: {{ .Values.redis.tlsInsecureVerify | quote }}
   {{- end }}
   {{- if .Values.redis.iamAuth }}
-  # IAM (ElastiCache) Redis auth: no static REDIS_PASSWORD is shipped.
+  # IAM (ElastiCache) Redis auth: TrustGate mints a SigV4 token at connect time
+  # (REDIS_LOGIN=aws). No static REDIS_PASSWORD is shipped.
   REDIS_IAM_AUTH: "true"
+  REDIS_LOGIN: "aws"
+  {{- if and .Values.redis.cacheName (ne (.Values.redis.cacheName | toString) "") }}
+  REDIS_CACHE_NAME: {{ .Values.redis.cacheName | quote }}
+  {{- end }}
+  {{- if .Values.redis.awsServerless }}
+  REDIS_AWS_SERVERLESS: "true"
+  {{- end }}
+  {{- end }}
   {{- end }}
   # The exporters file contains no Kafka exporter. Hybrid persists raw events to
   # local Postgres; external sends metadata and raw events to ClickStack.
   TELEMETRY_ENABLED: {{ .Values.config.telemetryEnabled | quote }}
   TELEMETRY_EXPORTERS_FILE: "/etc/telemetry/telemetry.yaml"
   {{- if eq (include "neuraltrust-platform.isExternal" .) "true" }}
-  OTEL_EXPORTER_OTLP_ENDPOINT: {{ printf "http://clickstack-collector.%s.svc.cluster.local:4318/v1/logs" .Release.Namespace | quote }}
+  # In-cluster ClickStack collector base URL (no /v1/logs). Authorization is
+  # wired from clickstack-collector-secrets on the data-plane / MCP Deployments.
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ printf "http://clickstack-collector.%s.svc.cluster.local:4318" .Release.Namespace | quote }}
   OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
   OTEL_EXPORTER_OTLP_INSECURE: "true"
   {{- else if eq (include "neuraltrust-platform.clickstackHybridEnabled" .) "true" }}

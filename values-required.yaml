@@ -4,7 +4,6 @@
 #     --namespace neuraltrust --create-namespace -f values-required.yaml
 
 global:
-  platformVersion: "v2"
   deploymentMode: "hybrid"
   platform: "kubernetes" # Required: aws | gcp | azure | openshift | kubernetes
   domain: "platform.example.com" # Required: base domain for generated hostnames
@@ -12,6 +11,16 @@ global:
   storageClass: "" # Optional: cluster default when empty
   autoGenerateSecrets: true
   preserveExistingSecrets: false
+  # v2 hybrid ALWAYS dual-writes AgentGateway + TrustGuard product data over OTLP
+  # to the NeuralTrust SaaS ClickStack collector (endpoint / protocol / TLS are
+  # fixed by the chart). Supply the collector's bearer token below OR reference a
+  # pre-created Secret via existingSecret.name. Rendering fails when neither is
+  # set. Set `enabled: false` for an air-gapped install with no OTLP dual-write.
+  clickstack:
+    authToken: "" # Required (or set existingSecret.name below)
+    # existingSecret:
+    #   name: "clickstack-otlp-token"       # pre-created Secret name
+    #   key: "OTEL_EXPORTER_OTLP_HEADERS"   # optional (default shown)
 
 # DataAgent is optional and enrolment-gated. Enable only after NeuralTrust
 # provides both values below.

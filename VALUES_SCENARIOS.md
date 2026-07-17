@@ -1,28 +1,26 @@
 # Values Files and Scenarios
 
-All new deployments should start with Platform v2. Platform v1 examples are
-explicitly marked legacy.
+This chart (2.x) is v2-only.
 
 ## Core examples
 
-| File | Platform | Mode | Purpose |
-|---|---|---|---|
-| `values-required.yaml` | v2 | hybrid | Minimal starting point; DataAgent disabled until enrolment |
-| `values-v2.yaml.example` | v2 | hybrid | Documented hybrid knobs |
-| `values-v2-external.yaml.example` | v2 | external | Minimal self-hosted topology |
-| `values-all-deployed.yaml.example` | v2 | external | Supported optional components enabled |
-| `values-v2-managed-datastores.yaml.example` | v2 | external | Managed PostgreSQL, Redis, and ClickHouse |
-| `values-v1-legacy.yaml.example` | v1 | legacy | Explicit legacy topology |
-| `values-external-services.yaml.example` | v1 | legacy | Legacy external PostgreSQL, ClickHouse, and Kafka |
+| File | Mode | Purpose |
+|---|---|---|
+| `values-required.yaml` | hybrid | Minimal starting point; DataAgent disabled until enrolment |
+| `values-v2.yaml.example` | hybrid | Documented hybrid knobs |
+| `values-v2-hybrid.yaml.example` | hybrid | Hybrid topology overlay |
+| `values-v2-external.yaml.example` | external | Minimal self-hosted topology |
+| `values-all-deployed.yaml.example` | external | Supported optional components enabled |
+| `values-v2-managed-datastores.yaml.example` | external | Managed PostgreSQL, Redis, and ClickHouse |
 
 ## Platform overlays
 
 | File | Applies to | Notes |
 |---|---|---|
-| `values-openshift.yaml` | v2 hybrid | Native OpenShift Routes |
-| `values-openshift-ingress.yaml.example` | v2 hybrid | Kubernetes Ingress on OpenShift |
-| `values-aws-ipv6.yaml.example` | v2 hybrid | AWS provider and IPv6-safe v2 defaults |
-| `values-dataplane-gpu.yaml.example` | v2 hybrid | GPU Firewall workers |
+| `values-openshift.yaml` | hybrid | Native OpenShift Routes |
+| `values-openshift-ingress.yaml.example` | hybrid | Kubernetes Ingress on OpenShift |
+| `values-aws-ipv6.yaml.example` | hybrid | AWS provider and IPv6-safe defaults |
+| `values-dataplane-gpu.yaml.example` | hybrid | GPU Firewall workers |
 
 ## Observability overlays
 
@@ -30,22 +28,23 @@ explicitly marked legacy.
 |---|---|
 | `values-minimal-observability.yaml.example` | Watchdog sends redacted telemetry directly to hosted observability |
 | `values-observability-self-hosted.yaml.example` | Umbrella OTel Collector and monitoring resources with hosted export off |
-| `values-self-monitoring.yaml.example` | Curated v2 watchdog checks, dry-run first |
-| `values-watchdog.yaml.example` | Detailed v2 watchdog configuration |
+| `values-self-monitoring.yaml.example` | Curated watchdog checks, dry-run first |
+| `values-watchdog.yaml.example` | Detailed watchdog configuration |
 | `values-watchdog-gmp.yaml.example` | Google Managed Prometheus resources |
 
 The umbrella OTel Collector is portable across hybrid and external. The
 ClickStack OTel Collector is a product analytics component and only renders in
-v2 external.
+external mode.
 
-## Scenario: default v2 hybrid
+## Scenario: default hybrid
 
 ```yaml
 global:
-  platformVersion: "v2"
   deploymentMode: "hybrid"
   platform: "kubernetes"
   domain: "platform.example.com"
+  clickstack:
+    authToken: "<CLICKSTACK_OTLP_TOKEN>"
 
 dataagent:
   tenantId: ""
@@ -60,11 +59,10 @@ dataagent:
   enrolmentToken: "<enrolment-token>"
 ```
 
-## Scenario: self-hosted v2 external
+## Scenario: self-hosted external
 
 ```yaml
 global:
-  platformVersion: "v2"
   deploymentMode: "external"
   observability:
     hostedExport:
@@ -75,25 +73,25 @@ alertengine:
 ```
 
 External mode renders ClickStack, DataCore, AlertEngine, the product API/app,
-and the v2 control and data planes. It does not render DataAgent.
+and the control and data planes. It does not render DataAgent.
 
 ## Scenario: managed datastores
 
 ```yaml
-infrastructure:
+global:
   postgresql:
     deploy: false
+
+infrastructure:
   redis:
     deploy: false
   clickhouse:
     deploy: false
-  kafka:
-    deploy: false
 ```
 
 Use existing secrets and generic service endpoints as shown in
-`values-v2-managed-datastores.yaml.example`. Pre-create PostgreSQL roles and
-databases because the in-cluster initialization Job is skipped.
+`values-v2-managed-datastores.yaml.example`. Pre-create the PostgreSQL role
+and database — there is no chart-managed database init Job.
 
 ## Scenario: OpenShift
 
@@ -126,14 +124,5 @@ the selected ClickHouse instance; it does not export to NeuralTrust SaaS.
 
 ## Legacy v1
 
-Pin v1 explicitly:
-
-```yaml
-global:
-  platformVersion: "v1"
-```
-
-Only v1 supports legacy TrustGate, Kafka, Kafka Connect, Kafka workers, and the
-scheduler. Kafka never runs in v2. AISPM and SIEM Connector components are
-retired; AlertEngine in v2 external preserves the supported SIEM and integration
-workflow.
+v1 (legacy TrustGate/Kafka) is maintained only on the `v1.14.x` release line;
+pin `--version ~1.14.0` to install it. This chart (2.x) is v2-only.

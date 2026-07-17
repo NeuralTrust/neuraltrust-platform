@@ -2,44 +2,58 @@
 # Control planes remain in NeuralTrust SaaS; data-plane workloads run locally.
 # PostgreSQL and Redis deploy in-cluster by default; analytics live in SaaS, so
 # no in-cluster ClickHouse renders in hybrid. The temporary data-plane-api read
-# shim runs on PostgreSQL by default (no ClickHouse required). Kafka never
-# renders in v2.
+# shim runs on PostgreSQL by default (no ClickHouse required).
+#
+# Hybrid contract: one shared PostgreSQL block, one shared Redis block, and one
+# mandatory ClickStack OTLP token drive every hybrid workload. There is no init
+# Job — application migrations own their tables.
 
 global:
-  platformVersion: "v2"
   deploymentMode: "hybrid"
   platform: "kubernetes"
   domain: "platform.example.com"
   imageRegistry: ""
   autoGenerateSecrets: true
-  # Shared "trustdata" database. In hybrid, AgentGateway + TrustGuard share ONE
-  # writer role/schema and DataAgent stays a separate read-only role (the default —
-  # no configuration needed). The schema/search_path/grant setup is owned by the
-  # chart's v2-postgresql-init Job. Only set global.postgresql for the two opt-ins:
-  #   - hybridRoleLayout: separate  # force the legacy per-service role+schema layout
-  #   - initJob.mode: enabled       # ALSO configure an EXTERNAL managed PostgreSQL
-  #                                 # (the DBA pre-creates the database + login roles;
-  #                                 # the Job never creates roles nor resets passwords)
-  #   - initJob.mode: disabled      # never run the Job (the DBA owns schema/grants)
+  # v2 hybrid always dual-writes product data over OTLP to the NeuralTrust SaaS
+  # ClickStack collector. The endpoint / protocol / TLS are fixed; only the
+  # bearer token is operator-supplied. Either inline `authToken` OR point
+  # `existingSecret.name` at a pre-created Secret carrying the header. Set
+  # `enabled: false` for an air-gapped install with no OTLP dual-write.
+  clickstack:
+    authToken: "<CLICKSTACK_OTLP_TOKEN>"
+    # existingSecret:
+    #   name: "clickstack-otlp-token"
+    #   key: "OTEL_EXPORTER_OTLP_HEADERS"
+  # Shared hybrid Postgres. Every hybrid workload (AgentGateway, TrustGuard,
+  # DataAgent, data-plane-api) envFrom's the rendered postgresql-secrets, so
+  # all four connect as ONE role to ONE database. In-cluster default renders
+  # control-plane-postgresql with user/database = neuraltrust; set deploy: false
+  # and supply host + password (or existingSecret.name) for external / managed
+  # PostgreSQL.
+  #
+  # postgresql:
+  #   deploy: true
+  #   host: ""              # empty + deploy=true -> in-cluster "control-plane-postgresql"
+  #   user: neuraltrust
+  #   database: neuraltrust
+  #   password: ""          # auto-generated when empty
+  #   sslMode: prefer
+  #
+  # Shared hybrid Redis. Passwordless in-cluster default on Service `redis`.
+  # See values-v2-hybrid.yaml.example for a fully-configured overlay.
   observability:
     hostedExport:
       enabled: true
 
 infrastructure:
-  postgresql:
-    deploy: true
-  redis:
-    deploy: true
   clickhouse:
     # Inert in hybrid — no in-cluster ClickHouse renders (analytics live in SaaS).
-    deploy: false
-  kafka:
     deploy: false
 
 # data-plane-api read shim. In hybrid it defaults to PostgreSQL (SQL_DATABASE=postgres)
 # and reuses the umbrella-managed `postgresql-secrets`, so nothing below is required.
 # Uncomment to point it at an EXTERNAL PostgreSQL, or to pin/override the backend.
-# neuraltrust-data-plane:
+# data-plane-api:
 #   dataPlane:
 #     components:
 #       api:
@@ -52,7 +66,7 @@ infrastructure:
 #             host: "postgres.example.com"
 #             port: "5432"
 #             user: "dataplane"
-#             database: "trustdata"
+#             database: "neuraltrust"
 #             sslMode: "require"
 #             existingSecret:
 #               name: "my-external-postgres"   # must contain the password key below
@@ -74,6 +88,6 @@ dataagent:
 trustlens:
   enabled: false
 
-neuraltrust-firewall:
+firewall:
   firewall:
     enabled: false

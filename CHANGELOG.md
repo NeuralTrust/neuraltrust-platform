@@ -4,17 +4,141 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
-## [v2.1.0] — 2026-07-16
+### Fixed
+
+- **External ClickStack OTLP auth + endpoint for TrustGuard / AgentGateway.**
+  In-cluster ClickStack requires `Authorization` on OTLP HTTP; external mode
+  never wired it, so TrustGuard traces failed with `401 … missing or empty
+  authorization header`. The chart now emits
+  `OTEL_EXPORTER_OTLP_HEADERS=authorization=<token>` on
+  `clickstack-collector-secrets` (same value as `OTLP_AUTH_TOKEN`) and mounts
+  that key on TrustGuard control-plane **and** data-plane, plus AgentGateway
+  admin/proxy/MCP. Also drops the erroneous `/v1/logs` suffix from
+  `OTEL_EXPORTER_OTLP_ENDPOINT` so the OTel SDK does not POST traces to
+  `/v1/logs/v1/traces`. Subcharts `trustguard` / `agentgateway`
+  `0.1.13 → 0.1.14`, `clickstack-otel-collector` `0.1.2 → 0.1.3`. If
+  `global.preserveExistingSecrets=true`, add the header key to the existing
+  collector Secret once (token must match `OTLP_AUTH_TOKEN`).
+- **Control-plane RDS IAM env contract.** `authMode: iam` now emits the keys the
+  apps actually read — `POSTGRES_CONNECTION_TYPE=aurora` (Python API) and
+  `POSTGRES_AUTH_MODE=iam` (Next.js app) — plus `AWS_REGION` from
+  `controlPlane.components.postgresql.awsRegion` / `global.postgresql.awsRegion`.
+  The app
+  init-db container mints a short-lived token via `scripts/postgres-iam-url.mjs`
+  before Prisma migrate (requires app image v1.93.0+). Subcharts
+  `control-plane-api` / `control-plane-app` `0.1.0 → 0.1.1`.
 
 ### Changed
 
+- **External control-plane-app defaults `AUTH_EMAIL_FORCE_ENV=true`.** On-prem
+  installs prefer platform env email (`AUTH_EMAIL_PROVIDER` / SES / SMTP /
+  Resend) over per-org `TeamAuthConfig` in the DB. Opt out with
+  `control-plane-app.controlPlane.components.app.config.authEmailForceEnv: "false"`.
+  Subchart `control-plane-app` `0.1.1 → 0.1.2`.
+- **Image bumps (AR latest):** control-plane-app `v1.94.1 → v1.97.0`,
+  agentgateway `v0.7.0 → v0.8.0`, trustguard `v0.12.1 → v0.13.1`,
+  datacore `v0.8.0 → v0.10.0`. Subchart patches:
+  `control-plane-app` `0.1.2 → 0.1.3`, `agentgateway` / `trustguard`
+  `0.1.12 → 0.1.13`, `datacore` `0.1.5 → 0.1.6`.
+- **control-plane-app always sets `DEPLOYMENT_MODE=external`.** Matches the
+  Next.js app contract (`saas` | `external`); unset would resolve to SaaS
+  behavior. Safe to hardcode because this subchart only renders in external
+  mode. Subchart `control-plane-app` `0.1.3 → 0.1.4`.
+
+## [2.2.0] — 2026-07-16
+
+Chart `2.2.0` is the first **v2-only** release. Legacy v1 (TrustGate/Kafka) is no
+longer part of this chart; it is maintained solely on the `v1.14.x` release line.
+v1 users must pin `helm install ... --version ~1.14.0`.
+
+### Removed
+
+- **v1 stack and generation switch.** Deleted `charts/trustgate`, `charts/kafka`,
+  the Kafka helper/connection templates, the control-plane `scheduler`, the
+  legacy data-plane workers / Kafka Connect / ClickHouse-config / Postgres-config
+  templates, and the v1-only `values-external-services.yaml.example`. Removed the
+  `global.platformVersion` / `confirmV2Migration` value switches and the v1
+  migration detection; the `isV2` / `isFull` render guards collapse to always-true
+  aliases (retained so subchart templates compile without a mass rewrite).
+  `global.deploymentMode` is now `hybrid | external` only (the deprecated `full`
+  alias is gone).
+- **v1 secret provisioning.** `create-secrets.sh` no longer creates the v1
+  `trustgate-secrets` (`SERVER_SECRET_KEY`, per-service `DATABASE_*`) or the
+  external-Kafka SASL/TLS Secrets. `TRUSTGATE_JWT_SECRET` (the control-plane ↔
+  gateway integration key) remains in `control-plane-secrets`.
+- **v1 automation rows/inputs.** `scripts/release-images-markdown.sh` and
+  `.github/workflows/bump-images.yml` drop the TrustGate, Kafka, scheduler,
+  data-plane-workers, and Kafka-Connect images/inputs and now reference only the
+  unprefixed v2 chart paths.
+
+### Changed
+
+- **Physical chart split and rename.** `charts/neuraltrust-control-plane` split
+  into `charts/control-plane-api` and `charts/control-plane-app` (external only);
+  the v2 read shim extracted from `charts/neuraltrust-data-plane` into
+  `charts/data-plane-api`; `charts/neuraltrust-firewall` → `charts/firewall` and
+  `charts/neuraltrust-watchdog` → `charts/watchdog`. All live Kubernetes resource
+  names, Secrets, PVCs, and selectors are preserved (`control-plane-api`,
+  `control-plane-app`, `data-plane-api`, `control-plane-postgresql`,
+  `postgresql-secrets`, `redis`, `neuraltrust-watchdog`, …) via hardcoded names /
+  `fullnameOverride`.
+- **Flattened values contract.** `control-plane-api:`, `control-plane-app:`,
+  `data-plane-api:`, `firewall:`, and `watchdog:` are the canonical subchart value
+  roots in `values.yaml`. Removed the `neuraltrust-*` alias keys and the merge
+  helpers, plus deprecated `hybridRoleLayout` / `sharedWriter` / `initJob`
+  no-ops and the `infrastructure.postgresql` / `infrastructure.redis` mirrors.
+  `global.postgresql` / `global.redis` are the sole datastore deploy gates.
+- **v2-only docs and rules.** README, deployment/observability/SECRETS docs,
+  NOTES, examples, and Cursor rules rewritten as v2-only with a support note
+  pointing v1 users at the `v1.14.x` line. `Chart.yaml` set to `2.2.0`.
+- **v2-only render suite.** `scripts/test-helm-render.sh` rewritten to cover
+  minimal hybrid, hybrid external datastores, external per-service IAM, the new
+  value roots, absence of the v1 stack, and stable Kubernetes names after the
+  physical moves.
+
+## [v2.1.0] — 2026-07-16
+
+> **Pre-release note.** Chart `2.x` has not shipped to customers yet, so this
+> release keeps the `2.1.0` number even though the hybrid contract below is
+> breaking relative to earlier `2.0`/`2.1` drafts (shared-writer init Job,
+> opt-in ClickStack). Treat this as the first deployable `2.1.0`.
+
+Chart 2.1.0 simplifies the Platform v2 hybrid contract to "one Postgres block, one Redis block, one ClickStack token" and reorganizes umbrella-side value overlays around unprefixed root keys.
+
+### Highlights
+
+- **Shared hybrid datastores.** `global.postgresql` and `global.redis` now drive a single connection contract for every hybrid workload (AgentGateway, TrustGuard, DataAgent, `data-plane-api`). Defaults: user `neuraltrust`, database `neuraltrust`, passwordless in-cluster Redis. The chart renders `postgresql-secrets` and `redis-secrets` and every hybrid workload `envFrom`'s them.
+- **No hybrid init Job.** `templates/v2-postgres-init.yaml` is removed. Application migrations own their tables (already namespaced: `trustgate_migration_versions` / `trustguard_migration_versions`). `hybridRoleLayout` / `sharedWriter` / `initJob.mode` are retained as deprecated no-ops so 2.x values keep parsing. External / managed PostgreSQL is now owned by the DBA (or Terraform); the chart never runs `CREATE USER` from Helm.
+- **Mandatory ClickStack token, fixed SaaS endpoint.** `global.clickstack` moves from opt-in dual-write to always-on OTLP export with `endpoint` / `protocol` / TLS fixed by the chart. Operators supply only the bearer token — inline via `authToken` or by pointing `existingSecret.name` at a pre-created Secret. Rendering fails when neither is set. `global.clickstack.enabled: false` is the air-gap escape hatch.
+- **In-cluster PostgreSQL moved to the umbrella.** `control-plane-postgresql` Deployment/PVC/Service and the `postgresql-secrets` fallback Secret now live under `templates/postgresql/` (mirroring `templates/redis/`). Kubernetes resource names, PVC identity, and gating switches are preserved bit-for-bit.
+- **Unprefixed root-value aliases.** New helpers merge overlays keyed under `control-plane` / `data-plane` / `firewall` / `watchdog` on top of the legacy `neuraltrust-*` subchart-name keys (alias wins per key). Umbrella-side reads honor either form; subchart-scoped values (component images, replica counts) still live under the legacy key until the physical chart rename lands.
+
+### Migration notes (v2 hybrid, from earlier 2.x drafts)
+
+- Earlier unreleased drafts used a shared-writer `trustdata` role/database and an init Job. Fresh installs use `neuraltrust` / `neuraltrust`. If you already provisioned `trustdata`, seed `global.postgresql.user` / `database` / `password` (or `existingSecret`) accordingly.
+- `trustdata-secrets` is not emitted. `postgresql-secrets` carries DB_* aliases alongside `POSTGRES_*`.
+- Hybrid requires `global.clickstack.authToken` (or `existingSecret.name`), or `global.clickstack.enabled: false` for air-gap.
+- Deprecated no-ops (`hybridRoleLayout`, `sharedWriter`, `initJob.mode`) still parse but are ignored.
+- v1 and v2 external are unchanged; external keeps per-service overlays.
+
+### Changed
+
+- **Umbrella now owns in-cluster PostgreSQL (AUT-337).** The `control-plane-postgresql` Deployment, PVC (`control-plane-postgresql-pvc`), Service, and the `postgresql-secrets` fallback Secret moved from `charts/neuraltrust-control-plane/templates/postgresql/` to the umbrella `templates/postgresql/` directory (mirroring the existing `templates/redis/` layout). Resource names, selectors, PVC name, and gating (`global.postgresql.deploy` canonical; `neuraltrust-control-plane.infrastructure.postgresql.deploy` legacy) are preserved bit-for-bit so live clusters upgrade in place. New umbrella helpers `neuraltrust-platform.postgresql.{deploy,componentConfig,imagePullSecrets}` drive the moved templates. The umbrella `platform-secrets.yaml` (autoGenerate default path) remains the primary owner of `postgresql-secrets`; the new `templates/postgresql/secrets.yaml` preserves the pre-existing autoGenerate=false fallback under umbrella ownership (guards are mutually exclusive, so `postgresql-secrets` is never rendered twice). Existing umbrella-level helpers (`neuraltrust-platform.postgresql.{host,port,user,database}`) are refactored to source values through the new dual-key resolver so operator overlays under either the legacy or unprefixed alias keep working. Subchart `neuraltrust-control-plane` `1.2.48 → 1.2.49` (templates removed only). Render coverage: `scripts/test-helm-render.sh` scenario 41 asserts umbrella ownership + preserved names.
+- **Unprefixed root-value aliases for control-plane and data-plane (AUT-338, AUT-339).** Umbrella-side templates now read control-plane values through the new `neuraltrust-platform.controlPlaneValues` helper (and data-plane values through `neuraltrust-platform.dataPlaneValues`). Each resolver deep-merges three inputs, alias winning per key: kebab-case unprefixed (`control-plane:` / `data-plane:`) overlays camelCase (`controlPlane:` / `dataPlane:`) which overlays the legacy `neuraltrust-control-plane:` / `neuraltrust-data-plane:` subchart-name key. Operators can now overlay individual umbrella-scoped values (e.g. `control-plane.controlPlane.secrets.openaiApiKey`, `data-plane.dataPlane.secrets.dataPlaneJWTSecretName`) without restating the full defaults tree. The subcharts themselves are still fed from the legacy keys (Helm subchart injection has not moved), so chart-consumed values (component images, replica counts, per-service knobs) continue to live under `neuraltrust-control-plane:` / `neuraltrust-data-plane:` — the alias bridge covers the umbrella-scoped reads only until the physical chart split lands. `templates/platform-secrets.yaml` and `neuraltrust-platform.dataPlane.components` now route through the resolvers so the JWT secret name, control-plane secret leaves, and dataPlaneApi lookups all honor the alias. Render coverage: `scripts/test-helm-render.sh` scenarios 42 (control-plane alias + precedence) and 43 (data-plane alias).
+- **Unprefixed root-value aliases for firewall and watchdog (AUT-340).** Same pattern as AUT-338/339, extended to the last two `neuraltrust-*`-scoped subchart keys still consumed by the umbrella. New helpers `neuraltrust-platform.firewallValues` and `neuraltrust-platform.watchdogValues` deep-merge two inputs (alias winning per key): unprefixed `firewall:` / `watchdog:` overlays the legacy `neuraltrust-firewall:` / `neuraltrust-watchdog:` subchart-name key. `templates/platform-secrets.yaml` and `templates/otel-collector/secret.yaml` now route firewall/watchdog reads through the helpers, and `neuraltrust-platform.watchdogEnabled` (which gates the OTel Collector's Prometheus exporter port) is refactored to consume the resolver so `watchdog.enabled: true` and `neuraltrust-watchdog.enabled: true` are equivalent at the umbrella. Chart.yaml `condition:` is a static value path and cannot call helpers, so the subchart-loading gate stays on `neuraltrust-firewall.firewall.enabled` / `neuraltrust-watchdog.enabled` for BC — enabling/disabling the physical subcharts still requires the legacy key, and subchart-scoped values (component images, replica counts, RBAC, checks) still live under the legacy key until the physical chart split lands. Live Kubernetes resource names are unchanged (e.g. watchdog keeps `fullnameOverride: neuraltrust-watchdog`). `.cursor/rules/component-registry.mdc` updated to document the pattern for future subchart renames; `values-watchdog.yaml.example` documents the alias. Render coverage: `scripts/test-helm-render.sh` scenarios 44 (firewall alias + precedence + legacy-only BC) and 45 (watchdog alias flips umbrella gate + legacy BC).
+- **BREAKING (v2 hybrid): ClickStack OTLP dual-write is always on with a fixed SaaS endpoint.** The `global.clickstack` block moves from opt-in dual-write with an operator-supplied endpoint to a mandatory-token, chart-owned pipeline. Endpoint (`https://clickstack-collector.neuraltrust.ai/v1/logs`), protocol (`http/protobuf`), and TLS (system-root verification; `OTEL_EXPORTER_OTLP_INSECURE` is no longer emitted for the default route) are FIXED for hybrid; operators supply ONLY the bearer token — either inline via `global.clickstack.authToken` OR by pointing `global.clickstack.existingSecret.name`/`key` (default key `OTEL_EXPORTER_OTLP_HEADERS`) at a pre-created Secret carrying the full header. `templates/validate-values.yaml` fails render when v2 hybrid ClickStack is enabled and neither is set. The legacy `endpoint`/`protocol`/`insecure` overrides remain honored (deprecated) so existing values files keep parsing. The `enabled` key becomes an **air-gap escape hatch** (`enabled: false` skips the OTLP dual-write entirely; raw payloads still land in Postgres for DataAgent). When `existingSecret.name` is set the data-plane Deployments mount `OTEL_EXPORTER_OTLP_HEADERS` directly from the operator-owned Secret via `secretKeyRef` and the chart-managed `agentgateway-secrets` / `trustguard-secrets` skip the key — recommended for `preserveExistingSecrets=true` and GitOps flows where `lookup` is not available. External mode's always-on in-cluster ClickStack wiring is unchanged and ignores this block. New helpers `neuraltrust-platform.clickstack.{defaultEndpoint,defaultProtocol,usesExistingSecret,otlpHeadersEnv}` and updated `clickstackHybridEnabled`/`clickstack.otlpEnv`/`clickstack.otlpHeaders`. **Migration:** hybrid installs coming from earlier 2.x drafts that were on the opt-in dual-write already have the token; installs that did not enable ClickStack must add `global.clickstack.authToken` (or `existingSecret.name`), or set `global.clickstack.enabled: false`, before upgrading. Render coverage added to `scripts/test-helm-render.sh` (scenario 38p rewritten: default-on + token-required + fixed endpoint + `enabled=false` escape hatch + existingSecret pattern). Subcharts: `agentgateway` `0.1.11 → 0.1.12`, `trustguard` `0.1.11 → 0.1.12`.
+
+- **BREAKING (v2 hybrid): one shared PostgreSQL + Redis connection contract.** The hybrid data-plane stack (AgentGateway, TrustGuard, DataAgent, `data-plane-api`) now connects to ONE Postgres role owning ONE Postgres database and ONE Redis, driven by the new top-level `global.postgresql` / `global.redis` blocks. The blocks expose `deploy`, `host`, `port`, `user`, `database`, `password`, `sslMode`, and `existingSecret` (for PostgreSQL — `password`, `username`, `tls`, `existingSecret` for Redis), and the chart renders a shared `postgresql-secrets` Secret carrying both the legacy `POSTGRES_*` keys and DB_* aliases (`DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_SSL_MODE`, `SENSIBLE_PG_DSN`, `DATABASE_URL`) plus a new shared `redis-secrets` Secret (`REDIS_HOST`/`REDIS_PORT`/`REDIS_PASSWORD`/`REDIS_USERNAME`/`REDIS_TLS`). Every hybrid workload `envFrom`'s these Secrets — per-service `agentgateway-secrets`/`trustguard-secrets` no longer emit `DB_PASSWORD`, `SENSIBLE_PG_DSN`, or `REDIS_PASSWORD`, and per-service ConfigMaps stop emitting `DB_*` / `REDIS_HOST` / `REDIS_PORT` in hybrid. Defaults: `user: neuraltrust`, `database: neuraltrust`, `sslMode: prefer`, in-cluster Redis is passwordless. External deployments keep their per-service overlays (`agentgateway.database` / `trustguard.database` / `alertengine.database` / `trustlens.database`) and IAM auth paths untouched. The `neuraltrust-platform.postgres.host` and `v2.dbName`/`v2.writerUser` helpers now route hybrid callers through `global.postgresql`. **Migration:** hybrid installs from earlier drafts pick up new defaults on upgrade; if the previous install used the shared-writer `trustdata` role/database, seed `global.postgresql.user: trustdata` / `global.postgresql.database: trustdata` / `global.postgresql.password: <existing>` before upgrading, or set `global.postgresql.existingSecret.name` to point at your pre-provisioned Secret.
+- **BREAKING (v2 hybrid): `templates/v2-postgres-init.yaml` is removed.** Hybrid no longer runs a Helm-managed schema/role init Job — the shared `neuraltrust` role owns the shared `neuraltrust` database, and application migrations (already namespaced: `trustgate_migration_versions`, `trustguard_migration_versions`) create their tables directly. `neuraltrust-platform.postgresql.hybridRoleLayout` now always returns `"separate"`, and `global.postgresql.hybridRoleLayout` / `sharedWriter` / `initJob.mode` are retained only as deprecated no-ops so existing values files keep parsing. The parent-managed `trustdata-secrets` Secret is no longer emitted (superseded by `postgresql-secrets` DB_* aliases + `SENSIBLE_PG_DSN`). External/managed PostgreSQL setup is now owned by the DBA/Terraform (or an out-of-band job); the chart never runs `CREATE USER` or `ALTER ROLE ... PASSWORD` from Helm.
+- **`global.redis.deploy` is authoritative in v2.** `neuraltrust-platform.v2Redis.enabled` now prefers `global.redis.deploy` (canonical), falling back to `infrastructure.redis.deploy` (legacy mirror) for BC. v1 (`global.platformVersion: v1`) and v2 external remain unchanged.
 - **`clickstack-otel-collector` defaults to the NeuralTrust AR mirror.** The subchart image repository is now `europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickstack-otel-collector` (tag `2.30.1`) instead of the public `docker.clickhouse.com` registry, with `imagePullSecrets: gcr-secret` by default. The image helper strips the AR prefix under `global.imageRegistry`, and `bump-images.yml` auto-detects tags from AR (bare `X.Y.Z`). Subchart `0.1.1 → 0.1.2`.
-
-### Added
-
 - **Release image refresh.** Bumped registry defaults to control-plane app `v1.94.1`, data-plane API `v1.41.0`, TrustGuard `v0.12.1`, DataCore `v0.8.0`, and AlertEngine `v0.4.5`. Matching subchart defaults, template fallbacks, chart versions, and dependency metadata remain synchronized.
-- **Job-driven shared hybrid PostgreSQL initialization (mode-derived shared writer + managed init Job).** The chart's `v2-postgresql-init` Job is now the single owner of hybrid `trustdata` schema/role setup for both in-cluster and external/managed PostgreSQL, and the two telemetry writers now collapse onto one identity by default. The role layout is **mode-derived** via `global.postgresql.hybridRoleLayout` (no configuration needed): **hybrid → `shared-writer`** (AgentGateway and TrustGuard share ONE writer role + schema — defaults role `trustdata`, schema `trustdata`, from `global.postgresql.sharedWriter.{user,schema}` — while DataAgent stays a separate read-only role); **external/full → always `separate`** (control planes own per-service databases). Set `global.postgresql.hybridRoleLayout: separate` to force the legacy per-service layout in hybrid (each service owns its own login role + schema in `trustdata`, DataAgent reads both) — e.g. an existing install that already has per-service-schema data, since switching layouts does NOT migrate data. **Upgrade note:** a hybrid install previously on the per-service layout will move to the shared writer on upgrade unless it pins `hybridRoleLayout: separate`; the shared-writer path requires release images whose telemetry migrations are namespaced (`trustgate_migration_versions` / `trustguard_migration_versions`, present since AgentGateway `v0.6.0` / TrustGuard `v0.11.1`; current defaults `v0.7.0` / `v0.12.1`). An explicit `shared-writer` is rejected in external/full by `templates/validate-values.yaml`. (2) `global.postgresql.initJob.mode: auto|enabled|disabled` (default `auto`) — `auto` runs the Job only for in-cluster PostgreSQL (unchanged); `enabled` ALSO runs it against external/managed PostgreSQL in **configure-only** mode (the DBA/Terraform pre-creates the database + login roles; the Job never runs `CREATE USER` nor resets passwords — it validates presence and only sets schema ownership, `search_path`, and grants, needing an admin connection in `postgresql-secrets`); `disabled` never renders the Job so the DBA owns schema/`search_path`/grants. `templates/v2-postgres-init.yaml` was refactored into `ensure_role`/`ensure_db`/`ensure_writer_schema`/`grant_readonly` shell helpers that adapt to local vs. managed mode. In `shared-writer`, the shared credential is generated once in a new lookup-preserved parent Secret `trustdata-secrets` (`templates/platform-secrets.yaml`, `DB_PASSWORD` + `SENSIBLE_PG_DSN`) and consumed identically by both data-plane Deployments (`envFrom`) and the init Job; AgentGateway/TrustGuard omit their own `DB_PASSWORD`/`SENSIBLE_PG_DSN` and connect as the shared writer via the new `neuraltrust-platform.v2.writerUser` helper (`DB_USER` resolves to `trustdata` for both). New helpers `neuraltrust-platform.postgresql.{hybridRoleLayout,sharedWriterUser,sharedWriterSchema,inClusterDeploy,initJobMode,initJobEnabled,initJobManaged}` and `neuraltrust-platform.v2.writerUser`. The standalone managed-PostgreSQL SQL bootstrap in `cloud-infrastructure` was removed — schema/role setup is now Helm-owned. Render coverage added to `scripts/test-helm-render.sh` (scenarios 40a–40f: default hybrid shared-writer one-writer/one-reader, `separate` escape hatch, managed configure-only, managed disabled omits the Job, explicit shared-writer rejected in external, AG/TG shared credential resolves identically) and scenario 36 updated to the shared-writer default. Docs/examples updated (`docs/platform-v2.md`, `README.md`, `SECRETS.md`, `values.yaml`, `values-required.yaml`, and every `values-*.yaml.example`). Subcharts: `agentgateway` `0.1.9 → 0.1.10`, `trustguard` `0.1.8 → 0.1.10`; umbrella `2.0.1 → 2.1.0`.
-- **Hybrid `data-plane-api` defaults to PostgreSQL — no ClickHouse required.** The `data-plane-api` image (`v1.41.0`) can read its evaluation/analytics store from PostgreSQL, so v2 **hybrid** no longer needs a ClickHouse at all. A new `neuraltrust-platform.dataPlaneApi.sqlBackend` helper resolves the store: empty/`auto` → PostgreSQL in v2 hybrid (reusing the umbrella-managed PostgreSQL), ClickHouse in v2 external and v1. Existing hybrid installs that opted into an **external** (dotted) ClickHouse host still resolve to ClickHouse for backward compatibility, and an explicit `neuraltrust-data-plane.dataPlane.components.api.database.backend: postgres|clickhouse` overrides either way (rollback / advanced). Because the shim no longer hard-requires ClickHouse, `neuraltrust-platform.dataPlaneApiV2.enabled` now renders the API in hybrid whenever the resolved backend is PostgreSQL. In PostgreSQL mode the Deployment emits `SQL_DATABASE=postgres` + the five `POSTGRES_*` vars (host/port/user/database default to the `postgresql-secrets` Secret; password is always a `secretKeyRef`, never inlined; scalar `api.database.postgresql.{host,port,user,database}` values override for external PostgreSQL, alongside a configurable `existingSecret` name/key map) and runs a `postgres-migrations` initContainer that applies the bundled idempotent schema (`charts/neuraltrust-data-plane/files/postgres/init-db.sql`, byte-identical to the `data-plane-api` source) under a transaction-scoped advisory lock via `pg_isready` + `psql -v ON_ERROR_STOP=1`. The ClickHouse initContainer/env/`clickhouse-secrets`/`clickhouse-init-job` now render **only** in ClickHouse mode, so a default hybrid install carries no `data-plane-api` ClickHouse metadata. Render-time validation rejects unknown backends and hybrid `clickhouse` without an external host. New helpers `neuraltrust-platform.dataPlane.components`/`dataPlaneApi.sqlBackend`/`dataPlaneApi.postgresConfig`/`dataPlaneApi.postgresEnv`; new ConfigMap `data-plane-postgres-init`; the copied SQL is kept in sync with `data-plane-api` manually for now (automated cross-repo sync is a follow-up). Render coverage added to `scripts/test-helm-render.sh`. Data-plane subchart `1.2.50 → 1.3.2`; umbrella `2.0.1 → 2.1.0`.
+- **Hybrid `data-plane-api` defaults to PostgreSQL — no ClickHouse required.** The `data-plane-api` image (`v1.41.0`) can read its evaluation/analytics store from PostgreSQL, so v2 **hybrid** no longer needs a ClickHouse at all. A new `neuraltrust-platform.dataPlaneApi.sqlBackend` helper resolves the store: empty/`auto` → PostgreSQL in v2 hybrid (reusing the umbrella-managed PostgreSQL), ClickHouse in v2 external and v1. Existing hybrid installs that opted into an **external** (dotted) ClickHouse host still resolve to ClickHouse for backward compatibility, and an explicit `neuraltrust-data-plane.dataPlane.components.api.database.backend: postgres|clickhouse` overrides either way (rollback / advanced). Because the shim no longer hard-requires ClickHouse, `neuraltrust-platform.dataPlaneApiV2.enabled` now renders the API in hybrid whenever the resolved backend is PostgreSQL. In PostgreSQL mode the Deployment emits `SQL_DATABASE=postgres` + the five `POSTGRES_*` vars (host/port/user/database default to the `postgresql-secrets` Secret; password is always a `secretKeyRef`, never inlined; scalar `api.database.postgresql.{host,port,user,database}` values override for external PostgreSQL, alongside a configurable `existingSecret` name/key map) and runs a `postgres-migrations` initContainer that applies the bundled idempotent schema (`charts/neuraltrust-data-plane/files/postgres/init-db.sql`, byte-identical to the `data-plane-api` source) under a transaction-scoped advisory lock via `pg_isready` + `psql -v ON_ERROR_STOP=1`. The ClickHouse initContainer/env/`clickhouse-secrets`/`clickhouse-init-job` now render **only** in ClickHouse mode, so a default hybrid install carries no `data-plane-api` ClickHouse metadata. Render-time validation rejects unknown backends and hybrid `clickhouse` without an external host. New helpers `neuraltrust-platform.dataPlane.components`/`dataPlaneApi.sqlBackend`/`dataPlaneApi.postgresConfig`/`dataPlaneApi.postgresEnv`; new ConfigMap `data-plane-postgres-init`; the copied SQL is kept in sync with `data-plane-api` manually for now (automated cross-repo sync is a follow-up). Render coverage added to `scripts/test-helm-render.sh`. Data-plane subchart `1.2.50 → 1.3.2`.
+
+### Fixed
+
+- **AgentGateway / TrustGuard Redis IAM: emit the apps' real ElastiCache contract.** `redis.iamAuth=true` previously only set `REDIS_IAM_AUTH=true`, which neither binary reads. Both services authenticate via `REDIS_LOGIN=aws` and require `REDIS_CACHE_NAME` (+ `REDIS_USERNAME`, TLS, and optionally `REDIS_AWS_SERVERLESS`). The chart now emits `REDIS_LOGIN=aws`, `REDIS_CACHE_NAME` (from `redis.cacheName`), and `REDIS_AWS_SERVERLESS` (from `redis.awsServerless`), still omitting the static Redis password. Subcharts: `agentgateway` / `trustguard` `0.1.10 → 0.1.11`.
+- **AlertEngine RDS IAM is live (was documented as pending).** AlertEngine `v0.4.0+` authenticates with `DB_AUTH_MODE=iam` and requires `AWS_REGION`. The chart already emitted `DB_AUTH_MODE`/`DB_IAM_AUTH` when `database.iamAuth=true`; it now also emits `AWS_REGION` from `database.awsRegion`. Subchart `alertengine` `0.1.2 → 0.1.3`.
 
 ## [v2.0.1] — 2026-07-15
 

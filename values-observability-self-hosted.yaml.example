@@ -3,7 +3,6 @@
 # collector writes product telemetry to ClickHouse.
 
 global:
-  platformVersion: "v2"
   deploymentMode: "external"
   observability:
     enabled: true
@@ -24,7 +23,7 @@ global:
 alertengine:
   enabled: true
 
-neuraltrust-watchdog:
+watchdog:
   enabled: true
   actions:
     dryRun: true
