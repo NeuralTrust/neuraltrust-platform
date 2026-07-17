@@ -4,7 +4,50 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
-## [v1.16.0] — 2026-07-17
+## [2.0.0] — 2026-07-17
+
+**Official GA** of the NeuralTrust Platform **v2-only** umbrella chart.
+
+This is the customer-facing `2.0.0` release. Legacy v1 (TrustGate/Kafka) is
+maintained solely on the `v1.14.x` release line — pin
+`helm install ... --version ~1.14.0` for v1 clusters. Do **not** upgrade a v1
+install in place to this chart.
+
+> **Tag note.** An earlier git tag named `v2.0.0` pointed at a TrustGate-era
+> chart. This GA **reclaims** chart version `2.0.0` for the v2-only stack.
+> Pre-GA interim numbers (`2.1.x` / `2.2.0` / `1.16.x` on `main`) are superseded
+> by this release.
+
+### Highlights
+
+- **Two topologies, one chart:** `global.deploymentMode: hybrid | external`.
+- **Hybrid install UX:** one Postgres block, one Redis block, one ClickStack
+  token — AgentGateway + TrustGuard in-cluster; control planes stay in SaaS.
+- **External mode:** full self-hosted control/data planes, DataCore,
+  ClickStack collector, and AlertEngine with per-service datastore/IAM overlays.
+- **Stable Kubernetes names** after the physical chart split (`control-plane-api`,
+  `control-plane-app`, `data-plane-api`, `firewall`, `watchdog`, shared Secrets /
+  PVCs).
+
+### Removed
+
+- **v1 stack and generation switch.** Deleted `charts/trustgate`, `charts/kafka`,
+  the Kafka helper/connection templates, the control-plane `scheduler`, the
+  legacy data-plane workers / Kafka Connect / ClickHouse-config / Postgres-config
+  templates, and the v1-only `values-external-services.yaml.example`. Removed the
+  `global.platformVersion` / `confirmV2Migration` value switches and the v1
+  migration detection; the `isV2` / `isFull` render guards collapse to always-true
+  aliases (retained so subchart templates compile without a mass rewrite).
+  `global.deploymentMode` is now `hybrid | external` only (the deprecated `full`
+  alias is gone).
+- **v1 secret provisioning.** `create-secrets.sh` no longer creates the v1
+  `trustgate-secrets` (`SERVER_SECRET_KEY`, per-service `DATABASE_*`) or the
+  external-Kafka SASL/TLS Secrets. `TRUSTGATE_JWT_SECRET` (the control-plane ↔
+  gateway integration key) remains in `control-plane-secrets`.
+- **v1 automation rows/inputs.** `scripts/release-images-markdown.sh` and
+  `.github/workflows/bump-images.yml` drop the TrustGate, Kafka, scheduler,
+  data-plane-workers, and Kafka-Connect images/inputs and now reference only the
+  unprefixed v2 chart paths.
 
 ### Fixed
 
@@ -49,49 +92,6 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ### Changed
 
-- **External control-plane-app defaults `AUTH_EMAIL_FORCE_ENV=true`.** On-prem
-  installs prefer platform env email (`AUTH_EMAIL_PROVIDER` / SES / SMTP /
-  Resend) over per-org `TeamAuthConfig` in the DB. Opt out with
-  `control-plane-app.controlPlane.components.app.config.authEmailForceEnv: "false"`.
-  Subchart `control-plane-app` `0.1.1 → 0.1.2`.
-- **Image bumps (AR latest):** control-plane-app `v1.94.1 → v1.97.0`,
-  agentgateway `v0.7.0 → v0.8.0`, trustguard `v0.12.1 → v0.13.1`,
-  datacore `v0.8.0 → v0.10.0`. Subchart patches:
-  `control-plane-app` `0.1.2 → 0.1.3`, `agentgateway` / `trustguard`
-  `0.1.12 → 0.1.13`, `datacore` `0.1.5 → 0.1.6`.
-- **control-plane-app always sets `DEPLOYMENT_MODE=external`.** Matches the
-  Next.js app contract (`saas` | `external`); unset would resolve to SaaS
-  behavior. Safe to hardcode because this subchart only renders in external
-  mode. Subchart `control-plane-app` `0.1.3 → 0.1.4`.
-
-## [2.2.0] — 2026-07-16
-
-Chart `2.2.0` is the first **v2-only** release. Legacy v1 (TrustGate/Kafka) is no
-longer part of this chart; it is maintained solely on the `v1.14.x` release line.
-v1 users must pin `helm install ... --version ~1.14.0`.
-
-### Removed
-
-- **v1 stack and generation switch.** Deleted `charts/trustgate`, `charts/kafka`,
-  the Kafka helper/connection templates, the control-plane `scheduler`, the
-  legacy data-plane workers / Kafka Connect / ClickHouse-config / Postgres-config
-  templates, and the v1-only `values-external-services.yaml.example`. Removed the
-  `global.platformVersion` / `confirmV2Migration` value switches and the v1
-  migration detection; the `isV2` / `isFull` render guards collapse to always-true
-  aliases (retained so subchart templates compile without a mass rewrite).
-  `global.deploymentMode` is now `hybrid | external` only (the deprecated `full`
-  alias is gone).
-- **v1 secret provisioning.** `create-secrets.sh` no longer creates the v1
-  `trustgate-secrets` (`SERVER_SECRET_KEY`, per-service `DATABASE_*`) or the
-  external-Kafka SASL/TLS Secrets. `TRUSTGATE_JWT_SECRET` (the control-plane ↔
-  gateway integration key) remains in `control-plane-secrets`.
-- **v1 automation rows/inputs.** `scripts/release-images-markdown.sh` and
-  `.github/workflows/bump-images.yml` drop the TrustGate, Kafka, scheduler,
-  data-plane-workers, and Kafka-Connect images/inputs and now reference only the
-  unprefixed v2 chart paths.
-
-### Changed
-
 - **Physical chart split and rename.** `charts/neuraltrust-control-plane` split
   into `charts/control-plane-api` and `charts/control-plane-app` (external only);
   the v2 read shim extracted from `charts/neuraltrust-data-plane` into
@@ -109,18 +109,32 @@ v1 users must pin `helm install ... --version ~1.14.0`.
   `global.postgresql` / `global.redis` are the sole datastore deploy gates.
 - **v2-only docs and rules.** README, deployment/observability/SECRETS docs,
   NOTES, examples, and Cursor rules rewritten as v2-only with a support note
-  pointing v1 users at the `v1.14.x` line. `Chart.yaml` set to `2.2.0`.
+  pointing v1 users at the `v1.14.x` line. `Chart.yaml` set to `2.0.0`.
 - **v2-only render suite.** `scripts/test-helm-render.sh` rewritten to cover
   minimal hybrid, hybrid external datastores, external per-service IAM, the new
   value roots, absence of the v1 stack, and stable Kubernetes names after the
   physical moves.
+- **External control-plane-app defaults `AUTH_EMAIL_FORCE_ENV=true`.** On-prem
+  installs prefer platform env email (`AUTH_EMAIL_PROVIDER` / SES / SMTP /
+  Resend) over per-org `TeamAuthConfig` in the DB. Opt out with
+  `control-plane-app.controlPlane.components.app.config.authEmailForceEnv: "false"`.
+  Subchart `control-plane-app` `0.1.1 → 0.1.2`.
+- **control-plane-app always sets `DEPLOYMENT_MODE=external`.** Matches the
+  Next.js app contract (`saas` | `external`); unset would resolve to SaaS
+  behavior. Safe to hardcode because this subchart only renders in external
+  mode. Subchart `control-plane-app` `0.1.3 → 0.1.4`.
+- **Image bumps (AR latest for GA):** control-plane-app `v1.97.0`,
+  agentgateway `v0.10.3`, trustguard `v0.13.3`, datacore `v0.11.0`,
+  data-plane-api `v1.41.0`, control-plane-api `v1.23.0`, firewall `v2.14.0`,
+  watchdog `v0.13.1`, alertengine `v0.4.5`, dataagent `v0.1.2`. Subchart patches
+  for this refresh: `agentgateway` `0.1.14 → 0.1.15`, `trustguard`
+  `0.1.15 → 0.1.16`, `datacore` `0.1.6 → 0.1.7`.
 
 ## [v2.1.0] — 2026-07-16
 
-> **Pre-release note.** Chart `2.x` has not shipped to customers yet, so this
-> release keeps the `2.1.0` number even though the hybrid contract below is
-> breaking relative to earlier `2.0`/`2.1` drafts (shared-writer init Job,
-> opt-in ClickStack). Treat this as the first deployable `2.1.0`.
+> **Pre-release note (superseded by [2.0.0]).** Interim tag cut before customer
+> GA. The hybrid contract below is historical; install chart `2.0.0` for the
+> official v2-only release.
 
 Chart 2.1.0 simplifies the Platform v2 hybrid contract to "one Postgres block, one Redis block, one ClickStack token" and reorganizes umbrella-side value overlays around unprefixed root keys.
 
