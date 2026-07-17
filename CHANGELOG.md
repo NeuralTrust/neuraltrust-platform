@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.0.2] — 2026-07-17
+
 ### Changed
 
 - **DataCore `v0.12.1` + RDS IAM auth.** Bumped the default image to `v0.12.1`.
