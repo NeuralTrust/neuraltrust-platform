@@ -96,6 +96,10 @@ assert_contains "$out1" 'name: trustguard-data-plane' \
   "hybrid: trustguard data-plane renders"
 assert_contains "$out1" 'name: data-plane-api' \
   "hybrid: data-plane-api shim renders"
+assert_not_contains "$out1" 'name: control-plane-app' \
+  "hybrid: control-plane-app must not render (SaaS-side)"
+assert_not_contains "$out1" 'name: control-plane-api' \
+  "hybrid: control-plane-api must not render (SaaS-side)"
 
 # ClickStack fail-closed
 blue "==> Scenario 1b: ClickStack token missing must fail (fail-closed)"

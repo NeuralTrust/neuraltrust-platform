@@ -1,4 +1,5 @@
-{{- /* platform-v2: App UI stays SaaS-side in v2 hybrid; rendered in v1 and v2 external */ -}}
+{{- /* platform-v2: App UI stays SaaS-side in hybrid; rendered only in external. */ -}}
+{{- if eq (include "control-plane-app.enabled" .) "true" }}
 
 {{- $gkeBackendConfigName := include "neuraltrust-platform.service.gkeBackendConfigName" (dict "global" .Values.global "localName" "control-plane-app-backendconfig") }}
 {{- $gcp := default dict (default dict .Values.global.ingress).gcp }}
@@ -216,4 +217,5 @@ spec:
     {{- end }}
     insecureEdgeTerminationPolicy: {{ if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.ingress .Values.controlPlane.components.app.ingress.tls .Values.controlPlane.components.app.ingress.tls.insecureEdgeTerminationPolicy }}{{ .Values.controlPlane.components.app.ingress.tls.insecureEdgeTerminationPolicy }}{{ else }}Redirect{{ end }}
     {{- end }}
+{{- end }}
 {{- end }}
