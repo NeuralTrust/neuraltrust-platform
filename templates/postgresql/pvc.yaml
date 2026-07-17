@@ -1,0 +1,29 @@
+{{- /*
+Umbrella-owned PVC for in-cluster PostgreSQL. Name and storageClass mirror the
+original subchart PVC exactly so live clusters retain their volume.
+*/}}
+{{- if include "neuraltrust-platform.postgresql.deploy" . }}
+{{- $pg := default dict (default dict .Values.global).postgresql }}
+{{- $persist := default dict $pg.persistence }}
+{{- if $persist.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: control-plane-postgresql-pvc
+  labels:
+    app: control-plane-postgresql
+  {{- if $persist.preserveOnDelete | default true }}
+  annotations:
+    helm.sh/resource-policy: keep
+  {{- end }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- if $persist.storageClass }}
+  storageClassName: {{ $persist.storageClass }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $persist.size | default "10Gi" }}
+{{- end }}
+{{- end }}

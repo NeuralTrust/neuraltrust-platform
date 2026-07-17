@@ -1,0 +1,132 @@
+{{- /*
+Umbrella-owned in-cluster PostgreSQL (control-plane-postgresql). Resource
+name, selectors, and PVC name are preserved bit-for-bit so live clusters
+upgrade in place.
+*/}}
+{{- if include "neuraltrust-platform.postgresql.deploy" . }}
+{{- $pg := default dict (default dict .Values.global).postgresql }}
+{{- $img := default dict $pg.image }}
+{{- $securityHardening := true }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: control-plane-postgresql
+  labels:
+    app: control-plane-postgresql
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: control-plane-postgresql
+  template:
+    metadata:
+      labels:
+        app: control-plane-postgresql
+    spec:
+      {{- if not (include "neuraltrust-platform.isOpenshift" .) }}
+      securityContext:
+        fsGroup: 999
+        runAsUser: 999
+        runAsGroup: 999
+        runAsNonRoot: true
+      {{- end }}
+      {{- include "neuraltrust-platform.postgresql.imagePullSecrets" . | nindent 6 }}
+      containers:
+      - name: postgresql
+        image: {{ include "neuraltrust-platform.image" (dict "repository" $img.repository "tag" $img.tag "global" .Values.global) | quote }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          {{- if $securityHardening }}
+          readOnlyRootFilesystem: true
+          {{- end }}
+          capabilities:
+            drop:
+              - ALL
+          runAsNonRoot: true
+          {{- if not (include "neuraltrust-platform.isOpenshift" .) }}
+          runAsUser: 999
+          runAsGroup: 999
+          {{- end }}
+          seccompProfile:
+            type: RuntimeDefault
+        imagePullPolicy: {{ $img.pullPolicy | default "Always" }}
+        ports:
+        - containerPort: 5432
+          name: postgresql
+        env:
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: postgresql-secrets
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgresql-secrets
+              key: POSTGRES_PASSWORD
+        - name: POSTGRES_DB
+          valueFrom:
+            secretKeyRef:
+              name: postgresql-secrets
+              key: POSTGRES_DB
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        - name: POSTGRES_HOST_AUTH_METHOD
+          value: "md5"
+        {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
+        volumeMounts:
+        - name: postgresql-data
+          mountPath: /var/lib/postgresql/data
+        - name: tmp
+          mountPath: /tmp
+        - name: run-postgresql
+          mountPath: /var/run/postgresql
+        resources:
+            {{- if $pg.resources }}
+            {{- toYaml $pg.resources | nindent 12 }}
+            {{- else }}
+            requests:
+              memory: 512Mi
+              cpu: 250m
+            limits:
+              memory: 1Gi
+              cpu: 500m
+            {{- end }}
+        livenessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - "PGPASSWORD=$POSTGRES_PASSWORD pg_isready -h localhost -p 5432 -U $POSTGRES_USER"
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 10
+          successThreshold: 1
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - "PGPASSWORD=$POSTGRES_PASSWORD pg_isready -h localhost -p 5432 -U $POSTGRES_USER"
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 10
+          successThreshold: 1
+          failureThreshold: 3
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: run-postgresql
+        emptyDir: {}
+      - name: postgresql-data
+        {{- $persist := default dict $pg.persistence }}
+        {{- if $persist.enabled }}
+        persistentVolumeClaim:
+          claimName: control-plane-postgresql-pvc
+        {{- else }}
+        emptyDir: {}
+        {{- end }}
+      {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" .) | nindent 6 }}
+      {{- include "neuraltrust-platform.tolerations" (dict "ctx" .) | nindent 6 }}
+{{- end }}

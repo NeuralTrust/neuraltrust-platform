@@ -2,7 +2,6 @@
 # ClickStack OTel Collector, DataCore, and AlertEngine render only in this mode.
 
 global:
-  platformVersion: "v2"
   deploymentMode: "external"
   platform: "kubernetes"
   domain: "platform.example.com"
@@ -12,14 +11,8 @@ global:
       enabled: false
 
 infrastructure:
-  postgresql:
-    deploy: true
-  redis:
-    deploy: true
   clickhouse:
     deploy: true
-  kafka:
-    deploy: false
 
 alertengine:
   enabled: true

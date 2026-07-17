@@ -2,12 +2,10 @@ NeuralTrust Platform has been deployed!
 
 {{- if .Values.global.autoGenerateSecrets }}
 Secrets have been auto-generated for this deployment.
-  - SERVER_SECRET_KEY and TRUSTGATE_JWT_SECRET are synchronized.
   - Existing secrets are preserved on upgrades.
   - To view generated secrets: kubectl get secrets -n {{ .Release.Namespace }}
 {{- end }}
 
-{{- $isV2 := eq (include "neuraltrust-platform.isV2" .) "true" }}
 {{- $isExternal := eq (include "neuraltrust-platform.isExternal" .) "true" }}
 {{- $isHybrid := eq (include "neuraltrust-platform.isHybrid" .) "true" }}
 {{- $dataagentEnabled := eq (include "neuraltrust-platform.dataagentEnabled" .) "true" }}
@@ -18,70 +16,40 @@ Secrets have been auto-generated for this deployment.
 {{- end }}
 {{- $ag := .Values.agentgateway | default dict }}
 {{- $mcpEnabled := dig "mcp" "enabled" true $ag }}
+{{- $cpApi := index .Values "control-plane-api" | default dict }}
+{{- $cpApp := index .Values "control-plane-app" | default dict }}
+{{- $dpValues := index .Values "data-plane-api" | default dict }}
 
-{{- if $isV2 }}
 Deployment profile: Platform v2 — {{ if $isExternal }}external (full on-prem: control plane + data plane + self-hosted analytics, no SaaS dependency){{ else }}hybrid (data plane on-prem; control plane in NeuralTrust SaaS){{ end }}.
-{{- end }}
 
+{{- if $isExternal }}
 {{- if .Values.infrastructure.clickhouse.deploy }}
 ClickHouse has been deployed in this release.
 {{- else }}
 Using external ClickHouse at {{ .Values.infrastructure.clickhouse.external.host }}:{{ .Values.infrastructure.clickhouse.external.port }}
 {{- end }}
-
-{{- if not $isV2 }}
-{{- if .Values.infrastructure.kafka.deploy }}
-Kafka has been deployed in this release.
-{{- else }}
-Using external Kafka at {{ .Values.global.kafka.bootstrapServers }}
-{{- end }}
 {{- end }}
 
-{{- if $isV2 }}
-{{- $redis := .Values.infrastructure.redis | default dict }}
-{{- if $redis.deploy }}
+{{- $redisDeploy := true }}
+{{- if hasKey (.Values.global.redis | default dict) "deploy" }}{{- $redisDeploy = .Values.global.redis.deploy }}{{- end }}
+{{- if $redisDeploy }}
 Redis has been deployed in this release (service "redis").
-{{- else if and $redis.external $redis.external.host }}
-Using external Redis at {{ $redis.external.host }}:{{ $redis.external.port }}
-{{- end }}
-{{- end }}
-
-{{- $postgresql := false }}
-{{- $postgresqlHost := "" }}
-{{- $postgresqlPort := "" }}
-{{- $postgresqlDeploy := false }}
-{{- $cpValues := index .Values "neuraltrust-control-plane" }}
-{{- if and $cpValues $cpValues.infrastructure $cpValues.infrastructure.postgresql (hasKey $cpValues.infrastructure.postgresql "deploy") }}
-  {{- $postgresqlDeploy = $cpValues.infrastructure.postgresql.deploy }}
-{{- end }}
-{{- if $postgresqlDeploy }}
-  {{- $postgresql = true }}
-  {{- $postgresqlHost = "control-plane-postgresql" }}
-  {{- $postgresqlPort = "5432" }}
-{{- else if and $cpValues $cpValues.controlPlane $cpValues.controlPlane.components $cpValues.controlPlane.components.postgresql $cpValues.controlPlane.components.postgresql.secrets $cpValues.controlPlane.components.postgresql.secrets.host }}
-  {{- $postgresql = false }}
-  {{- $postgresqlHost = $cpValues.controlPlane.components.postgresql.secrets.host }}
-  {{- if $cpValues.controlPlane.components.postgresql.secrets.port }}
-    {{- $postgresqlPort = $cpValues.controlPlane.components.postgresql.secrets.port }}
-  {{- else }}
-    {{- $postgresqlPort = "5432" }}
-  {{- end }}
-{{- end }}
-{{- if $postgresql }}
-PostgreSQL has been deployed in this release.
-{{- else if $postgresqlHost }}
-Using external PostgreSQL at {{ $postgresqlHost }}:{{ $postgresqlPort }}
-{{- else }}
-PostgreSQL configuration not specified.
+{{- else if .Values.global.redis.host }}
+Using external Redis at {{ .Values.global.redis.host }}:{{ .Values.global.redis.port }}
 {{- end }}
 
-{{- if $isV2 }}
-{{- /* ============================ v2 stack ============================ */}}
+{{- $pgDeploy := true }}
+{{- if hasKey (.Values.global.postgresql | default dict) "deploy" }}{{- $pgDeploy = .Values.global.postgresql.deploy }}{{- end }}
+{{- if $pgDeploy }}
+PostgreSQL has been deployed in this release (service "control-plane-postgresql").
+{{- else if .Values.global.postgresql.host }}
+Using external PostgreSQL at {{ .Values.global.postgresql.host }}:{{ .Values.global.postgresql.port }}
+{{- end }}
 
 Enabled v2 components:
   - AgentGateway proxy{{ if $mcpEnabled }} + MCP server{{ end }} (runtime data plane)
   - TrustGuard runtime (data plane)
-  - data-plane-api (temporary analytics shim over ClickHouse)
+  - data-plane-api (analytics shim)
 {{- if $dataagentEnabled }}
   - DataAgent (bridges local reads to the NeuralTrust SaaS control plane)
 {{- end }}
@@ -89,10 +57,10 @@ Enabled v2 components:
   - AgentGateway Admin + TrustGuard Control Plane (on-prem control plane)
   - Control Plane API + App (on-prem console)
   - DataCore + ClickStack OTel Collector (self-hosted analytics)
-  - AlertEngine (api + worker)
+  - AlertEngine
 {{- end }}
 {{- if .Values.trustlens.enabled }}
-  - TrustLens worker{{ if $isExternal }} + API{{ end }}
+  - TrustLens
 {{- end }}
 
 {{- if and $isHybrid (not $dataagentEnabled) }}
@@ -138,13 +106,13 @@ Ingress endpoints:
 {{- else }}
   - TrustGuard Admin:     kubectl get ingress trustguard-admin -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].{{ $ipField }}}'
 {{- end }}
-{{- $cpApiHost := include "neuraltrust-platform.ingress.host" (dict "host" (dig "controlPlane" "components" "api" "host" "" ($cpValues | default dict)) "prefix" "api" "global" .Values.global) }}
+{{- $cpApiHost := include "neuraltrust-platform.ingress.host" (dict "host" (dig "controlPlane" "components" "api" "host" "" $cpApi) "prefix" "api" "global" .Values.global) }}
 {{- if $cpApiHost }}
   - Control Plane API:    https://{{ $cpApiHost }}
 {{- else }}
   - Control Plane API:    kubectl get ingress control-plane-api-ingress -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].{{ $ipField }}}'
 {{- end }}
-{{- $cpAppHost := include "neuraltrust-platform.ingress.host" (dict "host" (dig "controlPlane" "components" "app" "host" "" ($cpValues | default dict)) "prefix" "app" "global" .Values.global) }}
+{{- $cpAppHost := include "neuraltrust-platform.ingress.host" (dict "host" (dig "controlPlane" "components" "app" "host" "" $cpApp) "prefix" "app" "global" .Values.global) }}
 {{- if $cpAppHost }}
   - Control Plane App:    https://{{ $cpAppHost }}
 {{- else }}
@@ -159,89 +127,11 @@ Ingress endpoints:
 {{- end }}
 {{- end }}
 {{- end }}
-{{- $dpValues := index .Values "neuraltrust-data-plane" }}
-{{- $dpApiHost := include "neuraltrust-platform.ingress.host" (dict "host" (dig "dataPlane" "components" "api" "host" "" ($dpValues | default dict)) "prefix" "data-plane-api" "global" .Values.global) }}
+{{- $dpApiHost := include "neuraltrust-platform.ingress.host" (dict "host" (dig "dataPlane" "components" "api" "host" "" $dpValues) "prefix" "data-plane-api" "global" .Values.global) }}
 {{- if $dpApiHost }}
   - Data Plane API:       https://{{ $dpApiHost }}
 {{- else }}
   - Data Plane API:       kubectl get ingress data-plane-api -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].{{ $ipField }}}'
-{{- end }}
-
-{{- else }}
-{{- /* ============================ v1 stack ============================ */}}
-{{- $dpValues := index .Values "neuraltrust-data-plane" }}
-{{- if and $dpValues $dpValues.dataPlane $dpValues.dataPlane.enabled }}
-NeuralTrust Data Plane is enabled.
-{{- end }}
-
-{{- if and $cpValues $cpValues.controlPlane $cpValues.controlPlane.enabled }}
-NeuralTrust Control Plane is enabled.
-{{- end }}
-
-{{- if .Values.trustgate.enabled }}
-TrustGate is enabled.
-{{- end }}
-
-Ingress endpoints:
-  kubectl get ingress -n {{ .Release.Namespace }}
-{{- if .Values.trustgate.enabled }}
-{{- if .Values.trustgate.ingress.enabled }}
-  {{- $tgCpHost := include "neuraltrust-platform.ingress.host" (dict "host" .Values.trustgate.ingress.controlPlane.host "prefix" .Values.trustgate.ingress.controlPlane.hostPrefix "global" .Values.global) }}
-  {{- $tgDpHost := include "neuraltrust-platform.ingress.host" (dict "host" .Values.trustgate.ingress.dataPlane.host "prefix" .Values.trustgate.ingress.dataPlane.hostPrefix "global" .Values.global) }}
-  {{- $tgActHost := include "neuraltrust-platform.ingress.host" (dict "host" .Values.trustgate.ingress.actions.host "prefix" .Values.trustgate.ingress.actions.hostPrefix "global" .Values.global) }}
-  {{- if $tgCpHost }}
-  - TrustGate Admin:   https://{{ $tgCpHost }}
-  {{- else }}
-  - TrustGate Admin:   kubectl get ingress trustgate-admin -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].{{ $ipField }}}'
-  {{- end }}
-  {{- if $tgDpHost }}
-  - TrustGate Gateway: https://{{ $tgDpHost }}
-  {{- else }}
-  - TrustGate Gateway: kubectl get ingress trustgate-gateway -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].{{ $ipField }}}'
-  {{- end }}
-  {{- if $tgActHost }}
-  - TrustGate Actions: https://{{ $tgActHost }}
-  {{- else }}
-  - TrustGate Actions: kubectl get ingress trustgate-actions -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].{{ $ipField }}}'
-  {{- end }}
-{{- end }}
-{{- end }}
-{{- if and $cpValues $cpValues.controlPlane $cpValues.controlPlane.enabled }}
-{{- if and $cpValues.controlPlane.components $cpValues.controlPlane.components.api $cpValues.controlPlane.components.api.ingress $cpValues.controlPlane.components.api.ingress.enabled }}
-  {{- $cpApiHost := include "neuraltrust-platform.ingress.host" (dict "host" $cpValues.controlPlane.components.api.host "prefix" $cpValues.controlPlane.components.api.hostPrefix "global" .Values.global) }}
-  {{- if $cpApiHost }}
-  - Control Plane API: https://{{ $cpApiHost }}
-  {{- else }}
-  - Control Plane API: kubectl get ingress control-plane-api-ingress -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].{{ $ipField }}}'
-  {{- end }}
-{{- end }}
-{{- if and $cpValues.controlPlane.components $cpValues.controlPlane.components.app $cpValues.controlPlane.components.app.ingress $cpValues.controlPlane.components.app.ingress.enabled }}
-  {{- $cpAppHost := include "neuraltrust-platform.ingress.host" (dict "host" $cpValues.controlPlane.components.app.host "prefix" $cpValues.controlPlane.components.app.hostPrefix "global" .Values.global) }}
-  {{- if $cpAppHost }}
-  - Control Plane App: https://{{ $cpAppHost }}
-  {{- else }}
-  - Control Plane App: kubectl get ingress control-plane-app-ingress -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].{{ $ipField }}}'
-  {{- end }}
-{{- end }}
-{{- if and $cpValues.controlPlane.components $cpValues.controlPlane.components.scheduler $cpValues.controlPlane.components.scheduler.ingress $cpValues.controlPlane.components.scheduler.ingress.enabled }}
-  {{- $cpSchedHost := include "neuraltrust-platform.ingress.host" (dict "host" $cpValues.controlPlane.components.scheduler.host "prefix" $cpValues.controlPlane.components.scheduler.hostPrefix "global" .Values.global) }}
-  {{- if $cpSchedHost }}
-  - Scheduler:         https://{{ $cpSchedHost }}
-  {{- else }}
-  - Scheduler:         kubectl get ingress control-plane-scheduler-ingress -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].{{ $ipField }}}'
-  {{- end }}
-{{- end }}
-{{- end }}
-{{- if and $dpValues $dpValues.dataPlane $dpValues.dataPlane.enabled }}
-{{- if and $dpValues.dataPlane.components $dpValues.dataPlane.components.api $dpValues.dataPlane.components.api.ingress $dpValues.dataPlane.components.api.ingress.enabled }}
-  {{- $dpApiHost := include "neuraltrust-platform.ingress.host" (dict "host" $dpValues.dataPlane.components.api.host "prefix" $dpValues.dataPlane.components.api.hostPrefix "global" .Values.global) }}
-  {{- if $dpApiHost }}
-  - Data Plane API:    https://{{ $dpApiHost }}
-  {{- else }}
-  - Data Plane API:    kubectl get ingress data-plane-api-ingress -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].{{ $ipField }}}'
-  {{- end }}
-{{- end }}
-{{- end }}
 {{- end }}
 
 {{- if eq $platform "aws" }}
@@ -256,80 +146,5 @@ Ingress endpoints:
 
 To get the status of your deployment, run:
   kubectl get pods -n {{ .Release.Namespace }}
-
-To view logs for specific components:
-{{- if $isV2 }}
-{{- if $isExternal }}
-  # AgentGateway Admin
-  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=agentgateway,app.kubernetes.io/component=control-plane
-{{- end }}
-  # AgentGateway Proxy
-  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=agentgateway,app.kubernetes.io/component=data-plane
-{{- if $mcpEnabled }}
-  # AgentGateway MCP
-  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=agentgateway,app.kubernetes.io/component=mcp
-{{- end }}
-  # TrustGuard Runtime
-  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=trustguard,app.kubernetes.io/component=data-plane
-{{- if $isExternal }}
-  # TrustGuard Control Plane
-  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=trustguard,app.kubernetes.io/component=control-plane
-  # Control Plane API
-  kubectl logs -n {{ .Release.Namespace }} -l app=control-plane-api
-  # Control Plane App
-  kubectl logs -n {{ .Release.Namespace }} -l app=control-plane-app
-  # DataCore
-  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=datacore
-  # ClickStack OTel Collector
-  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=clickstack-otel-collector
-  # AlertEngine
-  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=alertengine
-{{- end }}
-{{- if $dataagentEnabled }}
-  # DataAgent
-  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=dataagent
-{{- end }}
-{{- if .Values.trustlens.enabled }}
-  # TrustLens
-  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=trustlens
-{{- end }}
-  # Data Plane API (analytics shim)
-  kubectl logs -n {{ .Release.Namespace }} -l app=api
-{{- else }}
-{{- if and $cpValues $cpValues.controlPlane $cpValues.controlPlane.enabled }}
-  # NeuralTrust Control Plane
-  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=neuraltrust-control-plane,app.kubernetes.io/instance={{ .Release.Name }}
-{{- end }}
-{{- $dpValues := index .Values "neuraltrust-data-plane" }}
-{{- if and $dpValues $dpValues.dataPlane $dpValues.dataPlane.enabled }}
-  # NeuralTrust Data Plane
-  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=neuraltrust-data-plane,app.kubernetes.io/instance={{ .Release.Name }}
-{{- end }}
-{{- if .Values.trustgate.enabled }}
-  # TrustGate Control Plane
-  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=trustgate,app.kubernetes.io/instance={{ .Release.Name }},component=control-plane
-  # TrustGate Data Plane
-  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=trustgate,app.kubernetes.io/instance={{ .Release.Name }},component=data-plane
-{{- end }}
-{{- end }}
-{{- if .Values.infrastructure.clickhouse.deploy }}
-  # ClickHouse
-  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=clickhouse,app.kubernetes.io/instance={{ .Release.Name }}
-{{- end }}
-{{- if $isV2 }}
-{{- $redis := .Values.infrastructure.redis | default dict }}
-{{- if $redis.deploy }}
-  # Redis
-  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=redis
-{{- end }}
-{{- else }}
-{{- if .Values.infrastructure.kafka.deploy }}
-  # Kafka
-  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=kafka,app.kubernetes.io/instance={{ .Release.Name }}
-{{- end }}
-{{- end }}
-
-To view logs for all pods in the namespace:
-  kubectl logs -n {{ .Release.Namespace }} --all-containers=true -l app.kubernetes.io/instance={{ .Release.Name }}
 
 For more information, see the README.md file.

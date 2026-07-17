@@ -1,0 +1,23 @@
+{{- /*
+Umbrella-owned Service for in-cluster PostgreSQL. Name and selector match the
+original subchart Service exactly (control-plane-postgresql -> app label).
+*/}}
+{{- if include "neuraltrust-platform.postgresql.deploy" . }}
+{{- $pg := default dict (default dict .Values.global).postgresql }}
+{{- $service := default dict $pg.service }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: control-plane-postgresql
+  labels:
+    app: control-plane-postgresql
+spec:
+  type: {{ $service.type | default "ClusterIP" }}
+  ports:
+  - port: {{ $service.port | default 5432 }}
+    targetPort: postgresql
+    protocol: TCP
+    name: postgresql
+  selector:
+    app: control-plane-postgresql
+{{- end }}

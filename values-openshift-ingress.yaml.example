@@ -2,7 +2,6 @@
 # The referenced TLS Secret must exist in the release namespace.
 
 global:
-  platformVersion: "v2"
   deploymentMode: "hybrid"
   platform: "openshift"
   domain: "apps.example.com"
@@ -17,10 +16,6 @@ global:
       autoGenerate: false
       secretName: "platform-wildcard-tls"
 
-infrastructure:
-  kafka:
-    deploy: false
-
 agentgateway:
   ingress:
     enabled: true
@@ -33,7 +28,7 @@ trustguard:
     tls:
       enabled: true
 
-neuraltrust-data-plane:
+data-plane-api:
   dataPlane:
     components:
       api:

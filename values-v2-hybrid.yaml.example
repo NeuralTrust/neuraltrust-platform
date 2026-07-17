@@ -1,0 +1,98 @@
+# Platform v2 hybrid overlay for a fully-configured deployment.
+# Documents the "one Postgres block, one Redis block, one ClickStack token"
+# hybrid contract. Copy and replace the angle-bracket placeholders with your
+# real values (or reference pre-created Secrets).
+#
+# Never commit real tokens, passwords, or customer identifiers.
+# For the minimal starting point, see values-required.yaml.
+
+global:
+  deploymentMode: "hybrid"
+  platform: "kubernetes" # aws | gcp | azure | openshift | kubernetes
+  domain: "platform.example.com"
+
+  # Mandatory: v2 hybrid always dual-writes AgentGateway + TrustGuard product
+  # data over OTLP to the NeuralTrust SaaS ClickStack collector. The endpoint,
+  # protocol, and TLS are fixed by the chart — supply ONLY the bearer token,
+  # either inline OR by pointing existingSecret.name at a pre-created Secret.
+  # Set enabled: false for an air-gapped install with no OTLP dual-write.
+  clickstack:
+    authToken: "<CLICKSTACK_OTLP_TOKEN>"
+    # existingSecret:
+    #   name: "clickstack-otlp-token"
+    #   key: "OTEL_EXPORTER_OTLP_HEADERS"
+
+  # One shared PostgreSQL block. Every hybrid workload (AgentGateway,
+  # TrustGuard, DataAgent, data-plane-api) reads envFrom the rendered
+  # postgresql-secrets Secret, so all four connect as the same role to the
+  # same database.
+  #
+  # In-cluster (default): leave deploy: true and host/password empty — the
+  # chart renders control-plane-postgresql with user/database = neuraltrust
+  # and a generated password.
+  #
+  # External / managed: set deploy: false and provide host + password (or
+  # existingSecret.name). Pre-create the user and database out-of-band; the
+  # chart never runs CREATE USER from Helm.
+  postgresql:
+    deploy: false
+    host: "<postgres-host>"
+    port: 5432
+    user: "neuraltrust"
+    database: "neuraltrust"
+    password: "<postgres-password>"
+    sslMode: "prefer"
+    # existingSecret:
+    #   name: "my-external-postgres"
+
+  # One shared Redis block. In-cluster default is passwordless on Service
+  # `redis:6379`. For a hosted / TLS-only Redis set deploy: false and
+  # configure host / password / tls / username (or existingSecret.name).
+  redis:
+    deploy: false
+    host: "<redis-host>"
+    port: 6379
+    password: "<redis-password>"
+    # tls: "true"
+    # username: "<redis-acl-user>"
+    # existingSecret:
+    #   name: "my-external-redis"
+
+# DataAgent is enrolment-gated: it renders only when tenantId AND either
+# enrolmentToken OR enrolmentTokenExistingSecret.name are set. Both values
+# are SaaS-issued and must never be inlined into a committed values file —
+# use enrolmentTokenExistingSecret.name in tracked GitOps flows.
+dataagent:
+  tenantId: "<tenant-id>"
+  enrolmentToken: "<enrolment-token>"
+  # enrolmentTokenExistingSecret:
+  #   name: "dataagent-enrolment"
+  #   key: "ENROLMENT_TOKEN"
+
+# Optional config-sync tokens for pulling compiled policy from SaaS control
+# planes. Leave the top-level agentgateway / trustguard blocks off when the
+# data planes should run Postgres-backed instead of config-sync.
+# agentgateway:
+#   configSync:
+#     token: "<agentgateway-config-sync-token>"
+#
+# trustguard:
+#   configSync:
+#     token: "<trustguard-config-sync-token>"
+
+# The temporary data-plane-api read shim. In hybrid it defaults to PostgreSQL
+# (SQL_DATABASE=postgres) and reuses the shared postgresql-secrets, so nothing
+# below is required for the default path.
+# data-plane-api:
+#   dataPlane:
+#     components:
+#       api:
+#         k8sJobs:
+#           enabled: true
+
+trustlens:
+  enabled: false
+
+firewall:
+  firewall:
+    enabled: false

@@ -1,15 +1,11 @@
 # Platform v2
 
-Platform v2 is the default NeuralTrust architecture. Two global values select
-the topology:
+This chart (2.x) is v2-only. One global value selects the topology:
 
 ```yaml
 global:
-  platformVersion: "v2"
   deploymentMode: "hybrid" # hybrid | external
 ```
-
-`full` is a deprecated alias for `external`.
 
 ## Hybrid: default split-plane
 
@@ -23,18 +19,19 @@ path in the customer cluster:
 - optional, enrolment-gated DataAgent
 
 Hybrid does **not** deploy an in-cluster ClickHouse: analytics live in NeuralTrust
-SaaS (the data planes write raw telemetry to PostgreSQL, DataAgent bridges it out,
-and you can optionally also stream product data to a ClickStack collector — see
-below). The temporary `data-plane-api` read shim renders **by default** in hybrid
+SaaS. AgentGateway and TrustGuard **always dual-write** product data over OTLP to
+the NeuralTrust SaaS ClickStack collector (fixed endpoint, protocol, and TLS)
+while ALSO persisting raw payloads to the local PostgreSQL for DataAgent — see
+[the token setup below](#operator-input-clickstack-otlp-token). The temporary `data-plane-api` read shim renders **by default** in hybrid
 and reads from the umbrella-managed **PostgreSQL** (`SQL_DATABASE=postgres`), so no
 ClickHouse is required. Its schema is applied by a `postgres-migrations`
 initContainer (idempotent, advisory-locked). If you instead want it to read from
 an **external/managed ClickHouse**, either set a dotted
-`neuraltrust-data-plane.dataPlane.components.clickhouse.host` (auto-resolves to
+`data-plane-api.dataPlane.components.clickhouse.host` (auto-resolves to
 ClickHouse) or force it with
-`neuraltrust-data-plane.dataPlane.components.api.database.backend: clickhouse`.
+`data-plane-api.dataPlane.components.api.database.backend: clickhouse`.
 The backend can also be pinned to `postgres` explicitly. In-cluster ClickHouse
-deploys only in v2 external (and v1).
+deploys only in external mode.
 
 Leave DataAgent enrolment empty until a tenant identifier and token are issued:
 
@@ -50,29 +47,55 @@ DataAgent renders only when both values are present. It reads only the entitled
 local PostgreSQL data and opens an outbound TLS stream to SaaS DataBridge. It
 has no Ingress or public Service.
 
-### Optional: also stream product data to a ClickStack collector
+### Operator input: ClickStack OTLP token
 
-By default hybrid persists raw AgentGateway/TrustGuard payloads to the local
-PostgreSQL for DataAgent. To ALSO dual-write product data (`meta`/`raw`) over
-OTLP to a ClickStack collector — without dropping the Postgres/DataAgent path —
-enable `global.clickstack`:
+The v2 hybrid ClickStack export is **always on** and targets the NeuralTrust
+SaaS collector:
+
+- **endpoint** `https://clickstack-collector.neuraltrust.ai/v1/logs`
+- **protocol** `http/protobuf`
+- **TLS** enforced (system-root verification; no `OTEL_EXPORTER_OTLP_INSECURE`)
+
+The operator supplies **only** the bearer token — either inline via
+`authToken`, or by pre-creating a Secret and pointing `existingSecret.name` at
+it. Rendering fails when neither is set.
 
 ```yaml
 global:
   clickstack:
-    enabled: true
-    endpoint: "https://clickstack-collector.example.com/v1/logs"
-    protocol: "http/protobuf"
-    insecure: false            # public TLS route; true only for a plaintext in-cluster Service
-    authToken: "<OTLP_AUTH_TOKEN>"  # collector's bearer token
+    authToken: "<CLICKSTACK_OTLP_TOKEN>"
 ```
 
-The endpoint is required when enabled (the public route exposes OTLP/HTTP only,
-port `:4318`). The token is stored solely in the `agentgateway-secrets` /
-`trustguard-secrets` Secret as `OTEL_EXPORTER_OTLP_HEADERS`; with
-`global.preserveExistingSecrets=true`, add that key to the pre-created Secrets
-yourself. External mode always exports to its in-cluster ClickStack collector
-and ignores this block.
+Or reference a pre-created Secret carrying the full OTLP header value:
+
+```yaml
+global:
+  clickstack:
+    existingSecret:
+      name: "clickstack-otlp-token"
+      key: "OTEL_EXPORTER_OTLP_HEADERS"   # optional (default shown)
+```
+
+Create the Secret out-of-band, e.g.:
+
+```bash
+kubectl create secret generic clickstack-otlp-token \
+  --from-literal=OTEL_EXPORTER_OTLP_HEADERS='authorization=<CLICKSTACK_OTLP_TOKEN>'
+```
+
+The inline `authToken` flow stores the header in the chart-managed
+`agentgateway-secrets` / `trustguard-secrets` (`envFrom` picks it up). The
+`existingSecret` flow mounts `OTEL_EXPORTER_OTLP_HEADERS` directly from the
+referenced Secret via `secretKeyRef`, so the chart never sees the value —
+recommended for `preserveExistingSecrets=true` and GitOps flows where `lookup`
+is not available.
+
+**Air-gap escape hatch.** Set `global.clickstack.enabled: false` to skip the
+OTLP dual-write entirely; raw payloads still land in PostgreSQL for DataAgent.
+
+The legacy `endpoint` / `protocol` / `insecure` knobs remain honored as
+deprecated overrides (leave empty for the fixed SaaS defaults). External mode
+always exports to its in-cluster ClickStack collector and ignores this block.
 
 ## External: self-hosted
 
@@ -89,8 +112,11 @@ the self-hosted analytics stack:
 
 DataAgent never renders in external mode. The ClickStack collector is also
 external-only: AgentGateway and TrustGuard load metadata/raw OTLP exporter
-profiles that target it, and it writes the resulting signals to the `otel`
-ClickHouse database.
+profiles that target `http://clickstack-collector.<ns>.svc.cluster.local:4318`
+(OTLP base URL — no `/v1/logs` suffix) and authenticate with
+`OTEL_EXPORTER_OTLP_HEADERS` from `clickstack-collector-secrets` (same token as
+`OTLP_AUTH_TOKEN`). The collector writes signals to the `otel` ClickHouse
+database.
 DataCore serves residency queries and AlertEngine evaluates rules and forwards
 findings to configured SIEM/integration destinations.
 
@@ -116,83 +142,74 @@ NeuralTrust SaaS telemetry egress.
 ## Datastores
 
 PostgreSQL and Redis deploy in-cluster by default in both modes. ClickHouse
-deploys in-cluster only in **external** (and v1) — hybrid keeps analytics in SaaS,
-so no in-cluster ClickHouse renders there. Kafka is not part of Platform v2 and
-never renders.
+deploys in-cluster only in **external** — hybrid keeps analytics in SaaS, so no
+in-cluster ClickHouse renders there.
 
-Hybrid PostgreSQL uses a shared `trustdata` database. The schema/role setup is
-performed by the chart's `v2-postgresql-init` Job (see **Hybrid PostgreSQL
-initialization** below); there is no external SQL script to run. The temporary
-`data-plane-api` read shim also runs on PostgreSQL by default in hybrid: it
-connects with the
-`postgresql-secrets` connection (host/port/user/password/database) and a
-`postgres-migrations` initContainer applies its own schema (`neuraltrust` schema
-+ `tests`/`test_runs` tables). Point it at an external/managed ClickHouse instead
-by setting a dotted `neuraltrust-data-plane.dataPlane.components.clickhouse.host`
-(and its `existingSecret`), or force the backend with
-`neuraltrust-data-plane.dataPlane.components.api.database.backend`. For an
-**external** PostgreSQL, set
-`neuraltrust-data-plane.dataPlane.components.api.database.postgresql.{host,port,user,database}`
-and/or point its `existingSecret` at your own Secret.
+Hybrid PostgreSQL and Redis use ONE shared connection contract driven by two
+top-level blocks in `values.yaml`:
 
-External gives control-plane services separate databases. AlertEngine also owns
-its own PostgreSQL database. In external mode the data-plane API shim stays on
-ClickHouse; ClickStack, DataCore, AlertEngine, and the data-plane API shim share
-the selected ClickHouse credentials through existing Kubernetes Secrets.
+```yaml
+global:
+  postgresql:
+    deploy: true
+    host: ""           # empty + deploy=true -> in-cluster "control-plane-postgresql"
+    port: 5432
+    user: neuraltrust
+    database: neuraltrust
+    password: ""       # auto-generated into postgresql-secrets when empty
+    sslMode: prefer
+    existingSecret:
+      name: ""         # optional; provide a pre-created Secret instead
+  redis:
+    deploy: true
+    host: ""           # empty + deploy=true -> in-cluster "redis"
+    port: 6379
+    password: ""       # in-cluster default is passwordless
+    existingSecret:
+      name: ""
+```
 
-### Hybrid PostgreSQL initialization
+The chart renders two shared Kubernetes Secrets:
 
-The `trustdata` schema/role setup is owned by the chart's `v2-postgresql-init`
-Job. The role layout is **mode-derived** and needs no configuration.
+- `postgresql-secrets` — POSTGRES_* keys **plus** `DB_HOST`, `DB_PORT`, `DB_USER`,
+  `DB_PASSWORD`, `DB_NAME`, `DB_SSL_MODE`, `DATABASE_URL`, `SENSIBLE_PG_DSN`.
+- `redis-secrets` — `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_USERNAME`,
+  `REDIS_TLS`.
 
-**Role layout (`hybridRoleLayout`)**
+Every hybrid workload (AgentGateway, TrustGuard, DataAgent, `data-plane-api`)
+`envFrom`'s these Secrets, so all four connect as the single `neuraltrust` role
+to the shared `neuraltrust` database. There is **no** chart-managed schema/role
+init Job in hybrid — application migrations (already namespaced:
+`trustgate_migration_versions`, `trustguard_migration_versions`) own their tables
+directly. For an external / managed PostgreSQL, the DBA (or Terraform)
+pre-creates the database and role before install; point the chart at it via
+`global.postgresql.deploy: false` + host/user/password (or set
+`global.postgresql.existingSecret.name`). The `data-plane-api` read shim runs on
+PostgreSQL by default in hybrid, sharing the same `postgresql-secrets` — a
+`postgres-migrations` initContainer applies its own schema
+(`neuraltrust` schema + `tests`/`test_runs` tables). Point it at an
+external/managed ClickHouse instead by setting a dotted
+`data-plane-api.dataPlane.components.clickhouse.host` (and its
+`existingSecret`), or force the backend with
+`data-plane-api.dataPlane.components.api.database.backend`.
 
-| Mode | AgentGateway + TrustGuard | DataAgent |
-|---|---|---|
-| **hybrid** (`shared-writer`, default) | Share ONE writer role (`trustdata`) and one schema | Separate read-only role granted `SELECT` on the writer schema |
-| hybrid override (`hybridRoleLayout: separate`) | Each owns a login role and its own schema in `trustdata` | Read-only role granted `SELECT` on both schemas |
-| **external/full** (always `separate`) | Each owns its own per-service database | n/a (DataCore reads ClickHouse) |
-
-In hybrid the default `shared-writer` layout requires released AgentGateway/TrustGate
-and TrustGuard images whose telemetry migrations are namespaced
-(`trustgate_migration_versions` / `trustguard_migration_versions`, present in current
-release images). Set `global.postgresql.hybridRoleLayout: separate` to force the legacy
-per-service layout — for example an existing install that already has per-service-schema
-data, since switching layouts does **not** migrate data. `shared-writer` is hybrid-only
-and rejected in external/full, where control planes own their migrations and keep
-per-service databases. The privilege boundary is enforced by PostgreSQL: the writer role
-owns its schema; DataAgent only ever receives `USAGE` + `SELECT` (current and future
-tables) and never write access.
-
-**Init Job (`initJob.mode`)**
-
-| Value | In-cluster PostgreSQL | External / managed PostgreSQL |
-|---|---|---|
-| `auto` (default) | Runs (creates roles, database, schemas, grants) | Skipped |
-| `enabled` | Runs (local provisioning) | Runs **configure-only**: validates the DBA-created database/roles, then sets schema ownership, `search_path`, and grants — never creates roles nor resets passwords |
-| `disabled` | Never runs | Never runs (the DBA owns schema/`search_path`/grants) |
-
-For managed PostgreSQL with `initJob.mode: enabled`, `postgresql-secrets` must
-carry an **admin** connection (`POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`,
-`POSTGRES_PASSWORD`) able to `CREATE SCHEMA`/`ALTER ROLE ... IN DATABASE`/`GRANT`.
-If your DBAs will not place such a privileged credential in the namespace, set
-`initJob.mode: disabled` and have them apply the equivalent setup manually:
-create the `trustdata` database and login roles, create a writer-owned schema, set
-the writer's `search_path` to it, and grant the reader `USAGE` + `SELECT` (plus
-default privileges) on that schema. In `shared-writer` mode the AgentGateway and
-TrustGuard credentials come from a single `trustdata-secrets` Secret so both
-connect as the same writer role.
+External gives control-plane services separate per-service databases. AlertEngine
+also owns its own PostgreSQL database. In external mode the data-plane API shim
+stays on ClickHouse; ClickStack, DataCore, AlertEngine, and the data-plane API
+shim share the selected ClickHouse credentials through existing Kubernetes
+Secrets. The per-service `agentgateway.database` / `trustguard.database` /
+`trustlens.database` / `alertengine.database` overlays remain the source of truth
+for external mode — `global.postgresql.*` is ignored there.
 
 The data-plane API shim also uses Redis for its evaluation-progress cache
-(`EVALUATION_PROGRESS_BACKEND`): v1 keeps the existing Kafka-backed behavior,
-while v2 points it at the same Redis AgentGateway/TrustGuard use, via
-`neuraltrust-data-plane.dataPlane.components.api.redis` (host/port/password/
-username/tls, plus AWS ElastiCache IAM auth). Set `redis.host` (and
-`password`/`iamAuth`, etc.) there to match `infrastructure.redis.external`
-when `infrastructure.redis.deploy=false`. Redis-backed deployments do not
-receive Kafka client settings. Pooling and batching default to 100 connections
-and 200 keys per MGET; `maxConnections`, `mgetChunkSize`, and the optional
-connect/socket/health-check timeout values under `api.redis` override them.
+(`EVALUATION_PROGRESS_BACKEND`), pointed at the same Redis AgentGateway and
+TrustGuard use via `data-plane-api.dataPlane.components.api.redis`
+(host/port/password/username/tls, plus AWS ElastiCache IAM auth). Set
+`redis.host` (and `password`/`iamAuth`, etc.) there to match
+`infrastructure.redis.external` when `infrastructure.redis.deploy=false`.
+Pooling and batching default to 100 connections and 200 keys per MGET;
+`maxConnections`, `mgetChunkSize`, and the optional connect/socket/health-check
+timeout values under `api.redis` override them.
 
 To use managed datastores, disable each in-cluster component and configure
 service-specific endpoints:
@@ -206,8 +223,6 @@ infrastructure:
   redis:
     deploy: false
   clickhouse:
-    deploy: false
-  kafka:
     deploy: false
 ```
 
@@ -225,61 +240,16 @@ Do not confuse the two collectors:
 
 Disabling hosted export does not disable the external-mode ClickStack pipeline.
 
-## Retired legacy components
+## Legacy v1
 
-Under v2:
-
-- legacy TrustGate is replaced by AgentGateway
-- Kafka, Kafka Connect, and Kafka workers are disabled
-- the legacy scheduler is disabled
-- AISPM is retired
-- the SIEM Connector subchart is retired
-- AlertEngine owns supported SIEM and integration forwarding
-
-The legacy data-plane subchart remains only for the temporary API read shim;
-its worker and Kafka Connect workloads remain off.
-
-## Legacy v1 appendix
-
-Existing v1 deployments must pin:
-
-```yaml
-global:
-  platformVersion: "v1"
-```
-
-v1 remains available for compatibility and is the only generation that can
-render legacy TrustGate and Kafka workloads. New deployments should use v2.
-
-For a live v1 release, chart 2.0 detects legacy workloads and refuses to replace
-them silently. First remove any retired AISPM/SIEM add-ons on the current 1.x
-chart and back up stateful services. Then choose one upgrade path:
-
-```yaml
-# Keep the existing stack.
-global:
-  platformVersion: "v1"
-```
-
-```yaml
-# Explicitly authorize the reviewed v1-to-v2 workload replacement.
-global:
-  platformVersion: "v2"
-  confirmV2Migration: true
-```
-
-Keep `confirmV2Migration: true` for the first v2 reconciliation so newly
-introduced v2 Secrets can be created safely. Remove it after the v2 release is
-healthy; subsequent upgrades reuse the live Secrets through `lookup`. Renderers
-without cluster `lookup` access must pre-create the v2 Secrets and set
-`global.preserveExistingSecrets: true`; confirmation alone never authorizes
-random Secret regeneration.
+v1 (legacy TrustGate/Kafka) is maintained only on the `v1.14.x` release line;
+pin `--version ~1.14.0` to install it. This chart (2.x) is v2-only.
 
 ## Operator examples
 
-- `values-required.yaml`: minimal v2 hybrid
-- `values-v2.yaml.example`: documented v2 hybrid
+- `values-required.yaml`: minimal hybrid
+- `values-v2.yaml.example`: documented hybrid
+- `values-v2-hybrid.yaml.example`: hybrid topology overlay
 - `values-v2-external.yaml.example`: minimal external
 - `values-all-deployed.yaml.example`: external plus supported optional components
 - `values-v2-managed-datastores.yaml.example`: external managed datastores
-- `values-v1-legacy.yaml.example`: explicit v1

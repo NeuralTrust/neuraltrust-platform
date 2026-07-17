@@ -1,19 +1,14 @@
 {{/*
-platform-v2 in-cluster Redis (umbrella-managed parent template).
-Renders only under global.platformVersion=v2 when infrastructure.redis.deploy is
-true (default). Service name is the stable "redis" so agentgateway/trustguard
-default their redis.host to it.
-*/}}
-
-{{/*
-Returns "true" (non-empty) when the v2 in-cluster Redis should render.
+In-cluster Redis (umbrella-managed parent template). Renders when
+`global.redis.deploy` is true (default). Service name is the stable "redis" so
+AgentGateway / TrustGuard / DataAgent / data-plane-api default to it.
 */}}
 {{- define "neuraltrust-platform.v2Redis.enabled" -}}
-{{- $isV2 := eq (include "neuraltrust-platform.isV2" .) "true" -}}
-{{- $redis := default dict (default dict .Values.infrastructure).redis -}}
+{{- $global := default dict .Values.global -}}
+{{- $globalRedis := default dict $global.redis -}}
 {{- $deploy := true -}}
-{{- if hasKey $redis "deploy" }}{{- $deploy = $redis.deploy -}}{{- end -}}
-{{- if and $isV2 $deploy }}true{{- end -}}
+{{- if hasKey $globalRedis "deploy" -}}{{- $deploy = $globalRedis.deploy -}}{{- end -}}
+{{- if $deploy }}true{{- end -}}
 {{- end -}}
 
 {{- define "neuraltrust-platform.v2Redis.labels" -}}

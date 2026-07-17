@@ -1,0 +1,586 @@
+{{- /* platform-v2: App UI stays SaaS-side in v2 hybrid; rendered in v1 and v2 external */ -}}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: control-plane-app
+  labels:
+    app: control-plane-app
+spec:
+  {{- $replicas := 1 }}
+  {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.replicaCount }}
+    {{- $replicas = .Values.controlPlane.components.app.replicaCount }}
+  {{- end }}
+  replicas: {{ $replicas }}
+  selector:
+    matchLabels:
+      app: control-plane-app
+  template:
+    metadata:
+      labels:
+        app: control-plane-app
+    spec:
+      serviceAccountName: {{ include "control-plane.serviceAccountName" . }}
+      {{- $imagePullSecret := "gcr-secret" }}
+      {{- if .Values.imagePullSecrets }}
+        {{- $imagePullSecret = .Values.imagePullSecrets }}
+      {{- else if and .Values.controlPlane (hasKey .Values.controlPlane "imagePullSecrets") }}
+        {{- /* Assign unconditionally so "none"/"" opt out (the guard below suppresses them). */}}
+        {{- $imagePullSecret = .Values.controlPlane.imagePullSecrets }}
+      {{- end }}
+      {{- if and $imagePullSecret (ne $imagePullSecret "none") (ne $imagePullSecret "") }}
+      imagePullSecrets:
+        - name: {{ $imagePullSecret }}
+      {{- end }}
+      {{- $pgSecretName := "postgresql-secrets" }}
+      {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.postgresql .Values.controlPlane.components.postgresql.secrets .Values.controlPlane.components.postgresql.secrets.name }}
+        {{- $pgSecretName = .Values.controlPlane.components.postgresql.secrets.name }}
+      {{- end }}
+      {{- if or (include "neuraltrust-platform.customCaCert.enabled" .) (and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.extraVolumes) }}
+      volumes:
+      {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 6 }}
+      {{- with .Values.controlPlane.components.app.extraVolumes }}
+      {{- include "neuraltrust-platform.extraVolumes" (dict "items" .) | nindent 6 }}
+      {{- end }}
+      {{- end }}
+      initContainers:
+      - name: init-db
+        {{- $initImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
+        {{- $initImageTag := "v1.97.0" }}
+        {{- $initPullPolicy := "Always" }}
+        {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.image }}
+          {{- if .Values.controlPlane.components.app.image.repository }}{{- $initImageRepo = .Values.controlPlane.components.app.image.repository }}{{- end }}
+          {{- if .Values.controlPlane.components.app.image.tag }}{{- $initImageTag = .Values.controlPlane.components.app.image.tag }}{{- end }}
+          {{- if .Values.controlPlane.components.app.image.pullPolicy }}{{- $initPullPolicy = .Values.controlPlane.components.app.image.pullPolicy }}{{- end }}
+        {{- end }}
+        image: {{ include "control-plane.image" (dict "repository" $initImageRepo "tag" $initImageTag "global" .Values.global) | quote }}
+        imagePullPolicy: "{{ $initPullPolicy }}"
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          export PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING=true
+          export PRISMA_GENERATE_SKIP_AUTOINSTALL=true
+          export PRISMA_SKIP_POSTINSTALL_GENERATE=true
+
+          # Wait for PostgreSQL to be ready
+          echo "Waiting for PostgreSQL..."
+          echo "POSTGRES_HOST: $POSTGRES_HOST"
+          echo "POSTGRES_PORT: $POSTGRES_PORT"
+          echo "POSTGRES_DATABASE: $POSTGRES_DATABASE"
+          echo "POSTGRES_USER: $POSTGRES_USER"
+
+          # Check if PostgreSQL is ready
+          until nc -z -w 2 $POSTGRES_HOST $POSTGRES_PORT; do
+            echo "Waiting for PostgreSQL to be ready..."
+            sleep 2
+          done
+
+          echo "PostgreSQL is ready, running database migrations..."
+
+          # Set Prisma environment variables to avoid network access
+          export PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING=true
+          export PRISMA_GENERATE_SKIP_AUTOINSTALL=true
+          export PRISMA_SKIP_POSTINSTALL_GENERATE=true
+
+          # IAM: Prisma's engine needs a password in the URL. Mint a short-lived
+          # RDS token (scripts/postgres-iam-url.mjs; app image v1.93.0+).
+          if [ "${POSTGRES_AUTH_MODE:-password}" = "iam" ]; then
+            echo "Minting RDS IAM auth token for Prisma migrations..."
+            export POSTGRES_PRISMA_URL="$(node scripts/postgres-iam-url.mjs)"
+            export DATABASE_URL="$POSTGRES_PRISMA_URL"
+          fi
+
+          echo "Running Prisma migrations..."
+          if ! npx prisma migrate deploy; then
+            echo "ERROR: Prisma migrations failed!"
+            exit 1
+          fi
+
+          echo "Running Prisma db push..."
+          if ! npx prisma db push; then
+            echo "ERROR: Prisma db push failed!"
+            exit 1
+          fi
+
+          echo "Running Prisma seed..."
+          if ! node prisma/seed.js; then
+            echo "ERROR: Prisma seed failed!"
+            exit 1
+          fi
+
+          echo "Database migrations completed successfully"
+        env:
+        - name: POSTGRES_HOST
+          valueFrom:
+            secretKeyRef:
+              key: POSTGRES_HOST
+              name: {{ $pgSecretName }}
+        - name: POSTGRES_PORT
+          valueFrom:
+            secretKeyRef:
+              key: POSTGRES_PORT
+              name: {{ $pgSecretName }}
+        - name: POSTGRES_DATABASE
+          valueFrom:
+            secretKeyRef:
+              key: POSTGRES_DB
+              name: {{ $pgSecretName }}
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              key: POSTGRES_USER
+              name: {{ $pgSecretName }}
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: POSTGRES_PASSWORD
+              name: {{ $pgSecretName }}
+              optional: true
+        - name: POSTGRES_AUTH_MODE
+          valueFrom:
+            secretKeyRef:
+              key: POSTGRES_AUTH_MODE
+              name: {{ $pgSecretName }}
+              optional: true
+        {{- if eq (include "control-plane.postgresql.iam" .) "true" }}
+        {{- $awsRegion := include "control-plane.postgresql.awsRegion" . }}
+        {{- if $awsRegion }}
+        - name: AWS_REGION
+          value: {{ $awsRegion | quote }}
+        {{- end }}
+        {{- end }}
+        # Read DATABASE_URL / POSTGRES_PRISMA_URL from the secret instead of
+        # building them inline. The secret encodes the password with urlquery
+        # so backticks, '@', '/', '?' etc. in the password are safe; an inline
+        # "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@..." breaks Prisma
+        # (P1013 "invalid port number in database URL") when the password
+        # contains URL-reserved chars. Overwritten above when POSTGRES_AUTH_MODE=iam.
+        - name: POSTGRES_PRISMA_URL
+          valueFrom:
+            secretKeyRef:
+              key: POSTGRES_PRISMA_URL
+              name: {{ $pgSecretName }}
+              optional: true
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              key: DATABASE_URL
+              name: {{ $pgSecretName }}
+              optional: true
+        {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "node" "ctx" .) | nindent 8 }}
+        {{- if include "neuraltrust-platform.customCaCert.enabled" . }}
+        volumeMounts:
+        {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 8 }}
+        {{- end }}
+        resources:
+          {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.initContainerResources }}
+          {{- toYaml .Values.controlPlane.components.app.initContainerResources | nindent 10 }}
+          {{- else }}
+          requests:
+            cpu: 250m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          {{- end }}
+      containers:
+      - name: app
+        {{- $appImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
+        {{- $appImageTag := "v1.97.0" }}
+        {{- $appPullPolicy := "Always" }}
+        {{- $appPort := 3000 }}
+        {{- $nodeEnv := "production" }}
+        {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.image }}
+          {{- if .Values.controlPlane.components.app.image.repository }}{{- $appImageRepo = .Values.controlPlane.components.app.image.repository }}{{- end }}
+          {{- if .Values.controlPlane.components.app.image.tag }}{{- $appImageTag = .Values.controlPlane.components.app.image.tag }}{{- end }}
+          {{- if .Values.controlPlane.components.app.image.pullPolicy }}{{- $appPullPolicy = .Values.controlPlane.components.app.image.pullPolicy }}{{- end }}
+        {{- end }}
+        {{- $openaiModel := "gpt-4o-mini" }}
+        {{- $controlPlaneApiUrl := "" }}
+        {{- $dataPlaneApiUrl := "" }}
+        {{- $schedulerUrl := "" }}
+        {{- $trustgateControlPlaneUrl := "" }}
+        {{- $trustgateDataPlaneUrl := "" }}
+        {{- $trustgateActionsUrl := "" }}
+        {{- $nextAuthUrl := "" }}
+        {{- $appUrl := "" }}
+        {{- $modelScannerApiUrl := "" }}
+        {{- /* platform-v2 backend service URLs (in-cluster defaults, overridable via config) */}}
+        {{- $agentgatewayUrl := "http://agentgateway-admin" }}
+        {{- $agentgatewayProxyUrl := "http://agentgateway-proxy" }}
+        {{- $trustguardUrl := "http://trustguard-control-plane" }}
+        {{- $datacoreUrl := "http://datacore" }}
+        {{- $datacoreMetricsEnabled := "false" }}
+        {{- $forceV2Ui := "true" }}
+        {{- /* External/on-prem: prefer platform env email (SES/SMTP/Resend) over
+               per-org DB email settings. SaaS leaves this unset (org-first).
+               Opt out with config.authEmailForceEnv: "false". */}}
+        {{- $authEmailForceEnv := "true" }}
+        {{- $alertEngineApiUrl := "http://alertengine-api" }}
+        {{- $trustlensApiUrl := "http://trustlens-api" }}
+        {{- $openshiftDomain := include "neuraltrust-platform.domain" . }}
+        {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.config }}
+          {{- if .Values.controlPlane.components.app.config.port }}{{- $appPort = .Values.controlPlane.components.app.config.port }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.nodeEnv }}{{- $nodeEnv = .Values.controlPlane.components.app.config.nodeEnv }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.openaiModel }}{{- $openaiModel = .Values.controlPlane.components.app.config.openaiModel }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.controlPlaneApiUrl }}{{- $controlPlaneApiUrl = .Values.controlPlane.components.app.config.controlPlaneApiUrl }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.dataPlaneApiUrl }}{{- $dataPlaneApiUrl = .Values.controlPlane.components.app.config.dataPlaneApiUrl }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.schedulerUrl }}{{- $schedulerUrl = .Values.controlPlane.components.app.config.schedulerUrl }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.trustgateControlPlaneUrl }}{{- $trustgateControlPlaneUrl = .Values.controlPlane.components.app.config.trustgateControlPlaneUrl }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.trustgateDataPlaneUrl }}{{- $trustgateDataPlaneUrl = .Values.controlPlane.components.app.config.trustgateDataPlaneUrl }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.trustgateActionsUrl }}{{- $trustgateActionsUrl = .Values.controlPlane.components.app.config.trustgateActionsUrl }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.nextAuthUrl }}{{- $nextAuthUrl = .Values.controlPlane.components.app.config.nextAuthUrl }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.appUrl }}{{- $appUrl = .Values.controlPlane.components.app.config.appUrl }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.modelScannerApiUrl }}{{- $modelScannerApiUrl = .Values.controlPlane.components.app.config.modelScannerApiUrl }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.agentgatewayUrl }}{{- $agentgatewayUrl = .Values.controlPlane.components.app.config.agentgatewayUrl }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.agentgatewayProxyUrl }}{{- $agentgatewayProxyUrl = .Values.controlPlane.components.app.config.agentgatewayProxyUrl }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.trustguardUrl }}{{- $trustguardUrl = .Values.controlPlane.components.app.config.trustguardUrl }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.datacoreUrl }}{{- $datacoreUrl = .Values.controlPlane.components.app.config.datacoreUrl }}{{- end }}
+          {{- if hasKey .Values.controlPlane.components.app.config "datacoreMetricsEnabled" }}{{- $datacoreMetricsEnabled = .Values.controlPlane.components.app.config.datacoreMetricsEnabled | toString }}{{- end }}
+          {{- if hasKey .Values.controlPlane.components.app.config "forceV2Ui" }}{{- $forceV2Ui = .Values.controlPlane.components.app.config.forceV2Ui | toString }}{{- end }}
+          {{- if hasKey .Values.controlPlane.components.app.config "authEmailForceEnv" }}{{- $authEmailForceEnv = .Values.controlPlane.components.app.config.authEmailForceEnv | toString }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.alertEngineApiUrl }}{{- $alertEngineApiUrl = .Values.controlPlane.components.app.config.alertEngineApiUrl }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.trustlensApiUrl }}{{- $trustlensApiUrl = .Values.controlPlane.components.app.config.trustlensApiUrl }}{{- end }}
+        {{- end }}
+        {{- /* Use internal Kubernetes service URLs for inter-service communication */}}
+        {{- if not $controlPlaneApiUrl }}
+          {{- $controlPlaneApiUrl = "http://control-plane-api-service:80" }}
+        {{- end }}
+        {{- if not $dataPlaneApiUrl }}
+          {{- $dataPlaneApiUrl = "http://data-plane-api-service:80" }}
+        {{- end }}
+        {{- if not $schedulerUrl }}
+          {{- $schedulerUrl = "http://control-plane-scheduler-service:80" }}
+        {{- end }}
+        {{- if not $trustgateControlPlaneUrl }}
+          {{- $trustgateControlPlaneUrl = "http://trustgate-control-plane:80" }}
+        {{- end }}
+        {{- if not $trustgateDataPlaneUrl }}
+          {{- $trustgateDataPlaneUrl = "http://trustgate-data-plane:80" }}
+        {{- end }}
+        {{- if not $trustgateActionsUrl }}
+          {{- $trustgateActionsUrl = "http://trustgate-actions:80" }}
+        {{- end }}
+        image: {{ include "control-plane.image" (dict "repository" $appImageRepo "tag" $appImageTag "global" .Values.global) | quote }}
+        imagePullPolicy: "{{ $appPullPolicy }}"
+        ports:
+        - containerPort: {{ $appPort }}
+        {{- $appExtraEnvFrom := list }}
+        {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.extraEnvFrom }}
+          {{- $appExtraEnvFrom = .Values.controlPlane.components.app.extraEnvFrom }}
+        {{- end }}
+        {{- include "control-plane.envFrom" (dict "component" "app" "extraEnvFrom" $appExtraEnvFrom "context" .) | nindent 8 }}
+        env:
+        - name: NODE_ENV
+          value: "{{ $nodeEnv }}"
+        - name: PORT
+          value: "{{ $appPort }}"
+        - name: HOSTNAME
+          value: {{ (((.Values.controlPlane).components).app).hostname | default "::" | quote }}
+        - name: POSTGRES_HOST
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: POSTGRES_HOST
+        - name: POSTGRES_PORT
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: POSTGRES_PORT
+        - name: POSTGRES_DATABASE
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: POSTGRES_DB
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: POSTGRES_PASSWORD
+              optional: true
+        {{- /* Next.js app reads POSTGRES_AUTH_MODE=iam (lib/db/postgresConfig.ts).
+               Optional secret keys so pre-provisioned secrets keep working. */}}
+        - name: POSTGRES_AUTH_MODE
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: POSTGRES_AUTH_MODE
+              optional: true
+        - name: DATABASE_AUTH_MODE
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: DATABASE_AUTH_MODE
+              optional: true
+        - name: DATABASE_IAM_AUTH
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: DATABASE_IAM_AUTH
+              optional: true
+        {{- if eq (include "control-plane.postgresql.iam" .) "true" }}
+        {{- $awsRegion := include "control-plane.postgresql.awsRegion" . }}
+        {{- if $awsRegion }}
+        - name: AWS_REGION
+          value: {{ $awsRegion | quote }}
+        {{- end }}
+        {{- /* Without a mounted RDS CA, skip server-cert verification (TLS
+               still required via the IAM adapter). Set POSTGRES_SSL_CA via
+               extraEnv when you need verify-full. */}}
+        - name: POSTGRES_IAM_SSL_REJECT_UNAUTHORIZED
+          value: "false"
+        {{- end }}
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: DATABASE_URL
+              optional: true
+        - name: POSTGRES_PRISMA_URL
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: POSTGRES_PRISMA_URL
+              optional: true
+        - name: RESEND_API_KEY
+          valueFrom:
+            secretKeyRef:
+              {{- $resendSecret := (lookup "v1" "Secret" .Release.Namespace "resend-secrets") }}
+              {{- if and .Values.controlPlane .Values.controlPlane.secrets .Values.controlPlane.secrets.resendApiKey (kindIs "map" .Values.controlPlane.secrets.resendApiKey) }}
+              name: {{ .Values.controlPlane.secrets.resendApiKey.secretName }}
+              key: {{ .Values.controlPlane.secrets.resendApiKey.secretKey }}
+              {{- else if $resendSecret }}
+              name: resend-secrets
+              key: RESEND_API_KEY
+              {{- else }}
+              name: control-plane-secrets
+              key: resend-api-key
+              optional: true
+              {{- end }}
+        - name: RESEND_SENDER
+          valueFrom:
+            secretKeyRef:
+              name: control-plane-secrets
+              key: resend-alert-sender
+              optional: true
+        - name: APP_URL
+          {{- /* Resolve to the real ingress host (app.<domain>), not the in-cluster
+                 service name, so magic links / auth callbacks are correct. Explicit
+                 config.appUrl wins. See control-plane.appPublicUrl helper. */}}
+          value: "{{ $appUrl | default (include "control-plane.appPublicUrl" .) }}"
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              {{- $openaiSecret := (lookup "v1" "Secret" .Release.Namespace "openai-secrets") }}
+              {{- if and .Values.controlPlane .Values.controlPlane.secrets .Values.controlPlane.secrets.openaiApiKey (kindIs "map" .Values.controlPlane.secrets.openaiApiKey) }}
+              name: {{ .Values.controlPlane.secrets.openaiApiKey.secretName }}
+              key: {{ .Values.controlPlane.secrets.openaiApiKey.secretKey }}
+              {{- else if $openaiSecret }}
+              name: openai-secrets
+              key: OPENAI_API_KEY
+              {{- else }}
+              name: control-plane-secrets
+              key: OPENAI_API_KEY
+              optional: true
+              {{- end }}
+        - name: OPENAI_MODEL
+          value: "{{ $openaiModel }}"
+        - name: CONTROL_PLANE_API_URL
+          value: "{{ $controlPlaneApiUrl }}"
+        - name: CONTROL_PLANE_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: control-plane-secrets
+              key: CONTROL_PLANE_JWT_SECRET
+        - name: DATA_PLANE_API_URL
+          value: "{{ $dataPlaneApiUrl }}"
+        - name: DATA_PLANE_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: data-plane-jwt-secret
+              key: DATA_PLANE_JWT_SECRET
+        {{- if eq (include "neuraltrust-platform.isV2" .) "true" }}
+        - name: AUTH_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: control-plane-secrets
+              key: AUTH_SECRET
+        - name: NEXTAUTH_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: control-plane-secrets
+              key: NEXTAUTH_SECRET
+        # Self-hosted v2 installs have no v1 UI to preserve, so the console
+        # forces the v2 experience by default (see app/constants/uiVersion.ts).
+        # Set controlPlane.components.app.config.forceV2Ui: "false" to opt out.
+        - name: FORCE_V2_UI
+          value: "{{ $forceV2Ui }}"
+        {{- end }}
+        # External/on-prem default: platform env email (AUTH_EMAIL_PROVIDER /
+        # SES/SMTP/Resend) wins over per-org TeamAuthConfig. SaaS leaves this
+        # unset. Opt out: config.authEmailForceEnv: "false".
+        - name: AUTH_EMAIL_FORCE_ENV
+          value: {{ $authEmailForceEnv | quote }}
+        {{- /* App reads DEPLOYMENT_MODE (saas|external). This subchart only
+               renders in external mode, so always emit external. */}}
+        - name: DEPLOYMENT_MODE
+          value: "external"
+        - name: NEXTAUTH_URL
+          {{- /* Explicit config.nextAuthUrl wins; else resolve to the real ingress
+                 host (app.<domain>). See control-plane.appPublicUrl helper. */}}
+          value: "{{ $nextAuthUrl | default (include "control-plane.appPublicUrl" .) }}"
+        {{- if ne (include "neuraltrust-platform.isV2" .) "true" }}
+        - name: CONTROL_PLANE_SCHEDULER_URL
+          value: "{{ $schedulerUrl }}"
+        - name: TRUSTGATE_CONTROL_PLANE_URL
+          value: "{{ $trustgateControlPlaneUrl }}"
+        - name: TRUSTGATE_DATA_PLANE_URL
+          value: "{{ $trustgateDataPlaneUrl }}"
+        - name: TRUSTGATE_ACTIONS_URL
+          value: "{{ $trustgateActionsUrl }}"
+        - name: TRUSTGATE_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: control-plane-secrets
+              key: TRUSTGATE_JWT_SECRET
+              optional: true
+        {{- end }}
+        - name: FIREWALL_API_URL
+          # Resolved by the parent chart (templates/platform-secrets.yaml):
+          # explicit controlPlane.components.app.config.firewallApiUrl >
+          # existing control-plane-secrets value > firewall service FQDN
+          # when neuraltrust-firewall.firewall.enabled, else data-plane API.
+          valueFrom:
+            secretKeyRef:
+              name: control-plane-secrets
+              key: FIREWALL_API_URL
+              optional: true
+        - name: FIREWALL_JWT_SECRET
+          {{- if and .Values.controlPlane .Values.controlPlane.secrets .Values.controlPlane.secrets.firewallJwtSecret (or (kindIs "map" .Values.controlPlane.secrets.firewallJwtSecret) (and (kindIs "string" .Values.controlPlane.secrets.firewallJwtSecret) (ne .Values.controlPlane.secrets.firewallJwtSecret ""))) }}
+          # Use firewall JWT secret from control-plane secrets if present
+          valueFrom:
+            secretKeyRef:
+              name: control-plane-secrets
+              key: FIREWALL_JWT_SECRET
+              optional: true
+          {{- else }}
+          # Use data plane JWT secret as fallback if firewall JWT secret is not present
+          valueFrom:
+            secretKeyRef:
+              name: data-plane-jwt-secret
+              key: DATA_PLANE_JWT_SECRET
+          {{- end }}
+        - name: MODEL_SCANNER_API_URL
+          value: "{{ $modelScannerApiUrl }}"
+        - name: MODEL_SCANNER_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: control-plane-secrets
+              key: MODEL_SCANNER_SECRET
+              optional: true
+        {{- /* v2 backend services the console (BFF) calls. Core backend
+               credentials are required so the app fails closed on an incomplete
+               external install. AlertEngine and TrustLens remain optional. */}}
+        - name: AGENTGATEWAY_URL
+          value: "{{ $agentgatewayUrl }}"
+        - name: AGENTGATEWAY_PROXY_URL
+          value: "{{ $agentgatewayProxyUrl }}"
+        - name: AGENTGATEWAY_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: agentgateway-secrets
+              key: SERVER_SECRET_KEY
+        - name: TRUSTGUARD_URL
+          value: "{{ $trustguardUrl }}"
+        - name: TRUSTGUARD_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: trustguard-secrets
+              key: ADMIN_JWT_SECRET
+        - name: DATACORE_URL
+          value: "{{ $datacoreUrl }}"
+        - name: DATACORE_METRICS_ENABLED
+          value: "{{ $datacoreMetricsEnabled }}"
+        - name: ALERT_ENGINE_API_URL
+          value: "{{ $alertEngineApiUrl }}"
+        - name: TRUSTLENS_API_URL
+          value: "{{ $trustlensApiUrl }}"
+        - name: DATACORE_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: datacore-secrets
+              key: AUTH_JWT_HS256_SECRET
+        - name: ALERT_ENGINE_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: alertengine-secrets
+              key: AUTH_JWT_SECRET
+              optional: true
+        - name: TRUSTLENS_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: trustlens-secrets
+              key: JWT_SECRET
+              optional: true
+        {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.extraEnv }}
+        {{- toYaml .Values.controlPlane.components.app.extraEnv | nindent 8 }}
+        {{- end }}
+        {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
+        {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "node" "ctx" .) | nindent 8 }}
+        {{- include "neuraltrust-platform.appVersionEnv" (dict "tag" $appImageTag) | nindent 8 }}
+        {{- if or (include "neuraltrust-platform.customCaCert.enabled" .) (and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.extraVolumeMounts) }}
+        volumeMounts:
+        {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 8 }}
+        {{- with .Values.controlPlane.components.app.extraVolumeMounts }}
+        {{- include "neuraltrust-platform.extraVolumeMounts" (dict "items" .) | nindent 8 }}
+        {{- end }}
+        {{- end }}
+        resources:
+          {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.resources }}
+          {{- toYaml .Values.controlPlane.components.app.resources | nindent 10 }}
+          {{- else }}
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: 500m
+            memory: 1Gi
+          {{- end }}
+        {{- /*
+          Health probes. Default ON; opt out per-install for older
+          images that don't expose /api/health by setting:
+            controlPlane.components.app.healthProbes.enabled: false
+        */}}
+        {{- $hp := dict }}
+        {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.healthProbes }}
+          {{- $hp = .Values.controlPlane.components.app.healthProbes }}
+        {{- end }}
+        {{- $hpEnabled := true }}
+        {{- if hasKey $hp "enabled" }}{{- $hpEnabled = $hp.enabled }}{{- end }}
+        {{- if $hpEnabled }}
+        livenessProbe:
+          httpGet:
+            path: {{ default "/api/health" $hp.path | quote }}
+            port: {{ $appPort }}
+          initialDelaySeconds: {{ default 30 $hp.initialDelaySeconds }}
+          periodSeconds: {{ default 30 $hp.periodSeconds }}
+          timeoutSeconds: {{ default 5 $hp.timeoutSeconds }}
+          failureThreshold: {{ default 5 $hp.failureThreshold }}
+        readinessProbe:
+          httpGet:
+            path: {{ default "/api/health" $hp.path | quote }}
+            port: {{ $appPort }}
+          initialDelaySeconds: {{ default 10 $hp.readinessInitialDelaySeconds }}
+          periodSeconds: {{ default 10 $hp.readinessPeriodSeconds }}
+          timeoutSeconds: {{ default 3 $hp.readinessTimeoutSeconds }}
+          failureThreshold: {{ default 3 $hp.readinessFailureThreshold }}
+        {{- end }}
+      {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" .) | nindent 6 }}
+      {{- include "neuraltrust-platform.tolerations" (dict "ctx" .) | nindent 6 }}

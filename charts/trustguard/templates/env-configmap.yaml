@@ -1,4 +1,5 @@
 {{- if eq (include "neuraltrust-platform.isV2" .) "true" }}
+{{- $isHybrid := eq (include "neuraltrust-platform.isHybrid" .) "true" }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -30,14 +31,20 @@ data:
   # are set so either plane boots correctly from the shared env (they must differ).
   SERVER_PORT: {{ .Values.controlPlane.ports.http | quote }}
   SERVER_DATA_PORT: {{ .Values.dataPlane.ports.http | quote }}
-  # Host auto-derives to the in-cluster control-plane-postgresql Service; override
-  # .Values.database.host for external Postgres. DB_NAME is mode-derived: external =>
-  # private "trustguard" DB (control owns migrations); hybrid => shared "trustdata" DB
-  # (each service writes its own schema, so DataAgent's single reader resolves both).
+  {{- if $isHybrid }}
+  # v2 hybrid: DB_HOST/DB_PORT/DB_USER/DB_NAME/DB_PASSWORD/DB_SSL_MODE arrive
+  # through the shared `postgresql-secrets` Secret (via envFrom on the Deployment).
+  # A single `neuraltrust` role owns the shared `neuraltrust` database.
+  {{- $cachePubSub := true }}
+  {{- if hasKey .Values.redis "enableCachePubSub" }}{{- $cachePubSub = .Values.redis.enableCachePubSub }}{{- end }}
+  ENABLE_CACHE_PUBSUB: {{ $cachePubSub | quote }}
+  {{- else }}
+  # v2 external: each service points at its own PostgreSQL role/database. Host
+  # defaults to the in-cluster `control-plane-postgresql` Service; override
+  # `.Values.database.host` for hosted/managed PostgreSQL.
   DB_HOST: {{ include "neuraltrust-platform.postgres.host" (dict "host" .Values.database.host) | quote }}
   DB_PORT: {{ .Values.database.port | quote }}
   DB_NAME: {{ include "neuraltrust-platform.v2.dbName" (dict "ctx" . "explicit" .Values.database.name "external" "trustguard") | quote }}
-  # In hybrid shared-writer layout, TrustGuard connects as the shared writer role.
   DB_USER: {{ include "neuraltrust-platform.v2.writerUser" (dict "ctx" . "explicit" .Values.database.user "default" "trustguard") | quote }}
   DB_SSL_MODE: {{ .Values.database.sslMode | quote }}
   {{- if .Values.database.iamAuth }}
@@ -59,8 +66,17 @@ data:
   REDIS_TLS: {{ .Values.redis.tls | quote }}
   {{- end }}
   {{- if .Values.redis.iamAuth }}
-  # IAM (ElastiCache) Redis auth: no static REDIS_PASSWORD is shipped.
+  # IAM (ElastiCache) Redis auth: TrustGuard mints a SigV4 token at connect time
+  # (REDIS_LOGIN=aws). No static REDIS_PASSWORD is shipped.
   REDIS_IAM_AUTH: "true"
+  REDIS_LOGIN: "aws"
+  {{- if and .Values.redis.cacheName (ne (.Values.redis.cacheName | toString) "") }}
+  REDIS_CACHE_NAME: {{ .Values.redis.cacheName | quote }}
+  {{- end }}
+  {{- if .Values.redis.awsServerless }}
+  REDIS_AWS_SERVERLESS: "true"
+  {{- end }}
+  {{- end }}
   {{- end }}
   # TRUSTGUARD_PLATFORM_CLIENT_ID/_SECRET are wired from the shared
   # trustguard-client-credentials Secret in the Deployment env (kept consistent
@@ -70,8 +86,10 @@ data:
   TELEMETRY_EXPORTERS_FILE: "/etc/telemetry/telemetry.yaml"
   {{- if eq (include "neuraltrust-platform.isExternal" .) "true" }}
   # External mode exports business telemetry and runtime traces/metrics to the
-  # in-cluster ClickStack collector.
-  OTEL_EXPORTER_OTLP_ENDPOINT: {{ printf "http://clickstack-collector.%s.svc.cluster.local:4318/v1/logs" .Release.Namespace | quote }}
+  # in-cluster ClickStack collector. Use the OTLP base URL (no /v1/logs) so the
+  # SDK appends signal paths correctly (/v1/logs, /v1/traces, /v1/metrics).
+  # Authorization comes from clickstack-collector-secrets via the Deployment.
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ printf "http://clickstack-collector.%s.svc.cluster.local:4318" .Release.Namespace | quote }}
   OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
   OTEL_EXPORTER_OTLP_INSECURE: "true"
   OPENTELEMETRY_ENABLED: "true"

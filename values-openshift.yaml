@@ -1,7 +1,6 @@
 # Platform v2 hybrid on OpenShift using native Routes.
 
 global:
-  platformVersion: "v2"
   deploymentMode: "hybrid"
   platform: "openshift"
   domain: "apps.example.com"
@@ -13,16 +12,6 @@ global:
     allowInsecureImages: true
   ingress:
     provider: "openshift"
-
-infrastructure:
-  postgresql:
-    deploy: true
-  redis:
-    deploy: true
-  clickhouse:
-    deploy: true
-  kafka:
-    deploy: false
 
 dataagent:
   tenantId: ""

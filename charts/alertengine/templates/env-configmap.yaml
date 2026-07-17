@@ -17,9 +17,13 @@ data:
   DB_USER: {{ .Values.database.user | quote }}
   DB_SSL_MODE: {{ .Values.database.sslMode | quote }}
   {{- if .Values.database.iamAuth }}
-  # IAM (RDS) DB auth: no static DB_PASSWORD is shipped; the service mints a token.
+  # IAM (RDS) DB auth: AlertEngine mints a SigV4 token per connection (DB_AUTH_MODE=iam).
+  # No static DB_PASSWORD is shipped. AWS_REGION is required by the binary.
   DB_IAM_AUTH: "true"
   DB_AUTH_MODE: "iam"
+  {{- if and .Values.database.awsRegion (ne (.Values.database.awsRegion | toString) "") }}
+  AWS_REGION: {{ .Values.database.awsRegion | quote }}
+  {{- end }}
   {{- end }}
   # ---- ClickHouse (event source, native protocol) ----
   CLICKHOUSE_ADDR: {{ printf "%s:%v" .Values.clickhouse.host .Values.clickhouse.nativePort | quote }}
