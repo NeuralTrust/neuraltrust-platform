@@ -82,6 +82,14 @@ data:
   # trustguard-client-credentials Secret in the Deployment env (kept consistent
   # with AgentGateway's TRUSTGUARD_CLIENT_ID/_SECRET).
   TRUSTGUARD_BASE_URL: {{ $tgAud | quote }}
+  {{- $fw := default dict .Values.firewall }}
+  {{- if $fw.enabled }}
+  {{- /* In-cluster Firewall Service is named `firewall` (port 80). Private
+         cluster DNS is allowed by TrustGuard's default
+         FIREWALL_ALLOW_PRIVATE_EGRESS=true. */}}
+  NEURAL_TRUST_FIREWALL_BASE_URL: {{ $fw.baseURL | default (printf "http://firewall.%s.svc.cluster.local" .Release.Namespace) | quote }}
+  FIREWALL_ALLOW_PRIVATE_EGRESS: "true"
+  {{- end }}
   OPENTELEMETRY_SERVICE_NAME: "trustguard"
   TELEMETRY_EXPORTERS_FILE: "/etc/telemetry/telemetry.yaml"
   {{- if eq (include "neuraltrust-platform.isExternal" .) "true" }}

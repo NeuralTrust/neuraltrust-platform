@@ -105,6 +105,17 @@ platform:
   # Empty ⇒ auto-derived from global.domain (https://trustguard.<domain>), else
   # the in-cluster Service URL. Stamped as the `aud` on issued platform tokens.
   baseURL: ""
+# Firewall client (prompt_guard / toxicity / prompt_moderation plugins).
+# TrustGuard reads NEURAL_TRUST_FIREWALL_BASE_URL + NEURAL_TRUST_FIREWALL_SECRET_KEY
+# (derives the Token header from the JWT secret). Keep `enabled` in sync with the
+# umbrella `firewall.enabled` — the subchart cannot see sibling chart values.
+firewall:
+  enabled: true
+  # Empty ⇒ http://firewall.<release-namespace>.svc.cluster.local (stable Service).
+  baseURL: ""
+  existingSecret:
+    name: "firewall-secrets"
+    key: "JWT_SECRET"
 # ---- control-plane (admin API) — full deployments only ----
 controlPlane:
   name: trustguard-control-plane

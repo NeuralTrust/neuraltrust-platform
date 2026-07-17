@@ -8,6 +8,14 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ### Fixed
 
+- **TrustGuard → Firewall env wiring.** Policy plugins (`prompt_guard`,
+  `toxicity`, `prompt_moderation`) require `NEURAL_TRUST_FIREWALL_BASE_URL` +
+  `NEURAL_TRUST_FIREWALL_SECRET_KEY`. The chart never set them, so sandbox
+  evaluation failed with `neuraltrust base url is required` even when the
+  Firewall Service was healthy. TrustGuard now emits the in-cluster
+  `http://firewall.<ns>.svc.cluster.local` URL and mounts `firewall-secrets`
+  `JWT_SECRET` (gated by `trustguard.firewall.enabled`, default true — keep in
+  sync with `firewall.enabled`). Subchart `0.1.14 → 0.1.15`.
 - **Restore `templates/postgresql/secrets.yaml` fallback.** With the
   control-plane split, the `autoGenerateSecrets: false` path stopped emitting
   `postgresql-secrets` while in-cluster Postgres still referenced it. The

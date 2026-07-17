@@ -557,6 +557,9 @@ trustguard:
   redis:
     host: "redis"
     iamAuth: false
+  # Keep in sync with firewall.enabled (subchart cannot see sibling values).
+  firewall:
+    enabled: true
 # TrustLens (opt-in, WIP).
 trustlens:
   enabled: false

@@ -48,7 +48,7 @@ dependencies:
       - v2
   # TrustGuard control + data plane.
   - name: trustguard
-    version: 0.1.14
+    version: 0.1.15
     repository: file://./charts/trustguard
     tags:
       - neuraltrust
