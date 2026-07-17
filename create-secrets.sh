@@ -335,7 +335,7 @@ while [[ $# -gt 0 ]]; do
             echo "  - TRUSTGUARD_CLIENT_ID / TRUSTGUARD_CLIENT_SECRET"
             echo "  - TRUSTGUARD_ADMIN_JWT_SECRET / TRUSTGUARD_TOKEN_SIGNING_SECRET"
             echo "  - TRUSTGUARD_REDIS_EVENTS_SECRET"
-            echo "  - DATACORE_JWT_SECRET / ALERTENGINE_JWT_SECRET"
+            echo "  - DATACORE_JWT_SECRET / DATACORE_DB_PASSWORD / ALERTENGINE_JWT_SECRET"
             echo "  - DATAAGENT_DB_PASSWORD (ENROLMENT_TOKEN is never generated)"
             echo "  - And more..."
             echo ""
@@ -403,6 +403,7 @@ add_secret_key "trustguard-client-credentials" "CLIENT_SECRET" "$TRUSTGUARD_CLIE
 unset TRUSTGUARD_CLIENT_ID_VALUE TRUSTGUARD_CLIENT_SECRET_VALUE
 
 ensure_generated_secret_key "datacore-secrets" "AUTH_JWT_HS256_SECRET" "DATACORE_JWT_SECRET"
+ensure_generated_secret_key "datacore-secrets" "POSTGRES_PASSWORD" "DATACORE_DB_PASSWORD"
 ensure_generated_secret_key "alertengine-secrets" "AUTH_JWT_SECRET" "ALERTENGINE_JWT_SECRET"
 ensure_generated_secret_key "alertengine-secrets" "APP_ENCRYPTION_KEY" "ALERTENGINE_APP_ENCRYPTION_KEY"
 ensure_generated_secret_key "alertengine-secrets" "DB_PASSWORD" "ALERTENGINE_DB_PASSWORD"

@@ -13,6 +13,7 @@
 # - trustguard-client-credentials: CLIENT_ID, CLIENT_SECRET
 # - data-plane-jwt-secret: DATA_PLANE_JWT_SECRET, REDIS_URL
 # - datacore-secrets: AUTH_JWT_HS256_SECRET, CLICKHOUSE_USER
+#   (and POSTGRES_PASSWORD in password mode; omit when datacore.database.iamAuth=true)
 # - alertengine-secrets: DB_PASSWORD, AUTH_JWT_SECRET, APP_ENCRYPTION_KEY
 # - clickstack-collector-secrets: CLICKHOUSE_ENDPOINT, CLICKHOUSE_USER,
 #   OTLP_AUTH_TOKEN
@@ -79,6 +80,9 @@ alertengine:
       key: "password"
 
 datacore:
+  database:
+    host: "postgres.example.com"
+    sslMode: "require"
   clickhouse:
     host: "clickhouse.example.com"
     nativePort: 9440

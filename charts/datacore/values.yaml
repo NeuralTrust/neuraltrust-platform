@@ -1,14 +1,16 @@
 # DataCore subchart.
 # Renders ONLY when global.deploymentMode=external.
-# Single HTTP API on :8080. Requires ClickHouse (native protocol): runs embedded
-# migrations that materialize DataCore tables from the otel_logs landing table
-# written by clickstack-otel-collector, then serves a tenant-scoped REST API.
+# Single HTTP API on :8080. Requires ClickHouse (native protocol) for OTel raw
+# data and Postgres for deployment metadata. ClickHouse migrations materialize
+# DataCore tables from the otel_logs landing table written by
+# clickstack-otel-collector; Postgres migrations own deployments / registry /
+# enrolment tables. Then serves a tenant-scoped REST API.
 nameOverride: ""
 fullnameOverride: "datacore"
 securityHardening: true
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/datacore
-  tag: "v0.11.0"
+  tag: "v0.12.1"
   pullPolicy: IfNotPresent
 imagePullSecrets: "gcr-secret"
 serviceAccount:
@@ -19,11 +21,32 @@ replicas: 1
 config:
   # saas  → serve everything from ClickHouse (the self-hosted / external mode).
   # hybrid → route hybrid-instance raw reads to DataBridge (SaaS) instead.
+  # Both modes require Postgres for deployment metadata unless
+  # RESIDENCY_ALLOW_STUB=true (local/dev only; not set by this chart).
   residencyBackend: "saas"
   logLevel: "info"
   httpAddr: ":8080"
 ports:
   http: 8080
+# PostgreSQL connection (own "datacore" database + role; DataCore renders in
+# v2 external only and does not use the hybrid `global.postgresql` shared
+# block). host empty → auto-derives to the in-cluster control-plane-postgresql
+# Service. For external Postgres, pre-create the datacore role + database and
+# set host/user/name/password below. Env names are POSTGRES_* (DataCore binary
+# contract — not DB_*).
+database:
+  host: ""
+  port: 5432
+  name: "datacore"
+  user: "datacore"
+  password: "" # Auto-generated if empty (in-cluster PG); omitted when iamAuth=true
+  sslMode: "prefer" # TLS when available, plaintext fallback for the non-TLS in-cluster PG; use "require" for hosted DBs
+  # IAM (e.g. AWS RDS/Aurora) database auth. When true, emits POSTGRES_LOGIN=aws
+  # and omits POSTGRES_PASSWORD. DataCore (v0.12.1+) mints a SigV4 token per
+  # connection via the AWS SDK default chain (IRSA). Requires an IRSA-annotated
+  # serviceAccount + awsRegion, and POSTGRES_SSLMODE require|verify-ca|verify-full.
+  iamAuth: false
+  awsRegion: "" # Required when iamAuth=true → AWS_REGION
 # ClickHouse (native protocol, port 9000). Defaults to the in-cluster clickhouse
 # subchart; set clickhouse.host/nativePort to your endpoint when
 # infrastructure.clickhouse.deploy=false.

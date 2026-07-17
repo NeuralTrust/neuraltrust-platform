@@ -584,10 +584,19 @@ dataagent:
   enrolmentTokenExistingSecret:
     name: ""
     key: "ENROLMENT_TOKEN"
-# DataCore (v2 external only): residency API over local ClickHouse.
+# DataCore (v2 external only): residency API over local ClickHouse + Postgres
+# (deployment metadata). Own `datacore` database/role — not the hybrid shared
+# `global.postgresql` block.
 datacore:
   image:
-    tag: "v0.11.0"
+    tag: "v0.12.1"
+  database:
+    host: ""
+    port: 5432
+    name: "datacore"
+    user: "datacore"
+    sslMode: "prefer"
+    iamAuth: false
   clickhouse:
     host: "clickhouse"
     nativePort: 9000

@@ -188,9 +188,19 @@ assert_contains "$out3" 'OTEL_EXPORTER_OTLP_HEADERS:' \
   "external: collector Secret carries OTEL_EXPORTER_OTLP_HEADERS"
 assert_contains "$out3" 'name: OTEL_EXPORTER_OTLP_HEADERS'$'\n''          valueFrom:'$'\n''            secretKeyRef:'$'\n''              name: "clickstack-collector-secrets"' \
   "external: TrustGuard/AgentGateway mount OTLP headers from collector Secret"
+assert_contains "$out3" 'name: datacore-env-vars' \
+  "external: datacore-env-vars ConfigMap renders"
+assert_contains "$out3" 'POSTGRES_HOST: "control-plane-postgresql"' \
+  "external: DataCore POSTGRES_HOST defaults to in-cluster Postgres"
+assert_contains "$out3" 'POSTGRES_DATABASE: "datacore"' \
+  "external: DataCore POSTGRES_DATABASE defaults to datacore"
+assert_contains "$out3" 'POSTGRES_USER: "datacore"' \
+  "external: DataCore POSTGRES_USER defaults to datacore"
+assert_contains "$out3" 'POSTGRES_PASSWORD:' \
+  "external: datacore-secrets carries POSTGRES_PASSWORD"
 
 # ---------------------------------------------------------------------------
-# 3b. Control-plane RDS IAM env contract (api + app)
+# 3b. Control-plane RDS IAM env contract (api + app) + DataCore IAM
 # ---------------------------------------------------------------------------
 blue "==> Scenario 3b: control-plane Postgres IAM env contract"
 out3b="$TMP/scenario-external-cp-iam.yaml"
@@ -201,6 +211,11 @@ render_default "$out3b" \
   --set global.postgresql.authMode=iam \
   --set global.postgresql.awsRegion=eu-west-1 \
   --set global.postgresql.user=neuraltrust_iam \
+  --set datacore.database.iamAuth=true \
+  --set datacore.database.host=pg.iam.example.com \
+  --set datacore.database.user=datacore_iam \
+  --set datacore.database.sslMode=require \
+  --set datacore.database.awsRegion=eu-west-1 \
   --set control-plane-api.controlPlane.components.postgresql.authMode=iam \
   --set control-plane-api.controlPlane.components.postgresql.awsRegion=eu-west-1 \
   --set control-plane-app.controlPlane.components.postgresql.authMode=iam \
@@ -219,6 +234,17 @@ assert_contains "$out3b" 'value: "eu-west-1"' \
   "cp IAM: AWS_REGION=eu-west-1"
 assert_contains "$out3b" 'postgres-iam-url.mjs' \
   "cp IAM: app init-db mints Prisma URL via postgres-iam-url.mjs"
+assert_contains "$out3b" 'POSTGRES_LOGIN: "aws"' \
+  "datacore IAM: emits POSTGRES_LOGIN=aws"
+assert_contains "$out3b" 'POSTGRES_USER: "datacore_iam"' \
+  "datacore IAM: POSTGRES_USER is the _iam role"
+assert_contains "$out3b" 'AWS_REGION: "eu-west-1"' \
+  "datacore IAM: ConfigMap carries AWS_REGION"
+# datacore-secrets keeps AUTH_JWT + CLICKHOUSE_USER only (no POSTGRES_PASSWORD).
+assert_contains "$out3b" 'name: datacore-secrets'$'\n''  annotations:'$'\n''    helm.sh/resource-policy: keep' \
+  "datacore IAM: datacore-secrets still renders"
+assert_contains "$out3b" 'AUTH_JWT_HS256_SECRET:'$'\n''  CLICKHOUSE_USER:' \
+  "datacore IAM: omits POSTGRES_PASSWORD between JWT and CLICKHOUSE_USER"
 
 # ---------------------------------------------------------------------------
 # 4. New unprefixed value roots are honoured

@@ -25,7 +25,7 @@ dependencies:
   version: 0.1.4
 - name: datacore
   repository: file://./charts/datacore
-  version: 0.1.7
+  version: 0.1.9
 - name: clickstack-otel-collector
   repository: file://./charts/clickstack-otel-collector
   version: 0.1.3
@@ -38,5 +38,5 @@ dependencies:
 - name: watchdog
   repository: file://./charts/watchdog
   version: 0.3.0
-digest: sha256:5dbc05898bbeb8e6bc29c0e3c79ba323f5dce35452d05272e4ffcc8176dd7650
-generated: "2026-07-17T14:04:02.189321352Z"
+digest: sha256:b6d0261d1598a401b2a67678ef421500bfb8f2148bb83bb6494a05eec14cdccc
+generated: "2026-07-17T16:58:56.590092+02:00"

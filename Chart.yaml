@@ -69,7 +69,7 @@ dependencies:
       - v2
   # DataCore — v2 external only.
   - name: datacore
-    version: 0.1.7
+    version: 0.1.9
     repository: file://./charts/datacore
     tags:
       - neuraltrust
