@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v1.16.0] — 2026-07-17
+
 ### Fixed
 
 - **Restore `templates/postgresql/secrets.yaml` fallback.** With the
