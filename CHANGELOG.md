@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.0.3] — 2026-07-18
+
 ### Added
 
 - **AgentGateway wildcard public routing.** Proxy and MCP Ingress (AWS/Azure/GCP)
