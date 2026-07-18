@@ -178,10 +178,10 @@ assert_contains "$out3" 'NEURAL_TRUST_FIREWALL_BASE_URL: "http://firewall.defaul
   "external: TrustGuard wires in-cluster Firewall base URL"
 assert_contains "$out3" 'name: NEURAL_TRUST_FIREWALL_SECRET_KEY'$'\n''          valueFrom:'$'\n''            secretKeyRef:'$'\n''              name: "firewall-secrets"' \
   "external: TrustGuard mounts firewall-secrets JWT_SECRET"
-assert_contains "$out3" 'OTEL_EXPORTER_OTLP_ENDPOINT: "http://clickstack-collector.default.svc.cluster.local:4318"' \
-  "external: OTLP endpoint is collector base URL (no /v1/logs)"
-assert_not_contains "$out3" 'OTEL_EXPORTER_OTLP_ENDPOINT: "http://clickstack-collector.default.svc.cluster.local:4318/v1/logs"' \
-  "external: OTLP endpoint must not append /v1/logs"
+assert_contains "$out3" 'OTEL_EXPORTER_OTLP_ENDPOINT: "http://clickstack-collector.default.svc.cluster.local:4318/v1/logs"' \
+  "external: product OTLP logs endpoint includes /v1/logs (WithEndpointURL)"
+assert_contains "$out3" 'OPENTELEMETRY_TRACES_ENDPOINT: "clickstack-collector.default.svc.cluster.local:4318"' \
+  "external: runtime traces stay host:port (WithEndpoint appends /v1/traces)"
 assert_contains "$out3" 'name: clickstack-collector-secrets' \
   "external: clickstack-collector-secrets Secret renders"
 assert_contains "$out3" 'OTEL_EXPORTER_OTLP_HEADERS:' \
@@ -339,6 +339,133 @@ if grep -RqE '(platformVersion|confirmV2Migration|hybridRoleLayout|sharedWriter|
   exit 1
 fi
 green "ok  - values.yaml / values-required.yaml free of retired keys"
+
+# ---------------------------------------------------------------------------
+# 8. AgentGateway exact + wildcard routing (AWS / Azure / GCP Ingress)
+# ---------------------------------------------------------------------------
+blue "==> Scenario 8: AgentGateway wildcard Ingress (cloud providers)"
+WILDCARD_COMMON=(
+  --set global.domain=platform.example.com
+  --set agentgateway.config.gatewayDiscoveryMode=subdomain
+  --set agentgateway.config.gatewayBaseDomain=llm.platform.example.com
+  --set agentgateway.config.mcpBaseDomain=mcp.platform.example.com
+  --set agentgateway.ingress.dataPlane.host=gateway.platform.example.com
+  --set agentgateway.ingress.dataPlane.additionalHosts[0]="*.llm.platform.example.com"
+  --set agentgateway.ingress.mcp.host=mcp.platform.example.com
+  --set agentgateway.ingress.mcp.additionalHosts[0]="*.mcp.platform.example.com"
+)
+
+for provider in aws azure gcp; do
+  outw="$TMP/scenario-wildcard-${provider}.yaml"
+  render_default "$outw" \
+    --set global.deploymentMode=external \
+    --set "global.platform=${provider}" \
+    "${WILDCARD_COMMON[@]}"
+  assert_contains "$outw" 'name: agentgateway-gateway' \
+    "${provider}: proxy Ingress name stable"
+  assert_contains "$outw" 'host: "gateway.platform.example.com"' \
+    "${provider}: proxy exact host"
+  assert_contains "$outw" 'host: "\*\.llm\.platform\.example\.com"' \
+    "${provider}: proxy wildcard host rule"
+  assert_contains "$outw" 'name: agentgateway-proxy' \
+    "${provider}: proxy backend Service"
+  assert_contains "$outw" 'name: agentgateway-mcp' \
+    "${provider}: MCP Ingress/Service present"
+  assert_contains "$outw" 'host: "mcp.platform.example.com"' \
+    "${provider}: MCP exact host"
+  assert_contains "$outw" 'host: "\*\.mcp\.platform\.example\.com"' \
+    "${provider}: MCP wildcard host rule"
+  assert_contains "$outw" 'GATEWAY_DISCOVERY_MODE: "subdomain"' \
+    "${provider}: subdomain discovery in ConfigMap"
+  assert_contains "$outw" 'GATEWAY_BASE_DOMAIN: "llm.platform.example.com"' \
+    "${provider}: gateway base domain"
+  assert_contains "$outw" 'MCP_BASE_DOMAIN: "mcp.platform.example.com"' \
+    "${provider}: MCP base domain"
+  # Admin must stay exact-only (no wildcard rule on admin Ingress).
+  if python3 - "$outw" <<'PY'
+import re, sys
+for doc in open(sys.argv[1]).read().split("---"):
+    if "kind: Ingress" in doc and re.search(r"(?m)^\s+name:\s*agentgateway-admin\s*$", doc):
+        if re.search(r'host:\s*"?\*\.', doc):
+            sys.exit(1)
+sys.exit(0)
+PY
+  then
+    green "ok  - ${provider}: admin Ingress has no wildcard hosts"
+  else
+    red "FAIL: ${provider}: admin Ingress must not include wildcard hosts"
+    exit 1
+  fi
+  assert_not_contains "$outw" 'kind: Route' \
+    "${provider}: no OpenShift Routes on cloud platform"
+done
+
+# Default (empty additionalHosts) still renders only the primary host.
+outw_default="$TMP/scenario-wildcard-default.yaml"
+render_default "$outw_default" \
+  --set global.deploymentMode=hybrid \
+  --set global.domain=platform.example.com
+assert_contains "$outw_default" 'name: agentgateway-gateway' \
+  "default: proxy Ingress still renders"
+assert_not_contains "$outw_default" 'host: "\*\.' \
+  "default: no wildcard hosts when additionalHosts empty"
+
+# ---------------------------------------------------------------------------
+# 9. AgentGateway OpenShift Routes (exact + wildcardPolicy Subdomain)
+# ---------------------------------------------------------------------------
+blue "==> Scenario 9: AgentGateway OpenShift Routes + Ingress override"
+out_ocp="$TMP/scenario-wildcard-openshift-routes.yaml"
+helm template test "$CHART_DIR" --namespace default \
+  -f "$CHART_DIR/values-required.yaml" \
+  "${CLICKSTACK_DEFAULT_ARGS[@]}" \
+  --api-versions route.openshift.io/v1 \
+  --set global.deploymentMode=external \
+  --set global.platform=openshift \
+  --set global.domain=apps.example.com \
+  --set agentgateway.config.gatewayDiscoveryMode=subdomain \
+  --set agentgateway.config.gatewayBaseDomain=llm.apps.example.com \
+  --set agentgateway.config.mcpBaseDomain=mcp.apps.example.com \
+  --set agentgateway.ingress.dataPlane.host=gateway.apps.example.com \
+  --set agentgateway.ingress.dataPlane.additionalHosts[0]="*.llm.apps.example.com" \
+  --set agentgateway.ingress.mcp.host=mcp.apps.example.com \
+  --set agentgateway.ingress.mcp.additionalHosts[0]="*.mcp.apps.example.com" \
+  > "$out_ocp"
+
+assert_contains "$out_ocp" 'kind: Route' \
+  "openshift auto: Routes render"
+assert_contains "$out_ocp" 'host: "gateway.apps.example.com"' \
+  "openshift: exact proxy Route host"
+assert_contains "$out_ocp" 'host: "llm.apps.example.com"' \
+  "openshift: wildcard proxy Route host strips *."
+assert_contains "$out_ocp" 'wildcardPolicy: Subdomain' \
+  "openshift: wildcard Routes use Subdomain policy"
+assert_contains "$out_ocp" 'wildcardPolicy: None' \
+  "openshift: exact Routes use None policy"
+assert_contains "$out_ocp" 'name: agentgateway-proxy' \
+  "openshift: proxy Route backend Service"
+assert_not_contains "$out_ocp" 'name: agentgateway-gateway' \
+  "openshift auto: proxy Ingress not rendered"
+
+# Explicit Ingress on OpenShift still works.
+out_ocp_ing="$TMP/scenario-wildcard-openshift-ingress.yaml"
+helm template test "$CHART_DIR" --namespace default \
+  -f "$CHART_DIR/values-required.yaml" \
+  "${CLICKSTACK_DEFAULT_ARGS[@]}" \
+  --api-versions route.openshift.io/v1 \
+  --set global.deploymentMode=hybrid \
+  --set global.platform=openshift \
+  --set global.domain=apps.example.com \
+  --set agentgateway.ingress.resourceType=ingress \
+  --set agentgateway.ingress.dataPlane.additionalHosts[0]="*.llm.apps.example.com" \
+  > "$out_ocp_ing"
+assert_contains "$out_ocp_ing" 'name: agentgateway-gateway' \
+  "openshift resourceType=ingress: Ingress renders"
+assert_contains "$out_ocp_ing" 'host: "\*\.llm\.apps\.example\.com"' \
+  "openshift resourceType=ingress: wildcard Ingress rule"
+assert_not_contains "$out_ocp_ing" 'name: agentgateway-proxy-' \
+  "openshift resourceType=ingress: AgentGateway proxy Routes absent"
+assert_not_contains "$out_ocp_ing" 'name: agentgateway-mcp-' \
+  "openshift resourceType=ingress: AgentGateway MCP Routes absent"
 
 green ""
 green "All v2 render scenarios passed."
