@@ -1,11 +1,13 @@
-{{- if and (eq (include "neuraltrust-platform.isV2" .) "true") .Values.ingress.enabled }}
+{{- if and .Values.ingress.enabled (eq (include "agentgateway.ingress.useIngress" .) "true") }}
 {{- $className := include "neuraltrust-platform.ingress.className" (dict "global" .Values.global "local" .Values.ingress.className) }}
 {{- $annotations := include "neuraltrust-platform.ingress.annotations" (dict "global" .Values.global "local" .Values.ingress.annotations) }}
 {{- $renderTLS := and .Values.ingress.tls .Values.ingress.tls.enabled (include "neuraltrust-platform.ingress.renderTLS" (dict "global" .Values.global "tlsEnabled" .Values.ingress.tls.enabled)) }}
 {{- $tlsSecret := include "neuraltrust-platform.ingress.effectiveTLSSecretName" (dict "global" .Values.global "localSecretName" .Values.ingress.tls.secretName) }}
 {{- $dpHost := include "neuraltrust-platform.ingress.host" (dict "host" .Values.ingress.dataPlane.host "prefix" .Values.ingress.dataPlane.hostPrefix "global" .Values.global) }}
 {{- $mcpHost := include "neuraltrust-platform.ingress.host" (dict "host" .Values.ingress.mcp.host "prefix" .Values.ingress.mcp.hostPrefix "global" .Values.global) }}
-# Data-plane (proxy) ingress — hybrid + full
+{{- $dpExtra := default (list) .Values.ingress.dataPlane.additionalHosts }}
+{{- $mcpExtra := default (list) .Values.ingress.mcp.additionalHosts }}
+# Data-plane (proxy) ingress — hybrid + full (primary + optional additionalHosts / wildcards)
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -24,14 +26,19 @@ spec:
   {{- if $renderTLS }}
   tls:
     - secretName: {{ $tlsSecret }}
-      {{- if $dpHost }}
+      {{- if or $dpHost $dpExtra }}
       hosts:
-        - {{ $dpHost }}
+        {{- if $dpHost }}
+        - {{ $dpHost | quote }}
+        {{- end }}
+        {{- range $dpExtra }}
+        - {{ . | quote }}
+        {{- end }}
       {{- end }}
   {{- end }}
   rules:
     - {{- if $dpHost }}
-      host: {{ $dpHost }}
+      host: {{ $dpHost | quote }}
       {{- end }}
       http:
         paths:
@@ -42,9 +49,21 @@ spec:
                 name: {{ .Values.dataPlane.name }}
                 port:
                   name: http
+    {{- range $dpExtra }}
+    - host: {{ . | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $.Values.dataPlane.name }}
+                port:
+                  name: http
+    {{- end }}
 {{- if .Values.mcp.enabled }}
 ---
-# MCP ingress — hybrid + full
+# MCP ingress — hybrid + full (primary + optional additionalHosts / wildcards)
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -63,14 +82,19 @@ spec:
   {{- if $renderTLS }}
   tls:
     - secretName: {{ $tlsSecret }}
-      {{- if $mcpHost }}
+      {{- if or $mcpHost $mcpExtra }}
       hosts:
-        - {{ $mcpHost }}
+        {{- if $mcpHost }}
+        - {{ $mcpHost | quote }}
+        {{- end }}
+        {{- range $mcpExtra }}
+        - {{ . | quote }}
+        {{- end }}
       {{- end }}
   {{- end }}
   rules:
     - {{- if $mcpHost }}
-      host: {{ $mcpHost }}
+      host: {{ $mcpHost | quote }}
       {{- end }}
       http:
         paths:
@@ -81,11 +105,23 @@ spec:
                 name: {{ .Values.mcp.name }}
                 port:
                   name: http
+    {{- range $mcpExtra }}
+    - host: {{ . | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $.Values.mcp.name }}
+                port:
+                  name: http
+    {{- end }}
 {{- end }}
 {{- if eq (include "neuraltrust-platform.isFull" .) "true" }}
 {{- $cpHost := include "neuraltrust-platform.ingress.host" (dict "host" .Values.ingress.controlPlane.host "prefix" .Values.ingress.controlPlane.hostPrefix "global" .Values.global) }}
 ---
-# Control-plane (admin) ingress — full only
+# Control-plane (admin) ingress — full only (exact host; no wildcards)
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -106,12 +142,12 @@ spec:
     - secretName: {{ $tlsSecret }}
       {{- if $cpHost }}
       hosts:
-        - {{ $cpHost }}
+        - {{ $cpHost | quote }}
       {{- end }}
   {{- end }}
   rules:
     - {{- if $cpHost }}
-      host: {{ $cpHost }}
+      host: {{ $cpHost | quote }}
       {{- end }}
       http:
         paths:

@@ -93,11 +93,13 @@ data:
   OPENTELEMETRY_SERVICE_NAME: "trustguard"
   TELEMETRY_EXPORTERS_FILE: "/etc/telemetry/telemetry.yaml"
   {{- if eq (include "neuraltrust-platform.isExternal" .) "true" }}
-  # External mode exports business telemetry and runtime traces/metrics to the
-  # in-cluster ClickStack collector. Use the OTLP base URL (no /v1/logs) so the
-  # SDK appends signal paths correctly (/v1/logs, /v1/traces, /v1/metrics).
-  # Authorization comes from clickstack-collector-secrets via the Deployment.
-  OTEL_EXPORTER_OTLP_ENDPOINT: {{ printf "http://clickstack-collector.%s.svc.cluster.local:4318" .Release.Namespace | quote }}
+  # External mode: product telemetry (metadata/raw) is OTLP *logs* via
+  # otlploghttp.WithEndpointURL, which takes the URL path verbatim — so this
+  # endpoint MUST include /v1/logs (same as TrustGuard/TrustGate SaaS overlays).
+  # Runtime traces/metrics use OPENTELEMETRY_* with host:port + WithEndpoint,
+  # which appends /v1/traces and /v1/metrics itself. Authorization comes from
+  # clickstack-collector-secrets via the Deployment.
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ printf "http://clickstack-collector.%s.svc.cluster.local:4318/v1/logs" .Release.Namespace | quote }}
   OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
   OTEL_EXPORTER_OTLP_INSECURE: "true"
   OPENTELEMETRY_ENABLED: "true"

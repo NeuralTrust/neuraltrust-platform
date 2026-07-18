@@ -112,11 +112,13 @@ the self-hosted analytics stack:
 
 DataAgent never renders in external mode. The ClickStack collector is also
 external-only: AgentGateway and TrustGuard load metadata/raw OTLP exporter
-profiles that target `http://clickstack-collector.<ns>.svc.cluster.local:4318`
-(OTLP base URL — no `/v1/logs` suffix) and authenticate with
-`OTEL_EXPORTER_OTLP_HEADERS` from `clickstack-collector-secrets` (same token as
-`OTLP_AUTH_TOKEN`). The collector writes signals to the `otel` ClickHouse
-database.
+profiles that target
+`http://clickstack-collector.<ns>.svc.cluster.local:4318/v1/logs` (product
+events are OTLP logs; apps use `WithEndpointURL`, which requires the `/v1/logs`
+path) and authenticate with `OTEL_EXPORTER_OTLP_HEADERS` from
+`clickstack-collector-secrets` (same token as `OTLP_AUTH_TOKEN`). TrustGuard
+runtime traces/metrics use separate `OPENTELEMETRY_*_ENDPOINT` host:port values.
+The collector writes signals to the `otel` ClickHouse database.
 DataCore serves residency queries and AlertEngine evaluates rules and forwards
 findings to configured SIEM/integration destinations.
 
@@ -240,6 +242,47 @@ Do not confuse the two collectors:
 
 Disabling hosted export does not disable the external-mode ClickStack pipeline.
 
+## AgentGateway public routing (exact + optional wildcards)
+
+AgentGateway exposes three public surfaces: **admin** (external mode only),
+**proxy**, and **MCP**. Proxy and MCP accept an optional `additionalHosts`
+list so dynamically created gateway subdomains can share the same backend
+Services:
+
+```yaml
+agentgateway:
+  config:
+    gatewayDiscoveryMode: "subdomain"
+    gatewayBaseDomain: "llm.platform.example.com"
+    mcpBaseDomain: "mcp.platform.example.com"
+  ingress:
+    resourceType: "auto" # Ingress on AWS/Azure/GCP; OpenShift Routes by default
+    dataPlane:
+      host: "gateway.platform.example.com"
+      additionalHosts:
+        - "*.llm.platform.example.com"
+    mcp:
+      host: "mcp.platform.example.com"
+      additionalHosts:
+        - "*.mcp.platform.example.com"
+```
+
+Helm only renders routing objects. DNS, certificates, and cloud controller
+settings remain operator prerequisites:
+
+| Provider | Routing resource | Operator prerequisites |
+|---|---|---|
+| AWS (ALB) | `networking.k8s.io/v1` Ingress | ALB accepts `*.llm.<domain>` / `*.mcp.<domain>`; ACM certificate SANs and wildcard DNS records must cover them |
+| Azure (AGIC) | Ingress | AGIC **1.5.1+** / Application Gateway **v2** with a wildcard-capable certificate and DNS |
+| GCP (GCE Ingress) | Ingress | Wildcard Ingress rules are supported; **Google-managed certificates do not support wildcard names** — provide a self-managed wildcard TLS Secret |
+| OpenShift | native `Route` (`resourceType: auto\|route`) | IngressController `routeAdmission.wildcardPolicy: WildcardsAllowed`; router/Route certificate covering the wildcard domains. Set `ingress.resourceType: ingress` to keep Kubernetes Ingress instead |
+
+Admin stays exact-host only (no wildcards). Pair public wildcards with
+`config.gatewayDiscoveryMode: subdomain` and the matching base domains so the
+application resolves dynamic slugs; ingress rules alone do not enable discovery.
+
+See `values-agentgateway-wildcard.yaml.example`.
+
 ## Legacy v1
 
 v1 (legacy TrustGate/Kafka) is maintained only on the `v1.14.x` release line;
@@ -253,3 +296,4 @@ pin `--version ~1.14.0` to install it. This chart (2.x) is v2-only.
 - `values-v2-external.yaml.example`: minimal external
 - `values-all-deployed.yaml.example`: external plus supported optional components
 - `values-v2-managed-datastores.yaml.example`: external managed datastores
+- `values-agentgateway-wildcard.yaml.example`: proxy/MCP exact + wildcard hosts

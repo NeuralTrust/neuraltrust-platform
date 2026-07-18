@@ -19,6 +19,8 @@ global:
 agentgateway:
   ingress:
     enabled: true
+    # Keep Kubernetes Ingress on OpenShift (default auto uses native Routes).
+    resourceType: ingress
     tls:
       enabled: true
 

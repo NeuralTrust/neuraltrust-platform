@@ -68,9 +68,11 @@ data:
   TELEMETRY_ENABLED: {{ .Values.config.telemetryEnabled | quote }}
   TELEMETRY_EXPORTERS_FILE: "/etc/telemetry/telemetry.yaml"
   {{- if eq (include "neuraltrust-platform.isExternal" .) "true" }}
-  # In-cluster ClickStack collector base URL (no /v1/logs). Authorization is
-  # wired from clickstack-collector-secrets on the data-plane / MCP Deployments.
-  OTEL_EXPORTER_OTLP_ENDPOINT: {{ printf "http://clickstack-collector.%s.svc.cluster.local:4318" .Release.Namespace | quote }}
+  # Product telemetry is OTLP *logs* via otlploghttp.WithEndpointURL, which
+  # takes the URL path verbatim — endpoint MUST include /v1/logs (same as
+  # TrustGate SaaS overlays). Authorization is wired from
+  # clickstack-collector-secrets on the data-plane / MCP Deployments.
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ printf "http://clickstack-collector.%s.svc.cluster.local:4318/v1/logs" .Release.Namespace | quote }}
   OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
   OTEL_EXPORTER_OTLP_INSECURE: "true"
   {{- else if eq (include "neuraltrust-platform.clickstackHybridEnabled" .) "true" }}

@@ -41,12 +41,50 @@ enrolment token only after they are issued.
 
 ## Routes and Ingress
 
-With `global.platform: openshift`, native Routes are the default. Use
+With `global.platform: openshift`, native Routes are the default for
+AgentGateway (`agentgateway.ingress.resourceType: auto`). Use
 `values-openshift-ingress.yaml.example` when the cluster standardizes on
-Kubernetes Ingress.
+Kubernetes Ingress (`resourceType: ingress`).
 
 Both paths use `global.domain`. Route names remain stable; Ingress hostnames are
 derived from each service's `hostPrefix`.
+
+### Wildcard gateway / MCP Routes
+
+Dynamic gateway subdomains (`*.llm.<domain>`, `*.mcp.<domain>`) render as
+OpenShift Routes with `wildcardPolicy: Subdomain` (host = zone without `*.`).
+Exact hosts use `wildcardPolicy: None`.
+
+Operator prerequisites (not rendered by Helm):
+
+1. The cluster IngressController must allow wildcards:
+
+   ```yaml
+   # IngressController spec.routeAdmission
+   routeAdmission:
+     wildcardPolicy: WildcardsAllowed
+   ```
+
+2. The router / Route certificate must cover the wildcard domains
+   (or terminate TLS at an upstream edge that does).
+
+3. Set AgentGateway discovery to match the public zones:
+
+   ```yaml
+   agentgateway:
+     config:
+       gatewayDiscoveryMode: "subdomain"
+       gatewayBaseDomain: "llm.apps.example.com"
+       mcpBaseDomain: "mcp.apps.example.com"
+     ingress:
+       dataPlane:
+         additionalHosts: ["*.llm.apps.example.com"]
+       mcp:
+         additionalHosts: ["*.mcp.apps.example.com"]
+   ```
+
+See `values-agentgateway-wildcard.yaml.example` and
+[docs/platform-v2.md](./docs/platform-v2.md).
 
 ## Self-hosted external mode
 

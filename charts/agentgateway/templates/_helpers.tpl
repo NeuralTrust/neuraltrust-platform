@@ -109,3 +109,80 @@ imagePullSecrets:
 {{- end -}}
 {{- end -}}
 {{- end }}
+
+{{/*
+Ordered unique public hosts for an AgentGateway ingress plane.
+Args: dict "host" "" "prefix" "" "additionalHosts" list "global" .Values.global
+Returns a YAML list: primary host (if resolved) then additionalHosts, de-duped.
+*/}}
+{{- define "agentgateway.ingress.hosts" -}}
+{{- $hosts := list -}}
+{{- $primary := include "neuraltrust-platform.ingress.host" (dict "host" .host "prefix" .prefix "global" .global) -}}
+{{- if $primary -}}
+  {{- $hosts = append $hosts $primary -}}
+{{- end -}}
+{{- range (default (list) .additionalHosts) -}}
+  {{- $h := . | toString | trim -}}
+  {{- if and $h (not (has $h $hosts)) -}}
+    {{- $hosts = append $hosts $h -}}
+  {{- end -}}
+{{- end -}}
+{{- toYaml $hosts -}}
+{{- end }}
+
+{{/*
+Whether AgentGateway should render networking.k8s.io Ingress resources.
+resourceType: auto|ingress|route
+  auto    → Ingress unless OpenShift (then Routes)
+  ingress → always Ingress
+  route   → never Ingress (OpenShift Routes instead)
+*/}}
+{{- define "agentgateway.ingress.useIngress" -}}
+{{- $rt := (.Values.ingress.resourceType | default "auto") -}}
+{{- if eq $rt "ingress" -}}
+true
+{{- else if eq $rt "route" -}}
+{{- else if include "neuraltrust-platform.isOpenshift" . -}}
+{{- else -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/*
+Whether AgentGateway should render OpenShift Route resources.
+*/}}
+{{- define "agentgateway.ingress.useRoutes" -}}
+{{- if and .Values.ingress.enabled (include "neuraltrust-platform.isOpenshift" .) -}}
+  {{- $rt := (.Values.ingress.resourceType | default "auto") -}}
+  {{- if or (eq $rt "route") (eq $rt "auto") -}}
+true
+  {{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Convert an Ingress-style host to an OpenShift Route host + wildcardPolicy.
+  *.llm.example.com → host=llm.example.com, wildcardPolicy=Subdomain
+  exact.example.com → host=exact.example.com, wildcardPolicy=None
+Returns YAML: host / wildcardPolicy
+*/}}
+{{- define "agentgateway.route.fromHost" -}}
+{{- $h := . | toString | trim -}}
+{{- if hasPrefix "*." $h -}}
+host: {{ trimPrefix "*." $h | quote }}
+wildcardPolicy: Subdomain
+{{- else -}}
+host: {{ $h | quote }}
+wildcardPolicy: None
+{{- end -}}
+{{- end }}
+
+{{/*
+Stable OpenShift Route metadata.name from a host string (wildcard-safe).
+*/}}
+{{- define "agentgateway.route.name" -}}
+{{- $prefix := .prefix -}}
+{{- $host := .host | toString | trim -}}
+{{- $suffix := $host | trimPrefix "*." | replace "." "-" | trunc 40 | trimSuffix "-" -}}
+{{- printf "%s-%s" $prefix $suffix | trunc 63 | trimSuffix "-" -}}
+{{- end }}

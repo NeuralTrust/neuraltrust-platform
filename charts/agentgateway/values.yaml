@@ -161,6 +161,11 @@ mcp:
     port: 8082
 ingress:
   enabled: true
+  # Public routing resource:
+  #   auto    → Ingress on AWS/Azure/GCP; native OpenShift Routes on OpenShift
+  #   ingress → always networking.k8s.io/v1 Ingress (OpenShift Ingress option)
+  #   route   → always OpenShift Route (no-op outside OpenShift)
+  resourceType: "auto"
   className: "" # Empty = use global.ingress.className
   annotations: {}
   tls:
@@ -169,9 +174,16 @@ ingress:
   controlPlane:
     host: "" # Empty = auto-derive <hostPrefix>.<global.domain>
     hostPrefix: "admin"
+  # Proxy (data-plane) public hosts. Primary host is exact; additionalHosts may
+  # include single-label wildcards (e.g. "*.llm.platform.example.com") for
+  # dynamically created gateways. Pair with config.gatewayDiscoveryMode=subdomain
+  # and config.gatewayBaseDomain=<zone without *.> so the app resolves slugs.
   dataPlane:
     host: ""
     hostPrefix: "gateway"
+    additionalHosts: []
+  # MCP public hosts. Same contract as dataPlane (exact + optional wildcards).
   mcp:
     host: ""
     hostPrefix: "mcp"
+    additionalHosts: []

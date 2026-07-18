@@ -1,0 +1,108 @@
+{{- /*
+Native OpenShift Routes for AgentGateway proxy/MCP (and admin in external mode).
+Rendered when global.platform=openshift and ingress.resourceType is auto|route.
+Wildcard Ingress hosts (*.llm.example.com) become host=llm.example.com with
+wildcardPolicy: Subdomain. Exact hosts use wildcardPolicy: None.
+Requires the cluster IngressController to allow wildcard routes
+(routeAdmission.wildcardPolicy: WildcardsAllowed).
+*/ -}}
+{{- if and .Values.ingress.enabled (eq (include "agentgateway.ingress.useRoutes" .) "true") }}
+{{- $global := .Values.global | default dict }}
+{{- $isExternal := eq (include "neuraltrust-platform.isExternal" .) "true" }}
+{{- $tls := .Values.ingress.tls | default dict }}
+{{- $termination := $tls.termination | default "edge" }}
+{{- $insecurePolicy := $tls.insecureEdgeTerminationPolicy | default "Redirect" }}
+
+{{- $dpHost := include "neuraltrust-platform.ingress.host" (dict "host" .Values.ingress.dataPlane.host "prefix" .Values.ingress.dataPlane.hostPrefix "global" $global) }}
+{{- $mcpHost := include "neuraltrust-platform.ingress.host" (dict "host" .Values.ingress.mcp.host "prefix" .Values.ingress.mcp.hostPrefix "global" $global) }}
+{{- $dpHosts := list -}}
+{{- if $dpHost -}}{{- $dpHosts = append $dpHosts $dpHost -}}{{- end -}}
+{{- range (default (list) .Values.ingress.dataPlane.additionalHosts) -}}
+  {{- $h := . | toString | trim -}}
+  {{- if and $h (not (has $h $dpHosts)) -}}{{- $dpHosts = append $dpHosts $h -}}{{- end -}}
+{{- end -}}
+
+{{- $mcpHosts := list -}}
+{{- if $mcpHost -}}{{- $mcpHosts = append $mcpHosts $mcpHost -}}{{- end -}}
+{{- range (default (list) .Values.ingress.mcp.additionalHosts) -}}
+  {{- $h := . | toString | trim -}}
+  {{- if and $h (not (has $h $mcpHosts)) -}}{{- $mcpHosts = append $mcpHosts $h -}}{{- end -}}
+{{- end -}}
+
+{{- range $dpHosts }}
+{{- $routeMeta := include "agentgateway.route.fromHost" . | fromYaml }}
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ include "agentgateway.route.name" (dict "prefix" "agentgateway-proxy" "host" .) }}
+  labels:
+    {{- include "agentgateway.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: data-plane
+spec:
+  host: {{ index $routeMeta "host" | quote }}
+  wildcardPolicy: {{ index $routeMeta "wildcardPolicy" }}
+  to:
+    kind: Service
+    name: {{ $.Values.dataPlane.name }}
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: {{ $termination }}
+    insecureEdgeTerminationPolicy: {{ $insecurePolicy }}
+{{- end }}
+
+{{- if .Values.mcp.enabled }}
+{{- range $mcpHosts }}
+{{- $routeMeta := include "agentgateway.route.fromHost" . | fromYaml }}
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ include "agentgateway.route.name" (dict "prefix" "agentgateway-mcp" "host" .) }}
+  labels:
+    {{- include "agentgateway.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: mcp
+spec:
+  host: {{ index $routeMeta "host" | quote }}
+  wildcardPolicy: {{ index $routeMeta "wildcardPolicy" }}
+  to:
+    kind: Service
+    name: {{ $.Values.mcp.name }}
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: {{ $termination }}
+    insecureEdgeTerminationPolicy: {{ $insecurePolicy }}
+{{- end }}
+{{- end }}
+
+{{- if $isExternal }}
+{{- $cpHost := include "neuraltrust-platform.ingress.host" (dict "host" .Values.ingress.controlPlane.host "prefix" .Values.ingress.controlPlane.hostPrefix "global" $global) }}
+{{- if $cpHost }}
+{{- $routeMeta := include "agentgateway.route.fromHost" $cpHost | fromYaml }}
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ include "agentgateway.route.name" (dict "prefix" "agentgateway-admin" "host" $cpHost) }}
+  labels:
+    {{- include "agentgateway.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+spec:
+  host: {{ index $routeMeta "host" | quote }}
+  wildcardPolicy: None
+  to:
+    kind: Service
+    name: {{ $.Values.controlPlane.name }}
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: {{ $termination }}
+    insecureEdgeTerminationPolicy: {{ $insecurePolicy }}
+{{- end }}
+{{- end }}
+{{- end }}

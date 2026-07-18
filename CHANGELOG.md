@@ -4,6 +4,30 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Added
+
+- **AgentGateway wildcard public routing.** Proxy and MCP Ingress (AWS/Azure/GCP)
+  accept opt-in `ingress.dataPlane.additionalHosts` /
+  `ingress.mcp.additionalHosts` (for example `*.llm.<domain>` /
+  `*.mcp.<domain>`), rendered as extra rules and TLS hosts. On OpenShift,
+  `ingress.resourceType: auto|route` renders native Routes with
+  `wildcardPolicy: Subdomain` for `*.` hosts (exact hosts use `None`). Set
+  `resourceType: ingress` to keep Kubernetes Ingress on OpenShift. Pair with
+  `config.gatewayDiscoveryMode: subdomain` and `gatewayBaseDomain` /
+  `mcpBaseDomain`. Admin stays exact-host only. See
+  `values-agentgateway-wildcard.yaml.example` and `docs/platform-v2.md`.
+
+### Fixed
+
+- **External ClickStack product logs path.** AgentGateway and TrustGuard export
+  business telemetry as OTLP **logs** via `otlploghttp.WithEndpointURL`, which
+  takes the URL path verbatim. External mode now sets
+  `OTEL_EXPORTER_OTLP_ENDPOINT` to
+  `http://clickstack-collector.<ns>.svc.cluster.local:4318/v1/logs` again
+  (matching TrustGate/TrustGuard SaaS overlays). The earlier base-URL-only value
+  caused POSTs to `/` and left `otel.otel_logs` empty while runtime traces still
+  filled `otel_traces` via `OPENTELEMETRY_*` host:port endpoints.
+
 ## [v2.0.2] — 2026-07-17
 
 ### Changed
