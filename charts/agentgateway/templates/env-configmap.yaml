@@ -76,9 +76,8 @@ data:
   OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
   OTEL_EXPORTER_OTLP_INSECURE: "true"
   {{- else if eq (include "neuraltrust-platform.clickstackHybridEnabled" .) "true" }}
-  # Hybrid opt-in (global.clickstack.enabled): dual-write product data to a
-  # ClickStack collector in addition to the Postgres raw path used by DataAgent.
-  # The bearer token comes from the agentgateway-secrets Secret.
+  # Hybrid: dual-write via local clickstack-egress-collector (enrolment → SaaS).
+  # Apps send plain OTLP in-cluster; no direct SaaS Authorization header.
   {{- include "neuraltrust-platform.clickstack.otlpEnv" . | nindent 2 }}
   {{- end }}
   # In-cluster TrustGuard data-plane URL. Derived from the stable Service name +

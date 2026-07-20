@@ -2,5 +2,5 @@ apiVersion: v2
 name: datacore
 description: DataCore — residency query API. Reads OTel logs from ClickHouse and deployment metadata from Postgres; serves a tenant-scoped REST API. Deployed only when global.deploymentMode=external.
 type: application
-version: 0.1.9
-appVersion: "v0.12.1"
+version: 0.1.10
+appVersion: "v0.13.0"

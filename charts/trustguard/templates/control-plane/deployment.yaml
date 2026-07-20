@@ -64,9 +64,7 @@ spec:
         {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "go" "ctx" .) | nindent 8 }}
         {{- include "neuraltrust-platform.configSyncTokenEnv" . | nindent 8 }}
         {{- include "neuraltrust-platform.appVersionEnv" (dict "tag" .Values.image.tag) | nindent 8 }}
-        {{- if and (eq (include "neuraltrust-platform.clickstackHybridEnabled" .) "true") (eq (include "neuraltrust-platform.clickstack.usesExistingSecret" .) "true") }}
-        {{- include "neuraltrust-platform.clickstack.otlpHeadersEnv" . | nindent 8 }}
-        {{- else if eq (include "neuraltrust-platform.isExternal" .) "true" }}
+        {{- if eq (include "neuraltrust-platform.isExternal" .) "true" }}
         {{- include "neuraltrust-platform.clickstack.externalOtlpHeadersEnv" . | nindent 8 }}
         {{- end }}
         {{- $fw := default dict .Values.firewall }}

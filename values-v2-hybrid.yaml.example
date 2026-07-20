@@ -1,7 +1,7 @@
 # Platform v2 hybrid overlay for a fully-configured deployment.
-# Documents the "one Postgres block, one Redis block, one ClickStack token"
+# Documents the "one Postgres block, one Redis block, one enrolment Secret"
 # hybrid contract using pre-created Secrets. Prefer existingSecret for
-# ClickStack, config-sync, and DataAgent enrolment.
+# DataAgent enrolment (also powers ClickStack egress) and config-sync.
 #
 # Never commit real tokens, passwords, or customer identifiers.
 # For the minimal starting point, see values-required.yaml.
@@ -11,14 +11,11 @@ global:
   platform: "kubernetes" # aws | gcp | azure | openshift | kubernetes
   domain: "platform.example.com"
 
-  # Mandatory: v2 hybrid always dual-writes AgentGateway + TrustGuard product
-  # data over OTLP to the NeuralTrust SaaS ClickStack collector. The endpoint,
-  # protocol, and TLS are fixed by the chart. The Secret must contain
-  # OTEL_EXPORTER_OTLP_HEADERS.
-  # Set enabled: false for an air-gapped install with no OTLP dual-write.
+  # Hybrid ClickStack dual-write uses local clickstack-egress-collector +
+  # DataAgent enrolment (no direct SaaS authToken). Set enabled: false for
+  # air-gap with no SaaS OTLP dual-write.
   clickstack:
-    existingSecret:
-      name: "clickstack-otlp"
+    enabled: true
 
   # One shared PostgreSQL block. Every hybrid workload (AgentGateway,
   # TrustGuard, DataAgent, data-plane-api) reads envFrom the rendered
