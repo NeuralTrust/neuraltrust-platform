@@ -15,22 +15,24 @@ in your cluster:
 - NeuralTrust Firewall when enabled
 - DataAgent only after the deployment is enrolled
 
-Hybrid always dual-writes AgentGateway and TrustGuard product telemetry over
-OTLP to the fixed NeuralTrust SaaS ClickStack endpoint. Operators supply
-`global.clickstack.authToken` or `global.clickstack.existingSecret` (default
-key `OTEL_EXPORTER_OTLP_HEADERS`); there is no in-cluster ClickStack collector.
-Set `global.clickstack.enabled: false` for air-gap. For SaaS-managed hybrid,
+Hybrid dual-writes AgentGateway and TrustGuard product telemetry via a local
+`clickstack-egress-collector`: apps send plain OTLP in-cluster; the egress
+collector exchanges the DataAgent enrolment JWT at DataCore for a short-lived
+OTLP access token and forwards to SaaS. There is no direct SaaS ClickStack
+bearer-token path. Hybrid ClickStack therefore requires DataAgent enrolment
+(`dataagent.enrolmentToken` or `enrolmentTokenExistingSecret`). Set
+`global.clickstack.enabled: false` for air-gap. For SaaS-managed hybrid,
 enable `agentgateway.configSync` and `trustguard.configSync` separately
 (defaults `enabled: false`); prefer `existingSecret.name` Secrets that hold
 both `CONFIG_SYNC_TOKEN` and `CONFIG_SYNC_LKG_KEY`. See
 [`docs/platform-v2.md`](./docs/platform-v2.md) and
 [`values-v2-hybrid.yaml.example`](./values-v2-hybrid.yaml.example).
 
-DataAgent is not required to install the platform. It renders only when
-`tenantId` and either `enrolmentToken` or
-`enrolmentTokenExistingSecret.name` are set. Prefer the existing-Secret path
-so the token never enters Helm values. With a complete enrolment, it makes an
-outbound TLS connection to DataBridge; it exposes no operator-facing ingress.
+DataAgent renders when `tenantId` and either `enrolmentToken` or
+`enrolmentTokenExistingSecret.name` are set (also required for hybrid
+ClickStack egress). Prefer the existing-Secret path so the token never enters
+Helm values. With a complete enrolment, it makes an outbound TLS connection to
+DataBridge; it exposes no operator-facing ingress.
 
 In external deployments, AlertEngine provides the supported detection, SIEM,
 and integration path.
@@ -60,23 +62,19 @@ helm upgrade --install neuraltrust-platform \
 ```
 
 `values-required.yaml` is the minimal hybrid starting point. Set the cloud
-provider and domain, supply the ClickStack token (or existing Secret), then
-enable DataAgent only after enrolment:
+provider, domain, and DataAgent enrolment (powers DataBridge and ClickStack
+egress):
 
 ```yaml
 global:
   deploymentMode: "hybrid"
   platform: "kubernetes"
   domain: "platform.example.com"
-  clickstack:
-    existingSecret:
-      name: "clickstack-otlp"
-      # key defaults to OTEL_EXPORTER_OTLP_HEADERS
 
 dataagent:
-  tenantId: ""
+  tenantId: "<tenant-id>"
   enrolmentTokenExistingSecret:
-    name: ""
+    name: "dataagent-enrolment"
     key: "ENROLMENT_TOKEN"
 ```
 

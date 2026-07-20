@@ -1,0 +1,26 @@
+{{- /* ClusterIP for AgentGateway/TrustGuard → DataAgent OTLP sidecar.
+     Name stays clickstack-egress-collector by default for stable OTEL URLs. */ -}}
+{{- if eq (include "neuraltrust-platform.clickstackEgress.enabled" .) "true" }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "neuraltrust-platform.clickstackEgress.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dataagent.labels" . | nindent 4 }}
+    app.kubernetes.io/component: clickstack-egress-collector
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "dataagent.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: data-plane
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: otlp-grpc
+      protocol: TCP
+    - name: otlp-http
+      port: 4318
+      targetPort: otlp-http
+      protocol: TCP
+{{- end }}

@@ -4,6 +4,20 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Changed
+
+- **Bump `opentelemetry-collector-contrib` to `0.156.0`.** Shared default for the
+  umbrella OTel Collector and the hybrid ClickStack egress sidecar. Upstream
+  0.154–0.156 breakages do not affect the chart's OTLP / oauth2client pipelines
+  (Prometheus `IgnoreScopeInfoMetric` is a scrape-attribute behavioral change only).
+- **Bump registry images (latest from Artifact Registry).** control-plane-app
+  `v1.99.1 → v1.101.0`, agentgateway `v0.14.0 → v0.15.0`, trustguard
+  `v0.17.0 → v0.18.0`, dataagent `v0.3.0 → v0.4.0`, datacore `v0.12.1 → v0.13.0`.
+  Matching subchart `values.yaml` / `appVersion` / Chart dependency patch bumps.
+- **Include `opentelemetry-collector-contrib` in `bump-images.yml`.** Auto-detect
+  bare `X.Y.Z` tags from AR; sync `global.observability.collector.image.tag`,
+  `global.clickstack.egress.image.tag`, and the matching template fallbacks.
+
 ## [v2.0.7] — 2026-07-20
 
 ### Changed

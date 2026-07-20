@@ -62,6 +62,10 @@ on:
         description: "clickstack-otel-collector tag (e.g. 2.30.1). Empty = latest from AR (bare X.Y.Z)."
         required: false
         default: ""
+      opentelemetry_collector_contrib_tag:
+        description: "opentelemetry-collector-contrib tag (e.g. 0.156.0). Empty = latest from AR (bare X.Y.Z). Syncs umbrella OTel Collector + hybrid ClickStack egress sidecar."
+        required: false
+        default: ""
       alertengine_tag:
         description: "alertengine tag (e.g. v0.1.0). Empty = latest from AR."
         required: false
@@ -191,6 +195,8 @@ jobs:
           # Infrastructure images (non-standard tag patterns, override default regex).
           # clickstack-otel-collector is mirrored into AR from ClickHouse; tags are bare X.Y.Z.
           CLICKSTACK_OTEL_COLLECTOR=$(resolve_tag "clickstack-otel-collector" "${{ inputs.clickstack_otel_collector_tag }}" '^[0-9]+\.[0-9]+\.[0-9]+$')
+          # Contrib collector: upstream otel tags are bare X.Y.Z (no v-prefix).
+          OTEL_COLLECTOR_CONTRIB=$(resolve_tag "opentelemetry-collector-contrib" "${{ inputs.opentelemetry_collector_contrib_tag }}" '^[0-9]+\.[0-9]+\.[0-9]+$')
           CLICKHOUSE=$(resolve_tag "clickhouse-server" "${{ inputs.clickhouse_tag }}" '^[0-9]+\.[0-9]+(\.[0-9]+){0,2}$')
           REDIS=$(resolve_tag "redis-stack-server" "${{ inputs.redis_tag }}" '^[0-9]+\.[0-9]+\.[0-9]+-v[0-9]+$')
           POSTGRES=$(resolve_tag "postgres" "${{ inputs.postgres_tag }}" '^[0-9]+-alpine$')
@@ -206,6 +212,7 @@ jobs:
           echo "dataagent=${DATAAGENT}" >> "$GITHUB_OUTPUT"
           echo "datacore=${DATACORE}" >> "$GITHUB_OUTPUT"
           echo "clickstack_otel_collector=${CLICKSTACK_OTEL_COLLECTOR}" >> "$GITHUB_OUTPUT"
+          echo "opentelemetry_collector_contrib=${OTEL_COLLECTOR_CONTRIB}" >> "$GITHUB_OUTPUT"
           echo "alertengine=${ALERTENGINE}" >> "$GITHUB_OUTPUT"
           echo "clickhouse=${CLICKHOUSE}" >> "$GITHUB_OUTPUT"
           echo "redis=${REDIS}" >> "$GITHUB_OUTPUT"
@@ -225,6 +232,7 @@ jobs:
           echo "| dataagent | \`${DATAAGENT:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| datacore | \`${DATACORE:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| clickstack-otel-collector | \`${CLICKSTACK_OTEL_COLLECTOR:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| opentelemetry-collector-contrib | \`${OTEL_COLLECTOR_CONTRIB:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| alertengine | \`${ALERTENGINE:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| clickhouse-server | \`${CLICKHOUSE:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| redis-stack-server | \`${REDIS:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
@@ -463,7 +471,43 @@ jobs:
           if [[ "$TEMPLATE_TAG_CHANGED" == "1" ]]; then BUMP_DATA_PLANE_API=true; fi
 
           # =============================================
-          # 9. Infrastructure: Redis (in-cluster, umbrella-managed)
+          # 9. Infrastructure: opentelemetry-collector-contrib
+          # Shared by the umbrella OTel Collector and the hybrid ClickStack
+          # egress sidecar. Keep both values paths + hardcoded fallbacks in sync.
+          # =============================================
+          TAG="${{ steps.tags.outputs.opentelemetry_collector_contrib }}"
+          if [[ -n "$TAG" ]]; then
+            if update_values_tag '.global.observability.collector.image.tag' "$TAG" "opentelemetry-collector-contrib (umbrella)"; then
+              :
+            fi
+            # Only sync egress when the hybrid ClickStack egress image block exists.
+            if [[ -n "$(yq eval '.global.clickstack.egress.image.repository // ""' values.yaml)" ]]; then
+              if update_values_tag '.global.clickstack.egress.image.tag' "$TAG" "opentelemetry-collector-contrib (clickstack egress)"; then
+                :
+              fi
+            fi
+            # deployment.yaml uses inline default "X.Y.Z" (not $var :=).
+            if grep -q 'opentelemetry-collector-contrib' templates/otel-collector/deployment.yaml 2>/dev/null; then
+              cp templates/otel-collector/deployment.yaml templates/otel-collector/deployment.yaml.bump-bak
+              sed -i -E 's/(default ")[0-9]+\.[0-9]+\.[0-9]+(" \(default dict \$coll\.image\)\.tag)/\1'"${TAG}"'\2/' \
+                templates/otel-collector/deployment.yaml
+              if ! cmp -s templates/otel-collector/deployment.yaml templates/otel-collector/deployment.yaml.bump-bak; then
+                echo "  Updated otel-collector deployment fallback → ${TAG}"
+                CHANGES+=("opentelemetry-collector-contrib (umbrella fallback): → ${TAG}")
+              fi
+              rm -f templates/otel-collector/deployment.yaml.bump-bak
+            fi
+            # clickstackEgress.image helper: $tag := $img.tag | default "X.Y.Z"
+            if grep -q 'neuraltrust-platform.clickstackEgress.image' templates/_helpers.tpl 2>/dev/null; then
+              update_template_tag "templates/_helpers.tpl" "tag" "$TAG"
+              if [[ "$TEMPLATE_TAG_CHANGED" == "1" ]]; then
+                CHANGES+=("opentelemetry-collector-contrib (egress fallback): → ${TAG}")
+              fi
+            fi
+          fi
+
+          # =============================================
+          # 10. Infrastructure: Redis (in-cluster, umbrella-managed)
           # =============================================
           TAG="${{ steps.tags.outputs.redis }}"
           if update_values_tag '.infrastructure.redis.image.tag' "$TAG" "redis (in-cluster)"; then
@@ -475,7 +519,7 @@ jobs:
           fi
 
           # =============================================
-          # 10. Infrastructure: Postgres (in-cluster + migration initContainers)
+          # 11. Infrastructure: Postgres (in-cluster + migration initContainers)
           # =============================================
           TAG="${{ steps.tags.outputs.postgres }}"
           if [[ -n "$TAG" ]]; then
@@ -569,6 +613,8 @@ jobs:
             values.yaml \
             Chart.yaml \
             Chart.lock \
+            templates/_helpers.tpl \
+            templates/otel-collector/deployment.yaml \
             templates/redis/_helpers.tpl \
             templates/postgresql/deployment.yaml \
             charts/control-plane-api/Chart.yaml \
