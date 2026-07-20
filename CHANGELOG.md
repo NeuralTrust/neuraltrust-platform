@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.1.0] — 2026-07-20
+
 ### Changed
 
 - **Bump `opentelemetry-collector-contrib` to `0.156.0`.** Shared default for the
