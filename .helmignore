@@ -42,6 +42,7 @@ rendered-charts/
 # Private / local overlays (gitignored, but present on disk)
 accounts/
 regions/
+local/
 my-values*.yaml
 
 # Helm packages and nested release artifacts

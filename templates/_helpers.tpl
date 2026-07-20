@@ -1071,35 +1071,131 @@ true
 {{- end -}}
 {{- end }}
 
+{{/*
+Enrolment credential is resolvable for DataAgent and/or OTLP egress exchange.
+
+Works from the umbrella (`.Values.dataagent`) and the dataagent subchart
+(`.Values` is the dataagent block). AgentGateway/TrustGuard use
+clickstackEgress.useLocalEndpoint (global-only) for the OTLP endpoint switch.
+*/}}
+{{- define "neuraltrust-platform.clickstack.enrolmentReady" -}}
+{{- $cfg := .Values -}}
+{{- if hasKey .Values "dataagent" -}}{{- $cfg = default dict .Values.dataagent -}}{{- end -}}
+{{- $token := $cfg.enrolmentToken | default "" -}}
+{{- $existing := default dict $cfg.enrolmentTokenExistingSecret -}}
+{{- $existingName := $existing.name | default "" -}}
+{{- $managedSecret := lookup "v1" "Secret" .Release.Namespace "dataagent-secrets" -}}
+{{- $managedData := dict -}}
+{{- if and $managedSecret (kindIs "map" $managedSecret) $managedSecret.data -}}
+  {{- $managedData = $managedSecret.data -}}
+{{- end -}}
+{{- $hasManagedToken := and (hasKey $managedData "ENROLMENT_TOKEN") (ne (index $managedData "ENROLMENT_TOKEN") "") -}}
+{{- $preserve := dig "preserveExistingSecrets" false (.Values.global | default dict) -}}
+{{- $chartGenerates := and (eq (include "neuraltrust-platform.autoGenerateSecrets" .) "true") (not $preserve) -}}
+{{- if or $existingName $hasManagedToken (and $token $chartGenerates) -}}true{{- end -}}
+{{- end }}
+
+{{/*
+Hybrid OTLP egress is on by default (v2 hybrid has no direct SaaS ClickStack
+token path). Set global.clickstack.egress.enabled=false only together with
+global.clickstack.enabled=false, or validation fails.
+Missing key ⇒ true.
+*/}}
+{{- define "neuraltrust-platform.clickstackEgress.optIn" -}}
+{{- $cfg := default dict (default dict (default dict .Values.global).clickstack).egress -}}
+{{- $enabled := true -}}
+{{- if hasKey $cfg "enabled" -}}{{- $enabled = $cfg.enabled -}}{{- end -}}
+{{- if $enabled -}}true{{- end -}}
+{{- end }}
+
+{{/*
+True when hybrid should co-locate the OTLP egress sidecar on DataAgent.
+
+Requires a fully enabled DataAgent (tenantId + enrolment + DB) because the
+collector is a sidecar, not a standalone Deployment. EXTERNAL / air-gapped
+installs never enable this: they keep the in-cluster clickstack-otel-collector
+→ ClickHouse path with no internet hop.
+*/}}
+{{- define "neuraltrust-platform.clickstackEgress.enabled" -}}
+{{- if and
+  (eq (include "neuraltrust-platform.clickstackHybridEnabled" .) "true")
+  (eq (include "neuraltrust-platform.clickstackEgress.optIn" .) "true")
+  (eq (include "neuraltrust-platform.dataagentEnabled" .) "true")
+-}}true{{- end -}}
+{{- end }}
+
+{{/*
+True when AgentGateway/TrustGuard should send plain OTLP to the local egress
+ClusterIP (DataAgent sidecar). Hybrid ClickStack has no direct SaaS Authorization
+path — apps always talk to the local egress Service when product dual-write is on.
+*/}}
+{{- define "neuraltrust-platform.clickstackEgress.useLocalEndpoint" -}}
+{{- if and
+  (eq (include "neuraltrust-platform.clickstackHybridEnabled" .) "true")
+  (eq (include "neuraltrust-platform.clickstackEgress.optIn" .) "true")
+-}}true{{- end -}}
+{{- end }}
+
+{{- define "neuraltrust-platform.clickstackEgress.fullname" -}}
+{{- $cfg := default dict (default dict (default dict .Values.global).clickstack).egress -}}
+{{- default "clickstack-egress-collector" $cfg.fullnameOverride | trunc 63 | trimSuffix "-" -}}
+{{- end }}
+
+{{- define "neuraltrust-platform.clickstackEgress.endpointHost" -}}
+{{- printf "%s.%s.svc.cluster.local" (include "neuraltrust-platform.clickstackEgress.fullname" .) .Release.Namespace -}}
+{{- end }}
+
+{{- define "neuraltrust-platform.clickstackEgress.otlpHTTPEndpoint" -}}
+{{- printf "http://%s:4318/v1/logs" (include "neuraltrust-platform.clickstackEgress.endpointHost" .) -}}
+{{- end }}
+
+{{/*
+Loopback OAuth broker on the DataAgent container. Not overridable — trust is
+pod-local; public DataCore token URLs are intentionally unsupported.
+*/}}
+{{- define "neuraltrust-platform.clickstackEgress.tokenURL" -}}
+http://127.0.0.1:9465/oauth/token
+{{- end }}
+
+{{- define "neuraltrust-platform.clickstackEgress.clientId" -}}
+{{- $cfg := default dict (default dict (default dict .Values.global).clickstack).egress -}}
+{{- default "otlp-egress" $cfg.clientId -}}
+{{- end }}
+
+{{/*
+Non-secret placeholder for oauth2client (required by the extension). Real auth
+is the DataAgent loopback broker + enrolment on the DataAgent gRPC connection.
+*/}}
+{{- define "neuraltrust-platform.clickstackEgress.clientSecret" -}}
+{{- $cfg := default dict (default dict (default dict .Values.global).clickstack).egress -}}
+{{- default "unused" $cfg.clientSecret -}}
+{{- end }}
+
+{{/*
+SaaS OTLP/HTTP base URL for the egress collector exporter (no /v1/logs suffix).
+Defaults to the public ingest host; override via global.clickstack.egress.endpoint
+or the legacy global.clickstack.endpoint (strip path if present).
+*/}}
+{{- define "neuraltrust-platform.clickstackEgress.saasEndpoint" -}}
+{{- $clickstack := default dict (default dict .Values.global).clickstack -}}
+{{- $cfg := default dict $clickstack.egress -}}
+{{- $raw := $cfg.endpoint | default ($clickstack.endpoint | default "https://clickstack-collector.neuraltrust.ai") -}}
+{{- trimSuffix "/v1/logs" (trimSuffix "/" $raw) -}}
+{{- end }}
+
+{{- define "neuraltrust-platform.clickstackEgress.image" -}}
+{{- $cfg := default dict (default dict (default dict .Values.global).clickstack).egress -}}
+{{- $img := default dict $cfg.image -}}
+{{- $repo := $img.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/opentelemetry-collector-contrib" -}}
+{{- $tag := $img.tag | default "0.156.0" -}}
+{{- printf "%s:%s" $repo $tag -}}
+{{- end }}
+
 {{- define "neuraltrust-platform.clickstack.otlpEnv" -}}
-{{- $cfg := default dict (default dict .Values.global).clickstack -}}
-{{- $endpoint := $cfg.endpoint | default "" -}}
-{{- if not $endpoint -}}{{- $endpoint = include "neuraltrust-platform.clickstack.defaultEndpoint" . -}}{{- end -}}
-{{- $protocol := $cfg.protocol | default "" -}}
-{{- if not $protocol -}}{{- $protocol = include "neuraltrust-platform.clickstack.defaultProtocol" . -}}{{- end -}}
-OTEL_EXPORTER_OTLP_ENDPOINT: {{ $endpoint | quote }}
-OTEL_EXPORTER_OTLP_PROTOCOL: {{ $protocol | quote }}
-{{- if $cfg.insecure }}
+{{- /* Hybrid: plain OTLP to local egress (enrolment exchange owns SaaS auth). */ -}}
+OTEL_EXPORTER_OTLP_ENDPOINT: {{ include "neuraltrust-platform.clickstackEgress.otlpHTTPEndpoint" . | quote }}
+OTEL_EXPORTER_OTLP_PROTOCOL: {{ include "neuraltrust-platform.clickstack.defaultProtocol" . | quote }}
 OTEL_EXPORTER_OTLP_INSECURE: "true"
-{{- end }}
-{{- end }}
-
-{{- define "neuraltrust-platform.clickstack.usesExistingSecret" -}}
-{{- $cfg := default dict (default dict .Values.global).clickstack -}}
-{{- $existingRef := default dict $cfg.existingSecret -}}
-{{- if $existingRef.name -}}true{{- end -}}
-{{- end }}
-
-{{- define "neuraltrust-platform.clickstack.otlpHeadersEnv" -}}
-{{- $cfg := default dict (default dict .Values.global).clickstack -}}
-{{- $existingRef := default dict $cfg.existingSecret -}}
-{{- $name := $existingRef.name -}}
-{{- $key := $existingRef.key | default "OTEL_EXPORTER_OTLP_HEADERS" -}}
-- name: OTEL_EXPORTER_OTLP_HEADERS
-  valueFrom:
-    secretKeyRef:
-      name: {{ $name | quote }}
-      key: {{ $key | quote }}
 {{- end }}
 
 {{/*
@@ -1116,17 +1212,6 @@ clickstack-collector-secrets
     secretKeyRef:
       name: {{ include "neuraltrust-platform.clickstack.externalCollectorSecretName" . | quote }}
       key: OTEL_EXPORTER_OTLP_HEADERS
-{{- end }}
-
-{{- define "neuraltrust-platform.clickstack.otlpHeaders" -}}
-{{- $cfg := default dict (default dict .ctx.Values.global).clickstack -}}
-{{- $existing := .existingSecret -}}
-{{- $token := $cfg.authToken | default "" -}}
-{{- if and $token (ne ($token | toString) "") -}}
-{{- printf "authorization=%s" $token -}}
-{{- else if and $existing (kindIs "map" $existing) (index $existing "data") (hasKey $existing.data "OTEL_EXPORTER_OTLP_HEADERS") -}}
-{{- index $existing.data "OTEL_EXPORTER_OTLP_HEADERS" | b64dec -}}
-{{- end -}}
 {{- end }}
 
 {{/*

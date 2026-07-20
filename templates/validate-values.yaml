@@ -84,16 +84,17 @@ no Kubernetes resource when validation succeeds.
   {{- end -}}
 {{- end -}}
 
-{{- /* Hybrid ClickStack: mandatory bearer token unless the air-gap escape hatch. */ -}}
+{{- /* Hybrid ClickStack: local egress + DataAgent enrolment only (no direct
+     SaaS authToken path). EXTERNAL / air-gapped installs ignore this block. */ -}}
 {{- $clickstack := default dict $global.clickstack -}}
 {{- $clickstackEnabled := true -}}
 {{- if hasKey $clickstack "enabled" -}}{{- $clickstackEnabled = $clickstack.enabled -}}{{- end -}}
 {{- if and (eq $mode "hybrid") $clickstackEnabled -}}
-  {{- $csExistingRef := default dict $clickstack.existingSecret -}}
-  {{- $hasInlineToken := and ($clickstack.authToken | default "") (ne ($clickstack.authToken | toString) "") -}}
-  {{- $hasExistingRef := ne ($csExistingRef.name | default "") "" -}}
-  {{- if and (not $hasInlineToken) (not $hasExistingRef) -}}
-    {{- fail "v2 hybrid ClickStack export requires a bearer token: set `global.clickstack.authToken` OR `global.clickstack.existingSecret.name` (pointing at a Secret carrying `OTEL_EXPORTER_OTLP_HEADERS`). Set `global.clickstack.enabled: false` for an air-gapped install with no OTLP dual-write." -}}
+  {{- if ne (include "neuraltrust-platform.clickstackEgress.optIn" .) "true" -}}
+    {{- fail "v2 hybrid ClickStack has no direct SaaS token path: keep global.clickstack.egress.enabled=true (default) with dataagent enrolment, or set global.clickstack.enabled: false to disable SaaS OTLP dual-write." -}}
+  {{- end -}}
+  {{- if ne (include "neuraltrust-platform.dataagentEnabled" .) "true" -}}
+    {{- fail "v2 hybrid ClickStack export requires an enabled DataAgent (tenantId + enrolmentToken or enrolmentTokenExistingSecret.name) so the OTLP egress sidecar can use the loopback OAuth broker. Set global.clickstack.enabled: false to disable SaaS OTLP dual-write." -}}
   {{- end -}}
 {{- end -}}
 

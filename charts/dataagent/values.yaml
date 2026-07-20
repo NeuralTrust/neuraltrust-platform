@@ -1,14 +1,16 @@
 # DataAgent subchart.
 # Renders ONLY for v2 hybrid when tenantId and enrolment credentials are set.
 # Outbound-only: dials the SaaS DataBridge over gRPC, runs typed read-only
-# queries on a local Postgres, and streams back only entitled rows. No inbound
-# Service is exposed; the :8080 listener is health probes only.
+# queries on a local Postgres, and streams back only entitled rows.
+# When hybrid ClickStack egress is enabled, a ClusterIP Service
+# (clickstack-egress-collector) exposes the co-located OTel sidecar's OTLP
+# ports; DataAgent's :8080 listener remains health probes only.
 nameOverride: ""
 fullnameOverride: "dataagent"
 securityHardening: true
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/dataagent
-  tag: "v0.3.0"
+  tag: "v0.4.0"
   pullPolicy: IfNotPresent
 imagePullSecrets: "gcr-secret"
 serviceAccount:

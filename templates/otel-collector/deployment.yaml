@@ -40,7 +40,7 @@ spec:
       {{- end }}
       containers:
         - name: otel-collector
-          image: {{ printf "%s:%s" (default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/opentelemetry-collector-contrib" (default dict $coll.image).repository) (default "0.153.0" (default dict $coll.image).tag) | quote }}
+          image: {{ printf "%s:%s" (default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/opentelemetry-collector-contrib" (default dict $coll.image).repository) (default "0.156.0" (default dict $coll.image).tag) | quote }}
           imagePullPolicy: {{ default "IfNotPresent" (default dict $coll.image).pullPolicy }}
           args:
             - --config=/etc/otelcol/config.yaml
