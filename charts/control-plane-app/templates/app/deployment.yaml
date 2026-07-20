@@ -47,7 +47,7 @@ spec:
       initContainers:
       - name: init-db
         {{- $initImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
-        {{- $initImageTag := "v1.98.1" }}
+        {{- $initImageTag := "v1.99.1" }}
         {{- $initPullPolicy := "Always" }}
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.image }}
           {{- if .Values.controlPlane.components.app.image.repository }}{{- $initImageRepo = .Values.controlPlane.components.app.image.repository }}{{- end }}
@@ -189,7 +189,7 @@ spec:
       containers:
       - name: app
         {{- $appImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
-        {{- $appImageTag := "v1.98.1" }}
+        {{- $appImageTag := "v1.99.1" }}
         {{- $appPullPolicy := "Always" }}
         {{- $appPort := 3000 }}
         {{- $nodeEnv := "production" }}
@@ -213,7 +213,7 @@ spec:
         {{- $agentgatewayProxyUrl := "http://agentgateway-proxy" }}
         {{- $trustguardUrl := "http://trustguard-control-plane" }}
         {{- $datacoreUrl := "http://datacore" }}
-        {{- $datacoreMetricsEnabled := "false" }}
+        {{- $datacoreMetricsEnabled := "true" }}
         {{- $forceV2Ui := "true" }}
         {{- /* External/on-prem: prefer platform env email (SES/SMTP/Resend) over
                per-org DB email settings. SaaS leaves this unset (org-first).
