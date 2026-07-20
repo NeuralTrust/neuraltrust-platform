@@ -33,6 +33,59 @@ ClickHouse) or force it with
 The backend can also be pinned to `postgres` explicitly. In-cluster ClickHouse
 deploys only in external mode.
 
+### Hybrid control and data channels
+
+SaaS-managed hybrid uses three required outbound paths—two config-sync
+channels and ClickStack OTLP—and one optional DataAgent channel. Every
+connection is initiated by the customer cluster over TLS:
+
+1. AgentGateway proxy/MCP opens config-sync gRPC to
+   `agentgateway-configsync.neuraltrust.ai:443`.
+2. TrustGuard data plane opens config-sync gRPC to
+   `trustguard-configsync.neuraltrust.ai:443`.
+3. Enrolled DataAgent opens gRPC to `databridge.neuraltrust.ai:443`.
+4. AgentGateway and TrustGuard send product events directly over OTLP/HTTP to
+   `https://clickstack-collector.neuraltrust.ai/v1/logs`.
+
+There is no in-cluster ClickStack collector in hybrid. The
+`clickstack-otel-collector` subchart is external-mode only.
+
+For a SaaS-managed hybrid deployment, enable config-sync on both runtimes.
+Pre-create the two named Secrets below with independently issued SaaS bearer
+tokens under `CONFIG_SYNC_TOKEN` and separate base64-encoded 32-byte cache
+encryption keys under `CONFIG_SYNC_LKG_KEY`:
+
+```yaml
+agentgateway:
+  configSync:
+    enabled: true
+    existingSecret:
+      name: "agentgateway-config-sync"
+
+trustguard:
+  configSync:
+    enabled: true
+    existingSecret:
+      name: "trustguard-config-sync"
+```
+
+In external mode, each reference is also injected into that component's local
+control plane so the gRPC server and data-plane clients authenticate with the
+same token.
+
+Each data plane initiates a long-lived bidirectional gRPC stream, fetches a
+compiled snapshot, stores it in memory, and acknowledges applied versions. The
+encrypted last-known-good snapshot lets it serve during a temporary SaaS
+outage. Config-sync replaces PostgreSQL as the runtime **configuration source**;
+the shared hybrid PostgreSQL remains the raw product-data store used by the
+Postgres telemetry exporters and DataAgent. AgentGateway calls TrustGuard over
+the in-cluster `trustguard-data-plane` Service; that hop does not leave the
+cluster.
+
+Leaving config-sync disabled is only suitable when runtime configuration is
+populated and managed in PostgreSQL out of band. The hybrid chart does not
+deploy local AgentGateway or TrustGuard control planes to do that.
+
 Leave DataAgent enrolment empty until a tenant identifier and token are issued:
 
 ```yaml
@@ -43,9 +96,12 @@ dataagent:
     key: "ENROLMENT_TOKEN"
 ```
 
-DataAgent renders only when both values are present. It reads only the entitled
-local PostgreSQL data and opens an outbound TLS stream to SaaS DataBridge. It
-has no Ingress or public Service.
+DataAgent renders only when both values are present. It does not synchronize
+runtime configuration and is not the ClickStack transport. It opens an
+outbound-only gRPC connection to `databridge.neuraltrust.ai:443`; SaaS sends
+typed, entitlement-scoped query requests over that channel and DataAgent reads
+the shared local PostgreSQL and streams back only the permitted rows. It has no
+Ingress or public Service.
 
 ### Operator input: ClickStack OTLP token
 

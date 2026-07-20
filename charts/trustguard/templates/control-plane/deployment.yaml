@@ -62,6 +62,7 @@ spec:
         {{- include "neuraltrust-platform.trustguardClientEnv" (dict "ctx" . "idVar" "TRUSTGUARD_PLATFORM_CLIENT_ID" "secretVar" "TRUSTGUARD_PLATFORM_CLIENT_SECRET") | nindent 8 }}
         {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
         {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "go" "ctx" .) | nindent 8 }}
+        {{- include "neuraltrust-platform.configSyncTokenEnv" . | nindent 8 }}
         {{- include "neuraltrust-platform.appVersionEnv" (dict "tag" .Values.image.tag) | nindent 8 }}
         {{- if and (eq (include "neuraltrust-platform.clickstackHybridEnabled" .) "true") (eq (include "neuraltrust-platform.clickstack.usesExistingSecret" .) "true") }}
         {{- include "neuraltrust-platform.clickstack.otlpHeadersEnv" . | nindent 8 }}

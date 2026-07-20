@@ -1006,6 +1006,27 @@ Usage: {{- include "neuraltrust-platform.configSyncEnv" (dict "ctx" . "product" 
 {{- end }}
 
 {{/*
+Config-sync credentials from a dedicated operator-owned Secret. Explicit env
+wins over the chart-managed service Secret loaded through envFrom.
+*/}}
+{{- define "neuraltrust-platform.configSyncTokenEnv" -}}
+{{- $cs := default dict .Values.configSync -}}
+{{- $existing := default dict $cs.existingSecret -}}
+{{- if and $cs.enabled $existing.name }}
+- name: CONFIG_SYNC_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: {{ $existing.name | quote }}
+      key: {{ $existing.tokenKey | default "CONFIG_SYNC_TOKEN" | quote }}
+- name: CONFIG_SYNC_LKG_KEY
+  valueFrom:
+    secretKeyRef:
+      name: {{ $existing.name | quote }}
+      key: {{ $existing.lkgKey | default "CONFIG_SYNC_LKG_KEY" | quote }}
+{{- end }}
+{{- end }}
+
+{{/*
 Config-sync shared token / LKG cache key.
 */}}
 {{- define "neuraltrust-platform.configSync.token" -}}

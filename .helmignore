@@ -1,6 +1,12 @@
 # Patterns to ignore when building packages.
 # This supports shell glob matching, relative path matching, and
 # negation (prefixed with !). Only one pattern per line.
+#
+# Keep this aligned with .gitignore for anything that must never ship inside
+# the chart tarball. Helm packages the working tree (not git), so gitignored
+# local files still bloat — and can break — `helm upgrade .` (K8s Secret
+# hard limit: 1 MiB for sh.helm.release.v1.*).
+
 .DS_Store
 # Common VCS dirs
 .git/
@@ -23,4 +29,38 @@ gha-creds-*.json
 .idea/
 *.tmproj
 .vscode/
+.cursor/
 
+# GitHub / local tooling — not part of the installable chart
+.github/
+.helm/
+scripts/
+docs/
+test-results/
+rendered-charts/
+
+# Private / local overlays (gitignored, but present on disk)
+accounts/
+regions/
+my-values*.yaml
+
+# Helm packages and nested release artifacts
+*.tgz
+*.tar.gz
+charts/*.tgz
+
+# Docs that only bloat the release Secret
+CHANGELOG.md
+VALUES_SCENARIOS.md
+.commit*
+.commits*
+.release-notes*.md
+commits.txt
+request.json
+
+# Secrets and registry credentials (never package)
+key.json
+gcr-keys.json
+*.key
+*.pem
+/secrets.yaml

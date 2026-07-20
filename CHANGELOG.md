@@ -4,6 +4,20 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Changed
+
+- **Document the complete hybrid outbound contract.** SaaS-managed
+  AgentGateway and TrustGuard data planes use separate config-sync gRPC
+  channels; enrolled DataAgent uses DataBridge gRPC; product events go directly
+  to the SaaS ClickStack OTLP endpoint (no in-cluster collector in hybrid).
+
+### Fixed
+
+- **Make hybrid config-sync fail closed and preserve its runtime cache.**
+  AgentGateway and TrustGuard can read SaaS tokens from dedicated existing
+  Secrets, reject enabled config-sync without a token source, and mount writable
+  last-known-good storage when pod root filesystems are read-only.
+
 ## [v2.0.3] — 2026-07-18
 
 ### Added
