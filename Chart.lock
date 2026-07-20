@@ -1,22 +1,22 @@
 dependencies:
 - name: clickhouse
   repository: file://./charts/clickhouse
-  version: 1.0.3
+  version: 1.0.4
 - name: data-plane-api
   repository: file://./charts/data-plane-api
-  version: 1.4.2
+  version: 1.4.3
 - name: control-plane-api
   repository: file://./charts/control-plane-api
   version: 0.1.1
 - name: control-plane-app
   repository: file://./charts/control-plane-app
-  version: 0.1.6
+  version: 0.1.7
 - name: agentgateway
   repository: file://./charts/agentgateway
-  version: 0.1.17
+  version: 0.1.18
 - name: trustguard
   repository: file://./charts/trustguard
-  version: 0.1.17
+  version: 0.1.18
 - name: trustlens
   repository: file://./charts/trustlens
   version: 0.1.1
@@ -28,7 +28,7 @@ dependencies:
   version: 0.1.9
 - name: clickstack-otel-collector
   repository: file://./charts/clickstack-otel-collector
-  version: 0.1.3
+  version: 0.1.4
 - name: alertengine
   repository: file://./charts/alertengine
   version: 0.1.3
@@ -38,5 +38,5 @@ dependencies:
 - name: watchdog
   repository: file://./charts/watchdog
   version: 0.3.0
-digest: sha256:3931cb8d56a0bb8ed0f34f4e28b734a32fe2af998ee51734c9d141a6974be2c0
-generated: "2026-07-18T14:36:10.680645+02:00"
+digest: sha256:78fec75c356ab84cc3dc82326ce293d4d7d86def0c2b4ba61d8b683ac7728398
+generated: "2026-07-20T09:48:49.783192+02:00"

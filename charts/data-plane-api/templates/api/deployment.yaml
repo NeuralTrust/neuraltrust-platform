@@ -53,7 +53,7 @@ spec:
         {{- if $renderChInit }}
         - name: clickhouse-migrations
           {{- $chMigrationRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickhouse-server" }}
-          {{- $chMigrationTag := "26.3" }}
+          {{- $chMigrationTag := "26.6" }}
           {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.clickhouse .Values.dataPlane.components.clickhouse.image }}
             {{- if .Values.dataPlane.components.clickhouse.image.repository }}{{- $chMigrationRepo = .Values.dataPlane.components.clickhouse.image.repository }}{{- end }}
             {{- if .Values.dataPlane.components.clickhouse.image.tag }}{{- $chMigrationTag = .Values.dataPlane.components.clickhouse.image.tag }}{{- end }}
