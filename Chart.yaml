@@ -41,7 +41,7 @@ dependencies:
       - v2
   # AgentGateway proxy/MCP admin + data plane.
   - name: agentgateway
-    version: 0.1.18
+    version: 0.1.19
     repository: file://./charts/agentgateway
     tags:
       - neuraltrust
