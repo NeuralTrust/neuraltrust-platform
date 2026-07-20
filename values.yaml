@@ -27,25 +27,35 @@ global:
     trustguardClientSecretName: ""
   # ClickStack OTLP export for the v2 data planes (AgentGateway + TrustGuard).
   #
-  # In v2 HYBRID this block is ALWAYS ON with fixed SaaS defaults:
-  #   endpoint: https://clickstack-collector.neuraltrust.ai/v1/logs
-  #   protocol: http/protobuf
-  #   insecure: false
-  # Operators supply ONLY the bearer token — either inline via `authToken` or
-  # by pointing `existingSecret.name` at a pre-created Secret. Rendering fails
-  # closed when neither is set. Air-gap escape hatch: set `enabled: false`.
+  # In v2 HYBRID this is ALWAYS ON by default: apps send plain OTLP to a local
+  # ClusterIP Service (clickstack-egress-collector) that selects the DataAgent
+  # pod. An OTel collector sidecar on DataAgent exchanges via DataAgent's
+  # loopback OAuth broker (enrolment stays on DataAgent only) and forwards to
+  # SaaS. There is no direct SaaS authToken / existingSecret path.
+  # dataagent.tenantId is DataAgent routing only — it does not authorize OTLP.
   #
-  # In v2 external, product data (meta/raw) is always exported to the
-  # in-cluster clickstack-otel-collector and this block is ignored.
+  # Air-gap escape hatch: set `enabled: false` (also disables egress).
+  #
+  # In v2 EXTERNAL / air-gapped clusters, product telemetry stays in-cluster
+  # (AgentGateway/TrustGuard → clickstack-otel-collector → local ClickHouse).
+  # This block and the egress sidecar are ignored — no internet hop.
   clickstack:
     enabled: true
-    endpoint: "" # Deprecated override; leave empty in production hybrid
+    # Optional overrides for the egress sidecar's SaaS export target only.
+    endpoint: ""
     protocol: ""
     insecure: false
-    authToken: "" # Required for v2 hybrid installs (or use existingSecret below)
-    existingSecret:
-      name: ""
-      key: "OTEL_EXPORTER_OTLP_HEADERS"
+    egress:
+      enabled: true # default on for hybrid; set false only with clickstack.enabled=false
+      nameOverride: "" # ClusterIP Service name (default clickstack-egress-collector)
+      clientId: "otlp-egress" # non-secret oauth2client placeholder
+      clientSecret: "unused" # non-secret oauth2client placeholder (broker ignores it)
+      endpoint: "" # SaaS OTLP/HTTP base; default https://clickstack-collector.neuraltrust.ai
+      image:
+        repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/opentelemetry-collector-contrib
+        tag: "0.156.0"
+        pullPolicy: IfNotPresent
+      resources: {}
   # Base domain used for URL generation (<hostPrefix>.<domain>).
   domain: "neuraltrust.ai"
   imageRegistry: "" # Global registry mirror; empty = per-component defaults
@@ -205,7 +215,7 @@ global:
       endpoint: ""
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/opentelemetry-collector-contrib
-        tag: "0.153.0"
+        tag: "0.156.0"
         pullPolicy: IfNotPresent
       imagePullSecret: "gcr-secret"
       replicas: 1
@@ -473,7 +483,7 @@ control-plane-app:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.99.1"
+          tag: "v1.101.0"
           pullPolicy: "Always"
         config:
           nodeEnv: production
@@ -542,7 +552,7 @@ control-plane-app:
 # AgentGateway (v2 TrustGate replacement): admin + proxy/mcp.
 agentgateway:
   image:
-    tag: "v0.14.0"
+    tag: "v0.15.0"
   database:
     sslMode: "prefer"
     iamAuth: false
@@ -552,7 +562,7 @@ agentgateway:
 # TrustGuard: control-plane + data-plane (/v1/evaluate).
 trustguard:
   image:
-    tag: "v0.17.0"
+    tag: "v0.18.0"
   database:
     sslMode: "prefer"
     iamAuth: false
@@ -573,7 +583,7 @@ trustlens:
 # DataAgent (hybrid-only outbound bridge to SaaS DataBridge).
 dataagent:
   image:
-    tag: "v0.3.0"
+    tag: "v0.4.0"
   databridge:
     addr: "databridge.neuraltrust.ai:443"
     serverName: "databridge.neuraltrust.ai"
@@ -591,7 +601,7 @@ dataagent:
 # `global.postgresql` block.
 datacore:
   image:
-    tag: "v0.12.1"
+    tag: "v0.13.0"
   database:
     host: ""
     port: 5432

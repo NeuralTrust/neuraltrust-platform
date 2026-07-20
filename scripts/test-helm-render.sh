@@ -27,10 +27,13 @@ blue()  { printf '\033[34m%s\033[0m\n' "$*"; }
 
 helm dependency update "$CHART_DIR" >/dev/null
 
-# v2 hybrid ClickStack fails render when no token is configured. Wire a dummy
-# token by default so scenarios that aren't specifically about the ClickStack
-# contract don't have to opt in.
-CLICKSTACK_DEFAULT_ARGS=(--set global.clickstack.authToken=render-test-token)
+# v2 hybrid ClickStack co-locates the OTLP egress sidecar on DataAgent, so
+# defaults must enable DataAgent (tenantId + enrolment). External mode ignores
+# this requirement (DataAgent does not render).
+CLICKSTACK_DEFAULT_ARGS=(
+  --set dataagent.tenantId=test-tenant
+  --set dataagent.enrolmentTokenExistingSecret.name=dataagent-enrolment
+)
 
 render_default() {
   local out="$1"
@@ -88,9 +91,9 @@ assert_occurrences() {
 }
 
 # ---------------------------------------------------------------------------
-# 1. Minimal v2 hybrid — shared PG/Redis + mandatory ClickStack token
+# 1. Minimal v2 hybrid — shared PG/Redis + enrolment-backed ClickStack egress
 # ---------------------------------------------------------------------------
-blue "==> Scenario 1: minimal v2 hybrid (shared PG/Redis + mandatory ClickStack)"
+blue "==> Scenario 1: minimal v2 hybrid (shared PG/Redis + ClickStack egress)"
 out1="$TMP/scenario-hybrid-minimal.yaml"
 render_default "$out1"
 
@@ -108,15 +111,38 @@ assert_contains "$out1" 'name: trustguard-data-plane' \
   "hybrid: trustguard data-plane renders"
 assert_contains "$out1" 'name: data-plane-api' \
   "hybrid: data-plane-api shim renders"
+assert_contains "$out1" 'name: clickstack-egress-collector' \
+  "hybrid: local OTLP egress ClusterIP Service renders"
+assert_contains "$out1" 'name: clickstack-egress-collector'$'\n''        image:' \
+  "hybrid: OTLP egress sidecar on DataAgent renders"
+assert_contains "$out1" 'name: OAUTH_BROKER_ADDR'$'\n''          value: "127.0.0.1:9465"' \
+  "hybrid: DataAgent enables loopback OAuth broker for egress sidecar"
+assert_contains "$out1" 'token_url: "http://127.0.0.1:9465/oauth/token"' \
+  "hybrid: egress sidecar token_url is DataAgent loopback broker"
+assert_contains "$out1" 'client_secret: "unused"' \
+  "hybrid: egress sidecar uses non-secret oauth2client placeholder"
+assert_not_contains "$out1" 'client_secret: ${env:ENROLMENT_TOKEN}' \
+  "hybrid: egress sidecar must not read ENROLMENT_TOKEN"
+assert_contains "$out1" 'http://clickstack-egress-collector.default.svc.cluster.local:4318/v1/logs' \
+  "hybrid: apps OTLP endpoint points at local egress"
 assert_not_contains "$out1" 'name: control-plane-app' \
   "hybrid: control-plane-app must not render (SaaS-side)"
 assert_not_contains "$out1" 'name: control-plane-api' \
   "hybrid: control-plane-api must not render (SaaS-side)"
+assert_not_contains "$out1" 'OTEL_EXPORTER_OTLP_HEADERS:' \
+  "hybrid: apps do not carry SaaS Authorization headers"
 
-# ClickStack fail-closed
-blue "==> Scenario 1b: ClickStack token missing must fail (fail-closed)"
-assert_render_fails "hybrid without a ClickStack token fails render" \
-  --set global.clickstack.authToken=
+# ClickStack fail-closed without a fully enabled DataAgent (egress is a sidecar)
+blue "==> Scenario 1b: hybrid ClickStack without enrolment must fail (fail-closed)"
+assert_render_fails "hybrid without enrolment fails render" \
+  --set dataagent.enrolmentTokenExistingSecret.name=
+blue "==> Scenario 1b1: hybrid ClickStack without tenantId must fail (fail-closed)"
+assert_render_fails "hybrid without dataagent.tenantId fails render" \
+  --set dataagent.tenantId=
+
+blue "==> Scenario 1b2: egress.enabled=false with clickstack on must fail"
+assert_render_fails "hybrid cannot disable egress while ClickStack dual-write is on" \
+  --set global.clickstack.egress.enabled=false
 
 # Air-gap escape hatch
 blue "==> Scenario 1c: ClickStack air-gap escape hatch renders"
@@ -125,6 +151,8 @@ helm template test "$CHART_DIR" --namespace default -f "$CHART_DIR/values-requir
   --set global.clickstack.enabled=false > "$out1c"
 assert_contains "$out1c" 'name: agentgateway-proxy' \
   "air-gap: gateway still renders with ClickStack disabled"
+assert_not_contains "$out1c" 'name: clickstack-egress-collector' \
+  "air-gap: egress collector must not render when ClickStack disabled"
 
 # Config-sync fail-closed and writable LKG storage
 blue "==> Scenario 1d: config-sync token references and LKG storage"
@@ -190,7 +218,12 @@ assert_contains "$out2" 'cGcuaW50ZXJuYWwuZXhhbXBsZS5jb20=' \
 # ---------------------------------------------------------------------------
 blue "==> Scenario 2b: postgresql-secrets via autoGenerateSecrets=false fallback"
 out2b="$TMP/scenario-pg-secrets-fallback.yaml"
+# Clear DataAgent enrolment gates: default CLICKSTACK_DEFAULT_ARGS enable
+# DataAgent, which requires existingSecret when autoGenerateSecrets=false.
 render_default "$out2b" \
+  --set global.clickstack.enabled=false \
+  --set dataagent.tenantId= \
+  --set dataagent.enrolmentTokenExistingSecret.name= \
   --set global.autoGenerateSecrets=false \
   --set global.preserveExistingSecrets=false \
   --set global.postgresql.password=fallback-pg-secret
@@ -233,6 +266,10 @@ assert_contains "$out3" 'OTEL_EXPORTER_OTLP_ENDPOINT: "http://clickstack-collect
   "external: product OTLP logs endpoint includes /v1/logs (WithEndpointURL)"
 assert_contains "$out3" 'OPENTELEMETRY_TRACES_ENDPOINT: "clickstack-collector.default.svc.cluster.local:4318"' \
   "external: runtime traces stay host:port (WithEndpoint appends /v1/traces)"
+assert_not_contains "$out3" 'name: clickstack-egress-collector' \
+  "external: SaaS egress collector must not render (air-gap in-cluster path)"
+assert_not_contains "$out3" 'clickstack-egress-collector.default.svc' \
+  "external: product OTLP must not point at hybrid egress"
 assert_contains "$out3" 'name: clickstack-collector-secrets' \
   "external: clickstack-collector-secrets Secret renders"
 assert_contains "$out3" 'OTEL_EXPORTER_OTLP_HEADERS:' \
@@ -565,15 +602,23 @@ assert_not_contains "$out10b" 'name: prompt-moderation-worker' \
 assert_not_contains "$out10b" 'NEURAL_TRUST_FIREWALL_BASE_URL' \
   "firewall off: TrustGuard does not wire Firewall URL"
 
-blue "==> Scenario 10c: hybrid has no ClickStack collector; ClickStack env present"
+blue "==> Scenario 10c: hybrid has no in-cluster ClickStack; egress to SaaS"
 out10c="$TMP/scenario-hybrid-clickstack-channels.yaml"
 render_default "$out10c"
 assert_not_contains "$out10c" 'name: clickstack-collector' \
   "hybrid: in-cluster ClickStack collector must not render"
 assert_not_contains "$out10c" 'kind: StatefulSet' \
   "hybrid: ClickHouse StatefulSet must not render"
-assert_contains "$out10c" 'clickstack-collector.neuraltrust.ai' \
-  "hybrid: product events target SaaS ClickStack endpoint"
+assert_contains "$out10c" 'name: clickstack-egress-collector' \
+  "hybrid: local egress ClusterIP Service renders"
+assert_contains "$out10c" 'name: clickstack-egress-collector'$'\n''        image:' \
+  "hybrid: egress sidecar co-located on DataAgent"
+assert_contains "$out10c" 'token_url: "http://127.0.0.1:9465/oauth/token"' \
+  "hybrid: egress sidecar exchanges via DataAgent loopback broker"
+assert_contains "$out10c" 'endpoint: "https://clickstack-collector.neuraltrust.ai"' \
+  "hybrid: egress sidecar exports to SaaS ingest host"
+assert_contains "$out10c" 'http://clickstack-egress-collector.default.svc.cluster.local:4318/v1/logs' \
+  "hybrid: apps send OTLP to local egress only"
 
 blue "==> Scenario 10d: GPU Firewall workers (dataplane-gpu example shape)"
 out10d="$TMP/scenario-firewall-gpu.yaml"

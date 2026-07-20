@@ -71,6 +71,7 @@ emit_row "postgres (in-cluster)" "$(yq_get "$V" '.global.postgresql.image.reposi
 # Optional add-ons.
 emit_row "firewall-gateway (cpu)" "$(yq_get "$V" '.firewall.firewall.gateway.image.repository')" "$(yq_get "$V" '.firewall.firewall.gateway.image.tag')"
 emit_row "firewall-worker (cpu default)" "$(yq_get "$V" '.firewall.firewall.workerDefaults.image.repository')" "$(yq_get "$V" '.firewall.firewall.workerDefaults.image.tag')"
-emit_row "opentelemetry-collector-contrib" "$(yq_get "$V" '.global.observability.collector.image.repository')" "$(yq_get "$V" '.global.observability.collector.image.tag')"
+emit_row "opentelemetry-collector-contrib (umbrella)" "$(yq_get "$V" '.global.observability.collector.image.repository')" "$(yq_get "$V" '.global.observability.collector.image.tag')"
+emit_row "opentelemetry-collector-contrib (clickstack egress)" "$(yq_get "$V" '.global.clickstack.egress.image.repository')" "$(yq_get "$V" '.global.clickstack.egress.image.tag')"
 emit_row "neuraltrust-watchdog" "$(yq_get "$WD" '.image.repository')" "$(yq_get "$WD" '.image.tag')"
 emit_row "watchdog-prometheus" "$(yq_get "$WD" '.prometheus.image.repository')" "$(yq_get "$WD" '.prometheus.image.tag')"
