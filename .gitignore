@@ -52,5 +52,6 @@ gcr-keys.json
 key.json
 
 # CI-generated files
+gha-creds-*.json
 commits.txt
 request.json
