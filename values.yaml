@@ -301,7 +301,7 @@ clickhouse:
   imagePullSecrets: "gcr-secret"
   image:
     repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickhouse-server
-    tag: "26.3"
+    tag: "26.6"
     pullPolicy: IfNotPresent
   global:
     imagePullSecrets: []
@@ -471,7 +471,7 @@ control-plane-app:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.98.1"
+          tag: "v1.99.1"
           pullPolicy: "Always"
         config:
           nodeEnv: production
@@ -540,7 +540,7 @@ control-plane-app:
 # AgentGateway (v2 TrustGate replacement): admin + proxy/mcp.
 agentgateway:
   image:
-    tag: "v0.11.0"
+    tag: "v0.13.0"
   database:
     sslMode: "prefer"
     iamAuth: false
@@ -550,7 +550,7 @@ agentgateway:
 # TrustGuard: control-plane + data-plane (/v1/evaluate).
 trustguard:
   image:
-    tag: "v0.13.5"
+    tag: "v0.15.0"
   database:
     sslMode: "prefer"
     iamAuth: false
@@ -605,7 +605,7 @@ datacore:
 # ClickStack OTel collector (v2 external only): OTLP-to-ClickHouse pipeline.
 clickstack-otel-collector:
   image:
-    tag: "2.30.1"
+    tag: "2.31.0"
     repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickstack-otel-collector
   clickhouse:
     endpoint: "http://clickhouse:8123"
