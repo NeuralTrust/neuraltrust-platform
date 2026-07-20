@@ -1,7 +1,6 @@
 # Platform v2 hybrid overlay for a fully-configured deployment.
 # Documents the "one Postgres block, one Redis block, one ClickStack token"
-# hybrid contract. Copy and replace the angle-bracket placeholders with your
-# real values (or reference pre-created Secrets).
+# hybrid contract using pre-created Secrets.
 #
 # Never commit real tokens, passwords, or customer identifiers.
 # For the minimal starting point, see values-required.yaml.
@@ -13,14 +12,12 @@ global:
 
   # Mandatory: v2 hybrid always dual-writes AgentGateway + TrustGuard product
   # data over OTLP to the NeuralTrust SaaS ClickStack collector. The endpoint,
-  # protocol, and TLS are fixed by the chart — supply ONLY the bearer token,
-  # either inline OR by pointing existingSecret.name at a pre-created Secret.
+  # protocol, and TLS are fixed by the chart. The Secret must contain
+  # OTEL_EXPORTER_OTLP_HEADERS.
   # Set enabled: false for an air-gapped install with no OTLP dual-write.
   clickstack:
-    authToken: "<CLICKSTACK_OTLP_TOKEN>"
-    # existingSecret:
-    #   name: "clickstack-otlp-token"
-    #   key: "OTEL_EXPORTER_OTLP_HEADERS"
+    existingSecret:
+      name: "clickstack-otlp"
 
   # One shared PostgreSQL block. Every hybrid workload (AgentGateway,
   # TrustGuard, DataAgent, data-plane-api) reads envFrom the rendered
@@ -31,32 +28,22 @@ global:
   # chart renders control-plane-postgresql with user/database = neuraltrust
   # and a generated password.
   #
-  # External / managed: set deploy: false and provide host + password (or
-  # existingSecret.name). Pre-create the user and database out-of-band; the
-  # chart never runs CREATE USER from Helm.
+  # External / managed: set deploy: false and reference a Secret containing
+  # DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME, and DB_SSL_MODE. Pre-create
+  # the user and database out-of-band; the chart never runs CREATE USER.
   postgresql:
     deploy: false
-    host: "<postgres-host>"
-    port: 5432
-    user: "neuraltrust"
-    database: "neuraltrust"
-    password: "<postgres-password>"
-    sslMode: "prefer"
-    # existingSecret:
-    #   name: "my-external-postgres"
+    existingSecret:
+      name: "external-postgresql"
 
   # One shared Redis block. In-cluster default is passwordless on Service
   # `redis:6379`. For a hosted / TLS-only Redis set deploy: false and
-  # configure host / password / tls / username (or existingSecret.name).
+  # reference a Secret with REDIS_HOST, REDIS_PORT, REDIS_PASSWORD, and
+  # optional REDIS_USERNAME / REDIS_TLS.
   redis:
     deploy: false
-    host: "<redis-host>"
-    port: 6379
-    password: "<redis-password>"
-    # tls: "true"
-    # username: "<redis-acl-user>"
-    # existingSecret:
-    #   name: "my-external-redis"
+    existingSecret:
+      name: "external-redis"
 
 # DataAgent is enrolment-gated: it renders only when tenantId AND either
 # enrolmentToken OR enrolmentTokenExistingSecret.name are set. Both values
@@ -64,21 +51,24 @@ global:
 # use enrolmentTokenExistingSecret.name in tracked GitOps flows.
 dataagent:
   tenantId: "<tenant-id>"
-  enrolmentToken: "<enrolment-token>"
-  # enrolmentTokenExistingSecret:
-  #   name: "dataagent-enrolment"
-  #   key: "ENROLMENT_TOKEN"
+  enrolmentTokenExistingSecret:
+    name: "dataagent-enrolment"
+    key: "ENROLMENT_TOKEN"
 
-# Optional config-sync tokens for pulling compiled policy from SaaS control
-# planes. Leave the top-level agentgateway / trustguard blocks off when the
-# data planes should run Postgres-backed instead of config-sync.
-# agentgateway:
-#   configSync:
-#     token: "<agentgateway-config-sync-token>"
-#
-# trustguard:
-#   configSync:
-#     token: "<trustguard-config-sync-token>"
+# SaaS-managed hybrid data planes pull compiled configuration over outbound
+# config-sync gRPC. Each Secret holds an independently issued SaaS token under
+# CONFIG_SYNC_TOKEN and a base64-encoded 32-byte key under CONFIG_SYNC_LKG_KEY.
+agentgateway:
+  configSync:
+    enabled: true
+    existingSecret:
+      name: "agentgateway-config-sync"
+
+trustguard:
+  configSync:
+    enabled: true
+    existingSecret:
+      name: "trustguard-config-sync"
 
 # The temporary data-plane-api read shim. In hybrid it defaults to PostgreSQL
 # (SQL_DATABASE=postgres) and reuses the shared postgresql-secrets, so nothing

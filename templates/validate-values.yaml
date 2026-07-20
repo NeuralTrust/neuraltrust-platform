@@ -59,6 +59,31 @@ no Kubernetes resource when validation succeeds.
   {{- end -}}
 {{- end -}}
 
+{{- /* Config-sync is fail-closed: require a SaaS-issued token source. */ -}}
+{{- range $component := list
+  (dict "name" "agentgateway" "secretName" "agentgateway-secrets" "values" (default dict $.Values.agentgateway))
+  (dict "name" "trustguard" "secretName" "trustguard-secrets" "values" (default dict $.Values.trustguard))
+-}}
+  {{- $configSync := default dict $component.values.configSync -}}
+  {{- $existingRef := default dict $configSync.existingSecret -}}
+  {{- $managedSecret := lookup "v1" "Secret" $.Release.Namespace $component.secretName -}}
+  {{- $managedData := dict -}}
+  {{- if and $managedSecret (kindIs "map" $managedSecret) $managedSecret.data -}}
+    {{- $managedData = $managedSecret.data -}}
+  {{- end -}}
+  {{- $hasManagedToken := and (hasKey $managedData "CONFIG_SYNC_TOKEN") (ne (index $managedData "CONFIG_SYNC_TOKEN") "") -}}
+  {{- $hasManagedLkgKey := and (hasKey $managedData "CONFIG_SYNC_LKG_KEY") (ne (index $managedData "CONFIG_SYNC_LKG_KEY") "") -}}
+  {{- $inlineTokenUsable := and ($configSync.token | default "") $autoGenerate (not $preserveExisting) -}}
+  {{- if and
+    ($configSync.enabled | default false)
+    (not $inlineTokenUsable)
+    (not ($existingRef.name | default ""))
+    (not (and $hasManagedToken $hasManagedLkgKey))
+  -}}
+    {{- fail (printf "%s.configSync.enabled=true requires CONFIG_SYNC_TOKEN and CONFIG_SYNC_LKG_KEY: set %s.configSync.existingSecret.name, or use %s.configSync.token only when chart Secret generation is enabled." $component.name $component.name $component.name) -}}
+  {{- end -}}
+{{- end -}}
+
 {{- /* Hybrid ClickStack: mandatory bearer token unless the air-gap escape hatch. */ -}}
 {{- $clickstack := default dict $global.clickstack -}}
 {{- $clickstackEnabled := true -}}

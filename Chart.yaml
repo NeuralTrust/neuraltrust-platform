@@ -2,7 +2,7 @@ apiVersion: v2
 name: neuraltrust-platform
 description: NeuralTrust platform Helm chart (v2 hybrid + external)
 type: application
-version: 2.0.6
+version: 2.0.7
 appVersion: "2.0.0"
 icon: https://neuraltrust.ai/favicon.ico
 # v1 is maintained only on the v1.14.x release line. Do NOT install this chart
@@ -41,14 +41,14 @@ dependencies:
       - v2
   # AgentGateway proxy/MCP admin + data plane.
   - name: agentgateway
-    version: 0.1.19
+    version: 0.1.20
     repository: file://./charts/agentgateway
     tags:
       - neuraltrust
       - v2
   # TrustGuard control + data plane.
   - name: trustguard
-    version: 0.1.19
+    version: 0.1.20
     repository: file://./charts/trustguard
     tags:
       - neuraltrust

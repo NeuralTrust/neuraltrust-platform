@@ -75,6 +75,18 @@ assert_not_contains() {
   green "ok  - $msg"
 }
 
+assert_occurrences() {
+  local file="$1" needle="$2" expected="$3" msg="$4" count
+  count="$(grep -cE -- "$needle" "$file" || true)"
+  if [[ "$count" -ne "$expected" ]]; then
+    red "FAIL: $msg"
+    red "  expected $expected occurrences of pattern: $needle"
+    red "  found: $count"
+    exit 1
+  fi
+  green "ok  - $msg"
+}
+
 # ---------------------------------------------------------------------------
 # 1. Minimal v2 hybrid — shared PG/Redis + mandatory ClickStack token
 # ---------------------------------------------------------------------------
@@ -113,6 +125,45 @@ helm template test "$CHART_DIR" --namespace default -f "$CHART_DIR/values-requir
   --set global.clickstack.enabled=false > "$out1c"
 assert_contains "$out1c" 'name: agentgateway-proxy' \
   "air-gap: gateway still renders with ClickStack disabled"
+
+# Config-sync fail-closed and writable LKG storage
+blue "==> Scenario 1d: config-sync token references and LKG storage"
+assert_render_fails "config-sync without a SaaS token source fails render" \
+  --set agentgateway.configSync.enabled=true
+out1d="$TMP/scenario-hybrid-config-sync.yaml"
+render_default "$out1d" \
+  --set agentgateway.configSync.enabled=true \
+  --set agentgateway.configSync.existingSecret.name=agentgateway-config-sync \
+  --set trustguard.configSync.enabled=true \
+  --set trustguard.configSync.existingSecret.name=trustguard-config-sync
+assert_contains "$out1d" 'name: "?agentgateway-config-sync"?' \
+  "config-sync: AgentGateway references its operator-owned token Secret"
+assert_contains "$out1d" 'name: "?trustguard-config-sync"?' \
+  "config-sync: TrustGuard references its operator-owned token Secret"
+assert_contains "$out1d" 'key: "?CONFIG_SYNC_LKG_KEY"?' \
+  "config-sync: existing Secret also supplies the LKG encryption key"
+assert_contains "$out1d" 'mountPath: /var/lib/trustgate' \
+  "config-sync: AgentGateway LKG path is writable"
+assert_contains "$out1d" 'mountPath: /var/lib/trustguard' \
+  "config-sync: TrustGuard LKG path is writable"
+assert_render_fails "inline config-sync token fails when auto-generation is disabled" \
+  --set global.autoGenerateSecrets=false \
+  --set agentgateway.configSync.enabled=true \
+  --set agentgateway.configSync.token=inline-test-token
+assert_render_fails "inline config-sync token fails when managed Secrets are preserved" \
+  --set global.preserveExistingSecrets=true \
+  --set agentgateway.configSync.enabled=true \
+  --set agentgateway.configSync.token=inline-test-token
+out1e="$TMP/scenario-config-sync-inline-upgrade.yaml"
+render_default "$out1e" --is-upgrade \
+  --set agentgateway.configSync.enabled=true \
+  --set agentgateway.configSync.token=inline-test-token
+assert_contains "$out1e" 'name: agentgateway-secrets' \
+  "config-sync upgrade: inline token forces managed Secret rendering"
+assert_contains "$out1e" 'CONFIG_SYNC_TOKEN: "inline-test-token"' \
+  "config-sync upgrade: managed Secret carries the inline token"
+assert_contains "$out1e" 'CONFIG_SYNC_LKG_KEY:' \
+  "config-sync upgrade: managed Secret carries an LKG encryption key"
 
 # ---------------------------------------------------------------------------
 # 2. Hybrid with external datastores (existing secrets)
@@ -198,6 +249,21 @@ assert_contains "$out3" 'POSTGRES_USER: "datacore"' \
   "external: DataCore POSTGRES_USER defaults to datacore"
 assert_contains "$out3" 'POSTGRES_PASSWORD:' \
   "external: datacore-secrets carries POSTGRES_PASSWORD"
+
+# External config-sync servers and clients must share each component's
+# operator-owned credentials.
+blue "==> Scenario 3a: external config-sync uses shared operator Secrets"
+out3a="$TMP/scenario-external-config-sync.yaml"
+render_default "$out3a" \
+  --set global.deploymentMode=external \
+  --set agentgateway.configSync.enabled=true \
+  --set agentgateway.configSync.existingSecret.name=agentgateway-config-sync \
+  --set trustguard.configSync.enabled=true \
+  --set trustguard.configSync.existingSecret.name=trustguard-config-sync
+assert_occurrences "$out3a" 'name: "?agentgateway-config-sync"?' 6 \
+  "external config-sync: AgentGateway proxy, MCP, and admin share credentials"
+assert_occurrences "$out3a" 'name: "?trustguard-config-sync"?' 4 \
+  "external config-sync: TrustGuard data and control planes share credentials"
 
 # ---------------------------------------------------------------------------
 # 3b. Control-plane RDS IAM env contract (api + app) + DataCore IAM

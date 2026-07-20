@@ -88,9 +88,12 @@ configSync:
   # proxy. Empty => verify against the system root store.
   tlsCa: ""
   # Shared token authenticating the data plane to the control plane. MUST match
-  # the SaaS control plane. Prefer a pre-created secret + global.preserveExistingSecrets
-  # over putting the value here. Never auto-generated.
+  # the SaaS control plane. Never auto-generated.
   token: ""
+  existingSecret:
+    name: ""
+    tokenKey: "CONFIG_SYNC_TOKEN"
+    lkgKey: "CONFIG_SYNC_LKG_KEY"
   # Local encrypted last-known-good cache key: base64 of exactly 32 bytes.
   # Auto-generated per release when empty (local-only, need not match anything).
   lkgKey: ""
