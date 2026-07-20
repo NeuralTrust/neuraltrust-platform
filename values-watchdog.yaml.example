@@ -1,5 +1,7 @@
-# Detailed Platform v2 watchdog overlay.
-# Healing remains dry-run until both RBAC and per-check policy are approved.
+# Detailed Platform v2 watchdog overlay (hybrid).
+# Layer over values-required.yaml plus a ClickStack token (authToken or
+# existingSecret). Healing remains dry-run until both RBAC and per-check policy
+# are approved. Hybrid has no in-cluster ClickHouse — omit that check id.
 
 global:
   deploymentMode: "hybrid"
@@ -34,7 +36,6 @@ watchdog:
     prometheusRule:
       enabled: true
   enabledCheckIds:
-    - clickhouse
     - firewall-health
     - pod-health
     - otel-collector

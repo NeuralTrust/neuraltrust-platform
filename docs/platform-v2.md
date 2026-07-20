@@ -263,8 +263,8 @@ The data-plane API shim also uses Redis for its evaluation-progress cache
 (`EVALUATION_PROGRESS_BACKEND`), pointed at the same Redis AgentGateway and
 TrustGuard use via `data-plane-api.dataPlane.components.api.redis`
 (host/port/password/username/tls, plus AWS ElastiCache IAM auth). Set
-`redis.host` (and `password`/`iamAuth`, etc.) there to match
-`infrastructure.redis.external` when `infrastructure.redis.deploy=false`.
+`redis.host` (and `password`/`iamAuth`, etc.) there to match the shared Redis
+when `global.redis.deploy=false` (and any per-service `*.redis` overlays).
 Pooling and batching default to 100 connections and 200 keys per MGET;
 `maxConnections`, `mgetChunkSize`, and the optional connect/socket/health-check
 timeout values under `api.redis` override them.
@@ -276,10 +276,10 @@ service-specific endpoints:
 global:
   postgresql:
     deploy: false
-
-infrastructure:
   redis:
     deploy: false
+
+infrastructure:
   clickhouse:
     deploy: false
 ```

@@ -5,17 +5,6 @@ global:
   deploymentMode: "external"
   platform: "kubernetes"
   domain: "platform.example.com"
-  imageRegistry: ""
   observability:
     hostedExport:
       enabled: false
-
-infrastructure:
-  clickhouse:
-    deploy: true
-
-alertengine:
-  enabled: true
-
-trustlens:
-  enabled: false

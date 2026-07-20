@@ -15,10 +15,22 @@ in your cluster:
 - NeuralTrust Firewall when enabled
 - DataAgent only after the deployment is enrolled
 
-DataAgent is not required to install the platform. It is omitted until
-NeuralTrust provides both a tenant identifier and enrolment token. With a
-complete enrolment, it makes an outbound TLS connection to DataBridge; it
-exposes no operator-facing ingress.
+Hybrid always dual-writes AgentGateway and TrustGuard product telemetry over
+OTLP to the fixed NeuralTrust SaaS ClickStack endpoint. Operators supply
+`global.clickstack.authToken` or `global.clickstack.existingSecret` (default
+key `OTEL_EXPORTER_OTLP_HEADERS`); there is no in-cluster ClickStack collector.
+Set `global.clickstack.enabled: false` for air-gap. For SaaS-managed hybrid,
+enable `agentgateway.configSync` and `trustguard.configSync` separately
+(defaults `enabled: false`); prefer `existingSecret.name` Secrets that hold
+both `CONFIG_SYNC_TOKEN` and `CONFIG_SYNC_LKG_KEY`. See
+[`docs/platform-v2.md`](./docs/platform-v2.md) and
+[`values-v2-hybrid.yaml.example`](./values-v2-hybrid.yaml.example).
+
+DataAgent is not required to install the platform. It renders only when
+`tenantId` and either `enrolmentToken` or
+`enrolmentTokenExistingSecret.name` are set. Prefer the existing-Secret path
+so the token never enters Helm values. With a complete enrolment, it makes an
+outbound TLS connection to DataBridge; it exposes no operator-facing ingress.
 
 In external deployments, AlertEngine provides the supported detection, SIEM,
 and integration path.
@@ -48,7 +60,8 @@ helm upgrade --install neuraltrust-platform \
 ```
 
 `values-required.yaml` is the minimal hybrid starting point. Set the cloud
-provider and domain, then enable DataAgent only after enrolment:
+provider and domain, supply the ClickStack token (or existing Secret), then
+enable DataAgent only after enrolment:
 
 ```yaml
 global:
@@ -56,11 +69,15 @@ global:
   platform: "kubernetes"
   domain: "platform.example.com"
   clickstack:
-    authToken: "<CLICKSTACK_OTLP_TOKEN>"
+    existingSecret:
+      name: "clickstack-otlp"
+      # key defaults to OTEL_EXPORTER_OTLP_HEADERS
 
 dataagent:
   tenantId: ""
-  enrolmentToken: ""
+  enrolmentTokenExistingSecret:
+    name: ""
+    key: "ENROLMENT_TOKEN"
 ```
 
 Secrets are generated on first install and reused on upgrades when
@@ -71,7 +88,7 @@ reference pre-created Kubernetes Secrets; see [SECRETS.md](./SECRETS.md).
 
 | Mode | SaaS control plane | Workloads in cluster | Analytics path |
 |---|---:|---|---|
-| `hybrid` (default) | Yes | AgentGateway data plane, TrustGuard data plane, data-plane API shim (PostgreSQL) | Analytics in SaaS; optional enrolled DataAgent bridges entitled reads. No in-cluster ClickHouse |
+| `hybrid` (default) | Yes | AgentGateway data plane, TrustGuard data plane, data-plane API shim (PostgreSQL) | Analytics in SaaS via mandatory ClickStack OTLP; optional enrolled DataAgent bridges entitled reads. No in-cluster ClickHouse |
 | `external` | No | Control and data planes, product API/app, DataCore, AlertEngine | ClickStack OTel Collector writes to ClickHouse; data-plane API shim reads ClickHouse |
 
 ## Datastores
@@ -85,10 +102,10 @@ managed service:
 global:
   postgresql:
     deploy: false
-
-infrastructure:
   redis:
     deploy: false
+
+infrastructure:
   clickhouse:
     deploy: false
 ```
@@ -96,17 +113,19 @@ infrastructure:
 Use [`values-v2-managed-datastores.yaml.example`](./values-v2-managed-datastores.yaml.example)
 for the complete endpoint and existing-secret pattern.
 
-In hybrid, AgentGateway, TrustGuard, DataAgent, and the `data-plane-api` read
-shim share ONE PostgreSQL role owning ONE database, driven by the top-level
-`global.postgresql` block (defaults: user `neuraltrust`, database `neuraltrust`).
-The chart renders one shared `postgresql-secrets` Secret with the DB_* aliases
-every hybrid workload `envFrom`'s. There is no chart-managed init Job —
-application migrations own their tables. For external / managed PostgreSQL,
-pre-create the role and database, then point the chart at it via
-`global.postgresql.deploy: false` + host/user/password (or
-`global.postgresql.existingSecret.name`). External deployments keep the classic
-per-service database overlays. See [`docs/platform-v2.md`](./docs/platform-v2.md)
-for the full contract.
+In **hybrid**, AgentGateway, TrustGuard, DataAgent, and the `data-plane-api`
+read shim share ONE PostgreSQL role owning ONE database, driven by
+`global.postgresql` (defaults: user `neuraltrust`, database `neuraltrust`).
+The chart renders shared `postgresql-secrets` and `redis-secrets` (from
+`global.redis`) that every hybrid workload `envFrom`'s. There is no
+chart-managed init Job — application migrations own their tables.
+
+In **external**, runtime services use per-service `*.database` / `*.redis`
+overlays. `global.postgresql` still gates in-cluster PostgreSQL and feeds
+control-plane `postgresql-secrets` for control-plane-api/app. For managed
+PostgreSQL, set `global.postgresql.deploy: false` and point the chart at
+host/user/password (or `global.postgresql.existingSecret.name`). See
+[`docs/platform-v2.md`](./docs/platform-v2.md) for the full contract.
 
 ## Platform and ingress
 

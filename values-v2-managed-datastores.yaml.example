@@ -29,10 +29,11 @@ global:
   preserveExistingSecrets: true
   postgresql:
     deploy: false
-    # External mode keeps per-service databases (each control plane owns its
-    # migrations); the shared `global.postgresql` block is hybrid-only and is
-    # not consulted here — per-service `database` overlays remain the source
-    # of truth.
+    # Connection scalars on global.postgresql are primarily the hybrid shared
+    # contract. `deploy` still gates the in-cluster Postgres Deployment in every
+    # mode. In external, control-plane-api/app consume the shared
+    # postgresql-secrets fed by this block and/or control-plane overlays below.
+    # Runtime services keep per-service `*.database` as their identity.
   redis:
     deploy: false
   observability:

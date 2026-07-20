@@ -10,7 +10,20 @@ the OCI URL, a release archive, or `.` when testing the source tree.
 
 Hybrid runs AgentGateway and TrustGuard data-plane workloads in the cluster.
 Their control planes stay in NeuralTrust SaaS. PostgreSQL and Redis deploy
-in-cluster by default; ClickHouse is not part of hybrid.
+in-cluster by default; ClickHouse is not part of hybrid. The temporary
+`data-plane-api` read shim renders by default on the shared hybrid PostgreSQL.
+
+A ClickStack OTLP token is **required for render** unless you set
+`global.clickstack.enabled: false` (air-gap). Supply
+`global.clickstack.authToken` or (preferred)
+`global.clickstack.existingSecret` — the SaaS endpoint is fixed; there is no
+in-cluster ClickStack collector in hybrid.
+
+For SaaS-managed hybrid, enable config-sync on both runtimes (defaults
+`enabled: false`) and point each at a Secret holding `CONFIG_SYNC_TOKEN` and
+`CONFIG_SYNC_LKG_KEY`. Full contract:
+[`docs/platform-v2.md`](./docs/platform-v2.md) and
+[`values-v2-hybrid.yaml.example`](./values-v2-hybrid.yaml.example).
 
 ```bash
 helm upgrade --install neuraltrust-platform <chart> \
@@ -18,13 +31,16 @@ helm upgrade --install neuraltrust-platform <chart> \
   -f values-required.yaml
 ```
 
-DataAgent is enrolment-gated. It is omitted while its enrolment values are
-empty. Add the SaaS-issued values together:
+DataAgent is enrolment-gated. It is omitted while enrolment values are
+incomplete. Render requires `tenantId` and either `enrolmentToken` or
+(preferred) `enrolmentTokenExistingSecret.name`:
 
 ```yaml
 dataagent:
   tenantId: "<tenant-id>"
-  enrolmentToken: "<enrolment-token>"
+  enrolmentTokenExistingSecret:
+    name: "dataagent-enrolment"
+    key: "ENROLMENT_TOKEN"
 ```
 
 Do not configure a partial enrolment. It is outbound-only and is not rendered
@@ -70,18 +86,25 @@ identity already authorizes image pulls.
 
 ## 3. Choose datastore placement
 
-The chart uses PostgreSQL, Redis, and (external mode only) ClickHouse. In
-hybrid, PostgreSQL and Redis are driven by the single `global.postgresql` and
-`global.redis` blocks. For managed datastores:
+The chart uses PostgreSQL, Redis, and (external mode only) ClickHouse.
+
+In **hybrid**, PostgreSQL and Redis are driven by `global.postgresql` and
+`global.redis`, which render shared `postgresql-secrets` / `redis-secrets`.
+
+In **external**, runtime services use per-service `*.database` / `*.redis`
+overlays; `global.postgresql` still gates in-cluster PostgreSQL and feeds
+control-plane `postgresql-secrets` for control-plane-api/app.
+
+For managed datastores:
 
 ```yaml
 global:
   postgresql:
     deploy: false
-
-infrastructure:
   redis:
     deploy: false
+
+infrastructure:
   clickhouse:
     deploy: false
 ```

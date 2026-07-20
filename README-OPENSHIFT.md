@@ -33,11 +33,33 @@ global:
 ```
 
 Hybrid always dual-writes to the NeuralTrust SaaS ClickStack collector; supply
-the bearer token via `--set global.clickstack.authToken=<token>` or an
-`existingSecret` reference (see [SECRETS.md](./SECRETS.md)).
+the bearer token via `global.clickstack.existingSecret` (preferred) or
+`--set global.clickstack.authToken=<token>` (see [SECRETS.md](./SECRETS.md)).
+Air-gap: `global.clickstack.enabled: false`.
 
-DataAgent stays disabled until the deployment is enrolled. Add the tenant and
-enrolment token only after they are issued.
+For SaaS-managed hybrid, also pre-create config-sync Secrets (each holding
+`CONFIG_SYNC_TOKEN` and `CONFIG_SYNC_LKG_KEY`) and enable:
+
+```yaml
+agentgateway:
+  configSync:
+    enabled: true
+    existingSecret:
+      name: "agentgateway-config-sync"
+
+trustguard:
+  configSync:
+    enabled: true
+    existingSecret:
+      name: "trustguard-config-sync"
+```
+
+Defaults stay `enabled: false`. See
+[`values-v2-hybrid.yaml.example`](./values-v2-hybrid.yaml.example).
+
+DataAgent stays disabled until the deployment is enrolled. Add `tenantId` and
+either `enrolmentToken` or (preferred) `enrolmentTokenExistingSecret.name`
+only after they are issued.
 
 ## Routes and Ingress
 
@@ -101,7 +123,8 @@ helm upgrade --install neuraltrust-platform <chart> \
 
 External mode runs the product API/app, control and data planes, DataCore,
 AlertEngine, and the ClickStack OTel Collector in the cluster. DataAgent is
-absent. Disable hosted export for a no-egress deployment.
+absent. Set `global.observability.hostedExport.enabled: false` for a
+no-egress deployment.
 
 ## Security Context Constraints
 

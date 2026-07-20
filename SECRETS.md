@@ -15,10 +15,15 @@ helm upgrade --install neuraltrust-platform . --namespace neuraltrust --create-n
 | Secret | Kubernetes Secret | Key |
 |---|---|---|
 | AgentGateway server key | `agentgateway-secrets` | `SERVER_SECRET_KEY` |
-| Control Plane JWT | `control-plane-secrets` | `CONTROL_PLANE_JWT_SECRET` |
-| Gateway integration JWT | `control-plane-secrets` | `TRUSTGATE_JWT_SECRET` |
 | Data Plane JWT | `data-plane-jwt-secret` | `DATA_PLANE_JWT_SECRET` |
 | PostgreSQL password | `postgresql-secrets` | `POSTGRES_PASSWORD` |
+
+**External mode only** (control-plane API/app — not rendered in hybrid):
+
+| Secret | Kubernetes Secret | Key |
+|---|---|---|
+| Control Plane JWT | `control-plane-secrets` | `CONTROL_PLANE_JWT_SECRET` |
+| Gateway integration JWT | `control-plane-secrets` | `TRUSTGATE_JWT_SECRET` |
 
 **How it works:**
 
@@ -85,7 +90,10 @@ All required secrets must exist in the namespace before deployment.
 | `resend-secrets` | `RESEND_API_KEY` | No | Resend email API key |
 | `huggingface-secrets` | `HUGGINGFACE_TOKEN` | No | Not needed to run the data-plane (image bundles fastText). Only forwarded to evaluation Jobs that use HF-gated models. |
 
-### Control Plane
+### Control Plane (external mode only)
+
+These Secrets apply when `global.deploymentMode: external` renders
+control-plane-api/app. Hybrid keeps the console in NeuralTrust SaaS.
 
 | Kubernetes Secret | Key | Required | Description |
 |---|---|---|---|
@@ -264,7 +272,8 @@ source); the `envFrom` mounts map secret keys directly to env vars.
 | DataCore JWT | `datacore-secrets` | `AUTH_JWT_HS256_SECRET` | auto-generated |
 | DataCore DB password | `datacore-secrets` | `POSTGRES_PASSWORD` | auto-generated (own `datacore` DB; external only); **omitted when `datacore.database.iamAuth=true`** (`POSTGRES_LOGIN=aws`) |
 | DataCore / AlertEngine / clickstack / data-plane-api ClickHouse password | `clickhouse` | `admin-password` | **shared** — all read `CLICKHOUSE_PASSWORD` from the in-cluster `clickhouse` secret via `clickhouse.existingSecret` (`dataPlane.components.clickhouse.existingSecret` for the shim; no per-service key). External ClickHouse: point `existingSecret.name`/`key` at your secret. |
-| v2 hybrid ClickStack OTLP token | `agentgateway-secrets` / `trustguard-secrets` (or operator Secret) | `OTEL_EXPORTER_OTLP_HEADERS` | **v2 hybrid only** — required operator input. The header is either materialized into the chart-managed data-plane Secrets from inline `global.clickstack.authToken`, or sourced directly from a pre-created Secret via `global.clickstack.existingSecret.name`/`key` (default key `OTEL_EXPORTER_OTLP_HEADERS`). Rendering fails when neither is set. Set `global.clickstack.enabled: false` for an air-gapped install with no OTLP dual-write. |
+| v2 hybrid ClickStack OTLP token | `agentgateway-secrets` / `trustguard-secrets` (or operator Secret) | `OTEL_EXPORTER_OTLP_HEADERS` | **v2 hybrid only** — required operator input. Prefer `global.clickstack.existingSecret.name`/`key` (default key `OTEL_EXPORTER_OTLP_HEADERS`) over inline `global.clickstack.authToken`. Rendering fails when neither is set. Endpoint is fixed SaaS; no in-cluster ClickStack collector. Set `global.clickstack.enabled: false` for air-gap. |
+| v2 hybrid config-sync (AgentGateway / TrustGuard) | operator Secrets (e.g. `agentgateway-config-sync`, `trustguard-config-sync`) | `CONFIG_SYNC_TOKEN`, `CONFIG_SYNC_LKG_KEY` | **Optional but expected for SaaS-managed hybrid.** Enable `agentgateway.configSync` / `trustguard.configSync` separately (defaults `enabled: false`). Prefer `existingSecret.name` pointing at Secrets that hold **both** keys. Never auto-generated. |
 | v2 external ClickStack OTLP token | `clickstack-collector-secrets` | `OTLP_AUTH_TOKEN`, `OTEL_EXPORTER_OTLP_HEADERS` | **v2 external only** — auto-generated (or `clickstack-otel-collector.otlpAuthToken`). `OTLP_AUTH_TOKEN` is what the collector enforces; `OTEL_EXPORTER_OTLP_HEADERS` is `authorization=<same token>` and is mounted on TrustGuard / AgentGateway via `secretKeyRef`. |
 | Control-plane app auth | `control-plane-secrets` | `AUTH_SECRET` / `NEXTAUTH_SECRET` | one generated or reused value exposed under both aliases |
 
@@ -324,10 +333,12 @@ install, missing Secrets/keys are created; later upgrades reuse them with `looku
   requires `database.awsRegion` → `AWS_REGION`. RDS IAM is also live for the
   Python control-plane (`controlPlane.components.postgresql.authMode: iam`).
   Use `values-v2-managed-datastores.yaml.example` as the tracked starting point.
-- **DataAgent** requires operator-supplied `enrolmentToken` (SaaS-issued, never
-  generated). Its `DATABASE_URL` and `DB_PASSWORD` auto-derive for in-cluster
-  Postgres; overlay `dataagent.database.host` + `database.password` for external.
-  Prefer `dataagent.enrolmentTokenExistingSecret` so the token never enters Helm
+- **DataAgent** renders when `tenantId` and either `enrolmentToken` or
+  (preferred) `enrolmentTokenExistingSecret.name` are set (SaaS-issued, never
+  generated). Its `DATABASE_URL` and `DB_PASSWORD` auto-derive from shared
+  hybrid `postgresql-secrets`; overlay `dataagent.database.host` +
+  `database.password` only to opt out. Prefer
+  `dataagent.enrolmentTokenExistingSecret` so the token never enters Helm
   values or release history. When chart secret generation is disabled, also set
   `dataagent.existingSecret.name` to a Secret containing `DATABASE_URL` and
   `DB_PASSWORD`.

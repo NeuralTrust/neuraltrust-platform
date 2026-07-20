@@ -5,9 +5,6 @@ global:
   deploymentMode: "external"
   platform: "kubernetes"
   domain: "platform.example.com"
-  imageRegistry: ""
-  autoGenerateSecrets: true
-  preserveExistingSecrets: false
   observability:
     enabled: true
     hostedExport:
@@ -15,18 +12,15 @@ global:
   monitoring:
     enabled: true
 
-infrastructure:
-  clickhouse:
-    deploy: true
-
-# WIP component; keep disabled until a TrustLens release image is published.
-trustlens:
-  enabled: false
-
 alertengine:
   enabled: true
 
 firewall:
+  enabled: true
+  firewall:
+    enabled: true
+
+trustguard:
   firewall:
     enabled: true
 

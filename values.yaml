@@ -52,12 +52,16 @@ global:
   imagePullSecrets: [] # Optional global pull-secret list applied to platform workloads
   autoGenerateSecrets: true
   preserveExistingSecrets: false
-  # Shared PostgreSQL (v2 hybrid + external).
-  # In v2 hybrid every service (AgentGateway, TrustGuard, DataAgent,
-  # data-plane-api) connects to ONE shared database via envFrom on the
-  # `postgresql-secrets` Secret rendered from this block. Set `deploy: false`
-  # and `host`/credentials to point at a hosted instance. Application
-  # migrations own their tables; there is no chart-managed schema init.
+  # Shared PostgreSQL (v2 hybrid + external control-plane).
+  # Hybrid: every service (AgentGateway, TrustGuard, DataAgent, data-plane-api)
+  # connects to ONE shared database via envFrom on the `postgresql-secrets`
+  # Secret rendered from this block.
+  # External: `deploy` still gates the in-cluster Postgres Deployment, and this
+  # block (plus control-plane-api overlays) feeds the shared `postgresql-secrets`
+  # used by control-plane-api/app. Runtime services keep their own per-service
+  # `*.database` identities. Set `deploy: false` and `host`/credentials (or
+  # existingSecret) for a hosted instance. Application migrations own tables;
+  # there is no chart-managed schema init.
   postgresql:
     deploy: true
     host: "" # Empty + deploy=true resolves to the in-cluster "control-plane-postgresql" Service
@@ -168,8 +172,6 @@ global:
       wafPolicyId: ""
       requestTimeout: ""
       additionalAnnotations: {}
-  selfMonitoring:
-    enabled: false
   monitoring:
     enabled: false
     additionalLabels: {}
@@ -778,6 +780,11 @@ data-plane-api:
           waitTimeoutSeconds: 1800
 # =============================================================================
 # Firewall (optional; default on): CPU workers.
+# To disable Firewall completely, set all three gates together:
+#   firewall.enabled: false
+#   firewall.firewall.enabled: false
+#   trustguard.firewall.enabled: false
+# (Chart dependency, Firewall workloads, and TrustGuard client wiring.)
 # =============================================================================
 firewall:
   enabled: true
