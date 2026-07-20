@@ -540,7 +540,7 @@ control-plane-app:
 # AgentGateway (v2 TrustGate replacement): admin + proxy/mcp.
 agentgateway:
   image:
-    tag: "v0.13.0"
+    tag: "v0.14.0"
   database:
     sslMode: "prefer"
     iamAuth: false
