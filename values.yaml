@@ -301,7 +301,7 @@ clickhouse:
   imagePullSecrets: "gcr-secret"
   image:
     repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickhouse-server
-    tag: "26.3"
+    tag: "26.6"
     pullPolicy: IfNotPresent
   global:
     imagePullSecrets: []
@@ -605,7 +605,7 @@ datacore:
 # ClickStack OTel collector (v2 external only): OTLP-to-ClickHouse pipeline.
 clickstack-otel-collector:
   image:
-    tag: "2.30.1"
+    tag: "2.31.0"
     repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickstack-otel-collector
   clickhouse:
     endpoint: "http://clickhouse:8123"
