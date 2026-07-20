@@ -489,7 +489,7 @@ control-plane-app:
           agentgatewayProxyUrl: ""
           trustguardUrl: ""
           datacoreUrl: ""
-          datacoreMetricsEnabled: "false"
+          datacoreMetricsEnabled: "true"
           alertEngineApiUrl: ""
           trustlensApiUrl: ""
           modelScannerApiUrl: ""

@@ -166,7 +166,7 @@ install in place to this chart.
   behavior. Safe to hardcode because this subchart only renders in external
   mode. Subchart `control-plane-app` `0.1.3 → 0.1.4`.
 - **Image bumps (AR latest for GA):** control-plane-app `v1.97.0`,
-  agentgateway `v0.10.3`, trustguard `v0.13.3`, datacore `v0.11.0`,
+  agentgateway `v0.10.3`, trustguard `v0.13.3`, datacore `v0.12.1`,
   data-plane-api `v1.41.0`, control-plane-api `v1.23.0`, firewall `v2.14.0`,
   watchdog `v0.13.1`, alertengine `v0.4.5`, dataagent `v0.1.2`. Subchart patches
   for this refresh: `agentgateway` `0.1.14 → 0.1.15`, `trustguard`
