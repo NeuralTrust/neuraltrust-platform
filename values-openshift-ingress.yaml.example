@@ -1,14 +1,12 @@
 # Platform v2 hybrid on OpenShift using Kubernetes Ingress instead of Routes.
 # The referenced TLS Secret must exist in the release namespace.
+# Supply a ClickStack token (authToken or existingSecret) at install time —
+# hybrid render fails closed without one (or with clickstack.enabled: false).
 
 global:
   deploymentMode: "hybrid"
   platform: "openshift"
   domain: "apps.example.com"
-  imageRegistry: ""
-  autoGenerateSecrets: true
-  security:
-    allowInsecureImages: true
   ingress:
     provider: "openshift"
     className: "openshift-default"
@@ -38,7 +36,3 @@ data-plane-api:
           enabled: true
           tls:
             enabled: true
-
-dataagent:
-  tenantId: ""
-  enrolmentToken: ""

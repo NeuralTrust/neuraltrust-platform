@@ -1,16 +1,9 @@
 # Platform v2 hybrid with GPU Firewall workers.
-# Layer over values-required.yaml and replace the registry and scheduling labels.
-
-global:
-  deploymentMode: "hybrid"
-  platform: "kubernetes"
-  domain: "platform.example.com"
-
-dataagent:
-  tenantId: ""
-  enrolmentToken: ""
+# Layer over values-required.yaml (ClickStack token required for hybrid render)
+# and replace the registry and scheduling labels.
 
 firewall:
+  enabled: true
   firewall:
     enabled: true
     gateway:
@@ -38,3 +31,7 @@ firewall:
     config:
       cudaMpsActiveThreadPercentage: "25"
       cudaMpsPinnedDeviceMemLimit: "6000M"
+
+trustguard:
+  firewall:
+    enabled: true

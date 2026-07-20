@@ -44,19 +44,31 @@ global:
   platform: "kubernetes"
   domain: "platform.example.com"
   clickstack:
-    authToken: "<CLICKSTACK_OTLP_TOKEN>"
+    existingSecret:
+      name: "clickstack-otlp"
+      # key defaults to OTEL_EXPORTER_OTLP_HEADERS
 
 dataagent:
   tenantId: ""
-  enrolmentToken: ""
+  enrolmentTokenExistingSecret:
+    name: ""
+    key: "ENROLMENT_TOKEN"
 ```
 
-Enable DataAgent only after enrolment:
+ClickStack is mandatory for hybrid render unless
+`global.clickstack.enabled: false`. For SaaS-managed hybrid, also enable
+config-sync via `existingSecret` references (see
+`values-v2-hybrid.yaml.example`).
+
+Enable DataAgent only after enrolment (`tenantId` plus token or
+`enrolmentTokenExistingSecret.name`):
 
 ```yaml
 dataagent:
   tenantId: "<tenant-id>"
-  enrolmentToken: "<enrolment-token>"
+  enrolmentTokenExistingSecret:
+    name: "dataagent-enrolment"
+    key: "ENROLMENT_TOKEN"
 ```
 
 ## Scenario: self-hosted external
@@ -79,19 +91,23 @@ and the control and data planes. It does not render DataAgent.
 
 ```yaml
 global:
+  deploymentMode: "external"
   postgresql:
+    deploy: false
+  redis:
     deploy: false
 
 infrastructure:
-  redis:
-    deploy: false
   clickhouse:
     deploy: false
 ```
 
 Use existing secrets and generic service endpoints as shown in
 `values-v2-managed-datastores.yaml.example`. Pre-create the PostgreSQL role
-and database — there is no chart-managed database init Job.
+and database — there is no chart-managed database init Job. In external mode,
+runtime services use per-service `*.database` / `*.redis` overlays;
+`global.postgresql` still gates in-cluster PG and feeds control-plane
+`postgresql-secrets`.
 
 ## Scenario: OpenShift
 

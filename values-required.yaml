@@ -1,5 +1,8 @@
 # Minimal Platform v2 hybrid starting point.
-# Set the platform and domain, then install with:
+# Install fails closed until a ClickStack token is supplied (authToken OR
+# existingSecret.name), or until air-gap is opted in with
+# global.clickstack.enabled: false.
+#
 #   helm upgrade --install neuraltrust-platform <chart> \
 #     --namespace neuraltrust --create-namespace -f values-required.yaml
 
@@ -10,7 +13,6 @@ global:
   imageRegistry: "" # Optional: "<registry>/neuraltrust"
   storageClass: "" # Optional: cluster default when empty
   autoGenerateSecrets: true
-  preserveExistingSecrets: false
   # v2 hybrid ALWAYS dual-writes AgentGateway + TrustGuard product data over OTLP
   # to the NeuralTrust SaaS ClickStack collector (endpoint / protocol / TLS are
   # fixed by the chart). Supply the collector's bearer token below OR reference a
@@ -23,10 +25,7 @@ global:
     #   key: "OTEL_EXPORTER_OTLP_HEADERS"   # optional (default shown)
 
 # DataAgent is optional and enrolment-gated. Enable only after NeuralTrust
-# provides both values below.
+# provides tenantId plus enrolmentToken or enrolmentTokenExistingSecret.name.
 dataagent:
   tenantId: ""
   enrolmentToken: ""
-  enrolmentTokenExistingSecret:
-    name: ""
-    key: "ENROLMENT_TOKEN"

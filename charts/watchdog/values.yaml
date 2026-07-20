@@ -429,8 +429,9 @@ runner:
 # These checks answer "are the main services running?" and the watchdog pushes
 # their status over OTLP metrics. Adding any red/promql/scrape_staleness id here
 # later renders the bundled local Prometheus.
+# Topology-neutral defaults. Add `clickhouse` explicitly in external overlays
+# (hybrid does not deploy ClickHouse).
 enabledCheckIds:
-  - clickhouse
   - firewall-health
   - pod-health
 v2EnabledCheckIds:
@@ -609,9 +610,11 @@ checks:
     kind: otel_collector
     enabled: false
     target:
-      url: http://opentelemetry-collector.opentelemetry:13133/
-      namespace: opentelemetry
-      labelSelector: app.kubernetes.io/name=opentelemetry-collector
+      # Umbrella collector Service in the release namespace (not the old
+      # opentelemetry-operator install).
+      url: http://otel-collector:13133/
+      namespace: "" # empty => Helm release namespace
+      labelSelector: app.kubernetes.io/component=otel-collector
     thresholds:
       minReadyPods: 1
   # Replaces gcp/metric_based_alerts.tf pod_crash_alert.

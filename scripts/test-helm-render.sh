@@ -533,5 +533,59 @@ assert_not_contains "$out_ocp_ing" 'name: agentgateway-proxy-' \
 assert_not_contains "$out_ocp_ing" 'name: agentgateway-mcp-' \
   "openshift resourceType=ingress: AgentGateway MCP Routes absent"
 
+# ---------------------------------------------------------------------------
+# 10. Watchdog defaults + firewall disable sync + hybrid ClickStack channels
+# ---------------------------------------------------------------------------
+blue "==> Scenario 10: watchdog otel-collector target and topology-neutral checks"
+out10="$TMP/scenario-watchdog-defaults.yaml"
+render_default "$out10" \
+  --set global.observability.enabled=true \
+  --set global.observability.hostedExport.enabled=false \
+  --set watchdog.enabled=true
+assert_contains "$out10" 'url: http://otel-collector:13133/' \
+  "watchdog: otel-collector check targets umbrella Service"
+assert_contains "$out10" 'labelSelector: app.kubernetes.io/component=otel-collector' \
+  "watchdog: otel-collector selector matches umbrella labels"
+assert_not_contains "$out10" 'url: http://opentelemetry-collector.opentelemetry:13133/' \
+  "watchdog: obsolete collector health URL is gone"
+# Hybrid render must not enable the clickhouse check by default.
+assert_contains "$out10" 'enabled: false'$'\n''        id: clickhouse' \
+  "watchdog: clickhouse check stays off in hybrid defaults"
+
+blue "==> Scenario 10b: firewall disable requires all three gates"
+out10b="$TMP/scenario-firewall-disabled.yaml"
+render_default "$out10b" \
+  --set firewall.enabled=false \
+  --set firewall.firewall.enabled=false \
+  --set trustguard.firewall.enabled=false
+assert_not_contains "$out10b" 'name: firewall$' \
+  "firewall off: gateway Deployment/Service absent"
+assert_not_contains "$out10b" 'name: prompt-moderation-worker' \
+  "firewall off: workers absent"
+assert_not_contains "$out10b" 'NEURAL_TRUST_FIREWALL_BASE_URL' \
+  "firewall off: TrustGuard does not wire Firewall URL"
+
+blue "==> Scenario 10c: hybrid has no ClickStack collector; ClickStack env present"
+out10c="$TMP/scenario-hybrid-clickstack-channels.yaml"
+render_default "$out10c"
+assert_not_contains "$out10c" 'name: clickstack-collector' \
+  "hybrid: in-cluster ClickStack collector must not render"
+assert_not_contains "$out10c" 'kind: StatefulSet' \
+  "hybrid: ClickHouse StatefulSet must not render"
+assert_contains "$out10c" 'clickstack-collector.neuraltrust.ai' \
+  "hybrid: product events target SaaS ClickStack endpoint"
+
+blue "==> Scenario 10d: GPU Firewall workers (dataplane-gpu example shape)"
+out10d="$TMP/scenario-firewall-gpu.yaml"
+render_default "$out10d" \
+  --set firewall.firewall.workerDefaults.image.repository=europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-gpu \
+  --set 'firewall.firewall.workerDefaults.resources.requests.nvidia\.com/gpu=1' \
+  --set 'firewall.firewall.workerDefaults.resources.limits.nvidia\.com/gpu=1' \
+  --set firewall.firewall.workerDefaults.hostIPC=true
+assert_contains "$out10d" 'nvidia.com/gpu' \
+  "gpu: Firewall workers request GPU resources"
+assert_contains "$out10d" 'hostIPC: true' \
+  "gpu: Firewall workers share host IPC for CUDA MPS"
+
 green ""
 green "All v2 render scenarios passed."

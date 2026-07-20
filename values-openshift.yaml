@@ -1,18 +1,10 @@
 # Platform v2 hybrid on OpenShift using native Routes.
+# Supply a ClickStack token (authToken or existingSecret) at install time —
+# hybrid render fails closed without one (or with clickstack.enabled: false).
 
 global:
   deploymentMode: "hybrid"
   platform: "openshift"
   domain: "apps.example.com"
-  imageRegistry: ""
-  storageClass: ""
-  autoGenerateSecrets: true
-  preserveExistingSecrets: false
-  security:
-    allowInsecureImages: true
   ingress:
     provider: "openshift"
-
-dataagent:
-  tenantId: ""
-  enrolmentToken: ""

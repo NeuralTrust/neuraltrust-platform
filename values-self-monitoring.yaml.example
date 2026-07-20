@@ -1,9 +1,9 @@
-# Curated Platform v2 self-monitoring overlay.
+# Curated Platform v2 self-monitoring overlay (hybrid).
+# Layer over values-required.yaml plus a ClickStack token (authToken or
+# existingSecret). Hybrid has no in-cluster ClickHouse — omit that check id.
 
 global:
   deploymentMode: "hybrid"
-  selfMonitoring:
-    enabled: true
   observability:
     enabled: true
 
@@ -12,7 +12,6 @@ watchdog:
   actions:
     dryRun: true
   enabledCheckIds:
-    - clickhouse
     - firewall-health
     - pod-health
     - otel-collector

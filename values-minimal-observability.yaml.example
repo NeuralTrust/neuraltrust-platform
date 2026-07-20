@@ -1,5 +1,8 @@
 # Platform v2 hybrid with collector-less hosted observability.
-# Pre-create `neuraltrust-observability-token` with key `token`.
+# Layer over values-required.yaml plus a ClickStack token (authToken or
+# existingSecret). Pre-create `neuraltrust-observability-token` with key `token`.
+# Hybrid has no in-cluster ClickHouse — omit that check id.
+# hostedExport endpoint / auth defaults match values.yaml; override only when needed.
 
 global:
   deploymentMode: "hybrid"
@@ -8,16 +11,14 @@ global:
     tenantId: "<tenant-id>"
     hostedExport:
       enabled: true
-      endpoint: "https://collector.neuraltrust.ai"
       auth:
         tokenSecretName: "neuraltrust-observability-token"
-        tokenSecretKey: "token"
+        # tokenSecretKey defaults to "token"
 
 watchdog:
   enabled: true
   actions:
     dryRun: true
   enabledCheckIds:
-    - clickhouse
     - firewall-health
     - pod-health

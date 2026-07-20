@@ -1,6 +1,7 @@
 # Platform v2 hybrid overlay for a fully-configured deployment.
 # Documents the "one Postgres block, one Redis block, one ClickStack token"
-# hybrid contract using pre-created Secrets.
+# hybrid contract using pre-created Secrets. Prefer existingSecret for
+# ClickStack, config-sync, and DataAgent enrolment.
 #
 # Never commit real tokens, passwords, or customer identifiers.
 # For the minimal starting point, see values-required.yaml.
@@ -69,6 +70,9 @@ trustguard:
     enabled: true
     existingSecret:
       name: "trustguard-config-sync"
+  # Keep in sync with firewall.enabled / firewall.firewall.enabled below.
+  firewall:
+    enabled: false
 
 # The temporary data-plane-api read shim. In hybrid it defaults to PostgreSQL
 # (SQL_DATABASE=postgres) and reuses the shared postgresql-secrets, so nothing
@@ -80,9 +84,8 @@ trustguard:
 #         k8sJobs:
 #           enabled: true
 
-trustlens:
-  enabled: false
-
+# Disable Firewall completely (chart dependency, workloads, TrustGuard client).
 firewall:
+  enabled: false
   firewall:
     enabled: false

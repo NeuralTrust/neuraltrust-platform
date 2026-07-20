@@ -5,25 +5,25 @@
 # shim runs on PostgreSQL by default (no ClickHouse required).
 #
 # Hybrid contract: one shared PostgreSQL block, one shared Redis block, and one
-# mandatory ClickStack OTLP token drive every hybrid workload. There is no init
-# Job — application migrations own their tables.
+# mandatory ClickStack OTLP token drive every hybrid workload. Prefer
+# existingSecret references for ClickStack (and for config-sync / DataAgent when
+# enrolled). There is no init Job — application migrations own their tables.
+#
+# Layer over values-required.yaml, or supply a ClickStack token here.
 
 global:
   deploymentMode: "hybrid"
   platform: "kubernetes"
   domain: "platform.example.com"
-  imageRegistry: ""
-  autoGenerateSecrets: true
   # v2 hybrid always dual-writes product data over OTLP to the NeuralTrust SaaS
   # ClickStack collector. The endpoint / protocol / TLS are fixed; only the
-  # bearer token is operator-supplied. Either inline `authToken` OR point
-  # `existingSecret.name` at a pre-created Secret carrying the header. Set
-  # `enabled: false` for an air-gapped install with no OTLP dual-write.
+  # bearer token is operator-supplied. Prefer existingSecret; authToken is an
+  # inline escape hatch. Set enabled: false for an air-gapped install.
   clickstack:
-    authToken: "<CLICKSTACK_OTLP_TOKEN>"
-    # existingSecret:
-    #   name: "clickstack-otlp-token"
-    #   key: "OTEL_EXPORTER_OTLP_HEADERS"
+    # authToken: "<CLICKSTACK_OTLP_TOKEN>"
+    existingSecret:
+      name: "clickstack-otlp-token"
+      # key defaults to OTEL_EXPORTER_OTLP_HEADERS
   # Shared hybrid Postgres. Every hybrid workload (AgentGateway, TrustGuard,
   # DataAgent, data-plane-api) envFrom's the rendered postgresql-secrets, so
   # all four connect as ONE role to ONE database. In-cluster default renders
@@ -41,14 +41,6 @@ global:
   #
   # Shared hybrid Redis. Passwordless in-cluster default on Service `redis`.
   # See values-v2-hybrid.yaml.example for a fully-configured overlay.
-  observability:
-    hostedExport:
-      enabled: true
-
-infrastructure:
-  clickhouse:
-    # Inert in hybrid — no in-cluster ClickHouse renders (analytics live in SaaS).
-    deploy: false
 
 # data-plane-api read shim. In hybrid it defaults to PostgreSQL (SQL_DATABASE=postgres)
 # and reuses the umbrella-managed `postgresql-secrets`, so nothing below is required.
@@ -78,16 +70,17 @@ infrastructure:
 
 # DataAgent remains absent while enrolment is empty. Configure tenantId and
 # either the inline token or an existing Secret together.
-dataagent:
-  tenantId: ""
-  enrolmentToken: ""
-  enrolmentTokenExistingSecret:
-    name: ""
-    key: "ENROLMENT_TOKEN"
+# dataagent:
+#   tenantId: "<tenant-id>"
+#   enrolmentTokenExistingSecret:
+#     name: "dataagent-enrolment"
+#     key: "ENROLMENT_TOKEN"
 
-trustlens:
-  enabled: false
-
+# Disable Firewall completely (chart dependency, workloads, TrustGuard client).
 firewall:
+  enabled: false
+  firewall:
+    enabled: false
+trustguard:
   firewall:
     enabled: false
