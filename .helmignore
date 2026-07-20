@@ -16,6 +16,8 @@
 *.tmp
 *.orig
 *~
+# CI-generated credentials
+gha-creds-*.json
 # Various IDEs
 .project
 .idea/
