@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.0.7] — 2026-07-20
+
 ### Changed
 
 - **Document the complete hybrid outbound contract.** SaaS-managed
