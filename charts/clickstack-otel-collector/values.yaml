@@ -6,28 +6,21 @@
 # from the CLICKHOUSE_* env vars below — it is not templated as YAML here.
 nameOverride: ""
 fullnameOverride: "clickstack-collector"
-
 securityHardening: true
-
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickstack-otel-collector
-  tag: "2.30.1"
+  tag: "2.31.0"
   pullPolicy: IfNotPresent
-
 # Private AR image — default pull secret (set "none" to opt out for Workload Identity).
 imagePullSecrets: "gcr-secret"
-
 serviceAccount:
   create: true
   name: "clickstack-collector"
   annotations: {}
-
 replicas: 1
-
 ports:
   otlp: 4317
   otlpHttp: 4318
-
 # ClickHouse target. Defaults to the in-cluster clickhouse subchart over HTTP;
 # set clickhouse.endpoint to your external/Cloud endpoint (e.g.
 # https://<instance>.clickhouse.cloud:8443) when infrastructure.clickhouse.deploy=false.
@@ -42,25 +35,19 @@ clickhouse:
   existingSecret:
     name: "clickhouse"
     key: "admin-password"
-
 # Secures the OTLP receivers (senders present this token).
 otlpAuthToken: "" # Auto-generated if empty
-
 resources:
-  requests: { cpu: 100m, memory: 256Mi }
-  limits: { cpu: 1000m, memory: 1Gi }
-
+  requests: {cpu: 100m, memory: 256Mi}
+  limits: {cpu: 1000m, memory: 1Gi}
 nodeSelector: {}
 tolerations: []
 extraEnv: []
-
 # Collector log verbosity (HYPERDX_LOG_LEVEL). "info" by default; set "debug" to
 # troubleshoot pipeline/exporter errors.
 logLevel: "info"
-
 service:
   type: ClusterIP
-
 # Additive collector config mounted at CUSTOM_OTELCOL_CONFIG_FILE. The image ships
 # an experimental metrics/promql pipeline whose exporter targets a Prometheus
 # remote-write endpoint that a self-hosted ClickHouse does not expose, so it errors.
