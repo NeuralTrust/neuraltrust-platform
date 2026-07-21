@@ -27,26 +27,21 @@ global:
     trustguardClientSecretName: ""
   # ClickStack OTLP export for the v2 data planes (AgentGateway + TrustGuard).
   #
-  # In v2 HYBRID this is ALWAYS ON by default: apps send plain OTLP to a local
-  # ClusterIP Service (clickstack-egress-collector) that selects the DataAgent
-  # pod. An OTel collector sidecar on DataAgent exchanges via DataAgent's
-  # loopback OAuth broker (enrolment stays on DataAgent only) and forwards to
-  # SaaS. There is no direct SaaS authToken / existingSecret path.
-  # dataagent.tenantId is DataAgent routing only — it does not authorize OTLP.
+  # HYBRID: always on. Apps send plain OTLP to a local ClusterIP Service
+  # (clickstack-egress-collector) on the DataAgent pod. An OTel collector
+  # sidecar exchanges via DataAgent's loopback OAuth broker (enrolment stays
+  # on DataAgent only) and forwards to SaaS. There is no opt-out and no
+  # direct SaaS authToken path. Requires dataagent.tenantId + enrolment.
+  # Air-gapped / local-only product telemetry → use deploymentMode=external.
   #
-  # Air-gap escape hatch: set `enabled: false` (also disables egress).
-  #
-  # In v2 EXTERNAL / air-gapped clusters, product telemetry stays in-cluster
+  # EXTERNAL: this block is ignored. Product telemetry stays in-cluster
   # (AgentGateway/TrustGuard → clickstack-otel-collector → local ClickHouse).
-  # This block and the egress sidecar are ignored — no internet hop.
   clickstack:
-    enabled: true
     # Optional overrides for the egress sidecar's SaaS export target only.
     endpoint: ""
     protocol: ""
     insecure: false
     egress:
-      enabled: true # default on for hybrid; set false only with clickstack.enabled=false
       nameOverride: "" # ClusterIP Service name (default clickstack-egress-collector)
       clientId: "otlp-egress" # non-secret oauth2client placeholder
       clientSecret: "unused" # non-secret oauth2client placeholder (broker ignores it)
@@ -592,10 +587,12 @@ dataagent:
     sslMode: "prefer"
   existingSecret:
     name: ""
-  enrolmentToken: ""
-  enrolmentTokenExistingSecret:
-    name: ""
-    key: "ENROLMENT_TOKEN"
+  # Same ritual as configSync: preferred existingSecret; inline token for local/dev.
+  enrolment:
+    token: ""
+    existingSecret:
+      name: ""
+      key: "ENROLMENT_TOKEN"
 # DataCore (v2 external only): residency API over local ClickHouse + Postgres
 # (deployment metadata). Own `datacore` database/role — not the hybrid shared
 # `global.postgresql` block.

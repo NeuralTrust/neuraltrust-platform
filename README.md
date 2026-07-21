@@ -15,22 +15,26 @@ in your cluster:
 - NeuralTrust Firewall when enabled
 - DataAgent only after the deployment is enrolled
 
-Hybrid dual-writes AgentGateway and TrustGuard product telemetry via a local
-`clickstack-egress-collector`: apps send plain OTLP in-cluster; the egress
-collector exchanges the DataAgent enrolment JWT at DataCore for a short-lived
-OTLP access token and forwards to SaaS. There is no direct SaaS ClickStack
-bearer-token path. Hybrid ClickStack therefore requires DataAgent enrolment
-(`dataagent.enrolmentToken` or `enrolmentTokenExistingSecret`). Set
-`global.clickstack.enabled: false` for air-gap. For SaaS-managed hybrid,
-enable `agentgateway.configSync` and `trustguard.configSync` separately
-(defaults `enabled: false`); prefer `existingSecret.name` Secrets that hold
-both `CONFIG_SYNC_TOKEN` and `CONFIG_SYNC_LKG_KEY`. See
-[`docs/platform-v2.md`](./docs/platform-v2.md) and
+Hybrid product OTLP is mandatory. AgentGateway and TrustGuard send plain OTLP
+to a local `clickstack-egress-collector` on the DataAgent pod; the sidecar
+exchanges the DataAgent enrolment JWT at DataCore for a short-lived OTLP
+access token and forwards to SaaS. There is no direct SaaS ClickStack bearer
+path and no hybrid opt-out (`global.clickstack.enabled` /
+`global.clickstack.egress.enabled` are rejected). Air-gapped or local-only
+product telemetry requires `global.deploymentMode: external`. Hybrid therefore
+requires DataAgent enrolment (`dataagent.enrolment.token` or
+`enrolment.existingSecret`).
+
+Hybrid config-sync is on by default (mode-derived; `enabled: null` in
+subcharts). Overlays should set `existingSecret.name` only — do not restate
+`enabled: true`. Set `configSync.enabled: false` only for Postgres-managed
+runtime configuration. Prefer Secrets that hold both `CONFIG_SYNC_TOKEN` and
+`CONFIG_SYNC_LKG_KEY`. See [`docs/platform-v2.md`](./docs/platform-v2.md) and
 [`values-v2-hybrid.yaml.example`](./values-v2-hybrid.yaml.example).
 
-DataAgent renders when `tenantId` and either `enrolmentToken` or
-`enrolmentTokenExistingSecret.name` are set (also required for hybrid
-ClickStack egress). Prefer the existing-Secret path so the token never enters
+DataAgent renders when `tenantId` and either `enrolment.token` or
+`enrolment.existingSecret.name` are set (required for hybrid OTLP egress
+and for DataBridge). Prefer the existing-Secret path so the token never enters
 Helm values. With a complete enrolment, it makes an outbound TLS connection to
 DataBridge; it exposes no operator-facing ingress.
 
@@ -73,9 +77,9 @@ global:
 
 dataagent:
   tenantId: "<tenant-id>"
-  enrolmentTokenExistingSecret:
-    name: "dataagent-enrolment"
-    key: "ENROLMENT_TOKEN"
+  enrolment:
+    existingSecret:
+      name: "dataagent-enrolment"
 ```
 
 Secrets are generated on first install and reused on upgrades when
@@ -86,7 +90,7 @@ reference pre-created Kubernetes Secrets; see [SECRETS.md](./SECRETS.md).
 
 | Mode | SaaS control plane | Workloads in cluster | Analytics path |
 |---|---:|---|---|
-| `hybrid` (default) | Yes | AgentGateway data plane, TrustGuard data plane, data-plane API shim (PostgreSQL) | Analytics in SaaS via mandatory ClickStack OTLP; optional enrolled DataAgent bridges entitled reads. No in-cluster ClickHouse |
+| `hybrid` (default) | Yes | AgentGateway data plane, TrustGuard data plane, data-plane API shim (PostgreSQL), enrolled DataAgent | Analytics in SaaS via mandatory enrolment-backed ClickStack OTLP; DataAgent also bridges entitled reads. No in-cluster ClickHouse |
 | `external` | No | Control and data planes, product API/app, DataCore, AlertEngine | ClickStack OTel Collector writes to ClickHouse; data-plane API shim reads ClickHouse |
 
 ## Datastores

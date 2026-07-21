@@ -33,7 +33,7 @@ spec:
         configMap:
           name: agentgateway-telemetry
           optional: true
-      {{- if .Values.configSync.enabled }}
+      {{- if (eq (include "neuraltrust-platform.configSync.enabled" .) "true") }}
       - name: config-sync-lkg
         emptyDir: {}
       {{- end }}
@@ -85,7 +85,7 @@ spec:
         - name: telemetry
           mountPath: /etc/telemetry
           readOnly: true
-        {{- if .Values.configSync.enabled }}
+        {{- if (eq (include "neuraltrust-platform.configSync.enabled" .) "true") }}
         - name: config-sync-lkg
           mountPath: /var/lib/trustgate
         {{- end }}

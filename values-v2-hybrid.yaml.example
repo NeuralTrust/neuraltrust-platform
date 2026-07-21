@@ -2,6 +2,7 @@
 # Documents the "one Postgres block, one Redis block, one enrolment Secret"
 # hybrid contract using pre-created Secrets. Prefer existingSecret for
 # DataAgent enrolment (also powers ClickStack egress) and config-sync.
+# Product OTLP and config-sync are on by default in hybrid.
 #
 # Never commit real tokens, passwords, or customer identifiers.
 # For the minimal starting point, see values-required.yaml.
@@ -10,12 +11,6 @@ global:
   deploymentMode: "hybrid"
   platform: "kubernetes" # aws | gcp | azure | openshift | kubernetes
   domain: "platform.example.com"
-
-  # Hybrid ClickStack dual-write uses local clickstack-egress-collector +
-  # DataAgent enrolment (no direct SaaS authToken). Set enabled: false for
-  # air-gap with no SaaS OTLP dual-write.
-  clickstack:
-    enabled: true
 
   # One shared PostgreSQL block. Every hybrid workload (AgentGateway,
   # TrustGuard, DataAgent, data-plane-api) reads envFrom the rendered
@@ -43,28 +38,21 @@ global:
     existingSecret:
       name: "external-redis"
 
-# DataAgent is enrolment-gated: it renders only when tenantId AND either
-# enrolmentToken OR enrolmentTokenExistingSecret.name are set. Both values
-# are SaaS-issued and must never be inlined into a committed values file —
-# use enrolmentTokenExistingSecret.name in tracked GitOps flows.
+# Same credential ritual for all three: preferred existingSecret.name; for
+# local/dev clear name and set token / enrolment.token. Never commit tokens.
 dataagent:
   tenantId: "<tenant-id>"
-  enrolmentTokenExistingSecret:
-    name: "dataagent-enrolment"
-    key: "ENROLMENT_TOKEN"
+  enrolment:
+    existingSecret:
+      name: "dataagent-enrolment"
 
-# SaaS-managed hybrid data planes pull compiled configuration over outbound
-# config-sync gRPC. Each Secret holds an independently issued SaaS token under
-# CONFIG_SYNC_TOKEN and a base64-encoded 32-byte key under CONFIG_SYNC_LKG_KEY.
 agentgateway:
   configSync:
-    enabled: true
     existingSecret:
       name: "agentgateway-config-sync"
 
 trustguard:
   configSync:
-    enabled: true
     existingSecret:
       name: "trustguard-config-sync"
   # Keep in sync with firewall.enabled / firewall.firewall.enabled below.

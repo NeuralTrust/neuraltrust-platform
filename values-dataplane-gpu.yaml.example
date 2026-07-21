@@ -1,5 +1,5 @@
 # Platform v2 hybrid with GPU Firewall workers.
-# Layer over values-required.yaml (ClickStack token required for hybrid render)
+# Layer over values-required.yaml (DataAgent enrolment + config-sync Secrets)
 # and replace the registry and scheduling labels.
 
 firewall:

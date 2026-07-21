@@ -2,5 +2,5 @@ apiVersion: v2
 name: dataagent
 description: DataAgent — customer-side data-residency agent. Outbound-only gRPC to the SaaS DataBridge; runs typed read-only queries on a local Postgres. Deployed only when global.deploymentMode=hybrid.
 type: application
-version: 0.1.5
+version: 0.1.6
 appVersion: "v0.4.0"

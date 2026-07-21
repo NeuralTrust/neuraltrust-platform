@@ -54,12 +54,13 @@ adminJwtSecret: "" # Auto-generated if empty
 tokenSigningSecret: "" # Auto-generated if empty
 redisEventsSecret: "" # Auto-generated if empty; authenticates Redis cache events
 # ---- config-sync (DB-less data plane <- SaaS control plane) ----
-# When enabled, the data plane pulls compiled config over gRPC from the
-# NeuralTrust SaaS control plane instead of Postgres. OFF by default: enabling
-# switches the data plane to DB-less (a behavior change). TLS uses the public LE
-# cert on the SaaS endpoint, so no CA distribution is needed (system roots).
+# Mode-derived by default: hybrid → on, external → off. Explicit true/false
+# overrides. When on, the data plane pulls compiled config over gRPC from the
+# NeuralTrust SaaS control plane instead of Postgres (DB-less). Hybrid fails
+# closed without a token source (existingSecret or inline token). TLS uses the
+# public LE cert on the SaaS endpoint (system roots).
 configSync:
-  enabled: false
+  enabled: null
   # Control-plane gRPC endpoint host:port. Empty => mode-derived:
   #   hybrid: trustguard-configsync.<saasDomain>:443 (public SaaS, TLS)
   #   full:   <controlPlane.name>.<namespace>.svc.cluster.local:<controlPlane.ports.grpc> (in-cluster)

@@ -111,6 +111,75 @@ imagePullSecrets:
 {{- end }}
 
 {{/*
+Effective GATEWAY_BASE_DOMAIN.
+  explicit config.gatewayBaseDomain → use it
+  subdomain mode + empty → llm.<global.domain>
+  header mode + empty → <global.domain> (legacy header discovery)
+*/}}
+{{- define "agentgateway.config.effectiveGatewayBaseDomain" -}}
+{{- $explicit := .Values.config.gatewayBaseDomain | default "" | toString | trim -}}
+{{- if $explicit -}}
+{{- $explicit -}}
+{{- else if eq (.Values.config.gatewayDiscoveryMode | default "header") "subdomain" -}}
+{{- printf "llm.%s" (include "neuraltrust-platform.domain" .) -}}
+{{- else -}}
+{{- include "neuraltrust-platform.domain" . -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Effective MCP_BASE_DOMAIN.
+  explicit config.mcpBaseDomain → use it
+  empty → mcp.<global.domain>
+*/}}
+{{- define "agentgateway.config.effectiveMcpBaseDomain" -}}
+{{- $explicit := .Values.config.mcpBaseDomain | default "" | toString | trim -}}
+{{- if $explicit -}}
+{{- $explicit -}}
+{{- else -}}
+{{- printf "mcp.%s" (include "neuraltrust-platform.domain" .) -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Effective additionalHosts for a proxy/MCP plane.
+Args: dict "ctx" . "plane" "dataPlane"|"mcp"
+  subdomain mode + empty additionalHosts → ["*.<effective-base-domain>"]
+  non-empty additionalHosts → authoritative (no auto-merge)
+  header mode → empty / explicit list only
+*/}}
+{{- define "agentgateway.ingress.effectiveAdditionalHosts" -}}
+{{- $ctx := .ctx -}}
+{{- $plane := .plane -}}
+{{- $cfg := default dict $ctx.Values.config -}}
+{{- $ing := default dict $ctx.Values.ingress -}}
+{{- $planeCfg := dict -}}
+{{- if eq $plane "mcp" -}}
+  {{- $planeCfg = default dict $ing.mcp -}}
+{{- else -}}
+  {{- $planeCfg = default dict $ing.dataPlane -}}
+{{- end -}}
+{{- $explicit := default (list) $planeCfg.additionalHosts -}}
+{{- if gt (len $explicit) 0 -}}
+{{- toYaml $explicit -}}
+{{- else if eq ($cfg.gatewayDiscoveryMode | default "header") "subdomain" -}}
+{{- $base := "" -}}
+{{- if eq $plane "mcp" -}}
+  {{- $base = include "agentgateway.config.effectiveMcpBaseDomain" $ctx -}}
+{{- else -}}
+  {{- $base = include "agentgateway.config.effectiveGatewayBaseDomain" $ctx -}}
+{{- end -}}
+{{- if $base -}}
+{{- toYaml (list (printf "*.%s" $base)) -}}
+{{- else -}}
+{{- toYaml (list) -}}
+{{- end -}}
+{{- else -}}
+{{- toYaml (list) -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Ordered unique public hosts for an AgentGateway ingress plane.
 Args: dict "host" "" "prefix" "" "additionalHosts" list "global" .Values.global
 Returns a YAML list: primary host (if resolved) then additionalHosts, de-duped.

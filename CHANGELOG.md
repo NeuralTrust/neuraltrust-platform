@@ -4,6 +4,35 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Breaking
+
+- **Hybrid product OTLP is mandatory with no opt-out.** Remove
+  `global.clickstack.enabled: false` and `global.clickstack.egress.enabled`.
+  Hybrid uses the DataAgent-co-located egress collector (enrolment-backed);
+  there is no direct SaaS `authToken` / `existingSecret` bearer path on apps.
+  Air-gapped or local-only product telemetry requires
+  `global.deploymentMode: external`.
+- **Rename DataAgent enrolment values to match config-sync.** Use
+  `dataagent.enrolment.token` and `dataagent.enrolment.existingSecret`
+  (same ritual as `*.configSync.token` / `existingSecret`). Legacy
+  `enrolmentToken` / `enrolmentTokenExistingSecret` are rejected.
+
+### Changed
+
+- **Hybrid config-sync is on by default** (mode-derived; subchart
+  `enabled: null`). Overlays set `existingSecret` only; do not restate
+  `enabled: true`. Explicit `enabled: false` remains for Postgres-managed
+  configuration.
+- **AgentGateway subdomain discovery auto-derives base domains and wildcards.**
+  With `gatewayDiscoveryMode: subdomain`, empty base domains yield
+  `GATEWAY_BASE_DOMAIN=llm.<global.domain>` /
+  `MCP_BASE_DOMAIN=mcp.<global.domain>`, and empty `additionalHosts` auto-add
+  `*.llm.<domain>` / `*.mcp.<domain>` on Ingress/Routes. Explicit
+  `additionalHosts` remain authoritative.
+- **Bump `agentgateway` / `trustguard` subcharts `0.1.21 → 0.1.22`** for the
+  subdomain routing helpers and mode-derived config-sync defaults.
+- **Bump `dataagent` subchart `0.1.5 → 0.1.6`** for the enrolment value rename.
+
 ## [v2.1.0] — 2026-07-20
 
 ### Changed

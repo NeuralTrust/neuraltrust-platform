@@ -59,10 +59,14 @@ databaseUrl: ""
 # global.autoGenerateSecrets=false or global.preserveExistingSecrets=true.
 existingSecret:
   name: ""
-enrolmentToken: "" # Issued by SaaS; required for tls/mtls
-enrolmentTokenExistingSecret:
-  name: "" # Existing Secret containing the SaaS-issued token
-  key: "ENROLMENT_TOKEN"
+# Enrolment credentials — same ritual as configSync.token / existingSecret.
+# Preferred: existingSecret.name (pre-created Secret with ENROLMENT_TOKEN).
+# Inline: clear existingSecret.name and set token (local/dev only).
+enrolment:
+  token: "" # SaaS-issued; never auto-generated
+  existingSecret:
+    name: ""
+    key: "ENROLMENT_TOKEN"
 # gRPC supervisor tuning (sane defaults; override only if needed).
 supervisor:
   backoffMin: "1s"

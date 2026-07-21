@@ -1,6 +1,6 @@
 # Platform v2 hybrid on OpenShift using native Routes.
-# Supply a ClickStack token (authToken or existingSecret) at install time —
-# hybrid render fails closed without one (or with clickstack.enabled: false).
+# Hybrid product OTLP requires DataAgent enrolment (see values-required.yaml).
+# Air-gapped / local-only product telemetry → global.deploymentMode=external.
 
 global:
   deploymentMode: "hybrid"

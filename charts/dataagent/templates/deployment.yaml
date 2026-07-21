@@ -66,12 +66,13 @@ spec:
         - name: OAUTH_BROKER_ADDR
           value: "127.0.0.1:9465"
         {{- end }}
-        {{- with .Values.enrolmentTokenExistingSecret.name }}
+        {{- $enrolmentExisting := default dict (default dict .Values.enrolment).existingSecret }}
+        {{- with $enrolmentExisting.name }}
         - name: ENROLMENT_TOKEN
           valueFrom:
             secretKeyRef:
               name: {{ . | quote }}
-              key: {{ $.Values.enrolmentTokenExistingSecret.key | default "ENROLMENT_TOKEN" | quote }}
+              key: {{ $enrolmentExisting.key | default "ENROLMENT_TOKEN" | quote }}
         {{- end }}
         {{- with .Values.extraEnv }}
         {{- toYaml . | nindent 8 }}

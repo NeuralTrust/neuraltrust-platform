@@ -1,6 +1,6 @@
 # Curated Platform v2 self-monitoring overlay (hybrid).
-# Layer over values-required.yaml plus a ClickStack token (authToken or
-# existingSecret). Hybrid has no in-cluster ClickHouse — omit that check id.
+# Layer over values-required.yaml (DataAgent enrolment + config-sync Secrets).
+# Hybrid has no in-cluster ClickHouse — omit that check id.
 
 global:
   deploymentMode: "hybrid"

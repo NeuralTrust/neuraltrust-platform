@@ -27,12 +27,12 @@ blue()  { printf '\033[34m%s\033[0m\n' "$*"; }
 
 helm dependency update "$CHART_DIR" >/dev/null
 
-# v2 hybrid ClickStack co-locates the OTLP egress sidecar on DataAgent, so
-# defaults must enable DataAgent (tenantId + enrolment). External mode ignores
-# this requirement (DataAgent does not render).
+# v2 hybrid always exports product OTLP via the DataAgent egress sidecar and
+# enables config-sync by default. Tests supply enrolment + config-sync Secret
+# refs. External mode ignores DataAgent (does not render).
 CLICKSTACK_DEFAULT_ARGS=(
   --set dataagent.tenantId=test-tenant
-  --set dataagent.enrolmentTokenExistingSecret.name=dataagent-enrolment
+  --set dataagent.enrolment.existingSecret.name=dataagent-enrolment
 )
 
 render_default() {
@@ -135,35 +135,24 @@ assert_not_contains "$out1" 'OTEL_EXPORTER_OTLP_HEADERS:' \
 # ClickStack fail-closed without a fully enabled DataAgent (egress is a sidecar)
 blue "==> Scenario 1b: hybrid ClickStack without enrolment must fail (fail-closed)"
 assert_render_fails "hybrid without enrolment fails render" \
-  --set dataagent.enrolmentTokenExistingSecret.name=
+  --set dataagent.enrolment.existingSecret.name=
 blue "==> Scenario 1b1: hybrid ClickStack without tenantId must fail (fail-closed)"
 assert_render_fails "hybrid without dataagent.tenantId fails render" \
   --set dataagent.tenantId=
 
-blue "==> Scenario 1b2: egress.enabled=false with clickstack on must fail"
-assert_render_fails "hybrid cannot disable egress while ClickStack dual-write is on" \
+blue "==> Scenario 1b2: legacy clickstack/egress opt-out keys must fail"
+assert_render_fails "legacy global.clickstack.enabled=false is rejected" \
+  --set global.clickstack.enabled=false
+assert_render_fails "legacy global.clickstack.egress.enabled=false is rejected" \
   --set global.clickstack.egress.enabled=false
 
-# Air-gap escape hatch
-blue "==> Scenario 1c: ClickStack air-gap escape hatch renders"
-out1c="$TMP/scenario-hybrid-airgap.yaml"
-helm template test "$CHART_DIR" --namespace default -f "$CHART_DIR/values-required.yaml" \
-  --set global.clickstack.enabled=false > "$out1c"
-assert_contains "$out1c" 'name: agentgateway-proxy' \
-  "air-gap: gateway still renders with ClickStack disabled"
-assert_not_contains "$out1c" 'name: clickstack-egress-collector' \
-  "air-gap: egress collector must not render when ClickStack disabled"
-
-# Config-sync fail-closed and writable LKG storage
+# Config-sync fail-closed (hybrid default-on) and writable LKG storage
 blue "==> Scenario 1d: config-sync token references and LKG storage"
-assert_render_fails "config-sync without a SaaS token source fails render" \
-  --set agentgateway.configSync.enabled=true
+assert_render_fails "hybrid config-sync without a SaaS token source fails render" \
+  --set agentgateway.configSync.existingSecret.name= \
+  --set trustguard.configSync.existingSecret.name=
 out1d="$TMP/scenario-hybrid-config-sync.yaml"
-render_default "$out1d" \
-  --set agentgateway.configSync.enabled=true \
-  --set agentgateway.configSync.existingSecret.name=agentgateway-config-sync \
-  --set trustguard.configSync.enabled=true \
-  --set trustguard.configSync.existingSecret.name=trustguard-config-sync
+render_default "$out1d"
 assert_contains "$out1d" 'name: "?agentgateway-config-sync"?' \
   "config-sync: AgentGateway references its operator-owned token Secret"
 assert_contains "$out1d" 'name: "?trustguard-config-sync"?' \
@@ -174,17 +163,20 @@ assert_contains "$out1d" 'mountPath: /var/lib/trustgate' \
   "config-sync: AgentGateway LKG path is writable"
 assert_contains "$out1d" 'mountPath: /var/lib/trustguard' \
   "config-sync: TrustGuard LKG path is writable"
+assert_contains "$out1d" 'name: CONFIG_SYNC_DATA_PLANE_ENABLED'$'\n''          value: "true"' \
+  "config-sync: hybrid defaults enable data-plane sync"
 assert_render_fails "inline config-sync token fails when auto-generation is disabled" \
   --set global.autoGenerateSecrets=false \
-  --set agentgateway.configSync.enabled=true \
-  --set agentgateway.configSync.token=inline-test-token
+  --set agentgateway.configSync.existingSecret.name= \
+  --set agentgateway.configSync.token=inline-test-token \
+  --set dataagent.existingSecret.name=dataagent-secrets
 assert_render_fails "inline config-sync token fails when managed Secrets are preserved" \
   --set global.preserveExistingSecrets=true \
-  --set agentgateway.configSync.enabled=true \
+  --set agentgateway.configSync.existingSecret.name= \
   --set agentgateway.configSync.token=inline-test-token
 out1e="$TMP/scenario-config-sync-inline-upgrade.yaml"
 render_default "$out1e" --is-upgrade \
-  --set agentgateway.configSync.enabled=true \
+  --set agentgateway.configSync.existingSecret.name= \
   --set agentgateway.configSync.token=inline-test-token
 assert_contains "$out1e" 'name: agentgateway-secrets' \
   "config-sync upgrade: inline token forces managed Secret rendering"
@@ -218,14 +210,12 @@ assert_contains "$out2" 'cGcuaW50ZXJuYWwuZXhhbXBsZS5jb20=' \
 # ---------------------------------------------------------------------------
 blue "==> Scenario 2b: postgresql-secrets via autoGenerateSecrets=false fallback"
 out2b="$TMP/scenario-pg-secrets-fallback.yaml"
-# Clear DataAgent enrolment gates: default CLICKSTACK_DEFAULT_ARGS enable
-# DataAgent, which requires existingSecret when autoGenerateSecrets=false.
+# Hybrid still requires DataAgent enrolment + an existingSecret for DATABASE_URL
+# when chart Secret generation is off.
 render_default "$out2b" \
-  --set global.clickstack.enabled=false \
-  --set dataagent.tenantId= \
-  --set dataagent.enrolmentTokenExistingSecret.name= \
   --set global.autoGenerateSecrets=false \
   --set global.preserveExistingSecrets=false \
+  --set dataagent.existingSecret.name=dataagent-secrets \
   --set global.postgresql.password=fallback-pg-secret
 
 assert_contains "$out2b" 'name: postgresql-secrets' \
@@ -503,7 +493,7 @@ PY
     "${provider}: no OpenShift Routes on cloud platform"
 done
 
-# Default (empty additionalHosts) still renders only the primary host.
+# Header mode (default discovery): empty additionalHosts → no wildcards.
 outw_default="$TMP/scenario-wildcard-default.yaml"
 render_default "$outw_default" \
   --set global.deploymentMode=hybrid \
@@ -511,7 +501,36 @@ render_default "$outw_default" \
 assert_contains "$outw_default" 'name: agentgateway-gateway' \
   "default: proxy Ingress still renders"
 assert_not_contains "$outw_default" 'host: "\*\.' \
-  "default: no wildcard hosts when additionalHosts empty"
+  "header mode: no wildcard hosts when additionalHosts empty"
+
+# Subdomain mode: derive llm./mcp. base domains + auto wildcards from global.domain.
+blue "==> Scenario 8b: subdomain auto-derives base domains and wildcards"
+outw_auto="$TMP/scenario-wildcard-autoderive.yaml"
+render_default "$outw_auto" \
+  --set global.domain=platform.example.com \
+  --set agentgateway.config.gatewayDiscoveryMode=subdomain
+assert_contains "$outw_auto" 'GATEWAY_DISCOVERY_MODE: "subdomain"' \
+  "auto: subdomain discovery in ConfigMap"
+assert_contains "$outw_auto" 'GATEWAY_BASE_DOMAIN: "llm.platform.example.com"' \
+  "auto: GATEWAY_BASE_DOMAIN=llm.<global.domain>"
+assert_contains "$outw_auto" 'MCP_BASE_DOMAIN: "mcp.platform.example.com"' \
+  "auto: MCP_BASE_DOMAIN=mcp.<global.domain>"
+assert_contains "$outw_auto" 'host: "\*\.llm\.platform\.example\.com"' \
+  "auto: proxy wildcard host from global.domain"
+assert_contains "$outw_auto" 'host: "\*\.mcp\.platform\.example\.com"' \
+  "auto: MCP wildcard host from global.domain"
+assert_contains "$outw_auto" 'host: "gateway.platform.example.com"' \
+  "auto: exact gateway primary host retained"
+# Explicit additionalHosts stays authoritative (no auto-merge).
+outw_override="$TMP/scenario-wildcard-override.yaml"
+render_default "$outw_override" \
+  --set global.domain=platform.example.com \
+  --set agentgateway.config.gatewayDiscoveryMode=subdomain \
+  --set agentgateway.ingress.dataPlane.additionalHosts[0]="custom.platform.example.com"
+assert_contains "$outw_override" 'host: "custom.platform.example.com"' \
+  "override: explicit additionalHosts rendered"
+assert_not_contains "$outw_override" 'host: "\*\.llm\.platform\.example\.com"' \
+  "override: non-empty additionalHosts skips auto *.llm wildcard"
 
 # ---------------------------------------------------------------------------
 # 9. AgentGateway OpenShift Routes (exact + wildcardPolicy Subdomain)

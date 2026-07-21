@@ -1,7 +1,9 @@
 # Minimal Platform v2 hybrid starting point.
-# Hybrid ClickStack dual-write requires an enabled DataAgent (tenantId +
-# enrolment): the OTLP egress sidecar uses DataAgent's loopback OAuth broker.
-# Set global.clickstack.enabled: false for air-gap with no SaaS OTLP dual-write.
+# Hybrid always exports product OTLP via the DataAgent-co-located egress
+# collector, and enables config-sync by default. Pre-create the three Secrets
+# below before install (preferred). For local/dev inline tokens, clear each
+# `*.existingSecret.name` and set `enrolment.token` / `configSync.token`.
+# Air-gapped / local-only product telemetry → use global.deploymentMode=external.
 #
 #   helm upgrade --install neuraltrust-platform <chart> \
 #     --namespace neuraltrust --create-namespace -f values-required.yaml
@@ -13,14 +15,22 @@ global:
   imageRegistry: "" # Optional: "<registry>/neuraltrust"
   storageClass: "" # Optional: cluster default when empty
   autoGenerateSecrets: true
-  clickstack:
-    enabled: true
-    # egress.enabled defaults to true in values.yaml
 
-# Required for hybrid ClickStack egress (and for DataAgent itself).
+# Preferred path for all three: existing Secret names. Keys:
+#   dataagent-enrolment → ENROLMENT_TOKEN
+#   *-config-sync → CONFIG_SYNC_TOKEN + CONFIG_SYNC_LKG_KEY (see SECRETS.md)
 dataagent:
   tenantId: ""
-  enrolmentToken: ""
-  # enrolmentTokenExistingSecret:
-  #   name: dataagent-secrets
-  #   key: ENROLMENT_TOKEN
+  enrolment:
+    existingSecret:
+      name: "dataagent-enrolment"
+
+agentgateway:
+  configSync:
+    existingSecret:
+      name: "agentgateway-config-sync"
+
+trustguard:
+  configSync:
+    existingSecret:
+      name: "trustguard-config-sync"

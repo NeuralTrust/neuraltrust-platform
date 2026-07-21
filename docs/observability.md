@@ -23,14 +23,25 @@ The chart does not install Prometheus or Grafana. When
 `global.monitoring.enabled: true` and the cluster exposes the matching CRDs,
 the chart renders ServiceMonitor, PodMonitor, and PrometheusRule resources.
 
+## Hybrid ClickStack OTLP egress (mandatory)
+
+In hybrid mode, product OTLP is always on. AgentGateway and TrustGuard send
+plain OTLP to a local ClusterIP Service (`clickstack-egress-collector`) on the
+DataAgent pod. The sidecar exchanges the DataAgent enrolment JWT at DataCore
+for a short-lived OTLP access token and forwards to SaaS. There is no direct
+SaaS bearer on apps and no hybrid opt-out (`global.clickstack.enabled` /
+`egress.enabled` are rejected). Air-gapped or local-only product telemetry
+requires `global.deploymentMode: external`.
+
 ## ClickStack OTel Collector
 
 The ClickStack collector is an external-mode component, not a replacement
 for the umbrella collector. It receives product OTLP on ports 4317/4318 and
 writes traces, metrics, and logs to ClickHouse.
 
-It never renders in hybrid mode. In external mode, DataCore reads the landed
-telemetry and AlertEngine evaluates rules over it.
+It never renders in hybrid mode (hybrid uses the DataAgent-co-located egress
+sidecar above). In external mode, DataCore reads the landed telemetry and
+AlertEngine evaluates rules over it.
 
 ## AlertEngine SIEM and integrations
 

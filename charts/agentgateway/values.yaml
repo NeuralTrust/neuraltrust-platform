@@ -21,9 +21,12 @@ serviceAccount:
 config:
   logLevel: "info"
   # Gateway discovery: "header" (X-TG-Gateway) or "subdomain" (<gw>.<baseDomain>).
+  # subdomain + empty base domains → GATEWAY_BASE_DOMAIN=llm.<global.domain>,
+  # MCP_BASE_DOMAIN=mcp.<global.domain>, and Ingress/Routes auto-add
+  # *.llm.<domain> / *.mcp.<domain> when additionalHosts is empty.
   gatewayDiscoveryMode: "header"
   # Base domains the app requires (GATEWAY_BASE_DOMAIN / MCP_BASE_DOMAIN).
-  # Empty => derived from global.domain (mcp.<domain> for MCP).
+  # Empty → mode-derived (see gatewayDiscoveryMode). Explicit values win.
   gatewayBaseDomain: ""
   mcpBaseDomain: ""
   # v2 ships without Kafka; the telemetry publisher stays off unless a broker is
@@ -65,12 +68,13 @@ redis:
   cacheName: "" # ElastiCache replication-group / serverless cache name → REDIS_CACHE_NAME
   awsServerless: false # true for ElastiCache Serverless → REDIS_AWS_SERVERLESS
 # ---- config-sync (DB-less data plane <- SaaS control plane) ----
-# When enabled, proxy + mcp pull compiled config over gRPC from the NeuralTrust
-# SaaS control plane instead of Postgres. OFF by default: enabling switches the
-# data plane to DB-less (a behavior change). TLS uses the public LE cert on the
-# SaaS endpoint, so no CA distribution is needed (system roots).
+# Mode-derived by default: hybrid → on, external → off. Explicit true/false
+# overrides. When on, proxy + mcp pull compiled config over gRPC from the
+# NeuralTrust SaaS control plane instead of Postgres (DB-less). Hybrid fails
+# closed without a token source (existingSecret or inline token). TLS uses the
+# public LE cert on the SaaS endpoint (system roots).
 configSync:
-  enabled: false
+  enabled: null
   # Control-plane gRPC endpoint host:port. Empty => mode-derived:
   #   hybrid: agentgateway-configsync.<saasDomain>:443 (public SaaS, TLS)
   #   full:   <controlPlane.name>.<namespace>.svc.cluster.local:<controlPlane.ports.grpc> (in-cluster)
@@ -178,9 +182,12 @@ ingress:
     host: "" # Empty = auto-derive <hostPrefix>.<global.domain>
     hostPrefix: "admin"
   # Proxy (data-plane) public hosts. Primary host is exact; additionalHosts may
-  # include single-label wildcards (e.g. "*.llm.platform.example.com") for
-  # dynamically created gateways. Pair with config.gatewayDiscoveryMode=subdomain
-  # and config.gatewayBaseDomain=<zone without *.> so the app resolves slugs.
+  # include single-label wildcards (e.g. "*.llm.platform.example.com").
+  # Subdomain mode with empty additionalHosts auto-adds
+  # *.<effective gatewayBaseDomain>. A non-empty list is authoritative (no
+  # auto-merge). Operator must provision DNS + wildcard-capable TLS for those
+  # hosts (GCP managed certs reject wildcards; OpenShift needs
+  # routeAdmission.wildcardPolicy=WildcardsAllowed).
   dataPlane:
     host: ""
     hostPrefix: "gateway"

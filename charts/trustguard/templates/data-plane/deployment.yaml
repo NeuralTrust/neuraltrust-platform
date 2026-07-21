@@ -33,11 +33,11 @@ spec:
         configMap:
           name: trustguard-telemetry
           optional: true
-      {{- if .Values.configSync.enabled }}
+      {{- if (eq (include "neuraltrust-platform.configSync.enabled" .) "true") }}
       - name: config-sync-lkg
         emptyDir: {}
       {{- end }}
-      {{- if and .Values.configSync.enabled (eq (include "trustguard.configSyncTls.active" .) "true") }}
+      {{- if and (eq (include "neuraltrust-platform.configSync.enabled" .) "true") (eq (include "trustguard.configSyncTls.active" .) "true") }}
       - name: configsync-tls
         secret:
           secretName: {{ include "trustguard.configSyncTls.secretName" . }}
@@ -107,11 +107,11 @@ spec:
         - name: telemetry
           mountPath: /etc/telemetry
           readOnly: true
-        {{- if .Values.configSync.enabled }}
+        {{- if (eq (include "neuraltrust-platform.configSync.enabled" .) "true") }}
         - name: config-sync-lkg
           mountPath: /var/lib/trustguard
         {{- end }}
-        {{- if and .Values.configSync.enabled (eq (include "trustguard.configSyncTls.active" .) "true") }}
+        {{- if and (eq (include "neuraltrust-platform.configSync.enabled" .) "true") (eq (include "trustguard.configSyncTls.active" .) "true") }}
         - name: configsync-tls
           mountPath: {{ include "trustguard.configSyncTls.mountPath" . | quote }}
           readOnly: true

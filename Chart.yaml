@@ -41,14 +41,14 @@ dependencies:
       - v2
   # AgentGateway proxy/MCP admin + data plane.
   - name: agentgateway
-    version: 0.1.21
+    version: 0.1.22
     repository: file://./charts/agentgateway
     tags:
       - neuraltrust
       - v2
   # TrustGuard control + data plane.
   - name: trustguard
-    version: 0.1.21
+    version: 0.1.22
     repository: file://./charts/trustguard
     tags:
       - neuraltrust
@@ -62,7 +62,7 @@ dependencies:
       - v2
   # DataAgent — enrolled hybrid only.
   - name: dataagent
-    version: 0.1.5
+    version: 0.1.6
     repository: file://./charts/dataagent
     tags:
       - neuraltrust
