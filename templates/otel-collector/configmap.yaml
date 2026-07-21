@@ -15,7 +15,7 @@ data:
   config.yaml: |
     extensions:
       health_check:
-        endpoint: 0.0.0.0:13133
+        endpoint: {{ include "neuraltrust-platform.otelCollector.listenEndpoint" (dict "ctx" . "port" 13133) }}
       {{- if and $renderHosted $bufEnabled }}
       file_storage:
         directory: /var/lib/otelcol/buffer
@@ -29,9 +29,9 @@ data:
       otlp:
         protocols:
           grpc:
-            endpoint: 0.0.0.0:4317
+            endpoint: {{ include "neuraltrust-platform.otelCollector.listenEndpoint" (dict "ctx" . "port" 4317) }}
           http:
-            endpoint: 0.0.0.0:4318
+            endpoint: {{ include "neuraltrust-platform.otelCollector.listenEndpoint" (dict "ctx" . "port" 4318) }}
       k8s_events:
         auth_type: serviceAccount
         # Only the release namespace by default; the watchdog Role is
@@ -212,7 +212,7 @@ data:
       {{- end }}
       {{- if include "neuraltrust-platform.watchdogEnabled" . }}
       prometheus:
-        endpoint: 0.0.0.0:8889
+        endpoint: {{ include "neuraltrust-platform.otelCollector.listenEndpoint" (dict "ctx" . "port" 8889) }}
         resource_to_telemetry_conversion:
           enabled: true
       {{- end }}
@@ -233,11 +233,12 @@ data:
           # OTel Collector >= v0.128 rejects service.telemetry.metrics.address.
           # Use a pull reader with the Prometheus exporter (bind all interfaces
           # so the Service and in-collector prometheus receiver can scrape :8888).
+          # host defaults to :: (dual-stack); override via collector.listenHost.
           readers:
             - pull:
                 exporter:
                   prometheus:
-                    host: 0.0.0.0
+                    host: {{ include "neuraltrust-platform.otelCollector.listenHost" . | quote }}
                     port: 8888
       pipelines:
         metrics:
