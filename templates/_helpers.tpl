@@ -213,32 +213,40 @@ control-plane-postgresql
 
 {{/*
 imagePullSecrets for the umbrella-owned in-cluster PostgreSQL Deployment.
-Resolves from global.postgresql.image.imagePullSecrets (list) OR
-global.imagePullSecrets (list). Emits the full `imagePullSecrets:` block or nothing.
+Priority: global.postgresql.image.imagePullSecrets → global.imagePullSecrets →
+chart default `gcr-secret`. Set either list to ["none"] to suppress (IAM /
+Workload Identity clusters that pull without a pull secret).
 */}}
 {{- define "neuraltrust-platform.postgresql.imagePullSecrets" -}}
 {{- $pg := default dict (default dict .Values.global).postgresql -}}
 {{- $img := default dict $pg.image -}}
+{{- $global := default dict .Values.global -}}
 {{- $secrets := list -}}
-{{- range $img.imagePullSecrets -}}
+{{- $suppress := false -}}
+{{- range (default (list) $img.imagePullSecrets) -}}
   {{- $name := "" -}}
   {{- if kindIs "map" . -}}{{- $name = .name | default "" -}}
   {{- else if kindIs "string" . -}}{{- $name = . -}}
   {{- end -}}
-  {{- if and $name (ne $name "") (ne $name "none") -}}
+  {{- if eq $name "none" -}}{{- $suppress = true -}}
+  {{- else if and $name (ne $name "") -}}
     {{- $secrets = append $secrets $name -}}
   {{- end -}}
 {{- end -}}
-{{- if eq (len $secrets) 0 -}}
-  {{- range (default (list) (default dict .Values.global).imagePullSecrets) -}}
+{{- if and (eq (len $secrets) 0) (not $suppress) -}}
+  {{- range (default (list) $global.imagePullSecrets) -}}
     {{- $name := "" -}}
     {{- if kindIs "map" . -}}{{- $name = .name | default "" -}}
     {{- else if kindIs "string" . -}}{{- $name = . -}}
     {{- end -}}
-    {{- if and $name (ne $name "") (ne $name "none") -}}
+    {{- if eq $name "none" -}}{{- $suppress = true -}}
+    {{- else if and $name (ne $name "") -}}
       {{- $secrets = append $secrets $name -}}
     {{- end -}}
   {{- end -}}
+{{- end -}}
+{{- if and (eq (len $secrets) 0) (not $suppress) -}}
+  {{- $secrets = append $secrets "gcr-secret" -}}
 {{- end -}}
 {{- if gt (len $secrets) 0 -}}
 imagePullSecrets:
@@ -1189,6 +1197,24 @@ true
 {{- define "neuraltrust-platform.clickstackEgress.fullname" -}}
 {{- $cfg := default dict (default dict (default dict .Values.global).clickstack).egress -}}
 {{- default "clickstack-egress-collector" $cfg.fullnameOverride | trunc 63 | trimSuffix "-" -}}
+{{- end }}
+
+{{/*
+OTel listen endpoint host:port for the egress sidecar (health / OTLP).
+Call with (dict "ctx" $ "port" 4317). Default listenHost "::" → "[::]:port"
+(dual-stack on Linux). IPv4 literals (e.g. 0.0.0.0) are emitted unbracketed.
+*/}}
+{{- define "neuraltrust-platform.clickstackEgress.listenEndpoint" -}}
+{{- $cfg := default dict (default dict (default dict .ctx.Values.global).clickstack).egress -}}
+{{- $host := default "::" $cfg.listenHost -}}
+{{- $port := .port -}}
+{{- if hasPrefix "[" $host -}}
+{{- printf "%s:%v" $host $port -}}
+{{- else if contains ":" $host -}}
+{{- printf "[%s]:%v" $host $port -}}
+{{- else -}}
+{{- printf "%s:%v" $host $port -}}
+{{- end -}}
 {{- end }}
 
 {{- define "neuraltrust-platform.clickstackEgress.endpointHost" -}}

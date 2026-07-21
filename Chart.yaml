@@ -27,28 +27,28 @@ dependencies:
   # unconditionally so operators can flip global.deploymentMode without
   # editing dependency conditions; every template is gated by isExternal.
   - name: control-plane-api
-    version: 0.1.1
+    version: 0.1.2
     repository: file://./charts/control-plane-api
     tags:
       - neuraltrust
       - v2
   # Control-plane App/UI — v2 external only (SaaS-side in hybrid).
   - name: control-plane-app
-    version: 0.1.9
+    version: 0.1.10
     repository: file://./charts/control-plane-app
     tags:
       - neuraltrust
       - v2
   # AgentGateway proxy/MCP admin + data plane.
   - name: agentgateway
-    version: 0.1.23
+    version: 0.1.26
     repository: file://./charts/agentgateway
     tags:
       - neuraltrust
       - v2
   # TrustGuard control + data plane.
   - name: trustguard
-    version: 0.1.23
+    version: 0.1.24
     repository: file://./charts/trustguard
     tags:
       - neuraltrust
@@ -62,14 +62,14 @@ dependencies:
       - v2
   # DataAgent — enrolled hybrid only.
   - name: dataagent
-    version: 0.1.6
+    version: 0.1.7
     repository: file://./charts/dataagent
     tags:
       - neuraltrust
       - v2
   # DataCore — v2 external only.
   - name: datacore
-    version: 0.1.11
+    version: 0.1.12
     repository: file://./charts/datacore
     tags:
       - neuraltrust
@@ -83,7 +83,7 @@ dependencies:
       - v2
   # AlertEngine — v2 external only.
   - name: alertengine
-    version: 0.1.3
+    version: 0.1.4
     repository: file://./charts/alertengine
     tags:
       - neuraltrust

@@ -10,6 +10,32 @@ to avoid clashing with subchart helpers.
 {{- default "otel-collector" $coll.fullnameOverride | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
+{{/*
+Listen host for OTel health / OTLP / prometheus exporters.
+Default "::" dual-stacks on Linux (bindv6only=0).
+*/}}
+{{- define "neuraltrust-platform.otelCollector.listenHost" -}}
+{{- $obs := default dict (default dict .Values.global).observability -}}
+{{- $coll := default dict $obs.collector -}}
+{{- default "::" $coll.listenHost -}}
+{{- end -}}
+
+{{/*
+host:port for OTel endpoints. Call with (dict "ctx" $ "port" 4317).
+IPv6 literals are bracketed ([::]:port); IPv4 left bare (0.0.0.0:port).
+*/}}
+{{- define "neuraltrust-platform.otelCollector.listenEndpoint" -}}
+{{- $host := include "neuraltrust-platform.otelCollector.listenHost" .ctx -}}
+{{- $port := .port -}}
+{{- if hasPrefix "[" $host -}}
+{{- printf "%s:%v" $host $port -}}
+{{- else if contains ":" $host -}}
+{{- printf "[%s]:%v" $host $port -}}
+{{- else -}}
+{{- printf "%s:%v" $host $port -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "neuraltrust-platform.otelCollector.serviceAccountName" -}}
 {{- $obs := default dict (default dict .Values.global).observability -}}
 {{- $sa := default dict (default dict $obs.collector).serviceAccount -}}

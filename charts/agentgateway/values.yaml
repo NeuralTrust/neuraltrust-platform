@@ -8,7 +8,7 @@ fullnameOverride: "agentgateway"
 securityHardening: true
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/agentgateway
-  tag: "v0.15.1"
+  tag: "v0.17.0"
   pullPolicy: IfNotPresent
 # Image pull secret name (string) or list. "none"/"" suppresses it.
 # Falls back to global.imagePullSecrets when empty.
@@ -20,13 +20,14 @@ serviceAccount:
 # Non-secret config injected into every workload via the env ConfigMap.
 config:
   logLevel: "info"
-  # Gateway discovery: "header" (X-TG-Gateway) or "subdomain" (<gw>.<baseDomain>).
-  # subdomain + empty base domains → GATEWAY_BASE_DOMAIN=llm.<global.domain>,
-  # MCP_BASE_DOMAIN=mcp.<global.domain>, and Ingress/Routes auto-add
-  # *.llm.<domain> / *.mcp.<domain> when additionalHosts is empty.
-  gatewayDiscoveryMode: "header"
-  # Base domains the app requires (GATEWAY_BASE_DOMAIN / MCP_BASE_DOMAIN).
-  # Empty → mode-derived (see gatewayDiscoveryMode). Explicit values win.
+  # Dual discovery (always on): exact primary host uses a gateway header;
+  # wildcard slug hosts (<gw>.llm.<domain> / <slug>.mcp.<domain>) need none.
+  # Empty base domains → GATEWAY_BASE_DOMAIN=llm.<global.domain>,
+  # MCP_BASE_DOMAIN=mcp.<global.domain>. When autoWildcardHosts is true (default)
+  # and additionalHosts is empty, Ingress/Routes auto-add *.llm.<domain> /
+  # *.mcp.<domain>. Set autoWildcardHosts: false to keep exact hosts only
+  # (no wildcard DNS/cert). Explicit additionalHosts / base domains win.
+  autoWildcardHosts: true
   gatewayBaseDomain: ""
   mcpBaseDomain: ""
   # v2 ships without Kafka; the telemetry publisher stays off unless a broker is
@@ -181,9 +182,10 @@ ingress:
   controlPlane:
     host: "" # Empty = auto-derive <hostPrefix>.<global.domain>
     hostPrefix: "admin"
-  # Proxy (data-plane) public hosts. Primary host is exact; additionalHosts may
-  # include single-label wildcards (e.g. "*.llm.platform.example.com").
-  # Subdomain mode with empty additionalHosts auto-adds
+  # Proxy (data-plane) public hosts. Primary host is exact (header discovery);
+  # additionalHosts may include single-label wildcards
+  # (e.g. "*.llm.platform.example.com") for subdomain discovery.
+  # Empty additionalHosts + config.autoWildcardHosts (default true) auto-adds
   # *.<effective gatewayBaseDomain>. A non-empty list is authoritative (no
   # auto-merge). Operator must provision DNS + wildcard-capable TLS for those
   # hosts (GCP managed certs reject wildcards; OpenShift needs

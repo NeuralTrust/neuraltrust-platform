@@ -4,6 +4,44 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Breaking
+
+- **Remove AgentGateway `GATEWAY_DISCOVERY_MODE` / `config.gatewayDiscoveryMode`.**
+  The app always supports dual discovery: exact primary hosts
+  (`gateway.<domain>` / `mcp.<domain>`) require the gateway header; wildcard
+  slug hosts (`*.llm.<domain>` / `*.mcp.<domain>`) need none. Empty base
+  domains always yield `GATEWAY_BASE_DOMAIN=llm.<global.domain>` /
+  `MCP_BASE_DOMAIN=mcp.<global.domain>`, and empty `additionalHosts` always
+  auto-add the matching Ingress/Route wildcards. Set
+  `config.autoWildcardHosts: false` to keep exact hosts only. Drop the mode
+  key from overlays; explicit `gatewayBaseDomain` / `mcpBaseDomain` /
+  `additionalHosts` remain authoritative.
+
+### Changed
+
+- **Bump registry images (latest from Artifact Registry).** control-plane-api
+  `v1.23.0 → v1.23.1`, control-plane-app `v1.101.6 → v1.102.1`, agentgateway
+  `v0.16.1 → v0.17.0` (includes dual-discovery chart work). Matching subchart
+  `values.yaml` / `appVersion` / Chart dependency patch bumps. trustguard,
+  datacore, alertengine, and other bumpable images were already at the latest
+  AR tags from the local refresh.
+
+### Fixed
+
+- **DataAgent hybrid `DATABASE_URL` uses `SENSIBLE_PG_DSN`.** The shared
+  `postgresql-secrets` `DATABASE_URL` includes Prisma's `connection_limit`,
+  which lib/pq sends as a Postgres GUC and breaks DataBridge residency
+  queries (`unrecognized configuration parameter "connection_limit"`).
+  Hybrid DataAgent now overrides `DATABASE_URL` from `SENSIBLE_PG_DSN`.
+- **Hybrid ClickStack egress sidecar binds dual-stack by default.** The
+  DataAgent-co-located OTel collector health/OTLP endpoints used
+  `0.0.0.0`, which is IPv4-only and breaks kubelet probes and Service
+  routing on IPv6-only clusters. Defaults to `global.clickstack.egress.listenHost: "::"`
+  (emitted as `[::]:port`). Override to `0.0.0.0` only if needed.
+- **Umbrella otel-collector binds dual-stack by default.** Health, OTLP,
+  and prometheus exporter endpoints now honor
+  `global.observability.collector.listenHost` (default `::` → `[::]:port`).
+
 ## [v2.2.0] — 2026-07-21
 
 ### Changed

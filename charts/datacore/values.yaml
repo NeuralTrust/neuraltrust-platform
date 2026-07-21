@@ -10,7 +10,7 @@ fullnameOverride: "datacore"
 securityHardening: true
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/datacore
-  tag: "v0.13.1"
+  tag: "v0.14.0"
   pullPolicy: IfNotPresent
 imagePullSecrets: "gcr-secret"
 serviceAccount:
