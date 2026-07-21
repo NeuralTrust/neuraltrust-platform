@@ -634,7 +634,7 @@ assert_contains "$out10c" 'name: clickstack-egress-collector'$'\n''        image
   "hybrid: egress sidecar co-located on DataAgent"
 assert_contains "$out10c" 'token_url: "http://127.0.0.1:9465/oauth/token"' \
   "hybrid: egress sidecar exchanges via DataAgent loopback broker"
-assert_contains "$out10c" 'endpoint: "https://clickstack-collector.neuraltrust.ai"' \
+assert_contains "$out10c" 'endpoint: "https://telemetry.neuraltrust.ai"' \
   "hybrid: egress sidecar exports to SaaS ingest host"
 assert_contains "$out10c" 'http://clickstack-egress-collector.default.svc.cluster.local:4318/v1/logs' \
   "hybrid: apps send OTLP to local egress only"
