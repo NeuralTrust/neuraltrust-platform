@@ -101,6 +101,11 @@ assert_contains "$out1" 'kind: Deployment' \
   "hybrid: at least one Deployment renders"
 assert_contains "$out1" 'name: control-plane-postgresql' \
   "hybrid: in-cluster PostgreSQL Deployment/Service"
+# Private AR postgres image must default to gcr-secret (same as Redis).
+assert_contains "$out1" 'app: control-plane-postgresql'$'\n''    spec:'$'\n''      securityContext:' \
+  "hybrid: postgresql pod template present"
+assert_contains "$out1" 'runAsNonRoot: true'$'\n''      imagePullSecrets:'$'\n''        - name: gcr-secret' \
+  "hybrid: postgresql Deployment defaults imagePullSecrets to gcr-secret"
 assert_contains "$out1" 'name: postgresql-secrets' \
   "hybrid: postgresql-secrets rendered"
 assert_contains "$out1" 'name: redis-secrets' \
@@ -115,6 +120,8 @@ assert_contains "$out1" 'name: clickstack-egress-collector' \
   "hybrid: local OTLP egress ClusterIP Service renders"
 assert_contains "$out1" 'name: clickstack-egress-collector'$'\n''        image:' \
   "hybrid: OTLP egress sidecar on DataAgent renders"
+assert_contains "$out1" 'name: DATABASE_URL'$'\n''          valueFrom:'$'\n''            secretKeyRef:'$'\n''              name: "postgresql-secrets"'$'\n''              key: SENSIBLE_PG_DSN' \
+  "hybrid: DataAgent DATABASE_URL overrides Prisma DSN with SENSIBLE_PG_DSN"
 assert_contains "$out1" 'name: OAUTH_BROKER_ADDR'$'\n''          value: "127.0.0.1:9465"' \
   "hybrid: DataAgent enables loopback OAuth broker for egress sidecar"
 assert_contains "$out1" 'token_url: "http://127.0.0.1:9465/oauth/token"' \
@@ -125,6 +132,13 @@ assert_not_contains "$out1" 'client_secret: ${env:ENROLMENT_TOKEN}' \
   "hybrid: egress sidecar must not read ENROLMENT_TOKEN"
 assert_contains "$out1" 'http://clickstack-egress-collector.default.svc.cluster.local:4318/v1/logs' \
   "hybrid: apps OTLP endpoint points at local egress"
+# Brackets escaped — assert_contains uses grep -E ([::] is a char class).
+assert_contains "$out1" 'endpoint: "\[::\]:4317"' \
+  "hybrid: egress OTLP gRPC binds dual-stack ([::]) for IPv6-only clusters"
+assert_contains "$out1" 'endpoint: "\[::\]:4318"' \
+  "hybrid: egress OTLP HTTP binds dual-stack ([::]) for IPv6-only clusters"
+assert_contains "$out1" 'endpoint: "\[::\]:13133"' \
+  "hybrid: egress health_check binds dual-stack ([::]) for IPv6-only clusters"
 assert_not_contains "$out1" 'name: control-plane-app' \
   "hybrid: control-plane-app must not render (SaaS-side)"
 assert_not_contains "$out1" 'name: control-plane-api' \
@@ -426,9 +440,9 @@ assert_contains "$out6wd" 'name: neuraltrust-watchdog' \
 # 7. Retired helpers / values must not appear in the values contract or rendered output
 # ---------------------------------------------------------------------------
 blue "==> Scenario 7: retired concepts must not surface in values contract"
-if grep -RqE '(platformVersion|confirmV2Migration|hybridRoleLayout|sharedWriter|initJob|neuraltrust-control-plane:|neuraltrust-data-plane:|neuraltrust-firewall:|neuraltrust-watchdog:|trustgate:|^kafka:)' \
-    values.yaml values-required.yaml; then
-  red "FAIL: retired values keys still present in values.yaml / values-required.yaml"
+if grep -RqE '(platformVersion|confirmV2Migration|hybridRoleLayout|sharedWriter|initJob|neuraltrust-control-plane:|neuraltrust-data-plane:|neuraltrust-firewall:|neuraltrust-watchdog:|trustgate:|^kafka:|gatewayDiscoveryMode|GATEWAY_DISCOVERY_MODE)' \
+    values.yaml values-required.yaml charts/agentgateway/values.yaml; then
+  red "FAIL: retired values keys still present in values.yaml / values-required.yaml / agentgateway values"
   exit 1
 fi
 green "ok  - values.yaml / values-required.yaml free of retired keys"
@@ -436,10 +450,9 @@ green "ok  - values.yaml / values-required.yaml free of retired keys"
 # ---------------------------------------------------------------------------
 # 8. AgentGateway exact + wildcard routing (AWS / Azure / GCP Ingress)
 # ---------------------------------------------------------------------------
-blue "==> Scenario 8: AgentGateway wildcard Ingress (cloud providers)"
+blue "==> Scenario 8: AgentGateway exact + wildcard Ingress (cloud providers)"
 WILDCARD_COMMON=(
   --set global.domain=platform.example.com
-  --set agentgateway.config.gatewayDiscoveryMode=subdomain
   --set agentgateway.config.gatewayBaseDomain=llm.platform.example.com
   --set agentgateway.config.mcpBaseDomain=mcp.platform.example.com
   --set agentgateway.ingress.dataPlane.host=gateway.platform.example.com
@@ -468,8 +481,8 @@ for provider in aws azure gcp; do
     "${provider}: MCP exact host"
   assert_contains "$outw" 'host: "\*\.mcp\.platform\.example\.com"' \
     "${provider}: MCP wildcard host rule"
-  assert_contains "$outw" 'GATEWAY_DISCOVERY_MODE: "subdomain"' \
-    "${provider}: subdomain discovery in ConfigMap"
+  assert_not_contains "$outw" 'GATEWAY_DISCOVERY_MODE' \
+    "${provider}: discovery mode env retired"
   assert_contains "$outw" 'GATEWAY_BASE_DOMAIN: "llm.platform.example.com"' \
     "${provider}: gateway base domain"
   assert_contains "$outw" 'MCP_BASE_DOMAIN: "mcp.platform.example.com"' \
@@ -493,24 +506,13 @@ PY
     "${provider}: no OpenShift Routes on cloud platform"
 done
 
-# Header mode (default discovery): empty additionalHosts → no wildcards.
-outw_default="$TMP/scenario-wildcard-default.yaml"
-render_default "$outw_default" \
-  --set global.deploymentMode=hybrid \
-  --set global.domain=platform.example.com
-assert_contains "$outw_default" 'name: agentgateway-gateway' \
-  "default: proxy Ingress still renders"
-assert_not_contains "$outw_default" 'host: "\*\.' \
-  "header mode: no wildcard hosts when additionalHosts empty"
-
-# Subdomain mode: derive llm./mcp. base domains + auto wildcards from global.domain.
-blue "==> Scenario 8b: subdomain auto-derives base domains and wildcards"
+# Dual discovery default: empty additionalHosts → auto wildcards + llm./mcp. bases.
+blue "==> Scenario 8b: dual discovery auto-derives base domains and wildcards"
 outw_auto="$TMP/scenario-wildcard-autoderive.yaml"
 render_default "$outw_auto" \
-  --set global.domain=platform.example.com \
-  --set agentgateway.config.gatewayDiscoveryMode=subdomain
-assert_contains "$outw_auto" 'GATEWAY_DISCOVERY_MODE: "subdomain"' \
-  "auto: subdomain discovery in ConfigMap"
+  --set global.domain=platform.example.com
+assert_not_contains "$outw_auto" 'GATEWAY_DISCOVERY_MODE' \
+  "auto: discovery mode env retired"
 assert_contains "$outw_auto" 'GATEWAY_BASE_DOMAIN: "llm.platform.example.com"' \
   "auto: GATEWAY_BASE_DOMAIN=llm.<global.domain>"
 assert_contains "$outw_auto" 'MCP_BASE_DOMAIN: "mcp.platform.example.com"' \
@@ -521,11 +523,21 @@ assert_contains "$outw_auto" 'host: "\*\.mcp\.platform\.example\.com"' \
   "auto: MCP wildcard host from global.domain"
 assert_contains "$outw_auto" 'host: "gateway.platform.example.com"' \
   "auto: exact gateway primary host retained"
+# Opt out of auto wildcards (exact hosts only).
+outw_no_auto="$TMP/scenario-wildcard-no-auto.yaml"
+render_default "$outw_no_auto" \
+  --set global.domain=platform.example.com \
+  --set agentgateway.config.autoWildcardHosts=false
+assert_contains "$outw_no_auto" 'host: "gateway.platform.example.com"' \
+  "no-auto: exact gateway primary host retained"
+assert_not_contains "$outw_no_auto" 'host: "\*\.' \
+  "no-auto: autoWildcardHosts=false skips wildcards"
+assert_contains "$outw_no_auto" 'GATEWAY_BASE_DOMAIN: "llm.platform.example.com"' \
+  "no-auto: base domains still derived for dual-mode app"
 # Explicit additionalHosts stays authoritative (no auto-merge).
 outw_override="$TMP/scenario-wildcard-override.yaml"
 render_default "$outw_override" \
   --set global.domain=platform.example.com \
-  --set agentgateway.config.gatewayDiscoveryMode=subdomain \
   --set agentgateway.ingress.dataPlane.additionalHosts[0]="custom.platform.example.com"
 assert_contains "$outw_override" 'host: "custom.platform.example.com"' \
   "override: explicit additionalHosts rendered"
@@ -544,7 +556,6 @@ helm template test "$CHART_DIR" --namespace default \
   --set global.deploymentMode=external \
   --set global.platform=openshift \
   --set global.domain=apps.example.com \
-  --set agentgateway.config.gatewayDiscoveryMode=subdomain \
   --set agentgateway.config.gatewayBaseDomain=llm.apps.example.com \
   --set agentgateway.config.mcpBaseDomain=mcp.apps.example.com \
   --set agentgateway.ingress.dataPlane.host=gateway.apps.example.com \
@@ -602,6 +613,12 @@ assert_contains "$out10" 'url: http://otel-collector:13133/' \
   "watchdog: otel-collector check targets umbrella Service"
 assert_contains "$out10" 'labelSelector: app.kubernetes.io/component=otel-collector' \
   "watchdog: otel-collector selector matches umbrella labels"
+assert_contains "$out10" 'endpoint: \[::\]:4317' \
+  "observability: umbrella otel-collector OTLP gRPC binds dual-stack"
+assert_contains "$out10" 'endpoint: \[::\]:13133' \
+  "observability: umbrella otel-collector health binds dual-stack"
+assert_contains "$out10" 'host: "::"' \
+  "observability: umbrella otel-collector telemetry metrics host is ::"
 assert_not_contains "$out10" 'url: http://opentelemetry-collector.opentelemetry:13133/' \
   "watchdog: obsolete collector health URL is gone"
 # Hybrid render must not enable the clickhouse check by default.

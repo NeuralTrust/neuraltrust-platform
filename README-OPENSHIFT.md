@@ -88,20 +88,12 @@ Operator prerequisites (not rendered by Helm):
 2. The router / Route certificate must cover the wildcard domains
    (or terminate TLS at an upstream edge that does).
 
-3. Set AgentGateway discovery to subdomain mode. With empty base domains and
-   empty `additionalHosts`, the chart derives `GATEWAY_BASE_DOMAIN=llm.<domain>`,
-   `MCP_BASE_DOMAIN=mcp.<domain>`, and auto-adds `*.llm.<domain>` /
-   `*.mcp.<domain>` Ingress/Route hosts. Explicit `additionalHosts` remain
-   authoritative when set:
-
-   ```yaml
-   agentgateway:
-     config:
-       gatewayDiscoveryMode: "subdomain"
-   ```
-
-See `values-agentgateway-wildcard.yaml.example` and
-[docs/platform-v2.md](./docs/platform-v2.md).
+3. With empty base domains and empty `additionalHosts`, the chart derives
+   `GATEWAY_BASE_DOMAIN=llm.<domain>`, `MCP_BASE_DOMAIN=mcp.<domain>`, and
+   auto-adds `*.llm.<domain>` / `*.mcp.<domain>` Ingress/Route hosts. Exact
+   primary hosts still require the gateway header; wildcard slug hosts do not.
+   Explicit `additionalHosts` remain authoritative when set. See
+   [docs/platform-v2.md](./docs/platform-v2.md).
 
 ## Self-hosted external mode
 

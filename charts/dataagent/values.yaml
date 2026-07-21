@@ -41,9 +41,9 @@ store:
   backend: "postgres" # postgres | memory
 # DataAgent reads the shared hybrid Postgres alongside AgentGateway and
 # TrustGuard: it envFrom's the shared `postgresql-secrets` rendered from
-# `global.postgresql.*` (default user + database = neuraltrust), so the DSN
-# and password auto-derive from the umbrella. This block is only consulted
-# when the operator opts out of the shared credential via `databaseUrl` or
+# `global.postgresql.*` and sets DATABASE_URL from SENSIBLE_PG_DSN (Go-safe;
+# not the Prisma DATABASE_URL). This block is only consulted when the
+# operator opts out of the shared credential via `databaseUrl` or
 # `existingSecret.name`; otherwise leave it at the defaults.
 database:
   host: "" # Empty ⇒ in-cluster control-plane-postgresql

@@ -2,5 +2,5 @@ apiVersion: v2
 name: trustguard
 description: TrustGuard — AI security detector engine, split into control-plane (admin API) + data-plane (runtime /v1/guard). Core v2 runtime (hybrid + external).
 type: application
-version: 0.1.23
-appVersion: "v0.18.2"
+version: 0.1.24
+appVersion: "v0.18.3"

@@ -54,14 +54,24 @@ spec:
         - secretRef:
             name: {{ (default dict .Values.existingSecret).name | default "dataagent-secrets" | quote }}
         {{- if eq (include "neuraltrust-platform.isHybrid" .) "true" }}
-        # v2 hybrid: DATABASE_URL + DB_HOST/PORT/USER/PASSWORD/NAME/SSL_MODE arrive
-        # through the shared `postgresql-secrets` Secret. Listed after the per-service
-        # Secret so the shared credential wins.
+        # v2 hybrid: DB_* + SENSIBLE_PG_DSN arrive through the shared
+        # `postgresql-secrets` Secret. Listed after the per-service Secret so
+        # the shared credential wins. DATABASE_URL in that Secret is Prisma-
+        # shaped (connection_limit); DataAgent overrides it below for lib/pq.
         - secretRef:
             name: {{ include "neuraltrust-platform.v2.hybridPg.secretName" . | quote }}
             optional: true
         {{- end }}
         env:
+        {{- if eq (include "neuraltrust-platform.isHybrid" .) "true" }}
+        # lib/pq treats unknown query params as Postgres GUCs; Prisma's
+        # connection_limit=15 on DATABASE_URL causes 42704 on every query.
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "neuraltrust-platform.v2.hybridPg.secretName" . | quote }}
+              key: SENSIBLE_PG_DSN
+        {{- end }}
         {{- if $egressEnabled }}
         - name: OAUTH_BROKER_ADDR
           value: "127.0.0.1:9465"

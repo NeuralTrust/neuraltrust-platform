@@ -21,7 +21,10 @@ This chart (2.x) is v2-only.
 | `values-openshift-ingress.yaml.example` | hybrid | Kubernetes Ingress on OpenShift |
 | `values-aws-ipv6.yaml.example` | hybrid | AWS provider and IPv6-safe defaults |
 | `values-dataplane-gpu.yaml.example` | hybrid | GPU Firewall workers |
-| `values-agentgateway-wildcard.yaml.example` | hybrid/external | Subdomain discovery; auto `*.llm` / `*.mcp` |
+
+AgentGateway dual discovery (exact host + header, or `*.llm` / `*.mcp` slug
+with no header) is the chart default — no overlay is required. See
+[docs/platform-v2.md](./docs/platform-v2.md).
 
 ## Observability overlays
 
