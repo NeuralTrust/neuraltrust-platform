@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.2.0] — 2026-07-21
+
 ### Changed
 
 - **Bump registry images (latest from Artifact Registry).** control-plane-app
