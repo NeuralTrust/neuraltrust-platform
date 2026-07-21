@@ -16,17 +16,18 @@ path in the customer cluster:
 - TrustGuard data plane
 - PostgreSQL and Redis by default
 - optional Firewall
-- optional, enrolment-gated DataAgent
+- DataAgent (enrolment required for hybrid OTLP egress and DataBridge)
 
 Hybrid does **not** deploy an in-cluster ClickHouse: analytics live in NeuralTrust
-SaaS. AgentGateway and TrustGuard **always dual-write** product data over OTLP to
-the NeuralTrust SaaS ClickStack collector (fixed endpoint, protocol, and TLS)
-while ALSO persisting raw payloads to the local PostgreSQL for DataAgent — see
-[the token setup below](#operator-input-clickstack-otlp-token). The temporary `data-plane-api` read shim renders **by default** in hybrid
-and reads from the umbrella-managed **PostgreSQL** (`SQL_DATABASE=postgres`), so no
-ClickHouse is required. Its schema is applied by a `postgres-migrations`
-initContainer (idempotent, advisory-locked). If you instead want it to read from
-an **external/managed ClickHouse**, either set a dotted
+SaaS. AgentGateway and TrustGuard **always dual-write** product data over OTLP
+via a local `clickstack-egress-collector` (enrolment-backed; see
+[hybrid ClickStack OTLP](#hybrid-clickstack-otlp-mandatory)) while ALSO
+persisting raw payloads to the local PostgreSQL for DataAgent. The temporary
+`data-plane-api` read shim renders **by default** in hybrid and reads from the
+umbrella-managed **PostgreSQL** (`SQL_DATABASE=postgres`), so no ClickHouse is
+required. Its schema is applied by a `postgres-migrations` initContainer
+(idempotent, advisory-locked). If you instead want it to read from an
+**external/managed ClickHouse**, either set a dotted
 `data-plane-api.dataPlane.components.clickhouse.host` (auto-resolves to
 ClickHouse) or force it with
 `data-plane-api.dataPlane.components.api.database.backend: clickhouse`.
@@ -35,36 +36,38 @@ deploys only in external mode.
 
 ### Hybrid control and data channels
 
-SaaS-managed hybrid uses three required outbound paths—two config-sync
-channels and ClickStack OTLP—and one optional DataAgent channel. Every
-connection is initiated by the customer cluster over TLS:
+SaaS-managed hybrid uses two config-sync channels, mandatory ClickStack OTLP
+(via the DataAgent egress sidecar), and DataAgent DataBridge. Every connection
+is initiated by the customer cluster over TLS:
 
 1. AgentGateway proxy/MCP opens config-sync gRPC to
    `agentgateway-configsync.neuraltrust.ai:443`.
 2. TrustGuard data plane opens config-sync gRPC to
    `trustguard-configsync.neuraltrust.ai:443`.
 3. Enrolled DataAgent opens gRPC to `databridge.neuraltrust.ai:443`.
-4. AgentGateway and TrustGuard send product events directly over OTLP/HTTP to
-   `https://clickstack-collector.neuraltrust.ai/v1/logs`.
+4. AgentGateway and TrustGuard send product events as plain OTLP to the local
+   `clickstack-egress-collector`, which forwards to
+   `https://clickstack-collector.neuraltrust.ai` after exchanging the DataAgent
+   enrolment JWT for a short-lived OTLP access token.
 
-There is no in-cluster ClickStack collector in hybrid. The
-`clickstack-otel-collector` subchart is external-mode only.
+There is no in-cluster `clickstack-otel-collector` product collector in hybrid
+(that subchart is external-mode only). The hybrid egress sidecar is co-located
+with DataAgent and is not an operator-facing collector.
 
-For a SaaS-managed hybrid deployment, enable config-sync on both runtimes.
-Pre-create the two named Secrets below with independently issued SaaS bearer
-tokens under `CONFIG_SYNC_TOKEN` and separate base64-encoded 32-byte cache
-encryption keys under `CONFIG_SYNC_LKG_KEY`:
+Hybrid config-sync is **on by default** (mode-derived; subchart
+`configSync.enabled: null`). Pre-create the two named Secrets below with
+independently issued SaaS bearer tokens under `CONFIG_SYNC_TOKEN` and separate
+base64-encoded 32-byte cache encryption keys under `CONFIG_SYNC_LKG_KEY`.
+Overlays set `existingSecret` only — do not restate `enabled: true`:
 
 ```yaml
 agentgateway:
   configSync:
-    enabled: true
     existingSecret:
       name: "agentgateway-config-sync"
 
 trustguard:
   configSync:
-    enabled: true
     existingSecret:
       name: "trustguard-config-sync"
 ```
@@ -82,76 +85,48 @@ Postgres telemetry exporters and DataAgent. AgentGateway calls TrustGuard over
 the in-cluster `trustguard-data-plane` Service; that hop does not leave the
 cluster.
 
-Leaving config-sync disabled is only suitable when runtime configuration is
-populated and managed in PostgreSQL out of band. The hybrid chart does not
-deploy local AgentGateway or TrustGuard control planes to do that.
+Set `configSync.enabled: false` only when runtime configuration is populated
+and managed in PostgreSQL out of band. The hybrid chart does not deploy local
+AgentGateway or TrustGuard control planes to do that.
 
-Leave DataAgent enrolment empty until a tenant identifier and token are issued:
+DataAgent enrolment is required for hybrid OTLP egress (and for DataBridge).
+Prefer `enrolment.existingSecret` so the token never enters Helm values
+(same ritual as `configSync.existingSecret`):
 
 ```yaml
 dataagent:
-  tenantId: ""
-  enrolmentTokenExistingSecret:
-    name: ""
-    key: "ENROLMENT_TOKEN"
-```
-
-DataAgent renders only when both values are present. It does not synchronize
-runtime configuration and is not the ClickStack transport. It opens an
-outbound-only gRPC connection to `databridge.neuraltrust.ai:443`; SaaS sends
-typed, entitlement-scoped query requests over that channel and DataAgent reads
-the shared local PostgreSQL and streams back only the permitted rows. It has no
-Ingress or public Service.
-
-### Operator input: ClickStack OTLP token
-
-The v2 hybrid ClickStack export is **always on** and targets the NeuralTrust
-SaaS collector:
-
-- **endpoint** `https://clickstack-collector.neuraltrust.ai/v1/logs`
-- **protocol** `http/protobuf`
-- **TLS** enforced (system-root verification; no `OTEL_EXPORTER_OTLP_INSECURE`)
-
-The operator supplies **only** the bearer token — either inline via
-`authToken`, or by pre-creating a Secret and pointing `existingSecret.name` at
-it. Rendering fails when neither is set.
-
-```yaml
-global:
-  clickstack:
-    authToken: "<CLICKSTACK_OTLP_TOKEN>"
-```
-
-Or reference a pre-created Secret carrying the full OTLP header value:
-
-```yaml
-global:
-  clickstack:
+  tenantId: "<tenant-id>"
+  enrolment:
     existingSecret:
-      name: "clickstack-otlp-token"
-      key: "OTEL_EXPORTER_OTLP_HEADERS"   # optional (default shown)
+      name: "dataagent-enrolment"
 ```
 
-Create the Secret out-of-band, e.g.:
+DataAgent renders only when both values are present. It opens an outbound-only
+gRPC connection to `databridge.neuraltrust.ai:443`; SaaS sends typed,
+entitlement-scoped query requests over that channel and DataAgent reads the
+shared local PostgreSQL and streams back only the permitted rows. It has no
+Ingress or public Service. The co-located egress collector uses the same
+enrolment for ClickStack OTLP — DataAgent is not itself the ClickStack
+transport, but enrolment is shared.
 
-```bash
-kubectl create secret generic clickstack-otlp-token \
-  --from-literal=OTEL_EXPORTER_OTLP_HEADERS='authorization=<CLICKSTACK_OTLP_TOKEN>'
-```
+### Hybrid ClickStack OTLP (mandatory)
 
-The inline `authToken` flow stores the header in the chart-managed
-`agentgateway-secrets` / `trustguard-secrets` (`envFrom` picks it up). The
-`existingSecret` flow mounts `OTEL_EXPORTER_OTLP_HEADERS` directly from the
-referenced Secret via `secretKeyRef`, so the chart never sees the value —
-recommended for `preserveExistingSecrets=true` and GitOps flows where `lookup`
-is not available.
+The v2 hybrid ClickStack export is **always on**. Apps send plain OTLP to a
+local ClusterIP Service (`clickstack-egress-collector`) on the DataAgent pod.
+The sidecar exchanges the DataAgent enrolment JWT at DataCore for a short-lived
+OTLP access token and forwards to SaaS. There is **no** direct SaaS bearer on
+AgentGateway/TrustGuard and **no** hybrid opt-out:
 
-**Air-gap escape hatch.** Set `global.clickstack.enabled: false` to skip the
-OTLP dual-write entirely; raw payloads still land in PostgreSQL for DataAgent.
+- `global.clickstack.enabled: false` — rejected
+- `global.clickstack.egress.enabled` — rejected
 
-The legacy `endpoint` / `protocol` / `insecure` knobs remain honored as
-deprecated overrides (leave empty for the fixed SaaS defaults). External mode
-always exports to its in-cluster ClickStack collector and ignores this block.
+Air-gapped or local-only product telemetry requires
+`global.deploymentMode: external` (in-cluster ClickStack collector + ClickHouse).
+
+Optional `global.clickstack.endpoint` / `protocol` / `insecure` and
+`global.clickstack.egress.*` knobs override only the egress sidecar's SaaS
+export target; leave empty for the fixed defaults. External mode always exports
+to its in-cluster ClickStack collector and ignores the hybrid egress path.
 
 ## External: self-hosted
 
@@ -190,7 +165,7 @@ NeuralTrust SaaS telemetry egress.
 | TrustGuard data plane | yes | yes | Runtime safety evaluation |
 | TrustGuard control plane | SaaS | yes | Policy administration |
 | data-plane API shim | yes (PostgreSQL) | yes (ClickHouse) | Temporary read API — PostgreSQL by default in hybrid, ClickHouse in external |
-| DataAgent | enrolled only | no | Outbound entitled-query bridge |
+| DataAgent | required (enrolment) | no | Outbound entitled-query bridge; enrolment also powers ClickStack egress |
 | ClickStack OTel Collector | no | yes | OTLP to ClickHouse |
 | DataCore | no | yes | Residency query API (ClickHouse + Postgres metadata) |
 | AlertEngine | no | yes | Alert evaluation and SIEM/integration forwarding |
@@ -289,10 +264,12 @@ databases must be pre-created.
 
 ## Observability collectors
 
-Do not confuse the two collectors:
+Do not confuse the collectors:
 
 - The umbrella OTel Collector (`global.observability.enabled`) is portable
   cluster observability and can optionally export to NeuralTrust.
+- Hybrid product OTLP uses the DataAgent-co-located `clickstack-egress-collector`
+  (mandatory; enrolment-backed). There is no hybrid opt-out.
 - The ClickStack OTel Collector is an external-mode application component that
   lands self-hosted product telemetry in ClickHouse.
 
@@ -301,26 +278,19 @@ Disabling hosted export does not disable the external-mode ClickStack pipeline.
 ## AgentGateway public routing (exact + optional wildcards)
 
 AgentGateway exposes three public surfaces: **admin** (external mode only),
-**proxy**, and **MCP**. Proxy and MCP accept an optional `additionalHosts`
-list so dynamically created gateway subdomains can share the same backend
-Services:
+**proxy**, and **MCP**. With `config.gatewayDiscoveryMode: subdomain` and empty
+base domains, the chart sets `GATEWAY_BASE_DOMAIN=llm.<global.domain>` and
+`MCP_BASE_DOMAIN=mcp.<global.domain>`. When `additionalHosts` is also empty,
+Ingress/Routes auto-add `*.llm.<domain>` / `*.mcp.<domain>`. Explicit
+`additionalHosts` (and explicit `gatewayBaseDomain` / `mcpBaseDomain`) remain
+authoritative when set:
 
 ```yaml
 agentgateway:
   config:
     gatewayDiscoveryMode: "subdomain"
-    gatewayBaseDomain: "llm.platform.example.com"
-    mcpBaseDomain: "mcp.platform.example.com"
   ingress:
     resourceType: "auto" # Ingress on AWS/Azure/GCP; OpenShift Routes by default
-    dataPlane:
-      host: "gateway.platform.example.com"
-      additionalHosts:
-        - "*.llm.platform.example.com"
-    mcp:
-      host: "mcp.platform.example.com"
-      additionalHosts:
-        - "*.mcp.platform.example.com"
 ```
 
 Helm only renders routing objects. DNS, certificates, and cloud controller
@@ -334,8 +304,8 @@ settings remain operator prerequisites:
 | OpenShift | native `Route` (`resourceType: auto\|route`) | IngressController `routeAdmission.wildcardPolicy: WildcardsAllowed`; router/Route certificate covering the wildcard domains. Set `ingress.resourceType: ingress` to keep Kubernetes Ingress instead |
 
 Admin stays exact-host only (no wildcards). Pair public wildcards with
-`config.gatewayDiscoveryMode: subdomain` and the matching base domains so the
-application resolves dynamic slugs; ingress rules alone do not enable discovery.
+`config.gatewayDiscoveryMode: subdomain` so the application resolves dynamic
+slugs; ingress rules alone do not enable discovery.
 
 See `values-agentgateway-wildcard.yaml.example`.
 

@@ -67,7 +67,7 @@ Enabled v2 components:
 WARNING: DataAgent was not deployed because tenantId and enrolment credentials
 are not both configured. AgentGateway and TrustGuard runtime protection remain
 available, but SaaS DataBridge access is disabled. Set dataagent.tenantId and
-either dataagent.enrolmentToken or dataagent.enrolmentTokenExistingSecret.name.
+either dataagent.enrolment.token or dataagent.enrolment.existingSecret.name.
 {{- end }}
 
 Ingress endpoints:

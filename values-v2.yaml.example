@@ -4,26 +4,18 @@
 # no in-cluster ClickHouse renders in hybrid. The temporary data-plane-api read
 # shim runs on PostgreSQL by default (no ClickHouse required).
 #
-# Hybrid contract: one shared PostgreSQL block, one shared Redis block, and one
-# mandatory ClickStack OTLP token drive every hybrid workload. Prefer
-# existingSecret references for ClickStack (and for config-sync / DataAgent when
-# enrolled). There is no init Job — application migrations own their tables.
+# Hybrid contract: one shared PostgreSQL block, one shared Redis block, and
+# DataAgent enrolment (powers ClickStack egress). Product OTLP and config-sync
+# are on by default. Prefer existingSecret for enrolment and config-sync.
+# There is no init Job — application migrations own their tables.
+# Air-gapped / local-only product telemetry → global.deploymentMode=external.
 #
-# Layer over values-required.yaml, or supply a ClickStack token here.
+# Layer over values-required.yaml for a complete install.
 
 global:
   deploymentMode: "hybrid"
   platform: "kubernetes"
   domain: "platform.example.com"
-  # v2 hybrid always dual-writes product data over OTLP to the NeuralTrust SaaS
-  # ClickStack collector. The endpoint / protocol / TLS are fixed; only the
-  # bearer token is operator-supplied. Prefer existingSecret; authToken is an
-  # inline escape hatch. Set enabled: false for an air-gapped install.
-  clickstack:
-    # authToken: "<CLICKSTACK_OTLP_TOKEN>"
-    existingSecret:
-      name: "clickstack-otlp-token"
-      # key defaults to OTEL_EXPORTER_OTLP_HEADERS
   # Shared hybrid Postgres. Every hybrid workload (AgentGateway, TrustGuard,
   # DataAgent, data-plane-api) envFrom's the rendered postgresql-secrets, so
   # all four connect as ONE role to ONE database. In-cluster default renders
@@ -68,13 +60,25 @@ global:
 #       # clickhouse:
 #       #   host: "clickhouse.example.com"
 
-# DataAgent remains absent while enrolment is empty. Configure tenantId and
-# either the inline token or an existing Secret together.
+# DataAgent enrolment is required for hybrid OTLP egress (and for DataBridge).
+# Prefer enrolment.existingSecret (same ritual as configSync.existingSecret).
 # dataagent:
 #   tenantId: "<tenant-id>"
-#   enrolmentTokenExistingSecret:
-#     name: "dataagent-enrolment"
-#     key: "ENROLMENT_TOKEN"
+#   enrolment:
+#     existingSecret:
+#       name: "dataagent-enrolment"
+
+# Hybrid config-sync is on by default. Point at Secrets holding CONFIG_SYNC_TOKEN
+# and CONFIG_SYNC_LKG_KEY; do not restate enabled: true. Set enabled: false only
+# for Postgres-managed runtime configuration.
+# agentgateway:
+#   configSync:
+#     existingSecret:
+#       name: "agentgateway-config-sync"
+# trustguard:
+#   configSync:
+#     existingSecret:
+#       name: "trustguard-config-sync"
 
 # Disable Firewall completely (chart dependency, workloads, TrustGuard client).
 firewall:

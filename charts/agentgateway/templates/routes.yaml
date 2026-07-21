@@ -15,16 +15,18 @@ Requires the cluster IngressController to allow wildcard routes
 
 {{- $dpHost := include "neuraltrust-platform.ingress.host" (dict "host" .Values.ingress.dataPlane.host "prefix" .Values.ingress.dataPlane.hostPrefix "global" $global) }}
 {{- $mcpHost := include "neuraltrust-platform.ingress.host" (dict "host" .Values.ingress.mcp.host "prefix" .Values.ingress.mcp.hostPrefix "global" $global) }}
+{{- $dpExtra := include "agentgateway.ingress.effectiveAdditionalHosts" (dict "ctx" . "plane" "dataPlane") | fromYamlArray }}
+{{- $mcpExtra := include "agentgateway.ingress.effectiveAdditionalHosts" (dict "ctx" . "plane" "mcp") | fromYamlArray }}
 {{- $dpHosts := list -}}
 {{- if $dpHost -}}{{- $dpHosts = append $dpHosts $dpHost -}}{{- end -}}
-{{- range (default (list) .Values.ingress.dataPlane.additionalHosts) -}}
+{{- range $dpExtra -}}
   {{- $h := . | toString | trim -}}
   {{- if and $h (not (has $h $dpHosts)) -}}{{- $dpHosts = append $dpHosts $h -}}{{- end -}}
 {{- end -}}
 
 {{- $mcpHosts := list -}}
 {{- if $mcpHost -}}{{- $mcpHosts = append $mcpHosts $mcpHost -}}{{- end -}}
-{{- range (default (list) .Values.ingress.mcp.additionalHosts) -}}
+{{- range $mcpExtra -}}
   {{- $h := . | toString | trim -}}
   {{- if and $h (not (has $h $mcpHosts)) -}}{{- $mcpHosts = append $mcpHosts $h -}}{{- end -}}
 {{- end -}}

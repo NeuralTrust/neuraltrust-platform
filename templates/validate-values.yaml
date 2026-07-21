@@ -16,7 +16,12 @@ no Kubernetes resource when validation succeeds.
 
 {{- /* DataAgent hybrid guard rails. */ -}}
 {{- $dataagent := default dict .Values.dataagent -}}
-{{- $existingTokenRef := default dict $dataagent.enrolmentTokenExistingSecret -}}
+{{- if or (hasKey $dataagent "enrolmentToken") (hasKey $dataagent "enrolmentTokenExistingSecret") -}}
+  {{- fail "dataagent.enrolmentToken / dataagent.enrolmentTokenExistingSecret were renamed to dataagent.enrolment.token / dataagent.enrolment.existingSecret (same ritual as configSync.token / existingSecret)." -}}
+{{- end -}}
+{{- $enrolment := default dict $dataagent.enrolment -}}
+{{- $existingTokenRef := default dict $enrolment.existingSecret -}}
+{{- $enrolmentToken := $enrolment.token | default "" -}}
 {{- $existingDataRef := default dict $dataagent.existingSecret -}}
 {{- $managedDataagentSecret := lookup "v1" "Secret" .Release.Namespace "dataagent-secrets" -}}
 {{- $managedDataagentData := dict -}}
@@ -32,14 +37,14 @@ no Kubernetes resource when validation succeeds.
 {{- if and
   (eq $mode "hybrid")
   $dataagent.tenantId
-  $dataagent.enrolmentToken
+  $enrolmentToken
   (not ($existingTokenRef.name | default ""))
   (not $hasManagedToken)
   (or (not $autoGenerate) $preserveExisting ($existingDataRef.name | default ""))
 -}}
-  {{- fail "dataagent.enrolmentToken cannot be materialized with externally managed database secrets. Set dataagent.enrolmentTokenExistingSecret.name/key." -}}
+  {{- fail "dataagent.enrolment.token cannot be materialized with externally managed database secrets. Set dataagent.enrolment.existingSecret.name/key." -}}
 {{- end -}}
-{{- $dataagentTokenConfigured := or $dataagent.enrolmentToken ($existingTokenRef.name | default "") $hasManagedToken -}}
+{{- $dataagentTokenConfigured := or $enrolmentToken ($existingTokenRef.name | default "") $hasManagedToken -}}
 {{- if and
   (eq $mode "hybrid")
   $dataagent.tenantId
@@ -74,27 +79,31 @@ no Kubernetes resource when validation succeeds.
   {{- $hasManagedToken := and (hasKey $managedData "CONFIG_SYNC_TOKEN") (ne (index $managedData "CONFIG_SYNC_TOKEN") "") -}}
   {{- $hasManagedLkgKey := and (hasKey $managedData "CONFIG_SYNC_LKG_KEY") (ne (index $managedData "CONFIG_SYNC_LKG_KEY") "") -}}
   {{- $inlineTokenUsable := and ($configSync.token | default "") $autoGenerate (not $preserveExisting) -}}
+  {{- $configSyncOn := eq (include "neuraltrust-platform.configSync.enabledFrom" (dict "mode" $mode "configSync" $configSync)) "true" -}}
   {{- if and
-    ($configSync.enabled | default false)
+    $configSyncOn
     (not $inlineTokenUsable)
     (not ($existingRef.name | default ""))
     (not (and $hasManagedToken $hasManagedLkgKey))
   -}}
-    {{- fail (printf "%s.configSync.enabled=true requires CONFIG_SYNC_TOKEN and CONFIG_SYNC_LKG_KEY: set %s.configSync.existingSecret.name, or use %s.configSync.token only when chart Secret generation is enabled." $component.name $component.name $component.name) -}}
+    {{- fail (printf "%s config-sync requires CONFIG_SYNC_TOKEN and CONFIG_SYNC_LKG_KEY: set %s.configSync.existingSecret.name, or use %s.configSync.token only when chart Secret generation is enabled. Hybrid enables config-sync by default; set %s.configSync.enabled=false only for Postgres-managed configuration." $component.name $component.name $component.name $component.name) -}}
   {{- end -}}
 {{- end -}}
 
-{{- /* Hybrid ClickStack: local egress + DataAgent enrolment only (no direct
-     SaaS authToken path). EXTERNAL / air-gapped installs ignore this block. */ -}}
+{{- /* Hybrid product OTLP is mandatory: local egress + DataAgent enrolment.
+     EXTERNAL keeps telemetry in-cluster (no SaaS hop). Legacy opt-out keys
+     are rejected so operators move air-gap installs to deploymentMode=external. */ -}}
 {{- $clickstack := default dict $global.clickstack -}}
-{{- $clickstackEnabled := true -}}
-{{- if hasKey $clickstack "enabled" -}}{{- $clickstackEnabled = $clickstack.enabled -}}{{- end -}}
-{{- if and (eq $mode "hybrid") $clickstackEnabled -}}
-  {{- if ne (include "neuraltrust-platform.clickstackEgress.optIn" .) "true" -}}
-    {{- fail "v2 hybrid ClickStack has no direct SaaS token path: keep global.clickstack.egress.enabled=true (default) with dataagent enrolment, or set global.clickstack.enabled: false to disable SaaS OTLP dual-write." -}}
+{{- $egress := default dict $clickstack.egress -}}
+{{- if eq $mode "hybrid" -}}
+  {{- if and (hasKey $clickstack "enabled") (eq $clickstack.enabled false) -}}
+    {{- fail "global.clickstack.enabled is no longer supported: hybrid product OTLP is mandatory. Use global.deploymentMode=external for air-gapped / local-only product telemetry." -}}
+  {{- end -}}
+  {{- if and (hasKey $egress "enabled") (eq $egress.enabled false) -}}
+    {{- fail "global.clickstack.egress.enabled is no longer supported: hybrid product OTLP always uses the DataAgent-co-located egress collector. Use global.deploymentMode=external for air-gapped / local-only product telemetry." -}}
   {{- end -}}
   {{- if ne (include "neuraltrust-platform.dataagentEnabled" .) "true" -}}
-    {{- fail "v2 hybrid ClickStack export requires an enabled DataAgent (tenantId + enrolmentToken or enrolmentTokenExistingSecret.name) so the OTLP egress sidecar can use the loopback OAuth broker. Set global.clickstack.enabled: false to disable SaaS OTLP dual-write." -}}
+    {{- fail "v2 hybrid requires an enabled DataAgent (tenantId + enrolment.token or enrolment.existingSecret.name) so the OTLP egress sidecar can use the loopback OAuth broker. Use global.deploymentMode=external for air-gapped / local-only product telemetry." -}}
   {{- end -}}
 {{- end -}}
 

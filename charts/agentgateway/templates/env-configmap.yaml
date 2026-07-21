@@ -12,8 +12,9 @@ data:
   SERVER_PROXY_PORT: {{ .Values.dataPlane.ports.http | quote }}
   SERVER_MCP_PORT: {{ .Values.mcp.ports.http | quote }}
   # App reads GATEWAY_BASE_DOMAIN / MCP_BASE_DOMAIN (see AgentGateway config.go).
-  GATEWAY_BASE_DOMAIN: {{ .Values.config.gatewayBaseDomain | default (include "neuraltrust-platform.domain" .) | quote }}
-  MCP_BASE_DOMAIN: {{ .Values.config.mcpBaseDomain | default (printf "mcp.%s" (include "neuraltrust-platform.domain" .)) | quote }}
+  # Subdomain mode derives llm.<global.domain> / mcp.<global.domain> when empty.
+  GATEWAY_BASE_DOMAIN: {{ include "agentgateway.config.effectiveGatewayBaseDomain" . | quote }}
+  MCP_BASE_DOMAIN: {{ include "agentgateway.config.effectiveMcpBaseDomain" . | quote }}
   GATEWAY_DISCOVERY_MODE: {{ .Values.config.gatewayDiscoveryMode | quote }}
   {{- if $isHybrid }}
   # v2 hybrid: DB_HOST/DB_PORT/DB_USER/DB_NAME/DB_PASSWORD/DB_SSL_MODE are supplied

@@ -459,6 +459,43 @@ ClickHouse is allowed to render only in v2 external.
 {{- end }}
 
 {{/*
+DataAgent values root. Works from the umbrella (`.Values.dataagent`) and the
+dataagent subchart (`.Values` is the dataagent block).
+*/}}
+{{- define "neuraltrust-platform.dataagent.cfg" -}}
+{{- if hasKey .Values "dataagent" -}}
+{{- toYaml (default dict .Values.dataagent) -}}
+{{- else -}}
+{{- toYaml .Values -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Enrolment credentials — same ritual as configSync.token / existingSecret:
+  dataagent.enrolment.token
+  dataagent.enrolment.existingSecret.name / .key
+*/}}
+{{- define "neuraltrust-platform.dataagent.enrolment.token" -}}
+{{- $cfg := include "neuraltrust-platform.dataagent.cfg" . | fromYaml -}}
+{{- $enrolment := default dict $cfg.enrolment -}}
+{{- $enrolment.token | default "" -}}
+{{- end }}
+
+{{- define "neuraltrust-platform.dataagent.enrolment.existingSecretName" -}}
+{{- $cfg := include "neuraltrust-platform.dataagent.cfg" . | fromYaml -}}
+{{- $enrolment := default dict $cfg.enrolment -}}
+{{- $existing := default dict $enrolment.existingSecret -}}
+{{- $existing.name | default "" -}}
+{{- end }}
+
+{{- define "neuraltrust-platform.dataagent.enrolment.existingSecretKey" -}}
+{{- $cfg := include "neuraltrust-platform.dataagent.cfg" . | fromYaml -}}
+{{- $enrolment := default dict $cfg.enrolment -}}
+{{- $existing := default dict $enrolment.existingSecret -}}
+{{- $existing.key | default "ENROLMENT_TOKEN" -}}
+{{- end }}
+
+{{/*
 DataAgent enablement gate. Requires:
   - hybrid mode
   - non-empty tenantId
@@ -466,12 +503,10 @@ DataAgent enablement gate. Requires:
   - database credentials (chart-generated or existingSecret)
 */}}
 {{- define "neuraltrust-platform.dataagentEnabled" -}}
-{{- $cfg := .Values -}}
-{{- if hasKey .Values "dataagent" -}}{{- $cfg = default dict .Values.dataagent -}}{{- end -}}
+{{- $cfg := include "neuraltrust-platform.dataagent.cfg" . | fromYaml -}}
 {{- $tenantId := $cfg.tenantId | default "" -}}
-{{- $token := $cfg.enrolmentToken | default "" -}}
-{{- $existing := default dict $cfg.enrolmentTokenExistingSecret -}}
-{{- $existingName := $existing.name | default "" -}}
+{{- $token := include "neuraltrust-platform.dataagent.enrolment.token" . -}}
+{{- $existingName := include "neuraltrust-platform.dataagent.enrolment.existingSecretName" . -}}
 {{- $managedSecret := lookup "v1" "Secret" .Release.Namespace "dataagent-secrets" -}}
 {{- $managedData := dict -}}
 {{- if and $managedSecret (kindIs "map" $managedSecret) $managedSecret.data -}}
@@ -953,9 +988,44 @@ HTTP proxy environment variables.
 {{- end }}
 
 {{/*
+Effective config-sync enablement.
+  explicit bool → use it
+  null / omitted → true in hybrid, false in external
+Usage (subchart): {{ include "neuraltrust-platform.configSync.enabled" . }}
+Usage (umbrella): {{ include "neuraltrust-platform.configSync.enabledFrom" (dict "mode" $mode "configSync" $cs) }}
+*/}}
+{{- define "neuraltrust-platform.configSync.enabled" -}}
+{{- $cs := default dict .Values.configSync -}}
+{{- $isHybrid := eq (include "neuraltrust-platform.isHybrid" .) "true" -}}
+{{- if hasKey $cs "enabled" -}}
+  {{- if kindIs "bool" $cs.enabled -}}
+    {{- if $cs.enabled }}true{{- end -}}
+  {{- else if $isHybrid -}}
+true
+  {{- end -}}
+{{- else if $isHybrid -}}
+true
+{{- end -}}
+{{- end }}
+
+{{- define "neuraltrust-platform.configSync.enabledFrom" -}}
+{{- $cs := default dict .configSync -}}
+{{- $isHybrid := eq (.mode | default "hybrid") "hybrid" -}}
+{{- if hasKey $cs "enabled" -}}
+  {{- if kindIs "bool" $cs.enabled -}}
+    {{- if $cs.enabled }}true{{- end -}}
+  {{- else if $isHybrid -}}
+true
+  {{- end -}}
+{{- else if $isHybrid -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/*
 Config-sync data-plane environment (hybrid: dial the fixed public SaaS endpoint
 over TLS; external: dial the in-cluster control-plane Service). Rendered only
-when configSync.enabled at the caller.
+when config-sync is effectively enabled.
 Usage: {{- include "neuraltrust-platform.configSyncEnv" (dict "ctx" . "product" "trustguard") | nindent 8 }}
 */}}
 {{- define "neuraltrust-platform.configSyncEnv" -}}
@@ -963,7 +1033,7 @@ Usage: {{- include "neuraltrust-platform.configSyncEnv" (dict "ctx" . "product" 
 {{- $product := .product -}}
 {{- $tlsCaPath := .tlsCaPath | default "" -}}
 {{- $cs := default dict $ctx.Values.configSync -}}
-{{- if $cs.enabled -}}
+{{- if eq (include "neuraltrust-platform.configSync.enabled" $ctx) "true" -}}
 {{- $isFull := eq (include "neuraltrust-platform.isExternal" $ctx) "true" -}}
 {{- $endpoint := $cs.endpoint -}}
 {{- $insecure := false -}}
@@ -1012,7 +1082,7 @@ wins over the chart-managed service Secret loaded through envFrom.
 {{- define "neuraltrust-platform.configSyncTokenEnv" -}}
 {{- $cs := default dict .Values.configSync -}}
 {{- $existing := default dict $cs.existingSecret -}}
-{{- if and $cs.enabled $existing.name }}
+{{- if and (eq (include "neuraltrust-platform.configSync.enabled" .) "true") $existing.name }}
 - name: CONFIG_SYNC_TOKEN
   valueFrom:
     secretKeyRef:
@@ -1061,12 +1131,11 @@ https://clickstack-collector.neuraltrust.ai/v1/logs
 http/protobuf
 {{- end }}
 
+{{/*
+Hybrid product OTLP dual-write is always on (no opt-out). EXTERNAL ignores this.
+*/}}
 {{- define "neuraltrust-platform.clickstackHybridEnabled" -}}
-{{- $global := default dict .Values.global -}}
-{{- $cfg := default dict $global.clickstack -}}
-{{- $enabled := true -}}
-{{- if hasKey $cfg "enabled" -}}{{- $enabled = $cfg.enabled -}}{{- end -}}
-{{- if and (eq (include "neuraltrust-platform.isHybrid" .) "true") $enabled -}}
+{{- if eq (include "neuraltrust-platform.isHybrid" .) "true" -}}
 true
 {{- end -}}
 {{- end }}
@@ -1079,11 +1148,8 @@ Works from the umbrella (`.Values.dataagent`) and the dataagent subchart
 clickstackEgress.useLocalEndpoint (global-only) for the OTLP endpoint switch.
 */}}
 {{- define "neuraltrust-platform.clickstack.enrolmentReady" -}}
-{{- $cfg := .Values -}}
-{{- if hasKey .Values "dataagent" -}}{{- $cfg = default dict .Values.dataagent -}}{{- end -}}
-{{- $token := $cfg.enrolmentToken | default "" -}}
-{{- $existing := default dict $cfg.enrolmentTokenExistingSecret -}}
-{{- $existingName := $existing.name | default "" -}}
+{{- $token := include "neuraltrust-platform.dataagent.enrolment.token" . -}}
+{{- $existingName := include "neuraltrust-platform.dataagent.enrolment.existingSecretName" . -}}
 {{- $managedSecret := lookup "v1" "Secret" .Release.Namespace "dataagent-secrets" -}}
 {{- $managedData := dict -}}
 {{- if and $managedSecret (kindIs "map" $managedSecret) $managedSecret.data -}}
@@ -1096,44 +1162,28 @@ clickstackEgress.useLocalEndpoint (global-only) for the OTLP endpoint switch.
 {{- end }}
 
 {{/*
-Hybrid OTLP egress is on by default (v2 hybrid has no direct SaaS ClickStack
-token path). Set global.clickstack.egress.enabled=false only together with
-global.clickstack.enabled=false, or validation fails.
-Missing key ⇒ true.
-*/}}
-{{- define "neuraltrust-platform.clickstackEgress.optIn" -}}
-{{- $cfg := default dict (default dict (default dict .Values.global).clickstack).egress -}}
-{{- $enabled := true -}}
-{{- if hasKey $cfg "enabled" -}}{{- $enabled = $cfg.enabled -}}{{- end -}}
-{{- if $enabled -}}true{{- end -}}
-{{- end }}
-
-{{/*
 True when hybrid should co-locate the OTLP egress sidecar on DataAgent.
 
 Requires a fully enabled DataAgent (tenantId + enrolment + DB) because the
-collector is a sidecar, not a standalone Deployment. EXTERNAL / air-gapped
-installs never enable this: they keep the in-cluster clickstack-otel-collector
-→ ClickHouse path with no internet hop.
+collector is a sidecar, not a standalone Deployment. EXTERNAL installs never
+enable this: they keep the in-cluster clickstack-otel-collector → ClickHouse
+path with no internet hop.
 */}}
 {{- define "neuraltrust-platform.clickstackEgress.enabled" -}}
 {{- if and
   (eq (include "neuraltrust-platform.clickstackHybridEnabled" .) "true")
-  (eq (include "neuraltrust-platform.clickstackEgress.optIn" .) "true")
   (eq (include "neuraltrust-platform.dataagentEnabled" .) "true")
 -}}true{{- end -}}
 {{- end }}
 
 {{/*
 True when AgentGateway/TrustGuard should send plain OTLP to the local egress
-ClusterIP (DataAgent sidecar). Hybrid ClickStack has no direct SaaS Authorization
-path — apps always talk to the local egress Service when product dual-write is on.
+ClusterIP (DataAgent sidecar). Hybrid has no direct SaaS Authorization path.
 */}}
 {{- define "neuraltrust-platform.clickstackEgress.useLocalEndpoint" -}}
-{{- if and
-  (eq (include "neuraltrust-platform.clickstackHybridEnabled" .) "true")
-  (eq (include "neuraltrust-platform.clickstackEgress.optIn" .) "true")
--}}true{{- end -}}
+{{- if eq (include "neuraltrust-platform.clickstackHybridEnabled" .) "true" -}}
+true
+{{- end -}}
 {{- end }}
 
 {{- define "neuraltrust-platform.clickstackEgress.fullname" -}}

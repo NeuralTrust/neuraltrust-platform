@@ -32,34 +32,32 @@ global:
   platform: "openshift"
 ```
 
-Hybrid always dual-writes to the NeuralTrust SaaS ClickStack collector; supply
-the bearer token via `global.clickstack.existingSecret` (preferred) or
-`--set global.clickstack.authToken=<token>` (see [SECRETS.md](./SECRETS.md)).
-Air-gap: `global.clickstack.enabled: false`.
+Hybrid product OTLP is mandatory via the DataAgent-co-located egress collector
+(enrolment-backed; no direct SaaS ClickStack bearer). Air-gapped or local-only
+product telemetry requires `global.deploymentMode: external`. See
+[SECRETS.md](./SECRETS.md).
 
-For SaaS-managed hybrid, also pre-create config-sync Secrets (each holding
-`CONFIG_SYNC_TOKEN` and `CONFIG_SYNC_LKG_KEY`) and enable:
+Hybrid config-sync is on by default. Pre-create Secrets holding
+`CONFIG_SYNC_TOKEN` and `CONFIG_SYNC_LKG_KEY`, then point overlays at them
+(do not restate `enabled: true`):
 
 ```yaml
 agentgateway:
   configSync:
-    enabled: true
     existingSecret:
       name: "agentgateway-config-sync"
 
 trustguard:
   configSync:
-    enabled: true
     existingSecret:
       name: "trustguard-config-sync"
 ```
 
-Defaults stay `enabled: false`. See
+Set `configSync.enabled: false` only for Postgres-managed configuration. See
 [`values-v2-hybrid.yaml.example`](./values-v2-hybrid.yaml.example).
 
-DataAgent stays disabled until the deployment is enrolled. Add `tenantId` and
-either `enrolmentToken` or (preferred) `enrolmentTokenExistingSecret.name`
-only after they are issued.
+DataAgent enrolment (`tenantId` plus `enrolment.token` or preferred
+`enrolment.existingSecret.name`) is required for hybrid OTLP egress.
 
 ## Routes and Ingress
 
@@ -90,19 +88,16 @@ Operator prerequisites (not rendered by Helm):
 2. The router / Route certificate must cover the wildcard domains
    (or terminate TLS at an upstream edge that does).
 
-3. Set AgentGateway discovery to match the public zones:
+3. Set AgentGateway discovery to subdomain mode. With empty base domains and
+   empty `additionalHosts`, the chart derives `GATEWAY_BASE_DOMAIN=llm.<domain>`,
+   `MCP_BASE_DOMAIN=mcp.<domain>`, and auto-adds `*.llm.<domain>` /
+   `*.mcp.<domain>` Ingress/Route hosts. Explicit `additionalHosts` remain
+   authoritative when set:
 
    ```yaml
    agentgateway:
      config:
        gatewayDiscoveryMode: "subdomain"
-       gatewayBaseDomain: "llm.apps.example.com"
-       mcpBaseDomain: "mcp.apps.example.com"
-     ingress:
-       dataPlane:
-         additionalHosts: ["*.llm.apps.example.com"]
-       mcp:
-         additionalHosts: ["*.mcp.apps.example.com"]
    ```
 
 See `values-agentgateway-wildcard.yaml.example` and

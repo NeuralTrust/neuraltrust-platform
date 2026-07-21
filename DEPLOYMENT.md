@@ -13,13 +13,15 @@ Their control planes stay in NeuralTrust SaaS. PostgreSQL and Redis deploy
 in-cluster by default; ClickHouse is not part of hybrid. The temporary
 `data-plane-api` read shim renders by default on the shared hybrid PostgreSQL.
 
-Hybrid ClickStack dual-write uses a local `clickstack-egress-collector` and
-requires DataAgent enrolment (no direct SaaS bearer token). Set
-`global.clickstack.enabled: false` for air-gap with no SaaS OTLP dual-write.
+Hybrid product OTLP is mandatory via a local `clickstack-egress-collector` and
+requires DataAgent enrolment (no direct SaaS bearer token; no
+`global.clickstack.enabled` / `egress.enabled` opt-out). Air-gapped or
+local-only product telemetry requires `global.deploymentMode: external`.
 
-For SaaS-managed hybrid, enable config-sync on both runtimes (defaults
-`enabled: false`) and point each at a Secret holding `CONFIG_SYNC_TOKEN` and
-`CONFIG_SYNC_LKG_KEY`. Full contract:
+Hybrid config-sync is on by default. Point each runtime at a Secret holding
+`CONFIG_SYNC_TOKEN` and `CONFIG_SYNC_LKG_KEY` via `existingSecret` (do not
+restate `enabled: true`). Set `configSync.enabled: false` only for
+Postgres-managed configuration. Full contract:
 [`docs/platform-v2.md`](./docs/platform-v2.md) and
 [`values-v2-hybrid.yaml.example`](./values-v2-hybrid.yaml.example).
 
@@ -30,14 +32,14 @@ helm upgrade --install neuraltrust-platform <chart> \
 ```
 
 DataAgent enrolment is required for hybrid ClickStack egress (and for
-DataAgent itself). Prefer `enrolmentTokenExistingSecret.name`:
+DataAgent itself). Prefer `enrolment.existingSecret.name`:
 
 ```yaml
 dataagent:
   tenantId: "<tenant-id>"
-  enrolmentTokenExistingSecret:
-    name: "dataagent-enrolment"
-    key: "ENROLMENT_TOKEN"
+  enrolment:
+    existingSecret:
+      name: "dataagent-enrolment"
 ```
 
 Do not configure a partial enrolment. It is outbound-only and is not rendered

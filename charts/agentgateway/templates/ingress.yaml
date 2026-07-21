@@ -5,8 +5,8 @@
 {{- $tlsSecret := include "neuraltrust-platform.ingress.effectiveTLSSecretName" (dict "global" .Values.global "localSecretName" .Values.ingress.tls.secretName) }}
 {{- $dpHost := include "neuraltrust-platform.ingress.host" (dict "host" .Values.ingress.dataPlane.host "prefix" .Values.ingress.dataPlane.hostPrefix "global" .Values.global) }}
 {{- $mcpHost := include "neuraltrust-platform.ingress.host" (dict "host" .Values.ingress.mcp.host "prefix" .Values.ingress.mcp.hostPrefix "global" .Values.global) }}
-{{- $dpExtra := default (list) .Values.ingress.dataPlane.additionalHosts }}
-{{- $mcpExtra := default (list) .Values.ingress.mcp.additionalHosts }}
+{{- $dpExtra := include "agentgateway.ingress.effectiveAdditionalHosts" (dict "ctx" . "plane" "dataPlane") | fromYamlArray }}
+{{- $mcpExtra := include "agentgateway.ingress.effectiveAdditionalHosts" (dict "ctx" . "plane" "mcp") | fromYamlArray }}
 # Data-plane (proxy) ingress — hybrid + full (primary + optional additionalHosts / wildcards)
 apiVersion: networking.k8s.io/v1
 kind: Ingress

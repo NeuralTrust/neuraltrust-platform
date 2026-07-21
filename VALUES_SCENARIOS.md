@@ -6,7 +6,7 @@ This chart (2.x) is v2-only.
 
 | File | Mode | Purpose |
 |---|---|---|
-| `values-required.yaml` | hybrid | Minimal starting point; DataAgent disabled until enrolment |
+| `values-required.yaml` | hybrid | Minimal starting point; enrolment + config-sync Secrets |
 | `values-v2.yaml.example` | hybrid | Documented hybrid knobs |
 | `values-v2-hybrid.yaml.example` | hybrid | Hybrid topology overlay |
 | `values-v2-external.yaml.example` | external | Minimal self-hosted topology |
@@ -21,6 +21,7 @@ This chart (2.x) is v2-only.
 | `values-openshift-ingress.yaml.example` | hybrid | Kubernetes Ingress on OpenShift |
 | `values-aws-ipv6.yaml.example` | hybrid | AWS provider and IPv6-safe defaults |
 | `values-dataplane-gpu.yaml.example` | hybrid | GPU Firewall workers |
+| `values-agentgateway-wildcard.yaml.example` | hybrid/external | Subdomain discovery; auto `*.llm` / `*.mcp` |
 
 ## Observability overlays
 
@@ -43,33 +44,30 @@ global:
   deploymentMode: "hybrid"
   platform: "kubernetes"
   domain: "platform.example.com"
-  clickstack:
-    existingSecret:
-      name: "clickstack-otlp"
-      # key defaults to OTEL_EXPORTER_OTLP_HEADERS
 
-dataagent:
-  tenantId: ""
-  enrolmentTokenExistingSecret:
-    name: ""
-    key: "ENROLMENT_TOKEN"
-```
-
-ClickStack is mandatory for hybrid render unless
-`global.clickstack.enabled: false`. For SaaS-managed hybrid, also enable
-config-sync via `existingSecret` references (see
-`values-v2-hybrid.yaml.example`).
-
-Enable DataAgent only after enrolment (`tenantId` plus token or
-`enrolmentTokenExistingSecret.name`):
-
-```yaml
 dataagent:
   tenantId: "<tenant-id>"
-  enrolmentTokenExistingSecret:
-    name: "dataagent-enrolment"
-    key: "ENROLMENT_TOKEN"
+  enrolment:
+    existingSecret:
+      name: "dataagent-enrolment"
+
+agentgateway:
+  configSync:
+    existingSecret:
+      name: "agentgateway-config-sync"
+
+trustguard:
+  configSync:
+    existingSecret:
+      name: "trustguard-config-sync"
 ```
+
+Hybrid product OTLP is mandatory (enrolment-backed egress collector; no
+`global.clickstack.enabled` / `egress.enabled` opt-out). Air-gapped or
+local-only product telemetry requires `global.deploymentMode: external`.
+Config-sync is on by default — overlays set `existingSecret` only (see
+`values-v2-hybrid.yaml.example`). Set `configSync.enabled: false` only for
+Postgres-managed configuration.
 
 ## Scenario: self-hosted external
 
