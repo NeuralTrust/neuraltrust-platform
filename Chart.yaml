@@ -2,7 +2,7 @@ apiVersion: v2
 name: neuraltrust-platform
 description: NeuralTrust platform Helm chart (v2 hybrid + external)
 type: application
-version: 2.2.0
+version: 2.2.1
 appVersion: "2.0.0"
 icon: https://neuraltrust.ai/favicon.ico
 # v1 is maintained only on the v1.14.x release line. Do NOT install this chart
