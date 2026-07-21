@@ -46,6 +46,9 @@ global:
       clientId: "otlp-egress" # non-secret oauth2client placeholder
       clientSecret: "unused" # non-secret oauth2client placeholder (broker ignores it)
       endpoint: "" # SaaS OTLP/HTTP base; default https://telemetry.neuraltrust.ai
+      # OTel sidecar bind host (health + OTLP receivers). Chart emits [::]:port.
+      # Override to "0.0.0.0" only for rare IPv4-only kernels with bindv6only=1.
+      listenHost: "::"
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/opentelemetry-collector-contrib
         tag: "0.156.0"
@@ -93,6 +96,7 @@ global:
       repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/postgres
       tag: "17-alpine"
       pullPolicy: IfNotPresent
+      # Empty → global.imagePullSecrets → chart default gcr-secret. ["none"] suppresses.
       imagePullSecrets: []
     resources:
       requests:
@@ -134,7 +138,7 @@ global:
     enabled: false
     httpProxy: ""
     httpsProxy: ""
-    noProxy: "localhost,127.0.0.1,.cluster.local,.svc"
+    noProxy: "localhost,127.0.0.1,::1,.cluster.local,.svc"
   customCaCert:
     enabled: false
     secretName: ""
@@ -208,6 +212,9 @@ global:
     collector:
       fullnameOverride: "otel-collector"
       endpoint: ""
+      # Bind host for health / OTLP / prometheus exporters. Default "::"
+      # dual-stacks on Linux; set "0.0.0.0" only if bindv6only=1 breaks IPv4.
+      listenHost: "::"
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/opentelemetry-collector-contrib
         tag: "0.156.0"
@@ -415,7 +422,7 @@ control-plane-api:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api"
-          tag: "v1.23.0"
+          tag: "v1.23.1"
           pullPolicy: "Always"
         config:
           controlPlaneApiUrl: ""
@@ -478,7 +485,7 @@ control-plane-app:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.101.6"
+          tag: "v1.102.1"
           pullPolicy: "Always"
         config:
           nodeEnv: production
@@ -547,7 +554,7 @@ control-plane-app:
 # AgentGateway (v2 TrustGate replacement): admin + proxy/mcp.
 agentgateway:
   image:
-    tag: "v0.15.1"
+    tag: "v0.17.0"
   database:
     sslMode: "prefer"
     iamAuth: false
@@ -557,7 +564,7 @@ agentgateway:
 # TrustGuard: control-plane + data-plane (/v1/evaluate).
 trustguard:
   image:
-    tag: "v0.18.2"
+    tag: "v0.18.3"
   database:
     sslMode: "prefer"
     iamAuth: false
@@ -598,7 +605,7 @@ dataagent:
 # `global.postgresql` block.
 datacore:
   image:
-    tag: "v0.13.1"
+    tag: "v0.14.0"
   database:
     host: ""
     port: 5432
@@ -623,7 +630,7 @@ clickstack-otel-collector:
 alertengine:
   enabled: true
   image:
-    tag: "v0.4.5"
+    tag: "v0.5.0"
   database:
     host: ""
     port: 5432

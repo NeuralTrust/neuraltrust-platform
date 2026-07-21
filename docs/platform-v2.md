@@ -275,20 +275,27 @@ Do not confuse the collectors:
 
 Disabling hosted export does not disable the external-mode ClickStack pipeline.
 
-## AgentGateway public routing (exact + optional wildcards)
+## AgentGateway public routing (exact + wildcards)
 
 AgentGateway exposes three public surfaces: **admin** (external mode only),
-**proxy**, and **MCP**. With `config.gatewayDiscoveryMode: subdomain` and empty
-base domains, the chart sets `GATEWAY_BASE_DOMAIN=llm.<global.domain>` and
-`MCP_BASE_DOMAIN=mcp.<global.domain>`. When `additionalHosts` is also empty,
-Ingress/Routes auto-add `*.llm.<domain>` / `*.mcp.<domain>`. Explicit
-`additionalHosts` (and explicit `gatewayBaseDomain` / `mcpBaseDomain`) remain
-authoritative when set:
+**proxy**, and **MCP**. Discovery is always dual-mode in the app:
+
+| Call path | Host | Gateway header |
+|---|---|---|
+| Exact primary | `gateway.<domain>` / `mcp.<domain>` | Required |
+| Wildcard slug | `<slug>.llm.<domain>` / `<slug>.mcp.<domain>` | Not needed |
+
+With empty base domains the chart sets `GATEWAY_BASE_DOMAIN=llm.<global.domain>`
+and `MCP_BASE_DOMAIN=mcp.<global.domain>`. When `additionalHosts` is also empty
+and `config.autoWildcardHosts` is true (default), Ingress/Routes auto-add
+`*.llm.<domain>` / `*.mcp.<domain>`. Set `autoWildcardHosts: false` for exact
+hosts only (no wildcard DNS/cert). Explicit `additionalHosts` (and explicit
+`gatewayBaseDomain` / `mcpBaseDomain`) remain authoritative when set.
+`config.gatewayDiscoveryMode` / `GATEWAY_DISCOVERY_MODE` are retired — do not
+set them.
 
 ```yaml
 agentgateway:
-  config:
-    gatewayDiscoveryMode: "subdomain"
   ingress:
     resourceType: "auto" # Ingress on AWS/Azure/GCP; OpenShift Routes by default
 ```
@@ -303,11 +310,7 @@ settings remain operator prerequisites:
 | GCP (GCE Ingress) | Ingress | Wildcard Ingress rules are supported; **Google-managed certificates do not support wildcard names** — provide a self-managed wildcard TLS Secret |
 | OpenShift | native `Route` (`resourceType: auto\|route`) | IngressController `routeAdmission.wildcardPolicy: WildcardsAllowed`; router/Route certificate covering the wildcard domains. Set `ingress.resourceType: ingress` to keep Kubernetes Ingress instead |
 
-Admin stays exact-host only (no wildcards). Pair public wildcards with
-`config.gatewayDiscoveryMode: subdomain` so the application resolves dynamic
-slugs; ingress rules alone do not enable discovery.
-
-See `values-agentgateway-wildcard.yaml.example`.
+Admin stays exact-host only (no wildcards).
 
 ## Legacy v1
 
@@ -322,4 +325,3 @@ pin `--version ~1.14.0` to install it. This chart (2.x) is v2-only.
 - `values-v2-external.yaml.example`: minimal external
 - `values-all-deployed.yaml.example`: external plus supported optional components
 - `values-v2-managed-datastores.yaml.example`: external managed datastores
-- `values-agentgateway-wildcard.yaml.example`: proxy/MCP exact + wildcard hosts

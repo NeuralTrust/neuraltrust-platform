@@ -113,17 +113,14 @@ imagePullSecrets:
 {{/*
 Effective GATEWAY_BASE_DOMAIN.
   explicit config.gatewayBaseDomain → use it
-  subdomain mode + empty → llm.<global.domain>
-  header mode + empty → <global.domain> (legacy header discovery)
+  empty → llm.<global.domain> (subdomain slug zone; primary host stays gateway.<domain>)
 */}}
 {{- define "agentgateway.config.effectiveGatewayBaseDomain" -}}
 {{- $explicit := .Values.config.gatewayBaseDomain | default "" | toString | trim -}}
 {{- if $explicit -}}
 {{- $explicit -}}
-{{- else if eq (.Values.config.gatewayDiscoveryMode | default "header") "subdomain" -}}
-{{- printf "llm.%s" (include "neuraltrust-platform.domain" .) -}}
 {{- else -}}
-{{- include "neuraltrust-platform.domain" . -}}
+{{- printf "llm.%s" (include "neuraltrust-platform.domain" .) -}}
 {{- end -}}
 {{- end }}
 
@@ -144,9 +141,9 @@ Effective MCP_BASE_DOMAIN.
 {{/*
 Effective additionalHosts for a proxy/MCP plane.
 Args: dict "ctx" . "plane" "dataPlane"|"mcp"
-  subdomain mode + empty additionalHosts → ["*.<effective-base-domain>"]
   non-empty additionalHosts → authoritative (no auto-merge)
-  header mode → empty / explicit list only
+  empty + config.autoWildcardHosts (default true) → ["*.<effective-base-domain>"]
+  empty + autoWildcardHosts false → []
 */}}
 {{- define "agentgateway.ingress.effectiveAdditionalHosts" -}}
 {{- $ctx := .ctx -}}
@@ -160,9 +157,13 @@ Args: dict "ctx" . "plane" "dataPlane"|"mcp"
   {{- $planeCfg = default dict $ing.dataPlane -}}
 {{- end -}}
 {{- $explicit := default (list) $planeCfg.additionalHosts -}}
+{{- $auto := true -}}
+{{- if hasKey $cfg "autoWildcardHosts" -}}
+  {{- $auto = $cfg.autoWildcardHosts -}}
+{{- end -}}
 {{- if gt (len $explicit) 0 -}}
 {{- toYaml $explicit -}}
-{{- else if eq ($cfg.gatewayDiscoveryMode | default "header") "subdomain" -}}
+{{- else if $auto -}}
 {{- $base := "" -}}
 {{- if eq $plane "mcp" -}}
   {{- $base = include "agentgateway.config.effectiveMcpBaseDomain" $ctx -}}

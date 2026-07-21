@@ -13,7 +13,9 @@ data:
   config.yaml: |
     extensions:
       health_check:
-        endpoint: 0.0.0.0:13133
+        # Default global.clickstack.egress.listenHost "::" → [::]:port (dual-stack
+        # on Linux). 0.0.0.0 is IPv4-only and breaks probes/Service on IpFamily=ipv6.
+        endpoint: {{ include "neuraltrust-platform.clickstackEgress.listenEndpoint" (dict "ctx" . "port" 13133) | quote }}
       oauth2client:
         client_id: {{ include "neuraltrust-platform.clickstackEgress.clientId" . | quote }}
         client_secret: {{ include "neuraltrust-platform.clickstackEgress.clientSecret" . | quote }}
@@ -26,9 +28,9 @@ data:
       otlp:
         protocols:
           grpc:
-            endpoint: 0.0.0.0:4317
+            endpoint: {{ include "neuraltrust-platform.clickstackEgress.listenEndpoint" (dict "ctx" . "port" 4317) | quote }}
           http:
-            endpoint: 0.0.0.0:4318
+            endpoint: {{ include "neuraltrust-platform.clickstackEgress.listenEndpoint" (dict "ctx" . "port" 4318) | quote }}
 
     processors:
       memory_limiter:
