@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.2.1] — 2026-07-21
+
 ### Breaking
 
 - **Remove AgentGateway `GATEWAY_DISCOVERY_MODE` / `config.gatewayDiscoveryMode`.**
