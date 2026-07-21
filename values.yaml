@@ -45,7 +45,7 @@ global:
       nameOverride: "" # ClusterIP Service name (default clickstack-egress-collector)
       clientId: "otlp-egress" # non-secret oauth2client placeholder
       clientSecret: "unused" # non-secret oauth2client placeholder (broker ignores it)
-      endpoint: "" # SaaS OTLP/HTTP base; default https://clickstack-collector.neuraltrust.ai
+      endpoint: "" # SaaS OTLP/HTTP base; default https://telemetry.neuraltrust.ai
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/opentelemetry-collector-contrib
         tag: "0.156.0"
@@ -478,7 +478,7 @@ control-plane-app:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.101.0"
+          tag: "v1.101.6"
           pullPolicy: "Always"
         config:
           nodeEnv: production
@@ -547,7 +547,7 @@ control-plane-app:
 # AgentGateway (v2 TrustGate replacement): admin + proxy/mcp.
 agentgateway:
   image:
-    tag: "v0.15.0"
+    tag: "v0.15.1"
   database:
     sslMode: "prefer"
     iamAuth: false
@@ -557,7 +557,7 @@ agentgateway:
 # TrustGuard: control-plane + data-plane (/v1/evaluate).
 trustguard:
   image:
-    tag: "v0.18.0"
+    tag: "v0.18.2"
   database:
     sslMode: "prefer"
     iamAuth: false
@@ -598,7 +598,7 @@ dataagent:
 # `global.postgresql` block.
 datacore:
   image:
-    tag: "v0.13.0"
+    tag: "v0.13.1"
   database:
     host: ""
     port: 5432

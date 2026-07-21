@@ -4,6 +4,14 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Changed
+
+- **Bump registry images (latest from Artifact Registry).** control-plane-app
+  `v1.101.0 → v1.101.6`, agentgateway `v0.15.0 → v0.15.1`, trustguard
+  `v0.18.0 → v0.18.2`, datacore `v0.13.0 → v0.13.1`. Matching subchart
+  `values.yaml` / `appVersion` / Chart dependency patch bumps. Other bumpable
+  images were already at the latest AR tags.
+
 ## [v2.1.1] — 2026-07-21
 
 ### Breaking
