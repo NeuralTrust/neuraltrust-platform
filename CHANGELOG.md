@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.1.1] — 2026-07-21
+
 ### Breaking
 
 - **Hybrid product OTLP is mandatory with no opt-out.** Remove
