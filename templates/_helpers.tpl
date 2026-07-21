@@ -1125,7 +1125,7 @@ Config-sync shared token / LKG cache key.
 ClickStack defaults + OTLP env helpers.
 */}}
 {{- define "neuraltrust-platform.clickstack.defaultEndpoint" -}}
-https://clickstack-collector.neuraltrust.ai/v1/logs
+https://telemetry.neuraltrust.ai/v1/logs
 {{- end }}
 {{- define "neuraltrust-platform.clickstack.defaultProtocol" -}}
 http/protobuf
@@ -1223,13 +1223,15 @@ is the DataAgent loopback broker + enrolment on the DataAgent gRPC connection.
 
 {{/*
 SaaS OTLP/HTTP base URL for the egress collector exporter (no /v1/logs suffix).
-Defaults to the public ingest host; override via global.clickstack.egress.endpoint
-or the legacy global.clickstack.endpoint (strip path if present).
+Defaults to https://telemetry.neuraltrust.ai; override via
+global.clickstack.egress.endpoint or the legacy global.clickstack.endpoint
+(strip path if present). Legacy host clickstack-collector.neuraltrust.ai remains
+accepted on the SaaS edge during cutover.
 */}}
 {{- define "neuraltrust-platform.clickstackEgress.saasEndpoint" -}}
 {{- $clickstack := default dict (default dict .Values.global).clickstack -}}
 {{- $cfg := default dict $clickstack.egress -}}
-{{- $raw := $cfg.endpoint | default ($clickstack.endpoint | default "https://clickstack-collector.neuraltrust.ai") -}}
+{{- $raw := $cfg.endpoint | default ($clickstack.endpoint | default "https://telemetry.neuraltrust.ai") -}}
 {{- trimSuffix "/v1/logs" (trimSuffix "/" $raw) -}}
 {{- end }}
 

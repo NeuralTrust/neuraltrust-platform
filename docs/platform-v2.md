@@ -47,7 +47,7 @@ is initiated by the customer cluster over TLS:
 3. Enrolled DataAgent opens gRPC to `databridge.neuraltrust.ai:443`.
 4. AgentGateway and TrustGuard send product events as plain OTLP to the local
    `clickstack-egress-collector`, which forwards to
-   `https://clickstack-collector.neuraltrust.ai` after exchanging the DataAgent
+   `https://telemetry.neuraltrust.ai` after exchanging the DataAgent
    enrolment JWT for a short-lived OTLP access token.
 
 There is no in-cluster `clickstack-otel-collector` product collector in hybrid

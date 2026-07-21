@@ -34,21 +34,21 @@ dependencies:
       - v2
   # Control-plane App/UI — v2 external only (SaaS-side in hybrid).
   - name: control-plane-app
-    version: 0.1.8
+    version: 0.1.9
     repository: file://./charts/control-plane-app
     tags:
       - neuraltrust
       - v2
   # AgentGateway proxy/MCP admin + data plane.
   - name: agentgateway
-    version: 0.1.22
+    version: 0.1.23
     repository: file://./charts/agentgateway
     tags:
       - neuraltrust
       - v2
   # TrustGuard control + data plane.
   - name: trustguard
-    version: 0.1.22
+    version: 0.1.23
     repository: file://./charts/trustguard
     tags:
       - neuraltrust
@@ -69,7 +69,7 @@ dependencies:
       - v2
   # DataCore — v2 external only.
   - name: datacore
-    version: 0.1.10
+    version: 0.1.11
     repository: file://./charts/datacore
     tags:
       - neuraltrust
