@@ -8,53 +8,36 @@ no Kubernetes resource when validation succeeds.
   {{- fail (printf "global.deploymentMode must be one of: hybrid, external (got %q)" $mode) -}}
 {{- end -}}
 
+{{- $products := default dict $global.products -}}
+{{- range $name, $enabled := $products -}}
+  {{- if not (has $name (list "trustgate" "trustguard" "dataPlane")) -}}
+    {{- fail (printf "global.products supports only trustgate, trustguard, and dataPlane (got %q)" $name) -}}
+  {{- end -}}
+  {{- if not (kindIs "bool" $enabled) -}}
+    {{- fail (printf "global.products.%s must be a boolean" $name) -}}
+  {{- end -}}
+{{- end -}}
+{{- if eq $mode "hybrid" -}}
+  {{- $anyProduct := or
+    (eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustgate")) "true")
+    (eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustguard")) "true")
+    (eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "dataPlane")) "true")
+  -}}
+  {{- if not $anyProduct -}}
+    {{- fail "v2 hybrid requires at least one product: set global.products.trustgate, global.products.trustguard, and/or global.products.dataPlane to true. External mode ignores these flags and always deploys the full stack." -}}
+  {{- end -}}
+{{- end -}}
+
 {{- $trustlens := default dict .Values.trustlens -}}
 {{- $trustlensImage := default dict $trustlens.image -}}
 {{- if and ($trustlens.enabled | default false) (not ($trustlensImage.tag | default "")) -}}
   {{- fail "trustlens.image.tag is required when trustlens.enabled=true; no default TrustLens release image is published yet." -}}
 {{- end -}}
 
-{{- /* DataAgent hybrid guard rails. */ -}}
-{{- $dataagent := default dict .Values.dataagent -}}
-{{- if or (hasKey $dataagent "enrolmentToken") (hasKey $dataagent "enrolmentTokenExistingSecret") -}}
-  {{- fail "dataagent.enrolmentToken / dataagent.enrolmentTokenExistingSecret were renamed to dataagent.enrolment.token / dataagent.enrolment.existingSecret (same ritual as configSync.token / existingSecret)." -}}
-{{- end -}}
-{{- $enrolment := default dict $dataagent.enrolment -}}
-{{- $existingTokenRef := default dict $enrolment.existingSecret -}}
-{{- $enrolmentToken := $enrolment.token | default "" -}}
-{{- $existingDataRef := default dict $dataagent.existingSecret -}}
-{{- $managedDataagentSecret := lookup "v1" "Secret" .Release.Namespace "dataagent-secrets" -}}
-{{- $managedDataagentData := dict -}}
-{{- if and $managedDataagentSecret (kindIs "map" $managedDataagentSecret) $managedDataagentSecret.data -}}
-  {{- $managedDataagentData = $managedDataagentSecret.data -}}
-{{- end -}}
-{{- $hasManagedToken := and (hasKey $managedDataagentData "ENROLMENT_TOKEN") (ne (index $managedDataagentData "ENROLMENT_TOKEN") "") -}}
-{{- $hasManagedDatabase := and (hasKey $managedDataagentData "DATABASE_URL") (ne (index $managedDataagentData "DATABASE_URL") "") -}}
 {{- $autoGenerate := true -}}
 {{- if hasKey $global "autoGenerateSecrets" -}}{{- $autoGenerate = $global.autoGenerateSecrets -}}{{- end -}}
 {{- $preserveExisting := false -}}
 {{- if hasKey $global "preserveExistingSecrets" -}}{{- $preserveExisting = $global.preserveExistingSecrets -}}{{- end -}}
-{{- if and
-  (eq $mode "hybrid")
-  $dataagent.tenantId
-  $enrolmentToken
-  (not ($existingTokenRef.name | default ""))
-  (not $hasManagedToken)
-  (or (not $autoGenerate) $preserveExisting ($existingDataRef.name | default ""))
--}}
-  {{- fail "dataagent.enrolment.token cannot be materialized with externally managed database secrets. Set dataagent.enrolment.existingSecret.name/key." -}}
-{{- end -}}
-{{- $dataagentTokenConfigured := or $enrolmentToken ($existingTokenRef.name | default "") $hasManagedToken -}}
-{{- if and
-  (eq $mode "hybrid")
-  $dataagent.tenantId
-  $dataagentTokenConfigured
-  (or (not $autoGenerate) $preserveExisting)
-  (not ($existingDataRef.name | default ""))
-  (not $hasManagedDatabase)
--}}
-  {{- fail "DataAgent requires dataagent.existingSecret.name containing DATABASE_URL and DB_PASSWORD when chart secret generation is disabled." -}}
-{{- end -}}
 {{- if and (eq $mode "external") $preserveExisting -}}
   {{- $existingControlPlane := lookup "v1" "Secret" .Release.Namespace "control-plane-secrets" -}}
   {{- if and $existingControlPlane (kindIs "map" $existingControlPlane) $existingControlPlane.data -}}
@@ -64,11 +47,12 @@ no Kubernetes resource when validation succeeds.
   {{- end -}}
 {{- end -}}
 
-{{- /* Config-sync is fail-closed: require a SaaS-issued token source. */ -}}
+{{- /* Config-sync is fail-closed for each enabled product. */ -}}
 {{- range $component := list
-  (dict "name" "agentgateway" "secretName" "agentgateway-secrets" "values" (default dict $.Values.agentgateway))
-  (dict "name" "trustguard" "secretName" "trustguard-secrets" "values" (default dict $.Values.trustguard))
+  (dict "name" "agentgateway" "secretName" "agentgateway-secrets" "values" (default dict $.Values.agentgateway) "product" "trustgate")
+  (dict "name" "trustguard" "secretName" "trustguard-secrets" "values" (default dict $.Values.trustguard) "product" "trustguard")
 -}}
+  {{- if eq (include "neuraltrust-platform.product.enabled" (dict "ctx" $ "product" $component.product)) "true" -}}
   {{- $configSync := default dict $component.values.configSync -}}
   {{- $existingRef := default dict $configSync.existingSecret -}}
   {{- $managedSecret := lookup "v1" "Secret" $.Release.Namespace $component.secretName -}}
@@ -88,11 +72,11 @@ no Kubernetes resource when validation succeeds.
   -}}
     {{- fail (printf "%s config-sync requires CONFIG_SYNC_TOKEN and CONFIG_SYNC_LKG_KEY: set %s.configSync.existingSecret.name, or use %s.configSync.token only when chart Secret generation is enabled. Hybrid enables config-sync by default; set %s.configSync.enabled=false only for Postgres-managed configuration." $component.name $component.name $component.name $component.name) -}}
   {{- end -}}
+  {{- end -}}
 {{- end -}}
 
-{{- /* Hybrid product OTLP is mandatory: local egress + DataAgent enrolment.
-     EXTERNAL keeps telemetry in-cluster (no SaaS hop). Legacy opt-out keys
-     are rejected so operators move air-gap installs to deploymentMode=external. */ -}}
+{{- /* Hybrid product OTLP is mandatory when TrustGate and/or TrustGuard are
+     enabled. data-plane-only (red-teaming) hybrid skips DataAgent. */ -}}
 {{- $clickstack := default dict $global.clickstack -}}
 {{- $egress := default dict $clickstack.egress -}}
 {{- if eq $mode "hybrid" -}}
@@ -102,8 +86,15 @@ no Kubernetes resource when validation succeeds.
   {{- if and (hasKey $egress "enabled") (eq $egress.enabled false) -}}
     {{- fail "global.clickstack.egress.enabled is no longer supported: hybrid product OTLP always uses the DataAgent-co-located egress collector. Use global.deploymentMode=external for air-gapped / local-only product telemetry." -}}
   {{- end -}}
-  {{- if ne (include "neuraltrust-platform.dataagentEnabled" .) "true" -}}
-    {{- fail "v2 hybrid requires an enabled DataAgent (tenantId + enrolment.token or enrolment.existingSecret.name) so the OTLP egress sidecar can use the loopback OAuth broker. Use global.deploymentMode=external for air-gapped / local-only product telemetry." -}}
+  {{- if eq (include "neuraltrust-platform.dataagent.required" .) "true" -}}
+    {{- range $product := list "trustgate" "trustguard" -}}
+      {{- if eq (include "neuraltrust-platform.product.enabled" (dict "ctx" $ "product" $product)) "true" -}}
+        {{- if ne (include "neuraltrust-platform.dataagent.instanceEnabled" (dict "ctx" $ "product" $product)) "true" -}}
+          {{- $valuesRoot := include "neuraltrust-platform.product.valuesRoot" (dict "product" $product) -}}
+          {{- fail (printf "v2 hybrid with global.products.%s=true requires %s.dataagent (enrolment.token or enrolment.existingSecret.name) so the OTLP egress sidecar can use the loopback OAuth broker. Use global.deploymentMode=external for air-gapped / local-only product telemetry." $product $valuesRoot) -}}
+        {{- end -}}
+      {{- end -}}
+    {{- end -}}
   {{- end -}}
 {{- end -}}
 
@@ -115,10 +106,11 @@ no Kubernetes resource when validation succeeds.
 {{- if hasKey $dpApi "enabled" -}}{{- $dpApiEnabled = $dpApi.enabled -}}{{- end -}}
 {{- $dpApiDatabase := default dict $dpApi.database -}}
 {{- $dpBackend := $dpApiDatabase.backend | default "" | toString | lower -}}
-{{- if and $dpBackend (not (has $dpBackend (list "postgres" "postgresql" "clickhouse" "auto"))) -}}
+{{- $dataPlaneEnabled := eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "dataPlane")) "true" -}}
+{{- if and $dataPlaneEnabled $dpBackend (not (has $dpBackend (list "postgres" "postgresql" "clickhouse" "auto"))) -}}
   {{- fail (printf "data-plane-api.dataPlane.components.api.database.backend must be one of: postgres, clickhouse, auto (got %q)" $dpBackend) -}}
 {{- end -}}
-{{- if and (eq $mode "hybrid") $dpApiEnabled (eq $dpBackend "clickhouse") -}}
+{{- if and $dataPlaneEnabled (eq $mode "hybrid") $dpApiEnabled (eq $dpBackend "clickhouse") -}}
   {{- $dpCh := default dict $dpComponents.clickhouse -}}
   {{- $dpChHost := $dpCh.host | default "clickhouse" -}}
   {{- if not (contains "." $dpChHost) -}}

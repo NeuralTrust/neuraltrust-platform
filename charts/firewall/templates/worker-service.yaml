@@ -1,4 +1,4 @@
-{{- if .Values.firewall.enabled }}
+{{- if eq (include "firewall.enabled" .) "true" }}
 {{- range $workerName, $workerCfg := .Values.firewall.workers }}
 {{- if $workerCfg.enabled }}
 ---

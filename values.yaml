@@ -19,6 +19,18 @@ global:
   #                DataCore over local ClickHouse). No SaaS dependency;
   #                DataAgent is not deployed.
   deploymentMode: "hybrid"
+  # External-only bootstrap admin for control-plane-app. Ignored in hybrid
+  # (app does not render). Both must be non-empty to enable the feature.
+  superadmin:
+    email: ""
+    password: ""
+  # Hybrid product selection (positive opt-in). Defaults are all false so
+  # overlays only declare what they want. External mode ignores these flags
+  # and always deploys the full product stack. Firewall follows TrustGuard.
+  products:
+    trustgate: false
+    trustguard: false
+    dataPlane: false
   # v2 knobs: shared client_credentials pair AgentGateway presents to
   # TrustGuard. Both sides read the same Secret so id/secret stay in sync.
   v2:
@@ -31,7 +43,8 @@ global:
   # (clickstack-egress-collector) on the DataAgent pod. An OTel collector
   # sidecar exchanges via DataAgent's loopback OAuth broker (enrolment stays
   # on DataAgent only) and forwards to SaaS. There is no opt-out and no
-  # direct SaaS authToken path. Requires dataagent.tenantId + enrolment.
+  # direct SaaS authToken path. Requires dataagent enrolment (JWT carries
+  # tenant_id / instance_id).
   # Air-gapped / local-only product telemetry → use deploymentMode=external.
   #
   # EXTERNAL: this block is ignored. Product telemetry stays in-cluster
@@ -485,7 +498,7 @@ control-plane-app:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.102.1"
+          tag: "v1.105.0"
           pullPolicy: "Always"
         config:
           nodeEnv: production
@@ -551,29 +564,49 @@ control-plane-app:
 # Platform v2 in-cluster services.
 # =============================================================================
 
-# AgentGateway (v2 TrustGate replacement): admin + proxy/mcp.
+# TrustGate (commercial name for AgentGateway): admin + proxy/MCP. Image repo
+# stays agentgateway for now; K8s names stay agentgateway-*.
 agentgateway:
   image:
-    tag: "v0.17.0"
+    tag: "v0.18.1"
   database:
     sslMode: "prefer"
     iamAuth: false
   redis:
     host: "redis"
     iamAuth: false
+  trustguard:
+    # Empty ⇒ stable in-cluster TrustGuard Service when
+    # global.products.trustguard=true. Omitted entirely when Guard is off.
+    baseURL: ""
+  # Per-product DataAgent (hybrid). Nested so product overlays mix via -f.
+  # Identity (tenant_id / instance_id) comes from the enrolment JWT only.
+  dataagent:
+    enrolment:
+      token: ""
+      existingSecret:
+        name: ""
+        key: "ENROLMENT_TOKEN"
+    existingSecret:
+      name: ""
 # TrustGuard: control-plane + data-plane (/v1/evaluate).
 trustguard:
   image:
-    tag: "v0.18.3"
+    tag: "v0.19.1"
   database:
     sslMode: "prefer"
     iamAuth: false
   redis:
     host: "redis"
     iamAuth: false
-  # Keep in sync with firewall.enabled (subchart cannot see sibling values).
-  firewall:
-    enabled: true
+  dataagent:
+    enrolment:
+      token: ""
+      existingSecret:
+        name: ""
+        key: "ENROLMENT_TOKEN"
+    existingSecret:
+      name: ""
 # TrustLens (opt-in, WIP).
 trustlens:
   enabled: false
@@ -582,24 +615,16 @@ trustlens:
   database:
     host: "control-plane-postgresql"
     sslMode: "prefer"
-# DataAgent (hybrid-only outbound bridge to SaaS DataBridge).
+# Shared DataAgent defaults. Per-product enrolment lives only under
+# agentgateway.dataagent / trustguard.dataagent.
 dataagent:
   image:
     tag: "v0.4.0"
   databridge:
     addr: "databridge.neuraltrust.ai:443"
     serverName: "databridge.neuraltrust.ai"
-  tenantId: ""
   database:
     sslMode: "prefer"
-  existingSecret:
-    name: ""
-  # Same ritual as configSync: preferred existingSecret; inline token for local/dev.
-  enrolment:
-    token: ""
-    existingSecret:
-      name: ""
-      key: "ENROLMENT_TOKEN"
 # DataCore (v2 external only): residency API over local ClickHouse + Postgres
 # (deployment metadata). Own `datacore` database/role — not the hybrid shared
 # `global.postgresql` block.
@@ -793,24 +818,18 @@ data-plane-api:
           maxConcurrentJobs: 10
           waitTimeoutSeconds: 1800
 # =============================================================================
-# Firewall (optional; default on): CPU workers.
-# To disable Firewall completely, set all three gates together:
-#   firewall.enabled: false
-#   firewall.firewall.enabled: false
-#   trustguard.firewall.enabled: false
-# (Chart dependency, Firewall workloads, and TrustGuard client wiring.)
+# Firewall: part of TrustGuard. In hybrid, global.products.trustguard gates
+# workloads and TrustGuard client wiring; external always includes Firewall.
 # =============================================================================
 firewall:
-  enabled: true
   securityHardening: true
   firewall:
-    enabled: true
     imagePullSecrets: "gcr-secret"
     gateway:
       replicas: 2
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-        tag: "v2.14.0"
+        tag: "v2.15.0"
         pullPolicy: IfNotPresent
       resources:
         requests:
@@ -836,7 +855,8 @@ firewall:
       deploymentStrategy: Recreate
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-        tag: "v2.14.0"
+        # Keep in lockstep with gateway.image.tag.
+        tag: "v2.15.0"
         pullPolicy: IfNotPresent
       replicas: 1
       resources:
@@ -866,9 +886,11 @@ firewall:
         module: src.workers.toxicity.app:app
         extraEnv: []
         extraEnvFrom: []
-      toolguard:
+      # Replaces the retired toolguard worker. Gateway /v1/toolguard stays as a
+      # deprecated compatibility shim that forwards to this IPI worker.
+      indirect-prompt-injections:
         enabled: true
-        module: src.workers.toolguard.app:app
+        module: src.workers.indirect_prompt_injections.app:app
         extraEnv: []
         extraEnvFrom: []
       prompt-jailbreak:
@@ -918,8 +940,6 @@ firewall:
       runAsUser: 0
     healthCheckPolicy:
       enabled: false
-    image:
-      tag: v2.7.0
 # =============================================================================
 # Watchdog (optional): self-monitoring + self-healing.
 # =============================================================================

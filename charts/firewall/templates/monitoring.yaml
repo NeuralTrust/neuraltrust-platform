@@ -1,7 +1,8 @@
+{{- if eq (include "firewall.enabled" .) "true" }}
 {{- $g := default dict .Values.global -}}
 {{- $m := default dict $g.monitoring -}}
 {{- $cap := .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" -}}
-{{- if and $m.enabled $cap (and .Values.firewall .Values.firewall.enabled) -}}
+{{- if and $m.enabled $cap -}}
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -45,4 +46,5 @@ spec:
             description: "The {{ $workerName }} worker pool has no ready replicas. The gateway will fall back per-check policy (typically allow-with-warning)."
         {{- end }}
         {{- end }}
+{{- end }}
 {{- end }}

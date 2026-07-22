@@ -2,7 +2,7 @@ apiVersion: v2
 name: neuraltrust-platform
 description: NeuralTrust platform Helm chart (v2 hybrid + external)
 type: application
-version: 2.2.1
+version: 2.3.0
 appVersion: "2.0.0"
 icon: https://neuraltrust.ai/favicon.ico
 # v1 is maintained only on the v1.14.x release line. Do NOT install this chart
@@ -15,11 +15,12 @@ dependencies:
     condition: infrastructure.clickhouse.deploy
     tags:
       - infrastructure
-  # Data-plane API shim (kept until TrustLens supersedes it).
+  # Data-plane API shim (kept until TrustLens supersedes it). Loaded
+  # unconditionally; templates gate on global.products.dataPlane in hybrid
+  # and always render in external.
   - name: data-plane-api
-    version: 1.4.3
+    version: 1.4.4
     repository: file://./charts/data-plane-api
-    condition: data-plane-api.dataPlane.enabled
     tags:
       - neuraltrust
       - v2
@@ -34,21 +35,25 @@ dependencies:
       - v2
   # Control-plane App/UI — v2 external only (SaaS-side in hybrid).
   - name: control-plane-app
-    version: 0.1.10
+    version: 0.1.13
     repository: file://./charts/control-plane-app
     tags:
       - neuraltrust
       - v2
-  # AgentGateway proxy/MCP admin + data plane.
+  # TrustGate product (commercial name) — AgentGateway proxy/MCP admin +
+  # data plane. Values key is `agentgateway:`; K8s resource names stay
+  # agentgateway-*. Loaded unconditionally; templates gate on
+  # global.products.trustgate in hybrid and always render in external.
   - name: agentgateway
-    version: 0.1.26
+    version: 0.1.29
     repository: file://./charts/agentgateway
     tags:
       - neuraltrust
       - v2
-  # TrustGuard control + data plane.
+  # TrustGuard control + data plane. Templates gate on
+  # global.products.trustguard in hybrid; always on in external.
   - name: trustguard
-    version: 0.1.24
+    version: 0.1.27
     repository: file://./charts/trustguard
     tags:
       - neuraltrust
@@ -60,9 +65,10 @@ dependencies:
     tags:
       - neuraltrust
       - v2
-  # DataAgent — enrolled hybrid only.
+  # DataAgent library — hybrid dual instances rendered by umbrella templates
+  # (agentgateway.dataagent / trustguard.dataagent).
   - name: dataagent
-    version: 0.1.7
+    version: 0.1.11
     repository: file://./charts/dataagent
     tags:
       - neuraltrust
@@ -88,11 +94,11 @@ dependencies:
     tags:
       - neuraltrust
       - v2
-  # Firewall API — optional (default on).
+  # Firewall is part of TrustGuard. Templates follow the TrustGuard product
+  # gate in hybrid; always on in external.
   - name: firewall
-    version: 2.1.0
+    version: 2.1.4
     repository: file://./charts/firewall
-    condition: firewall.enabled
     tags:
       - neuraltrust
   # Watchdog — optional self-monitoring/self-healing.

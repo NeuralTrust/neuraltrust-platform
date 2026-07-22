@@ -1,11 +1,10 @@
 # Platform v2 hybrid with GPU Firewall workers.
-# Layer over values-required.yaml (DataAgent enrolment + config-sync Secrets)
-# and replace the registry and scheduling labels.
+# Layer over a TrustGuard-enabled base (values-required.yaml or
+# values-trustguard.yaml.example) and replace the registry and scheduling
+# labels. Firewall follows TrustGuard automatically.
 
 firewall:
-  enabled: true
   firewall:
-    enabled: true
     gateway:
       image:
         repository: "<registry>/firewall-cpu"
@@ -31,7 +30,3 @@ firewall:
     config:
       cudaMpsActiveThreadPercentage: "25"
       cudaMpsPinnedDeviceMemLimit: "6000M"
-
-trustguard:
-  firewall:
-    enabled: true

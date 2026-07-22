@@ -8,22 +8,29 @@ Deploy NeuralTrust on Kubernetes with one Helm umbrella chart. This chart
 Hybrid keeps control-plane services in NeuralTrust SaaS and runs the data path
 in your cluster:
 
-- AgentGateway proxy and MCP runtimes
+- TrustGate proxy and MCP runtimes (product flag `global.products.trustgate`; values key `agentgateway:`; K8s names stay `agentgateway-*`)
 - TrustGuard runtime
 - the temporary data-plane API read shim (PostgreSQL-backed by default; no ClickHouse required)
 - PostgreSQL and Redis by default (no in-cluster ClickHouse in hybrid)
-- NeuralTrust Firewall when enabled
-- DataAgent only after the deployment is enrolled
+- NeuralTrust Firewall with TrustGuard
+- one DataAgent per enabled product (TrustGate / TrustGuard) after enrolment
 
-Hybrid product OTLP is mandatory. AgentGateway and TrustGuard send plain OTLP
-to a local `clickstack-egress-collector` on the DataAgent pod; the sidecar
-exchanges the DataAgent enrolment JWT at DataCore for a short-lived OTLP
-access token and forwards to SaaS. There is no direct SaaS ClickStack bearer
-path and no hybrid opt-out (`global.clickstack.enabled` /
-`global.clickstack.egress.enabled` are rejected). Air-gapped or local-only
-product telemetry requires `global.deploymentMode: external`. Hybrid therefore
-requires DataAgent enrolment (`dataagent.enrolment.token` or
-`enrolment.existingSecret`).
+In hybrid mode, choose products with positive `global.products` flags
+(defaults are all off; at least one must be `true`). Overlay any combination
+of [`values-trustgate.yaml.example`](./values-trustgate.yaml.example),
+[`values-trustguard.yaml.example`](./values-trustguard.yaml.example), and
+[`values-red-teaming.yaml.example`](./values-red-teaming.yaml.example) —
+no all-off baseline file. External mode ignores these flags and always
+deploys the full product stack.
+
+Hybrid product OTLP is mandatory when TrustGate and/or TrustGuard is enabled.
+Those apps send plain OTLP to a local `clickstack-egress-collector` on the
+primary DataAgent pod; the sidecar exchanges the DataAgent enrolment JWT at
+DataCore for a short-lived OTLP access token and forwards to SaaS. There is no
+direct SaaS ClickStack bearer path and no hybrid opt-out
+(`global.clickstack.enabled` / `global.clickstack.egress.enabled` are rejected).
+Air-gapped or local-only product telemetry requires
+`global.deploymentMode: external`. data-plane-only hybrid skips DataAgent.
 
 Hybrid config-sync is on by default (mode-derived; `enabled: null` in
 subcharts). Overlays should set `existingSecret.name` only — do not restate
@@ -32,11 +39,12 @@ runtime configuration. Prefer Secrets that hold both `CONFIG_SYNC_TOKEN` and
 `CONFIG_SYNC_LKG_KEY`. See [`docs/platform-v2.md`](./docs/platform-v2.md) and
 [`values-v2-hybrid.yaml.example`](./values-v2-hybrid.yaml.example).
 
-DataAgent renders when `tenantId` and either `enrolment.token` or
-`enrolment.existingSecret.name` are set (required for hybrid OTLP egress
-and for DataBridge). Prefer the existing-Secret path so the token never enters
-Helm values. With a complete enrolment, it makes an outbound TLS connection to
-DataBridge; it exposes no operator-facing ingress.
+Each selected TrustGate/TrustGuard DataAgent renders when its nested
+`dataagent` block has either `enrolment.token` or
+`enrolment.existingSecret.name` (required for hybrid OTLP egress and
+DataBridge). The enrolment JWT carries `tenant_id` and `instance_id`; do not
+duplicate them in values. Prefer the existing-Secret path so the token never
+enters Helm values.
 
 In external deployments, AlertEngine provides the supported detection, SIEM,
 and integration path.
@@ -66,20 +74,30 @@ helm upgrade --install neuraltrust-platform \
 ```
 
 `values-required.yaml` is the minimal hybrid starting point. Set the cloud
-provider, domain, and DataAgent enrolment (powers DataBridge and ClickStack
-egress):
+provider, domain, and per-product DataAgent enrolment (powers DataBridge and
+ClickStack egress):
 
 ```yaml
 global:
   deploymentMode: "hybrid"
   platform: "kubernetes"
   domain: "platform.example.com"
+  products:
+    trustgate: true
+    trustguard: true
+    dataPlane: true
 
-dataagent:
-  tenantId: "<tenant-id>"
-  enrolment:
-    existingSecret:
-      name: "dataagent-enrolment"
+agentgateway:
+  dataagent:
+    enrolment:
+      existingSecret:
+        name: "dataagent-enrolment-trustgate"
+
+trustguard:
+  dataagent:
+    enrolment:
+      existingSecret:
+        name: "dataagent-enrolment-trustguard"
 ```
 
 Secrets are generated on first install and reused on upgrades when
@@ -90,8 +108,8 @@ reference pre-created Kubernetes Secrets; see [SECRETS.md](./SECRETS.md).
 
 | Mode | SaaS control plane | Workloads in cluster | Analytics path |
 |---|---:|---|---|
-| `hybrid` (default) | Yes | AgentGateway data plane, TrustGuard data plane, data-plane API shim (PostgreSQL), enrolled DataAgent | Analytics in SaaS via mandatory enrolment-backed ClickStack OTLP; DataAgent also bridges entitled reads. No in-cluster ClickHouse |
-| `external` | No | Control and data planes, product API/app, DataCore, AlertEngine | ClickStack OTel Collector writes to ClickHouse; data-plane API shim reads ClickHouse |
+| `hybrid` (default) | Yes | TrustGate / TrustGuard / data-plane-api via positive `global.products` (at least one); Firewall follows TrustGuard; per-product DataAgent when TrustGate/TrustGuard is on | Analytics in SaaS via mandatory enrolment-backed ClickStack OTLP when products are on; DataAgent also bridges entitled reads. No in-cluster ClickHouse |
+| `external` | No | Full product stack (product flags ignored) plus control planes, product API/app, DataCore, AlertEngine | ClickStack OTel Collector writes to ClickHouse; data-plane API shim reads ClickHouse |
 
 ## Datastores
 

@@ -28,18 +28,58 @@ blue()  { printf '\033[34m%s\033[0m\n' "$*"; }
 helm dependency update "$CHART_DIR" >/dev/null
 
 # v2 hybrid always exports product OTLP via the DataAgent egress sidecar and
-# enables config-sync by default. Tests supply enrolment + config-sync Secret
-# refs. External mode ignores DataAgent (does not render).
+# enables config-sync by default. Tests supply per-product enrolment +
+# config-sync Secret refs. External mode ignores DataAgent (does not render).
 CLICKSTACK_DEFAULT_ARGS=(
-  --set dataagent.tenantId=test-tenant
-  --set dataagent.enrolment.existingSecret.name=dataagent-enrolment
+  --set agentgateway.dataagent.enrolment.existingSecret.name=dataagent-enrolment-trustgate
+  --set trustguard.dataagent.enrolment.existingSecret.name=dataagent-enrolment-trustguard
 )
+
+validate_yaml() {
+  local file="$1"
+  ruby -ryaml -e 'YAML.load_stream(File.read(ARGV.fetch(0)))' "$file"
+}
+
+helm lint "$CHART_DIR" -f "$CHART_DIR/values-required.yaml" \
+  "${CLICKSTACK_DEFAULT_ARGS[@]}" >/dev/null
+green "ok  - helm lint passes"
 
 render_default() {
   local out="$1"
   shift
   helm template test "$CHART_DIR" --namespace default -f "$CHART_DIR/values-required.yaml" \
     "${CLICKSTACK_DEFAULT_ARGS[@]}" "$@" > "$out"
+  validate_yaml "$out"
+}
+
+# Hybrid product slices start from values-required with every product off
+# (values file, so later -f product examples can turn flags back on), then
+# apply positive-only product examples. --set must not clear products: Helm
+# gives --set higher precedence than -f.
+PRODUCTS_OFF_FILE="$TMP/products-off.yaml"
+cat > "$PRODUCTS_OFF_FILE" <<'EOF'
+global:
+  products:
+    trustgate: false
+    trustguard: false
+    dataPlane: false
+EOF
+
+HYBRID_NO_PRODUCTS=(
+  --set global.products.trustgate=false
+  --set global.products.trustguard=false
+  --set global.products.dataPlane=false
+)
+
+render_product_slice() {
+  local out="$1"
+  shift
+  helm template test "$CHART_DIR" --namespace default \
+    -f "$CHART_DIR/values-required.yaml" \
+    -f "$PRODUCTS_OFF_FILE" \
+    "${CLICKSTACK_DEFAULT_ARGS[@]}" \
+    "$@" > "$out"
+  validate_yaml "$out"
 }
 
 assert_render_fails() {
@@ -111,15 +151,22 @@ assert_contains "$out1" 'name: postgresql-secrets' \
 assert_contains "$out1" 'name: redis-secrets' \
   "hybrid: redis-secrets rendered"
 assert_contains "$out1" 'name: agentgateway-proxy' \
-  "hybrid: agentgateway proxy renders"
+  "hybrid: trustgate (agentgateway) proxy renders"
 assert_contains "$out1" 'name: trustguard-data-plane' \
   "hybrid: trustguard data-plane renders"
+assert_contains "$out1" 'name: dataagent$' \
+  "hybrid: trustgate DataAgent preserves stable name"
+assert_contains "$out1" 'name: dataagent-trustguard' \
+  "hybrid: trustguard DataAgent renders"
 assert_contains "$out1" 'name: data-plane-api' \
   "hybrid: data-plane-api shim renders"
 assert_contains "$out1" 'name: clickstack-egress-collector' \
   "hybrid: local OTLP egress ClusterIP Service renders"
+# Exactly one egress Service metadata.name (ConfigMap uses -config suffix).
+assert_occurrences "$out1" '^  name: clickstack-egress-collector$' 1 \
+  "hybrid: single clickstack-egress-collector Service"
 assert_contains "$out1" 'name: clickstack-egress-collector'$'\n''        image:' \
-  "hybrid: OTLP egress sidecar on DataAgent renders"
+  "hybrid: OTLP egress sidecar on primary DataAgent renders"
 assert_contains "$out1" 'name: DATABASE_URL'$'\n''          valueFrom:'$'\n''            secretKeyRef:'$'\n''              name: "postgresql-secrets"'$'\n''              key: SENSIBLE_PG_DSN' \
   "hybrid: DataAgent DATABASE_URL overrides Prisma DSN with SENSIBLE_PG_DSN"
 assert_contains "$out1" 'name: OAUTH_BROKER_ADDR'$'\n''          value: "127.0.0.1:9465"' \
@@ -145,20 +192,28 @@ assert_not_contains "$out1" 'name: control-plane-api' \
   "hybrid: control-plane-api must not render (SaaS-side)"
 assert_not_contains "$out1" 'OTEL_EXPORTER_OTLP_HEADERS:' \
   "hybrid: apps do not carry SaaS Authorization headers"
+assert_not_contains "$out1" 'TENANT_ID:' \
+  "hybrid: DataAgent env omits TENANT_ID when identity comes from enrolment JWT"
+assert_not_contains "$out1" 'INSTANCE_ID:' \
+  "hybrid: DataAgent env never emits unused INSTANCE_ID"
 
 # ClickStack fail-closed without a fully enabled DataAgent (egress is a sidecar)
 blue "==> Scenario 1b: hybrid ClickStack without enrolment must fail (fail-closed)"
 assert_render_fails "hybrid without enrolment fails render" \
-  --set dataagent.enrolment.existingSecret.name=
-blue "==> Scenario 1b1: hybrid ClickStack without tenantId must fail (fail-closed)"
-assert_render_fails "hybrid without dataagent.tenantId fails render" \
-  --set dataagent.tenantId=
+  --set agentgateway.dataagent.enrolment.existingSecret.name= \
+  --set trustguard.dataagent.enrolment.existingSecret.name=
 
 blue "==> Scenario 1b2: legacy clickstack/egress opt-out keys must fail"
 assert_render_fails "legacy global.clickstack.enabled=false is rejected" \
   --set global.clickstack.enabled=false
 assert_render_fails "legacy global.clickstack.egress.enabled=false is rejected" \
   --set global.clickstack.egress.enabled=false
+
+blue "==> Scenario 1c: product selector rejects invalid keys and types"
+assert_render_fails "product selector values must be booleans" \
+  --set-string global.products.trustgate=false
+assert_render_fails "unknown product selector keys are rejected" \
+  --set global.products.unknown=true
 
 # Config-sync fail-closed (hybrid default-on) and writable LKG storage
 blue "==> Scenario 1d: config-sync token references and LKG storage"
@@ -168,13 +223,13 @@ assert_render_fails "hybrid config-sync without a SaaS token source fails render
 out1d="$TMP/scenario-hybrid-config-sync.yaml"
 render_default "$out1d"
 assert_contains "$out1d" 'name: "?agentgateway-config-sync"?' \
-  "config-sync: AgentGateway references its operator-owned token Secret"
+  "config-sync: TrustGate references its operator-owned token Secret"
 assert_contains "$out1d" 'name: "?trustguard-config-sync"?' \
   "config-sync: TrustGuard references its operator-owned token Secret"
 assert_contains "$out1d" 'key: "?CONFIG_SYNC_LKG_KEY"?' \
   "config-sync: existing Secret also supplies the LKG encryption key"
 assert_contains "$out1d" 'mountPath: /var/lib/trustgate' \
-  "config-sync: AgentGateway LKG path is writable"
+  "config-sync: TrustGate LKG path is writable"
 assert_contains "$out1d" 'mountPath: /var/lib/trustguard' \
   "config-sync: TrustGuard LKG path is writable"
 assert_contains "$out1d" 'name: CONFIG_SYNC_DATA_PLANE_ENABLED'$'\n''          value: "true"' \
@@ -183,7 +238,8 @@ assert_render_fails "inline config-sync token fails when auto-generation is disa
   --set global.autoGenerateSecrets=false \
   --set agentgateway.configSync.existingSecret.name= \
   --set agentgateway.configSync.token=inline-test-token \
-  --set dataagent.existingSecret.name=dataagent-secrets
+  --set agentgateway.dataagent.existingSecret.name=dataagent-trustgate-secrets \
+  --set trustguard.dataagent.existingSecret.name=dataagent-trustguard-secrets
 assert_render_fails "inline config-sync token fails when managed Secrets are preserved" \
   --set global.preserveExistingSecrets=true \
   --set agentgateway.configSync.existingSecret.name= \
@@ -198,6 +254,20 @@ assert_contains "$out1e" 'CONFIG_SYNC_TOKEN: "inline-test-token"' \
   "config-sync upgrade: managed Secret carries the inline token"
 assert_contains "$out1e" 'CONFIG_SYNC_LKG_KEY:' \
   "config-sync upgrade: managed Secret carries an LKG encryption key"
+
+blue "==> Scenario 1e: preserved shared PostgreSQL supports DataAgent"
+out1f="$TMP/scenario-preserved-shared-postgres.yaml"
+render_default "$out1f" \
+  --set global.preserveExistingSecrets=true \
+  --set global.postgresql.existingSecret.name=external-postgresql
+assert_contains "$out1f" 'name: dataagent$' \
+  "preserved Secrets: TrustGate DataAgent still renders"
+assert_contains "$out1f" 'name: dataagent-trustguard$' \
+  "preserved Secrets: TrustGuard DataAgent still renders"
+assert_contains "$out1f" 'name: "?external-postgresql"?' \
+  "preserved Secrets: DataAgents reference shared PostgreSQL Secret"
+assert_not_contains "$out1f" 'name: dataagent-secrets' \
+  "preserved Secrets: no unnecessary per-agent Secret reference"
 
 # ---------------------------------------------------------------------------
 # 2. Hybrid with external datastores (existing secrets)
@@ -224,18 +294,26 @@ assert_contains "$out2" 'cGcuaW50ZXJuYWwuZXhhbXBsZS5jb20=' \
 # ---------------------------------------------------------------------------
 blue "==> Scenario 2b: postgresql-secrets via autoGenerateSecrets=false fallback"
 out2b="$TMP/scenario-pg-secrets-fallback.yaml"
-# Hybrid still requires DataAgent enrolment + an existingSecret for DATABASE_URL
-# when chart Secret generation is off.
+# DataAgent reuses the fallback shared PostgreSQL Secret; no per-agent DB Secret.
 render_default "$out2b" \
   --set global.autoGenerateSecrets=false \
   --set global.preserveExistingSecrets=false \
-  --set dataagent.existingSecret.name=dataagent-secrets \
   --set global.postgresql.password=fallback-pg-secret
 
 assert_contains "$out2b" 'name: postgresql-secrets' \
   "autoGenerate=false: postgresql-secrets fallback renders"
 assert_contains "$out2b" 'ZmFsbGJhY2stcGctc2VjcmV0' \
   "autoGenerate=false: explicit password reaches postgresql-secrets"
+assert_contains "$out2b" 'SENSIBLE_PG_DSN:' \
+  "autoGenerate=false: shared fallback includes DataAgent-compatible DSN"
+assert_contains "$out2b" 'name: dataagent$' \
+  "autoGenerate=false: TrustGate DataAgent reuses shared fallback Secret"
+assert_contains "$out2b" 'name: dataagent-trustguard$' \
+  "autoGenerate=false: TrustGuard DataAgent reuses shared fallback Secret"
+assert_not_contains "$out2b" 'name: dataagent-secrets' \
+  "autoGenerate=false: no TrustGate per-agent DB Secret"
+assert_not_contains "$out2b" 'name: dataagent-trustguard-secrets' \
+  "autoGenerate=false: no TrustGuard per-agent DB Secret"
 
 # ---------------------------------------------------------------------------
 # 3. External mode — full on-prem
@@ -256,6 +334,10 @@ assert_contains "$out3" 'name: DEPLOYMENT_MODE' \
   "external: DEPLOYMENT_MODE is set on control-plane-app"
 assert_contains "$out3" 'name: DEPLOYMENT_MODE'$'\n''          value: "external"' \
   "external: DEPLOYMENT_MODE is always external"
+assert_not_contains "$out3" 'name: ONPREM_SUPERADMIN_EMAIL' \
+  "external: ONPREM_SUPERADMIN_EMAIL absent when global.superadmin unset"
+assert_not_contains "$out3" 'name: ONPREM_SUPERADMIN_PASSWORD' \
+  "external: ONPREM_SUPERADMIN_PASSWORD absent when global.superadmin unset"
 assert_contains "$out3" 'name: data-plane-api' \
   "external: data-plane-api still renders"
 assert_contains "$out3" 'name: agentgateway-admin' \
@@ -290,6 +372,17 @@ assert_contains "$out3" 'POSTGRES_USER: "datacore"' \
   "external: DataCore POSTGRES_USER defaults to datacore"
 assert_contains "$out3" 'POSTGRES_PASSWORD:' \
   "external: datacore-secrets carries POSTGRES_PASSWORD"
+
+blue "==> Scenario 3-superadmin: ONPREM_SUPERADMIN_* when global.superadmin set"
+out3sa="$TMP/scenario-external-superadmin.yaml"
+render_default "$out3sa" \
+  --set global.deploymentMode=external \
+  --set global.superadmin.email=admin@example.com \
+  --set global.superadmin.password=s3cret
+assert_contains "$out3sa" 'name: ONPREM_SUPERADMIN_EMAIL'$'\n''          value: "admin@example.com"' \
+  "external+superadmin: ONPREM_SUPERADMIN_EMAIL set on control-plane-app"
+assert_contains "$out3sa" 'name: ONPREM_SUPERADMIN_PASSWORD'$'\n''          value: "s3cret"' \
+  "external+superadmin: ONPREM_SUPERADMIN_PASSWORD set on control-plane-app"
 
 # External config-sync servers and clients must share each component's
 # operator-owned credentials.
@@ -360,13 +453,12 @@ blue "==> Scenario 4: unprefixed value roots (control-plane-api / control-plane-
 out4="$TMP/scenario-unprefixed-roots.yaml"
 render_default "$out4" \
   --set global.deploymentMode=external \
-  --set firewall.enabled=true \
   --set watchdog.enabled=true
 
 assert_contains "$out4" 'kind: Deployment' \
   "unprefixed roots: chart still renders"
 assert_contains "$out4" 'name: firewall' \
-  "firewall root: firewall Deployment renders when firewall.enabled=true"
+  "firewall: Deployment follows enabled TrustGuard"
 assert_contains "$out4" 'name: neuraltrust-watchdog' \
   "watchdog root: stable K8s name neuraltrust-watchdog preserved"
 
@@ -440,7 +532,7 @@ assert_contains "$out6wd" 'name: neuraltrust-watchdog' \
 # 7. Retired helpers / values must not appear in the values contract or rendered output
 # ---------------------------------------------------------------------------
 blue "==> Scenario 7: retired concepts must not surface in values contract"
-if grep -RqE '(platformVersion|confirmV2Migration|hybridRoleLayout|sharedWriter|initJob|neuraltrust-control-plane:|neuraltrust-data-plane:|neuraltrust-firewall:|neuraltrust-watchdog:|trustgate:|^kafka:|gatewayDiscoveryMode|GATEWAY_DISCOVERY_MODE)' \
+if grep -RqE '(platformVersion|confirmV2Migration|hybridRoleLayout|sharedWriter|initJob|neuraltrust-control-plane:|neuraltrust-data-plane:|neuraltrust-firewall:|neuraltrust-watchdog:|^kafka:|gatewayDiscoveryMode|GATEWAY_DISCOVERY_MODE|^trustgate:)' \
     values.yaml values-required.yaml charts/agentgateway/values.yaml; then
   red "FAIL: retired values keys still present in values.yaml / values-required.yaml / agentgateway values"
   exit 1
@@ -625,18 +717,45 @@ assert_not_contains "$out10" 'url: http://opentelemetry-collector.opentelemetry:
 assert_contains "$out10" 'enabled: false'$'\n''        id: clickhouse' \
   "watchdog: clickhouse check stays off in hybrid defaults"
 
-blue "==> Scenario 10b: firewall disable requires all three gates"
+blue "==> Scenario 10b: Firewall follows the TrustGuard product gate"
 out10b="$TMP/scenario-firewall-disabled.yaml"
-render_default "$out10b" \
-  --set firewall.enabled=false \
-  --set firewall.firewall.enabled=false \
-  --set trustguard.firewall.enabled=false
+render_default "$out10b" --set global.products.trustguard=false
 assert_not_contains "$out10b" 'name: firewall$' \
-  "firewall off: gateway Deployment/Service absent"
+  "trustguard off: Firewall gateway absent"
 assert_not_contains "$out10b" 'name: prompt-moderation-worker' \
-  "firewall off: workers absent"
+  "trustguard off: Firewall workers absent"
+assert_not_contains "$out10b" 'name: firewall-secrets' \
+  "trustguard off: Firewall Secret absent"
 assert_not_contains "$out10b" 'NEURAL_TRUST_FIREWALL_BASE_URL' \
-  "firewall off: TrustGuard does not wire Firewall URL"
+  "trustguard off: no Firewall client wiring"
+
+blue "==> Scenario 10b2: Firewall v2.15 production worker module set"
+out10b2="$TMP/scenario-firewall-workers.yaml"
+render_default "$out10b2"
+assert_contains "$out10b2" 'name: firewall$' \
+  "firewall workers: gateway Deployment present"
+assert_contains "$out10b2" 'name: toxicity-worker' \
+  "firewall workers: toxicity present"
+assert_contains "$out10b2" 'name: prompt-jailbreak-worker' \
+  "firewall workers: prompt-jailbreak present"
+assert_contains "$out10b2" 'name: prompt-moderation-worker' \
+  "firewall workers: prompt-moderation present"
+assert_contains "$out10b2" 'name: response-jailbreak-worker' \
+  "firewall workers: response-jailbreak present"
+assert_contains "$out10b2" 'name: indirect-prompt-injections-worker' \
+  "firewall workers: IPI present"
+assert_contains "$out10b2" 'src.workers.indirect_prompt_injections.app:app' \
+  "firewall workers: IPI module arg"
+assert_contains "$out10b2" 'INDIRECT_PROMPT_INJECTIONS_WORKER_URL: "http://indirect-prompt-injections-worker:80"' \
+  "firewall workers: IPI worker URL in ConfigMap"
+assert_contains "$out10b2" 'europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu:v2.15.0' \
+  "firewall workers: default image tag is v2.15.0"
+assert_not_contains "$out10b2" 'name: toolguard-worker' \
+  "firewall workers: retired toolguard worker absent"
+assert_not_contains "$out10b2" 'TOOLGUARD_WORKER_URL' \
+  "firewall workers: TOOLGUARD_WORKER_URL absent"
+assert_not_contains "$out10b2" 'src.workers.toolguard.app:app' \
+  "firewall workers: retired toolguard module absent"
 
 blue "==> Scenario 10c: hybrid has no in-cluster ClickStack; egress to SaaS"
 out10c="$TMP/scenario-hybrid-clickstack-channels.yaml"
@@ -667,6 +786,113 @@ assert_contains "$out10d" 'nvidia.com/gpu' \
   "gpu: Firewall workers request GPU resources"
 assert_contains "$out10d" 'hostIPC: true' \
   "gpu: Firewall workers share host IPC for CUDA MPS"
+
+# ---------------------------------------------------------------------------
+# 11. Positive hybrid product selection
+# ---------------------------------------------------------------------------
+blue "==> Scenario 11: hybrid with no product selected fails fast"
+assert_render_fails "hybrid no-selection: requires at least one product" \
+  "${HYBRID_NO_PRODUCTS[@]}"
+
+blue "==> Scenario 11a: trustgate-only hybrid"
+out11a="$TMP/scenario-trustgate-only.yaml"
+render_product_slice "$out11a" -f "$CHART_DIR/values-trustgate.yaml.example"
+assert_contains "$out11a" 'name: agentgateway-proxy' \
+  "trustgate-only: proxy renders"
+assert_contains "$out11a" 'name: dataagent$' \
+  "trustgate-only: single DataAgent keeps stable name dataagent"
+assert_not_contains "$out11a" 'name: trustguard-data-plane' \
+  "trustgate-only: trustguard absent"
+assert_not_contains "$out11a" 'TRUSTGUARD_BASE_URL:' \
+  "trustgate-only: TRUSTGUARD_BASE_URL omitted"
+assert_contains "$out11a" 'name: clickstack-egress-collector' \
+  "trustgate-only: egress Service present"
+
+blue "==> Scenario 11b: trustguard-only hybrid"
+out11b="$TMP/scenario-trustguard-only.yaml"
+render_product_slice "$out11b" -f "$CHART_DIR/values-trustguard.yaml.example"
+assert_contains "$out11b" 'name: trustguard-data-plane' \
+  "trustguard-only: data-plane renders"
+assert_contains "$out11b" 'name: dataagent-trustguard$' \
+  "trustguard-only: fixed TrustGuard DataAgent name"
+assert_not_contains "$out11b" 'name: agentgateway-proxy' \
+  "trustguard-only: trustgate absent"
+assert_contains "$out11b" 'name: firewall$' \
+  "trustguard-only: Firewall follows TrustGuard"
+assert_contains "$out11b" 'name: clickstack-egress-collector' \
+  "trustguard-only: egress Service on primary DataAgent"
+
+blue "==> Scenario 11c: data-plane-only (red-teaming) hybrid — no DataAgent"
+out11c="$TMP/scenario-red-teaming-only.yaml"
+render_product_slice "$out11c" -f "$CHART_DIR/values-red-teaming.yaml.example"
+assert_contains "$out11c" 'name: data-plane-api' \
+  "red-teaming: data-plane-api renders"
+assert_not_contains "$out11c" 'name: dataagent' \
+  "red-teaming: no DataAgent"
+assert_not_contains "$out11c" 'name: clickstack-egress-collector' \
+  "red-teaming: no ClickStack egress"
+assert_not_contains "$out11c" 'name: agentgateway-proxy' \
+  "red-teaming: trustgate absent"
+assert_not_contains "$out11c" 'name: trustguard-data-plane' \
+  "red-teaming: trustguard absent"
+
+blue "==> Scenario 11d: positive slices compose pairwise and all together"
+out11d1="$TMP/scenario-trustgate-trustguard.yaml"
+render_product_slice "$out11d1" \
+  -f "$CHART_DIR/values-trustgate.yaml.example" \
+  -f "$CHART_DIR/values-trustguard.yaml.example"
+assert_contains "$out11d1" 'name: dataagent$' \
+  "trustgate+trustguard: stable TrustGate DataAgent"
+assert_contains "$out11d1" 'name: dataagent-trustguard$' \
+  "trustgate+trustguard: fixed TrustGuard DataAgent"
+assert_occurrences "$out11d1" '^  name: clickstack-egress-collector$' 1 \
+  "trustgate+trustguard: exactly one egress Service"
+
+out11d2="$TMP/scenario-trustgate-red-teaming.yaml"
+render_product_slice "$out11d2" \
+  -f "$CHART_DIR/values-red-teaming.yaml.example" \
+  -f "$CHART_DIR/values-trustgate.yaml.example"
+assert_contains "$out11d2" 'name: agentgateway-proxy' \
+  "trustgate+red-teaming: TrustGate renders"
+assert_contains "$out11d2" 'name: data-plane-api' \
+  "trustgate+red-teaming: data-plane-api renders"
+
+out11d3="$TMP/scenario-trustguard-red-teaming.yaml"
+render_product_slice "$out11d3" \
+  -f "$CHART_DIR/values-trustguard.yaml.example" \
+  -f "$CHART_DIR/values-red-teaming.yaml.example"
+assert_contains "$out11d3" 'name: trustguard-data-plane' \
+  "trustguard+red-teaming: TrustGuard renders"
+assert_contains "$out11d3" 'name: data-plane-api' \
+  "trustguard+red-teaming: data-plane-api renders"
+
+out11d4="$TMP/scenario-all-products.yaml"
+render_product_slice "$out11d4" \
+  -f "$CHART_DIR/values-red-teaming.yaml.example" \
+  -f "$CHART_DIR/values-trustguard.yaml.example" \
+  -f "$CHART_DIR/values-trustgate.yaml.example"
+assert_contains "$out11d4" 'name: agentgateway-proxy' \
+  "all products: TrustGate renders"
+assert_contains "$out11d4" 'name: trustguard-data-plane' \
+  "all products: TrustGuard renders"
+assert_contains "$out11d4" 'name: data-plane-api' \
+  "all products: data-plane-api renders"
+assert_occurrences "$out11d4" '^  name: clickstack-egress-collector$' 1 \
+  "all products: exactly one egress Service"
+
+blue "==> Scenario 11e: external overlay without global.products still full stack"
+out11e="$TMP/scenario-external-no-products.yaml"
+helm template test "$CHART_DIR" --namespace default \
+  -f "$CHART_DIR/values-v2-external.yaml.example" > "$out11e"
+validate_yaml "$out11e"
+assert_contains "$out11e" 'name: agentgateway-admin' \
+  "external no-products: AgentGateway admin renders"
+assert_contains "$out11e" 'name: trustguard-control-plane' \
+  "external no-products: TrustGuard control plane renders"
+assert_contains "$out11e" 'name: data-plane-api' \
+  "external no-products: data-plane-api renders"
+assert_contains "$out11e" 'name: firewall$' \
+  "external no-products: Firewall renders"
 
 green ""
 green "All v2 render scenarios passed."

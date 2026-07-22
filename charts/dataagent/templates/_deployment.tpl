@@ -1,6 +1,6 @@
-{{- if eq (include "neuraltrust-platform.dataagentEnabled" .) "true" }}
+{{- define "dataagent.deployment" -}}
 {{- $img := include "dataagent.image" (dict "repository" .Values.image.repository "tag" .Values.image.tag "global" .Values.global) }}
-{{- $egressEnabled := eq (include "neuraltrust-platform.clickstackEgress.enabled" .) "true" }}
+{{- $egressEnabled := .Values.egressPrimary | default false }}
 {{- $egressCfg := default dict (default dict (default dict .Values.global).clickstack).egress -}}
 {{- $egressImg := default dict $egressCfg.image -}}
 apiVersion: apps/v1
@@ -25,7 +25,7 @@ spec:
         app.kubernetes.io/component: data-plane
       {{- if $egressEnabled }}
       annotations:
-        checksum/egress-config: {{ include (print $.Template.BasePath "/egress-configmap.yaml") . | sha256sum }}
+        checksum/egress-config: {{ include "dataagent.egressConfigmapData" . | sha256sum }}
       {{- end }}
     spec:
       serviceAccountName: {{ include "dataagent.serviceAccountName" . }}
@@ -50,9 +50,13 @@ spec:
         imagePullPolicy: {{ .Values.image.pullPolicy }}
         envFrom:
         - configMapRef:
-            name: dataagent-env-vars
+            name: {{ include "dataagent.envConfigMapName" . }}
+        {{- $dataSecret := default dict .Values.existingSecret }}
+        {{- $managedDataSecret := and (eq (include "neuraltrust-platform.autoGenerateSecrets" .) "true") (not .Values.global.preserveExistingSecrets) }}
+        {{- if or $dataSecret.name $managedDataSecret }}
         - secretRef:
-            name: {{ (default dict .Values.existingSecret).name | default "dataagent-secrets" | quote }}
+            name: {{ include "dataagent.secretName" . | quote }}
+        {{- end }}
         {{- if eq (include "neuraltrust-platform.isHybrid" .) "true" }}
         # v2 hybrid: DB_* + SENSIBLE_PG_DSN arrive through the shared
         # `postgresql-secrets` Secret. Listed after the per-service Secret so

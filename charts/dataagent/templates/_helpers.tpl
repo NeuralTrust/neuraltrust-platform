@@ -1,8 +1,9 @@
 {{/*
-Expand the name of the chart.
+Instance name for labels/selectors. Uses fullname so dual product agents do not
+share selectors (two PDBs/Deployments cannot match the same pods).
 */}}
 {{- define "dataagent.name" -}}
-{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
+{{- include "dataagent.fullname" . }}
 {{- end }}
 
 {{/*
@@ -12,13 +13,13 @@ Fully qualified app name. Pinned via fullnameOverride to a stable name.
 {{- if .Values.fullnameOverride }}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
 {{- else }}
-{{- $name := default .Chart.Name .Values.nameOverride }}
+{{- $name := default .Chart.Name .Values.nameOverride | default "dataagent" }}
 {{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" }}
 {{- end }}
 {{- end }}
 
 {{- define "dataagent.chart" -}}
-{{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+{{- printf "%s-%s" (.Chart.Name | default "dataagent") (.Chart.Version | default "0.1.8") | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
@@ -33,10 +34,13 @@ app.kubernetes.io/part-of: neuraltrust-platform
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- if .Values.product }}
+app.kubernetes.io/product: {{ .Values.product | quote }}
+{{- end }}
 {{- end }}
 
 {{/*
-Selector labels (immutable fields)
+Selector labels (immutable fields) — unique per instance fullname.
 */}}
 {{- define "dataagent.selectorLabels" -}}
 app.kubernetes.io/name: {{ include "dataagent.name" . }}
@@ -44,14 +48,33 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
-Service account name
+Service account name — defaults to the instance fullname.
 */}}
 {{- define "dataagent.serviceAccountName" -}}
 {{- if .Values.serviceAccount.create }}
-{{- default "dataagent" .Values.serviceAccount.name }}
+{{- default (include "dataagent.fullname" .) .Values.serviceAccount.name }}
 {{- else }}
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
+{{- end }}
+
+{{/*
+Per-instance Secret name (ENROLMENT_TOKEN / optional DATABASE_URL).
+*/}}
+{{- define "dataagent.secretName" -}}
+{{- $existing := default dict .Values.existingSecret -}}
+{{- if $existing.name -}}
+{{- $existing.name -}}
+{{- else -}}
+{{- printf "%s-secrets" (include "dataagent.fullname" .) -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Per-instance env ConfigMap name.
+*/}}
+{{- define "dataagent.envConfigMapName" -}}
+{{- printf "%s-env-vars" (include "dataagent.fullname" .) -}}
 {{- end }}
 
 {{/*

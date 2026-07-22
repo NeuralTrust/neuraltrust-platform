@@ -1,4 +1,5 @@
-{{- if and .Values.firewall.enabled .Values.firewall.gateway.podDisruptionBudget .Values.firewall.gateway.podDisruptionBudget.enabled }}
+{{- if eq (include "firewall.enabled" .) "true" }}
+{{- if and .Values.firewall.gateway.podDisruptionBudget .Values.firewall.gateway.podDisruptionBudget.enabled }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -15,4 +16,5 @@ spec:
   selector:
     matchLabels:
       {{- include "firewall.gateway.selectorLabels" . | nindent 6 }}
+{{- end }}
 {{- end }}

@@ -1,4 +1,4 @@
-{{- if eq (include "neuraltrust-platform.dataagentEnabled" .) "true" }}
+{{- define "dataagent.secrets" -}}
 {{- if and (include "neuraltrust-platform.autoGenerateSecrets" .) (not .Values.global.preserveExistingSecrets) (not (default dict .Values.existingSecret).name) }}
 {{- /*
 DataAgent secret. ENROLMENT_TOKEN is issued by SaaS and is never auto-generated —
@@ -6,14 +6,10 @@ we source it from values, falling back to the existing in-cluster secret on upgr
 
 v2 hybrid: DB_* and SENSIBLE_PG_DSN (as DATABASE_URL) are supplied through the
 shared `postgresql-secrets` Secret (via envFrom + env override on the
-Deployment), so this Secret only
-carries ENROLMENT_TOKEN. In v2 external, DataAgent is not enrolled — this
-template only renders in hybrid via `dataagentEnabled`. When operators need a
-non-shared Postgres identity for DataAgent, they set `.Values.databaseUrl` /
-`.Values.database.password` explicitly and the values-supplied DATABASE_URL is
-retained.
+Deployment), so this Secret only carries ENROLMENT_TOKEN when using shared PG.
 */}}
-{{- $existing := (lookup "v1" "Secret" .Release.Namespace "dataagent-secrets") }}
+{{- $secretName := include "dataagent.secretName" . }}
+{{- $existing := (lookup "v1" "Secret" .Release.Namespace $secretName) }}
 {{- $enrolment := default dict .Values.enrolment }}
 {{- $enrolmentExisting := default dict $enrolment.existingSecret }}
 {{- $hasExplicit := or $enrolment.token $enrolmentExisting.name .Values.databaseUrl .Values.database.password }}
@@ -26,13 +22,11 @@ retained.
 {{- if and (not $token) (hasKey $existingData "ENROLMENT_TOKEN") }}
   {{- $token = index $existingData "ENROLMENT_TOKEN" | b64dec }}
 {{- end }}
-{{- /* Explicit overrides retain the classic per-service credential. Otherwise the
-       shared postgresql-secrets envFrom on the Deployment provides DATABASE_URL. */}}
 {{- $useExplicitDb := or .Values.databaseUrl .Values.database.password }}
 apiVersion: v1
 kind: Secret
 metadata:
-  name: dataagent-secrets
+  name: {{ $secretName }}
   annotations:
     helm.sh/resource-policy: keep
   labels:

@@ -1,4 +1,5 @@
-{{- if and .Values.firewall.enabled .Values.firewall.healthCheckPolicy.enabled }}
+{{- if eq (include "firewall.enabled" .) "true" }}
+{{- if .Values.firewall.healthCheckPolicy.enabled }}
 apiVersion: networking.gke.io/v1
 kind: HealthCheckPolicy
 metadata:
@@ -20,4 +21,5 @@ spec:
     group: ""
     kind: Service
     name: firewall
+{{- end }}
 {{- end }}

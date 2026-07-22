@@ -1,4 +1,4 @@
-{{- if .Values.firewall.enabled }}
+{{- if eq (include "firewall.enabled" .) "true" }}
 apiVersion: v1
 kind: ConfigMap
 metadata:

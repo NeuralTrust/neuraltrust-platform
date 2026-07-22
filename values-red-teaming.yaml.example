@@ -1,0 +1,11 @@
+# Positive red-teaming / data-plane-api hybrid slice.
+# No DataAgent is required when this is the only selected product.
+#
+#   helm upgrade --install neuraltrust-platform <chart> \
+#     --namespace neuraltrust --create-namespace \
+#     -f <environment-values.yaml> \
+#     -f values-red-teaming.yaml.example
+
+global:
+  products:
+    dataPlane: true

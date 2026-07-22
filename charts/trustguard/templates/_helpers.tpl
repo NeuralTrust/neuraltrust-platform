@@ -1,4 +1,15 @@
 {{/*
+True when TrustGuard templates should render.
+Hybrid: global.products.trustguard must be true. External: always on.
+*/}}
+{{- define "trustguard.enabled" -}}
+{{- if and
+  (eq (include "neuraltrust-platform.isV2" .) "true")
+  (eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustguard")) "true")
+-}}true{{- end -}}
+{{- end }}
+
+{{/*
 Expand the name of the chart.
 */}}
 {{- define "trustguard.name" -}}
