@@ -6,9 +6,12 @@ This chart (2.x) is v2-only.
 
 | File | Mode | Purpose |
 |---|---|---|
-| `values-required.yaml` | hybrid | Minimal starting point; enrolment + config-sync Secrets |
+| `values-required.yaml` | hybrid | Full-hybrid preset (all three products on) + enrolment / config-sync Secrets |
 | `values-v2.yaml.example` | hybrid | Documented hybrid knobs |
 | `values-v2-hybrid.yaml.example` | hybrid | Hybrid topology overlay |
+| `values-trustgate.yaml.example` | hybrid | Positive TrustGate + DataAgent slice |
+| `values-trustguard.yaml.example` | hybrid | Positive TrustGuard + Firewall + DataAgent slice |
+| `values-red-teaming.yaml.example` | hybrid | Positive data-plane-api-only slice |
 | `values-v2-external.yaml.example` | external | Minimal self-hosted topology |
 | `values-all-deployed.yaml.example` | external | Supported optional components enabled |
 | `values-v2-managed-datastores.yaml.example` | external | Managed PostgreSQL, Redis, and ClickHouse |
@@ -48,21 +51,23 @@ global:
   platform: "kubernetes"
   domain: "platform.example.com"
 
-dataagent:
-  tenantId: "<tenant-id>"
-  enrolment:
-    existingSecret:
-      name: "dataagent-enrolment"
-
 agentgateway:
   configSync:
     existingSecret:
       name: "agentgateway-config-sync"
+  dataagent:
+    enrolment:
+      existingSecret:
+        name: "dataagent-enrolment-trustgate"
 
 trustguard:
   configSync:
     existingSecret:
       name: "trustguard-config-sync"
+  dataagent:
+    enrolment:
+      existingSecret:
+        name: "dataagent-enrolment-trustguard"
 ```
 
 Hybrid product OTLP is mandatory (enrolment-backed egress collector; no
@@ -77,6 +82,9 @@ Postgres-managed configuration.
 ```yaml
 global:
   deploymentMode: "external"
+  superadmin:
+    email: "admin@example.com"
+    password: "change-me"
   observability:
     hostedExport:
       enabled: false
@@ -86,7 +94,10 @@ alertengine:
 ```
 
 External mode renders ClickStack, DataCore, AlertEngine, the product API/app,
-and the control and data planes. It does not render DataAgent.
+and the control and data planes. It does not render DataAgent. When both
+`global.superadmin.email` and `password` are set, control-plane-app receives
+`ONPREM_SUPERADMIN_EMAIL` / `ONPREM_SUPERADMIN_PASSWORD` (inline values enter
+Helm release history).
 
 ## Scenario: managed datastores
 

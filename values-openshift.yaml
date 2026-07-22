@@ -1,5 +1,6 @@
 # Platform v2 hybrid on OpenShift using native Routes.
-# Hybrid product OTLP requires DataAgent enrolment (see values-required.yaml).
+# Layer over values-required.yaml (or a positive product example) so
+# global.products is selected and DataAgent enrolment is set.
 # Air-gapped / local-only product telemetry → global.deploymentMode=external.
 
 global:

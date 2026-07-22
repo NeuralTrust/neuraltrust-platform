@@ -1,4 +1,4 @@
-{{- if and (eq (include "neuraltrust-platform.isV2" .) "true") (eq (include "neuraltrust-platform.monitoring.enabled" .) "true") }}
+{{- if and (eq (include "agentgateway.enabled" .) "true") (eq (include "neuraltrust-platform.monitoring.enabled" .) "true") }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:

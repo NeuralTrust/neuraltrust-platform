@@ -2,13 +2,14 @@
 # Core v2 runtime (hybrid + external). The admin (control-plane) workload
 # renders only in external mode (global.deploymentMode=external); proxy + mcp
 # (data-plane) render in both hybrid and external.
-nameOverride: ""
+# Pin label name to agentgateway (stable K8s identity).
+nameOverride: "agentgateway"
 fullnameOverride: "agentgateway"
 # Adds readOnlyRootFilesystem, drops capabilities, seccomp profile. Set false to relax.
 securityHardening: true
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/agentgateway
-  tag: "v0.17.0"
+  tag: "v0.18.1"
   pullPolicy: IfNotPresent
 # Image pull secret name (string) or list. "none"/"" suppresses it.
 # Falls back to global.imagePullSecrets when empty.

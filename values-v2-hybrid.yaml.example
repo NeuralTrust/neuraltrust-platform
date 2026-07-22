@@ -1,8 +1,14 @@
 # Platform v2 hybrid overlay for a fully-configured deployment.
-# Documents the "one Postgres block, one Redis block, one enrolment Secret"
+# Documents the "one Postgres block, one Redis block, per-product DataAgent"
 # hybrid contract using pre-created Secrets. Prefer existingSecret for
 # DataAgent enrolment (also powers ClickStack egress) and config-sync.
 # Product OTLP and config-sync are on by default in hybrid.
+#
+# Positive product slices (mix with -f; no all-off baseline):
+#   values-trustgate.yaml.example
+#   values-trustguard.yaml.example
+#   values-red-teaming.yaml.example
+# External mode ignores global.products and always deploys the full stack.
 #
 # Never commit real tokens, passwords, or customer identifiers.
 # For the minimal starting point, see values-required.yaml.
@@ -11,8 +17,12 @@ global:
   deploymentMode: "hybrid"
   platform: "kubernetes" # aws | gcp | azure | openshift | kubernetes
   domain: "platform.example.com"
+  products:
+    trustgate: true
+    trustguard: true
+    dataPlane: true
 
-  # One shared PostgreSQL block. Every hybrid workload (AgentGateway,
+  # One shared PostgreSQL block. Every hybrid workload (TrustGate,
   # TrustGuard, DataAgent, data-plane-api) reads envFrom the rendered
   # postgresql-secrets Secret, so all four connect as the same role to the
   # same database.
@@ -22,8 +32,9 @@ global:
   # and a generated password.
   #
   # External / managed: set deploy: false and reference a Secret containing
-  # DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME, and DB_SSL_MODE. Pre-create
-  # the user and database out-of-band; the chart never runs CREATE USER.
+  # DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME, DB_SSL_MODE, and
+  # SENSIBLE_PG_DSN. Pre-create the user and database out-of-band; the chart
+  # never runs CREATE USER.
   postgresql:
     deploy: false
     existingSecret:
@@ -38,26 +49,25 @@ global:
     existingSecret:
       name: "external-redis"
 
-# Same credential ritual for all three: preferred existingSecret.name; for
-# local/dev clear name and set token / enrolment.token. Never commit tokens.
-dataagent:
-  tenantId: "<tenant-id>"
-  enrolment:
-    existingSecret:
-      name: "dataagent-enrolment"
-
+# TrustGate (commercial name; image/repo still agentgateway; K8s names
+# agentgateway-*). Nested dataagent so product overlays mix via -f.
 agentgateway:
   configSync:
     existingSecret:
       name: "agentgateway-config-sync"
+  dataagent:
+    enrolment:
+      existingSecret:
+        name: "dataagent-enrolment-trustgate"
 
 trustguard:
   configSync:
     existingSecret:
       name: "trustguard-config-sync"
-  # Keep in sync with firewall.enabled / firewall.firewall.enabled below.
-  firewall:
-    enabled: false
+  dataagent:
+    enrolment:
+      existingSecret:
+        name: "dataagent-enrolment-trustguard"
 
 # The temporary data-plane-api read shim. In hybrid it defaults to PostgreSQL
 # (SQL_DATABASE=postgres) and reuses the shared postgresql-secrets, so nothing
@@ -68,9 +78,3 @@ trustguard:
 #       api:
 #         k8sJobs:
 #           enabled: true
-
-# Disable Firewall completely (chart dependency, workloads, TrustGuard client).
-firewall:
-  enabled: false
-  firewall:
-    enabled: false

@@ -6,7 +6,8 @@
 # - control-plane-secrets: AUTH_SECRET, NEXTAUTH_SECRET,
 #   CONTROL_PLANE_JWT_SECRET, TRUSTGATE_JWT_SECRET
 # - postgresql-secrets: POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER, POSTGRES_DB,
-#   DATABASE_URL, POSTGRES_PRISMA_URL (and POSTGRES_PASSWORD in password mode)
+#   DATABASE_URL, POSTGRES_PRISMA_URL, SENSIBLE_PG_DSN
+#   (and POSTGRES_PASSWORD in password mode)
 # - agentgateway-secrets: SERVER_SECRET_KEY, STS_SIGNING_KEY, DB_PASSWORD
 # - trustguard-secrets: ADMIN_JWT_SECRET, TRUSTGUARD_TOKEN_SIGNING_SECRET,
 #   REDIS_EVENTS_SECRET, DB_PASSWORD
@@ -23,6 +24,10 @@
 
 global:
   deploymentMode: "external"
+  # Optional bootstrap admin (set both; password enters Helm release history):
+  # superadmin:
+  #   email: "admin@example.com"
+  #   password: "change-me"
   platform: "kubernetes"
   domain: "platform.example.com"
   autoGenerateSecrets: false

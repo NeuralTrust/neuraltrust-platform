@@ -1,0 +1,21 @@
+# Positive TrustGate hybrid slice (AgentGateway + its DataAgent).
+# Chart defaults leave all products off; this file only turns TrustGate on.
+# Combine with other product examples in any -f order.
+#
+#   helm upgrade --install neuraltrust-platform <chart> \
+#     --namespace neuraltrust --create-namespace \
+#     -f <environment-values.yaml> \
+#     -f values-trustgate.yaml.example
+
+global:
+  products:
+    trustgate: true
+
+agentgateway:
+  configSync:
+    existingSecret:
+      name: "agentgateway-config-sync"
+  dataagent:
+    enrolment:
+      existingSecret:
+        name: "dataagent-enrolment-trustgate"

@@ -1,3 +1,4 @@
+{{- if eq (include "agentgateway.enabled" .) "true" }}
 {{- if and .Values.ingress.enabled (eq (include "agentgateway.ingress.useIngress" .) "true") }}
 {{- $className := include "neuraltrust-platform.ingress.className" (dict "global" .Values.global "local" .Values.ingress.className) }}
 {{- $annotations := include "neuraltrust-platform.ingress.annotations" (dict "global" .Values.global "local" .Values.ingress.annotations) }}
@@ -158,5 +159,6 @@ spec:
                 name: {{ .Values.controlPlane.name }}
                 port:
                   name: http
+{{- end }}
 {{- end }}
 {{- end }}

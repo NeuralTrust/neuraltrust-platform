@@ -1,18 +1,14 @@
-{{- if eq (include "neuraltrust-platform.dataagentEnabled" .) "true" }}
+{{- define "dataagent.envConfigMap" -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: dataagent-env-vars
+  name: {{ include "dataagent.envConfigMapName" . }}
   labels:
     {{- include "dataagent.labels" . | nindent 4 }}
 data:
   DATABRIDGE_ADDR: {{ .Values.databridge.addr | quote }}
   DATABRIDGE_SERVER_NAME: {{ .Values.databridge.serverName | quote }}
   TLS_MODE: {{ .Values.databridge.tlsMode | quote }}
-  TENANT_ID: {{ .Values.tenantId | quote }}
-  {{- with .Values.instanceId }}
-  INSTANCE_ID: {{ . | quote }}
-  {{- end }}
   STORE_BACKEND: {{ .Values.store.backend | quote }}
   HEALTH_ADDR: {{ printf ":%v" .Values.ports.health | quote }}
   BACKOFF_MIN: {{ .Values.supervisor.backoffMin | quote }}

@@ -8,7 +8,7 @@ fullnameOverride: "trustguard"
 securityHardening: true
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustguard
-  tag: "v0.18.3"
+  tag: "v0.19.1"
   pullPolicy: IfNotPresent
 imagePullSecrets: "gcr-secret"
 serviceAccount:
@@ -111,10 +111,9 @@ platform:
   baseURL: ""
 # Firewall client (prompt_guard / toxicity / prompt_moderation plugins).
 # TrustGuard reads NEURAL_TRUST_FIREWALL_BASE_URL + NEURAL_TRUST_FIREWALL_SECRET_KEY
-# (derives the Token header from the JWT secret). Keep `enabled` in sync with the
-# umbrella `firewall.enabled` — the subchart cannot see sibling chart values.
+# (derives the Token header from the JWT secret). Firewall always accompanies
+# TrustGuard; the umbrella's global.products.trustguard flag gates both charts.
 firewall:
-  enabled: true
   # Empty ⇒ http://firewall.<release-namespace>.svc.cluster.local (stable Service).
   baseURL: ""
   existingSecret:
