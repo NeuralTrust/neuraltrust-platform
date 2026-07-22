@@ -1,12 +1,7 @@
-# DataAgent subchart.
-# Renders ONLY for v2 hybrid when tenantId and enrolment credentials are set.
-# Outbound-only: dials the SaaS DataBridge over gRPC, runs typed read-only
-# queries on a local Postgres, and streams back only entitled rows.
-# When hybrid ClickStack egress is enabled, a ClusterIP Service
-# (clickstack-egress-collector) exposes the co-located OTel sidecar's OTLP
-# ports; DataAgent's :8080 listener remains health probes only.
+# DataAgent library defaults. Umbrella merges these with top-level
+# `dataagent:` and per-product `agentgateway.dataagent` / `trustguard.dataagent`.
 nameOverride: ""
-fullnameOverride: "dataagent"
+fullnameOverride: ""
 securityHardening: true
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/dataagent
@@ -15,7 +10,7 @@ image:
 imagePullSecrets: "gcr-secret"
 serviceAccount:
   create: true
-  name: "dataagent"
+  name: ""
   annotations: {}
 # Single outbound stream — a second replica would double-register on DataBridge.
 replicas: 1
@@ -27,47 +22,27 @@ resources:
 nodeSelector: {}
 tolerations: []
 extraEnv: []
-# DataBridge (SaaS) connection. Defaults point at the NeuralTrust SaaS DataBridge,
-# so hybrid customers need not set these — override only for a non-default SaaS
-# region/endpoint or a self-hosted DataBridge.
 databridge:
-  addr: "databridge.neuraltrust.ai:443" # SaaS DataBridge gRPC host:port
-  serverName: "databridge.neuraltrust.ai" # TLS SNI / server identity pin
-  tlsMode: "tls" # tls | mtls | insecure (insecure = dev only)
-tenantId: "" # Required: tenant identity on the stream
-instanceId: "" # Defaults to the pod hostname when empty
-# Local store the agent reads (read-only). `memory` is dev-only.
+  addr: "databridge.neuraltrust.ai:443"
+  serverName: "databridge.neuraltrust.ai"
+  tlsMode: "tls"
 store:
-  backend: "postgres" # postgres | memory
-# DataAgent reads the shared hybrid Postgres alongside AgentGateway and
-# TrustGuard: it envFrom's the shared `postgresql-secrets` rendered from
-# `global.postgresql.*` and sets DATABASE_URL from SENSIBLE_PG_DSN (Go-safe;
-# not the Prisma DATABASE_URL). This block is only consulted when the
-# operator opts out of the shared credential via `databaseUrl` or
-# `existingSecret.name`; otherwise leave it at the defaults.
+  backend: "postgres"
 database:
-  host: "" # Empty ⇒ in-cluster control-plane-postgresql
+  host: ""
   port: 5432
-  name: "" # Empty ⇒ inherits global.postgresql.database (hybrid default: neuraltrust)
-  user: "" # Empty ⇒ inherits global.postgresql.user (hybrid default: neuraltrust)
-  password: "" # Empty ⇒ inherits from shared postgresql-secrets
+  name: ""
+  user: ""
+  password: ""
   sslMode: "prefer"
-# DEPRECATED escape hatch: a full DSN that overrides the `database` block above.
-# Prefer the components. Kept for backward compatibility.
 databaseUrl: ""
-# Existing Secret containing DATABASE_URL and DB_PASSWORD. Required when
-# global.autoGenerateSecrets=false or global.preserveExistingSecrets=true.
 existingSecret:
   name: ""
-# Enrolment credentials — same ritual as configSync.token / existingSecret.
-# Preferred: existingSecret.name (pre-created Secret with ENROLMENT_TOKEN).
-# Inline: clear existingSecret.name and set token (local/dev only).
 enrolment:
-  token: "" # SaaS-issued; never auto-generated
+  token: ""
   existingSecret:
     name: ""
     key: "ENROLMENT_TOKEN"
-# gRPC supervisor tuning (sane defaults; override only if needed).
 supervisor:
   backoffMin: "1s"
   backoffMax: "30s"
@@ -77,3 +52,6 @@ supervisor:
 pdb:
   enabled: true
   minAvailable: 1
+# Set by umbrella when this instance owns clickstack-egress-collector.
+egressPrimary: false
+product: ""

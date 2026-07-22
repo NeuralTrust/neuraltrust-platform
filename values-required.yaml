@@ -1,36 +1,40 @@
-# Minimal Platform v2 hybrid starting point.
+# Full Platform v2 hybrid starting point (all three products selected).
 # Hybrid always exports product OTLP via the DataAgent-co-located egress
-# collector, and enables config-sync by default. Pre-create the three Secrets
-# below before install (preferred). For local/dev inline tokens, clear each
+# collector, and enables config-sync by default. Pre-create the Secrets below
+# before install (preferred). Enrolment JWTs carry tenant_id and instance_id
+# — no separate tenantId value. For local/dev inline tokens, clear each
 # `*.existingSecret.name` and set `enrolment.token` / `configSync.token`.
 # Air-gapped / local-only product telemetry → use global.deploymentMode=external.
+# For a product subset, use values-trustgate / trustguard / red-teaming examples.
 #
 #   helm upgrade --install neuraltrust-platform <chart> \
 #     --namespace neuraltrust --create-namespace -f values-required.yaml
 
 global:
-  deploymentMode: "hybrid"
   platform: "kubernetes" # Required: aws | gcp | azure | openshift | kubernetes
   domain: "platform.example.com" # Required: base domain for generated hostnames
-  imageRegistry: "" # Optional: "<registry>/neuraltrust"
-  storageClass: "" # Optional: cluster default when empty
-  autoGenerateSecrets: true
+  products:
+    trustgate: true
+    trustguard: true
+    dataPlane: true
 
-# Preferred path for all three: existing Secret names. Keys:
-#   dataagent-enrolment → ENROLMENT_TOKEN
+# Preferred path: existing Secret names. Keys:
+#   dataagent-enrolment-* → ENROLMENT_TOKEN
 #   *-config-sync → CONFIG_SYNC_TOKEN + CONFIG_SYNC_LKG_KEY (see SECRETS.md)
-dataagent:
-  tenantId: ""
-  enrolment:
-    existingSecret:
-      name: "dataagent-enrolment"
-
 agentgateway:
   configSync:
     existingSecret:
       name: "agentgateway-config-sync"
+  dataagent:
+    enrolment:
+      existingSecret:
+        name: "dataagent-enrolment-trustgate"
 
 trustguard:
   configSync:
     existingSecret:
       name: "trustguard-config-sync"
+  dataagent:
+    enrolment:
+      existingSecret:
+        name: "dataagent-enrolment-trustguard"

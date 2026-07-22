@@ -1,4 +1,4 @@
-{{- if and (eq (include "neuraltrust-platform.isV2" .) "true") (eq (include "neuraltrust-platform.isFull" .) "true") }}
+{{- if and (eq (include "trustguard.enabled" .) "true") (eq (include "neuraltrust-platform.isFull" .) "true") }}
 {{- $img := include "trustguard.image" (dict "repository" .Values.image.repository "tag" .Values.image.tag "global" .Values.global) }}
 apiVersion: apps/v1
 kind: Deployment
@@ -68,14 +68,12 @@ spec:
         {{- include "neuraltrust-platform.clickstack.externalOtlpHeadersEnv" . | nindent 8 }}
         {{- end }}
         {{- $fw := default dict .Values.firewall }}
-        {{- if $fw.enabled }}
         {{- $fwSecret := default dict $fw.existingSecret }}
         - name: NEURAL_TRUST_FIREWALL_SECRET_KEY
           valueFrom:
             secretKeyRef:
               name: {{ $fwSecret.name | default "firewall-secrets" | quote }}
               key: {{ $fwSecret.key | default "JWT_SECRET" | quote }}
-        {{- end }}
         {{- if .Values.securityHardening }}
         securityContext:
           allowPrivilegeEscalation: false

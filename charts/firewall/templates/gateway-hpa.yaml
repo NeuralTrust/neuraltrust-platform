@@ -1,4 +1,5 @@
-{{- if and .Values.firewall.enabled .Values.firewall.gateway.autoscaling .Values.firewall.gateway.autoscaling.enabled }}
+{{- if eq (include "firewall.enabled" .) "true" }}
+{{- if and .Values.firewall.gateway.autoscaling .Values.firewall.gateway.autoscaling.enabled }}
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
@@ -29,4 +30,5 @@ spec:
           type: Utilization
           averageUtilization: {{ .Values.firewall.gateway.autoscaling.targetMemoryUtilizationPercentage }}
     {{- end }}
+{{- end }}
 {{- end }}

@@ -1,0 +1,21 @@
+# Positive TrustGuard hybrid slice (TrustGuard + Firewall + its DataAgent).
+# Firewall always follows TrustGuard and has no separate enable flag.
+# Use a distinct DataAgent enrolment Secret from the TrustGate slice.
+#
+#   helm upgrade --install neuraltrust-platform <chart> \
+#     --namespace neuraltrust --create-namespace \
+#     -f <environment-values.yaml> \
+#     -f values-trustguard.yaml.example
+
+global:
+  products:
+    trustguard: true
+
+trustguard:
+  configSync:
+    existingSecret:
+      name: "trustguard-config-sync"
+  dataagent:
+    enrolment:
+      existingSecret:
+        name: "dataagent-enrolment-trustguard"

@@ -10,7 +10,8 @@
 # There is no init Job — application migrations own their tables.
 # Air-gapped / local-only product telemetry → global.deploymentMode=external.
 #
-# Layer over values-required.yaml for a complete install.
+# Layer over values-required.yaml (or positive product examples) so
+# global.products is selected — this file alone does not enable products.
 
 global:
   deploymentMode: "hybrid"
@@ -60,14 +61,6 @@ global:
 #       # clickhouse:
 #       #   host: "clickhouse.example.com"
 
-# DataAgent enrolment is required for hybrid OTLP egress (and for DataBridge).
-# Prefer enrolment.existingSecret (same ritual as configSync.existingSecret).
-# dataagent:
-#   tenantId: "<tenant-id>"
-#   enrolment:
-#     existingSecret:
-#       name: "dataagent-enrolment"
-
 # Hybrid config-sync is on by default. Point at Secrets holding CONFIG_SYNC_TOKEN
 # and CONFIG_SYNC_LKG_KEY; do not restate enabled: true. Set enabled: false only
 # for Postgres-managed runtime configuration.
@@ -79,12 +72,3 @@ global:
 #   configSync:
 #     existingSecret:
 #       name: "trustguard-config-sync"
-
-# Disable Firewall completely (chart dependency, workloads, TrustGuard client).
-firewall:
-  enabled: false
-  firewall:
-    enabled: false
-trustguard:
-  firewall:
-    enabled: false

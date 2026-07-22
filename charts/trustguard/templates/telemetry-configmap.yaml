@@ -1,4 +1,4 @@
-{{- if eq (include "neuraltrust-platform.isV2" .) "true" }}
+{{- if eq (include "trustguard.enabled" .) "true" }}
 {{- /*
 Mode-specific default telemetry exporters. Hybrid keeps raw payloads in the
 customer-boundary Postgres for DataAgent. External sends metadata and raw events

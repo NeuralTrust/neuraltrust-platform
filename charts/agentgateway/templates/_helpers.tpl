@@ -1,4 +1,15 @@
 {{/*
+True when TrustGate (AgentGateway) templates should render.
+Hybrid: global.products.trustgate must be true. External: always on.
+*/}}
+{{- define "agentgateway.enabled" -}}
+{{- if and
+  (eq (include "neuraltrust-platform.isV2" .) "true")
+  (eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustgate")) "true")
+-}}true{{- end -}}
+{{- end }}
+
+{{/*
 Expand the name of the chart.
 */}}
 {{- define "agentgateway.name" -}}

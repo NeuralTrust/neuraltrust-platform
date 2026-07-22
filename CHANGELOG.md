@@ -4,6 +4,62 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Breaking
+
+- **Positive hybrid product selection.** `global.products.trustgate`,
+  `trustguard`, and `dataPlane` default to `false`. Hybrid installs must set
+  at least one to `true` (fail-fast otherwise). External mode ignores these
+  flags and always deploys the full product stack. Firewall has no
+  independent gate and always follows TrustGuard. Chart.yaml no longer uses
+  static product `condition:` entries — templates gate via a mode-aware
+  selector. Product selector is `global.products.trustgate`; component
+  configuration stays under `agentgateway:` (K8s names `agentgateway-*`,
+  image repository `agentgateway`).
+- **One DataAgent per enabled product.** Enrolment moves under
+  `agentgateway.dataagent` / `trustguard.dataagent` (mixable `-f` overlays).
+  Dual installs preserve `dataagent` for TrustGate and add
+  `dataagent-trustguard`. Only the primary agent owns
+  `clickstack-egress-collector`. Top-level `dataagent` now contains shared
+  runtime defaults only. Hybrid fail-closed requires a DataAgent only when
+  TrustGate and/or TrustGuard is selected (red-teaming skips it).
+
+### Added
+
+- Positive product slice examples: `values-trustgate.yaml.example`,
+  `values-trustguard.yaml.example`, `values-red-teaming.yaml.example`
+  (no all-off baseline). `values-required.yaml` selects all three products.
+- Render scenarios for hybrid no-selection failure, standalone / pairwise /
+  all-product mixes, and external full-stack compatibility without product
+  flags.
+- **External on-prem superadmin.** Optional `global.superadmin.email` /
+  `password` (empty by default). When both are set, control-plane-app emits
+  `ONPREM_SUPERADMIN_EMAIL` and `ONPREM_SUPERADMIN_PASSWORD`. Ignored in
+  hybrid (app does not render). Inline password enters Helm release history.
+
+### Changed
+
+- Image bumps (local AR latest): control-plane-app `v1.105.0`, firewall
+  `v2.15.0`, agentgateway `v0.18.1`, trustguard `v0.19.1`. Control Plane App
+  subchart `0.1.12 → 0.1.13`.
+- **Firewall workers new module set.** Dropped the retired
+  `toolguard-worker` (`src.workers.toolguard` removed in firewall v2.15.0+)
+  and added `indirect-prompt-injections-worker`
+  (`src.workers.indirect_prompt_injections.app:app`). Gateway
+  `/v1/toolguard` remains a deprecated compatibility shim that forwards to
+  IPI. Portable CPU defaults, Recreate strategy, and disabled HPA/PDB/OTel
+  are unchanged. Firewall subchart `2.1.3 → 2.1.4`.
+- DataAgent subchart is a Helm **library** (v0.1.11); umbrella templates render
+  deterministic instances. TrustGate omits `TRUSTGUARD_BASE_URL` when Guard
+  is not selected in hybrid.
+- **DataAgent identity from enrolment JWT only.** Hybrid DataAgent readiness
+  requires enrolment credentials, not `tenantId`. The agent derives
+  `tenant_id` from `ENROLMENT_TOKEN`; DataBridge matches `instance_id` from
+  the same JWT. Helm no longer exposes `tenantId` / `TENANT_ID` or
+  `instanceId` / `INSTANCE_ID` for DataAgent.
+- AgentGateway `0.1.28`, TrustGuard `0.1.26`, Firewall `2.1.2`, data-plane-api
+  `1.4.4`, and Control Plane App `0.1.11` consume the mode-aware product
+  contract; Firewall no longer exposes an independent enable flag.
+
 ## [v2.2.1] — 2026-07-21
 
 ### Breaking

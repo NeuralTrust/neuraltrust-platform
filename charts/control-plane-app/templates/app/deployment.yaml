@@ -47,7 +47,7 @@ spec:
       initContainers:
       - name: init-db
         {{- $initImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
-        {{- $initImageTag := "v1.102.1" }}
+        {{- $initImageTag := "v1.105.0" }}
         {{- $initPullPolicy := "Always" }}
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.image }}
           {{- if .Values.controlPlane.components.app.image.repository }}{{- $initImageRepo = .Values.controlPlane.components.app.image.repository }}{{- end }}
@@ -189,7 +189,7 @@ spec:
       containers:
       - name: app
         {{- $appImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
-        {{- $appImageTag := "v1.102.1" }}
+        {{- $appImageTag := "v1.105.0" }}
         {{- $appPullPolicy := "Always" }}
         {{- $appPort := 3000 }}
         {{- $nodeEnv := "production" }}
@@ -433,6 +433,15 @@ spec:
                renders in external mode, so always emit external. */}}
         - name: DEPLOYMENT_MODE
           value: "external"
+        {{- $sa := default dict (default dict .Values.global).superadmin }}
+        {{- $saEmail := $sa.email | default "" }}
+        {{- $saPassword := $sa.password | default "" }}
+        {{- if and $saEmail $saPassword }}
+        - name: ONPREM_SUPERADMIN_EMAIL
+          value: {{ $saEmail | quote }}
+        - name: ONPREM_SUPERADMIN_PASSWORD
+          value: {{ $saPassword | quote }}
+        {{- end }}
         - name: NEXTAUTH_URL
           {{- /* Explicit config.nextAuthUrl wins; else resolve to the real ingress
                  host (app.<domain>). See control-plane.appPublicUrl helper. */}}
@@ -457,7 +466,7 @@ spec:
           # Resolved by the parent chart (templates/platform-secrets.yaml):
           # explicit controlPlane.components.app.config.firewallApiUrl >
           # existing control-plane-secrets value > firewall service FQDN
-          # when neuraltrust-firewall.firewall.enabled, else data-plane API.
+          # when TrustGuard is selected, else data-plane API.
           valueFrom:
             secretKeyRef:
               name: control-plane-secrets

@@ -1,4 +1,5 @@
-{{- if and (eq (include "neuraltrust-platform.dataagentEnabled" .) "true") .Values.pdb.enabled }}
+{{- define "dataagent.pdb" -}}
+{{- if .Values.pdb.enabled }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -12,4 +13,5 @@ spec:
     matchLabels:
       {{- include "dataagent.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: data-plane
+{{- end }}
 {{- end }}
