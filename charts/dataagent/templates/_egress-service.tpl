@@ -1,6 +1,8 @@
-{{- /* ClusterIP for AgentGateway/TrustGuard → DataAgent OTLP sidecar.
-     Name stays clickstack-egress-collector by default for stable OTEL URLs. */ -}}
-{{- if eq (include "neuraltrust-platform.clickstackEgress.enabled" .) "true" }}
+{{- define "dataagent.egressService" -}}
+{{- /* ClusterIP for TrustGate/TrustGuard → DataAgent OTLP sidecar.
+     Name stays clickstack-egress-collector by default for stable OTEL URLs.
+     Only the primary DataAgent instance owns this Service. */ -}}
+{{- if .Values.egressPrimary }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -23,4 +25,5 @@ spec:
       port: 4318
       targetPort: otlp-http
       protocol: TCP
+{{- end }}
 {{- end }}

@@ -56,8 +56,9 @@ trustguard:
 Set `configSync.enabled: false` only for Postgres-managed configuration. See
 [`values-v2-hybrid.yaml.example`](./values-v2-hybrid.yaml.example).
 
-DataAgent enrolment (`tenantId` plus `enrolment.token` or preferred
-`enrolment.existingSecret.name`) is required for hybrid OTLP egress.
+DataAgent enrolment (`enrolment.token` or preferred
+`enrolment.existingSecret.name`) is required for hybrid OTLP egress. The JWT
+carries `tenant_id` and `instance_id`.
 
 ## Routes and Ingress
 

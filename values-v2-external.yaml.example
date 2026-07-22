@@ -3,6 +3,9 @@
 
 global:
   deploymentMode: "external"
+  superadmin:
+    email: "admin@example.com"
+    password: "change-me"
   platform: "kubernetes"
   domain: "platform.example.com"
   observability:

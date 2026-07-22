@@ -1,0 +1,27 @@
+{{- /*
+Render one DataAgent per enabled hybrid product (trustgate / trustguard).
+Templates come from the dataagent library chart.
+*/ -}}
+{{- if eq (include "neuraltrust-platform.isHybrid" .) "true" }}
+{{- $chartMeta := .Subcharts.dataagent.Chart }}
+{{- range $product := list "trustgate" "trustguard" }}
+{{- if eq (include "neuraltrust-platform.dataagent.instanceEnabled" (dict "ctx" $ "product" $product)) "true" }}
+{{- $vals := include "neuraltrust-platform.dataagent.instanceValues" (dict "ctx" $ "product" $product) | fromYaml }}
+{{- $ctx := dict "Values" $vals "Release" $.Release "Chart" $chartMeta "Capabilities" $.Capabilities "Template" $.Template }}
+{{ include "dataagent.serviceAccount" $ctx }}
+---
+{{ include "dataagent.envConfigMap" $ctx }}
+---
+{{ include "dataagent.secrets" $ctx }}
+---
+{{ include "dataagent.deployment" $ctx }}
+---
+{{ include "dataagent.pdb" $ctx }}
+---
+{{ include "dataagent.egressConfigmap" $ctx }}
+---
+{{ include "dataagent.egressService" $ctx }}
+---
+{{- end }}
+{{- end }}
+{{- end }}

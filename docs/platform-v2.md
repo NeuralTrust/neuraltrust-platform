@@ -12,10 +12,10 @@ global:
 Hybrid keeps control-plane services in NeuralTrust SaaS and deploys the data
 path in the customer cluster:
 
-- AgentGateway proxy and MCP
+- TrustGate proxy and MCP (K8s resources remain `agentgateway-*`)
 - TrustGuard data plane
 - PostgreSQL and Redis by default
-- optional Firewall
+- Firewall whenever TrustGuard is selected
 - DataAgent (enrolment required for hybrid OTLP egress and DataBridge)
 
 Hybrid does **not** deploy an in-cluster ClickHouse: analytics live in NeuralTrust
@@ -81,41 +81,73 @@ compiled snapshot, stores it in memory, and acknowledges applied versions. The
 encrypted last-known-good snapshot lets it serve during a temporary SaaS
 outage. Config-sync replaces PostgreSQL as the runtime **configuration source**;
 the shared hybrid PostgreSQL remains the raw product-data store used by the
-Postgres telemetry exporters and DataAgent. AgentGateway calls TrustGuard over
-the in-cluster `trustguard-data-plane` Service; that hop does not leave the
-cluster.
+Postgres telemetry exporters and DataAgent. TrustGate calls TrustGuard over
+the in-cluster `trustguard-data-plane` Service when Guard is co-deployed; that
+hop does not leave the cluster. TrustGate can run without Guard by selecting
+only `global.products.trustgate`.
 
 Set `configSync.enabled: false` only when runtime configuration is populated
 and managed in PostgreSQL out of band. The hybrid chart does not deploy local
-AgentGateway or TrustGuard control planes to do that.
+TrustGate or TrustGuard control planes to do that.
 
-DataAgent enrolment is required for hybrid OTLP egress (and for DataBridge).
-Prefer `enrolment.existingSecret` so the token never enters Helm values
-(same ritual as `configSync.existingSecret`):
+### Positive product selection (hybrid only)
+
+Hybrid installs choose products with positive `global.products` flags.
+Chart defaults are all `false`; validation fails if none are selected.
+External mode ignores these flags and always deploys the full product stack.
+
+| Slice | Flags | DataAgent |
+|---|---|---|
+| TrustGate | `global.products.trustgate: true` | `agentgateway.dataagent` (enrolment) |
+| TrustGuard + Firewall | `global.products.trustguard: true` | `trustguard.dataagent` |
+| Red teaming | `global.products.dataPlane: true` | none |
+
+Overlay only the products you want — no all-off baseline file. Product
+examples are positive-only deltas and combine in any `-f` order. Shared
+Postgres/Redis stay under `global.postgresql` / `global.redis`. Tracked
+examples: `values-trustgate.yaml.example`, `values-trustguard.yaml.example`,
+`values-red-teaming.yaml.example`. `values-required.yaml` selects all three
+for the full-hybrid preset.
+
+### DataAgent (one per enabled product)
+
+When TrustGate and/or TrustGuard are enabled, each needs its own DataAgent
+enrolment (distinct SaaS-issued tokens in production). The JWT carries
+`tenant_id` and `instance_id` (gateway or guard id); do not duplicate them in
+values. Prefer nested `enrolment.existingSecret` so the token never enters
+Helm values:
 
 ```yaml
-dataagent:
-  tenantId: "<tenant-id>"
-  enrolment:
-    existingSecret:
-      name: "dataagent-enrolment"
+agentgateway:
+  dataagent:
+    enrolment:
+      existingSecret:
+        name: "dataagent-enrolment-trustgate"
+
+trustguard:
+  dataagent:
+    enrolment:
+      existingSecret:
+        name: "dataagent-enrolment-trustguard"
 ```
 
-DataAgent renders only when both values are present. It opens an outbound-only
-gRPC connection to `databridge.neuraltrust.ai:443`; SaaS sends typed,
-entitlement-scoped query requests over that channel and DataAgent reads the
-shared local PostgreSQL and streams back only the permitted rows. It has no
-Ingress or public Service. The co-located egress collector uses the same
-enrolment for ClickStack OTLP — DataAgent is not itself the ClickStack
-transport, but enrolment is shared.
+Top-level `dataagent` contains shared runtime defaults only. Product enrolment
+lives under each product. data-plane-only hybrid skips DataAgent.
 
-### Hybrid ClickStack OTLP (mandatory)
+Each agent opens an outbound-only gRPC connection to
+`databridge.neuraltrust.ai:443`. TrustGate preserves the existing `dataagent`
+resource name; TrustGuard uses `dataagent-trustguard`. The selected primary
+(TrustGate when enabled, otherwise TrustGuard) co-locates the
+`clickstack-egress-collector` sidecar and owns that ClusterIP Service name.
 
-The v2 hybrid ClickStack export is **always on**. Apps send plain OTLP to a
-local ClusterIP Service (`clickstack-egress-collector`) on the DataAgent pod.
+### Hybrid ClickStack OTLP (mandatory when TrustGate/TrustGuard on)
+
+When TrustGate or TrustGuard is enabled, hybrid ClickStack export is **always
+on**. Apps send plain OTLP to a local ClusterIP Service
+(`clickstack-egress-collector`) on the primary DataAgent pod.
 The sidecar exchanges the DataAgent enrolment JWT at DataCore for a short-lived
 OTLP access token and forwards to SaaS. There is **no** direct SaaS bearer on
-AgentGateway/TrustGuard and **no** hybrid opt-out:
+TrustGate/TrustGuard and **no** hybrid opt-out:
 
 - `global.clickstack.enabled: false` — rejected
 - `global.clickstack.egress.enabled` — rejected
@@ -160,17 +192,17 @@ NeuralTrust SaaS telemetry egress.
 
 | Component | Hybrid | External | Purpose |
 |---|:---:|:---:|---|
-| AgentGateway proxy/MCP | yes | yes | AI gateway data path |
-| AgentGateway admin | SaaS | yes | Gateway administration |
-| TrustGuard data plane | yes | yes | Runtime safety evaluation |
+| TrustGate proxy/MCP (`agentgateway:`; product `global.products.trustgate`; K8s `agentgateway-*`) | opt-in (default on) | yes | AI gateway data path |
+| TrustGate admin | SaaS | yes | Gateway administration |
+| TrustGuard data plane | opt-in (default on) | yes | Runtime safety evaluation |
 | TrustGuard control plane | SaaS | yes | Policy administration |
-| data-plane API shim | yes (PostgreSQL) | yes (ClickHouse) | Temporary read API — PostgreSQL by default in hybrid, ClickHouse in external |
-| DataAgent | required (enrolment) | no | Outbound entitled-query bridge; enrolment also powers ClickStack egress |
+| data-plane API shim | opt-in (default on; PostgreSQL) | yes (ClickHouse) | Temporary read API — PostgreSQL by default in hybrid, ClickHouse in external |
+| DataAgent | one per enabled TrustGate/TrustGuard | no | Outbound entitled-query bridge; primary also powers ClickStack egress |
 | ClickStack OTel Collector | no | yes | OTLP to ClickHouse |
 | DataCore | no | yes | Residency query API (ClickHouse + Postgres metadata) |
 | AlertEngine | no | yes | Alert evaluation and SIEM/integration forwarding |
 | TrustLens | opt-in | opt-in | WIP analytics/inventory replacement |
-| Firewall | optional | optional | Prompt and response safety |
+| Firewall | with TrustGuard | with TrustGuard | Prompt and response safety |
 
 ## Datastores
 

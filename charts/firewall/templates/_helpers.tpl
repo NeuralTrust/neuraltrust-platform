@@ -1,4 +1,12 @@
 {{/*
+Firewall follows TrustGuard product selection.
+Hybrid: on when global.products.trustguard is true. External: always on.
+*/}}
+{{- define "firewall.enabled" -}}
+{{- if eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustguard")) "true" -}}true{{- end -}}
+{{- end }}
+
+{{/*
 Construct image path with optional global registry prefix.
 Usage: {{ include "firewall.image" (dict "repository" "repo" "tag" "v1" "global" .Values.global) }}
 */}}

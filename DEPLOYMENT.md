@@ -35,15 +35,21 @@ DataAgent enrolment is required for hybrid ClickStack egress (and for
 DataAgent itself). Prefer `enrolment.existingSecret.name`:
 
 ```yaml
-dataagent:
-  tenantId: "<tenant-id>"
-  enrolment:
-    existingSecret:
-      name: "dataagent-enrolment"
+agentgateway:
+  dataagent:
+    enrolment:
+      existingSecret:
+        name: "dataagent-enrolment-trustgate"
+
+trustguard:
+  dataagent:
+    enrolment:
+      existingSecret:
+        name: "dataagent-enrolment-trustguard"
 ```
 
-Do not configure a partial enrolment. It is outbound-only and is not rendered
-in external mode.
+The enrolment JWT carries `tenant_id` and `instance_id`. Do not configure a
+partial enrolment. It is outbound-only and is not rendered in external mode.
 
 ### External (self-hosted)
 
@@ -135,15 +141,15 @@ global:
 
 See [docs/observability.md](./docs/observability.md).
 
-## 5. Optional Firewall
+## 5. TrustGuard Firewall
 
-CPU workers use chart defaults. GPU workers require a GPU image, resource
-limit, node selection, toleration, and `hostIPC`:
+Firewall deploys whenever TrustGuard is selected. CPU workers use chart
+defaults. GPU workers require a GPU image, resource limit, node selection,
+toleration, and `hostIPC`:
 
 ```yaml
 firewall:
   firewall:
-    enabled: true
     workerDefaults:
       image:
         repository: "<registry>/firewall-gpu"

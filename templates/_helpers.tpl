@@ -467,71 +467,166 @@ ClickHouse is allowed to render only in v2 external.
 {{- end }}
 
 {{/*
-DataAgent values root. Works from the umbrella (`.Values.dataagent`) and the
-dataagent subchart (`.Values` is the dataagent block).
+Product enable flag from the shared global.products contract.
+- external: always on (full stack; product flags are ignored)
+- hybrid: positive opt-in — true only when the flag is explicitly true
+Usage: {{ include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustgate") }}
 */}}
-{{- define "neuraltrust-platform.dataagent.cfg" -}}
-{{- if hasKey .Values "dataagent" -}}
-{{- toYaml (default dict .Values.dataagent) -}}
+{{- define "neuraltrust-platform.product.enabled" -}}
+{{- if eq (include "neuraltrust-platform.isExternal" .ctx) "true" -}}
+true
 {{- else -}}
-{{- toYaml .Values -}}
+{{- $products := default dict (default dict .ctx.Values.global).products -}}
+{{- $on := false -}}
+{{- if hasKey $products .product -}}{{- $on = index $products .product -}}{{- end -}}
+{{- if $on -}}true{{- end -}}
 {{- end -}}
 {{- end }}
 
 {{/*
-Enrolment credentials — same ritual as configSync.token / existingSecret:
-  dataagent.enrolment.token
-  dataagent.enrolment.existingSecret.name / .key
+Map commercial product id → component values root.
+trustgate (product) → agentgateway (values); trustguard → trustguard.
+Usage: {{ include "neuraltrust-platform.product.valuesRoot" (dict "product" "trustgate") }}
 */}}
-{{- define "neuraltrust-platform.dataagent.enrolment.token" -}}
-{{- $cfg := include "neuraltrust-platform.dataagent.cfg" . | fromYaml -}}
-{{- $enrolment := default dict $cfg.enrolment -}}
+{{- define "neuraltrust-platform.product.valuesRoot" -}}
+{{- $product := .product | default . -}}
+{{- if eq $product "trustgate" -}}agentgateway
+{{- else -}}{{ $product }}
+{{- end -}}
+{{- end }}
+
+{{/*
+Primary product for ClickStack egress ownership: TrustGate when enabled,
+otherwise TrustGuard.
+*/}}
+{{- define "neuraltrust-platform.dataagent.primaryProduct" -}}
+{{- if eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustgate")) "true" -}}
+trustgate
+{{- else if eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustguard")) "true" -}}
+trustguard
+{{- end -}}
+{{- end }}
+
+{{/*
+True when a hybrid product slice needs a DataAgent (trustgate or trustguard on).
+*/}}
+{{- define "neuraltrust-platform.dataagent.required" -}}
+{{- if and
+  (eq (include "neuraltrust-platform.isHybrid" .) "true")
+  (or
+    (eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustgate")) "true")
+    (eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustguard")) "true")
+  )
+-}}true{{- end -}}
+{{- end }}
+
+{{/*
+Nested enrolment helpers for a product dataagent block.
+Usage: (dict "cfg" $merged)
+*/}}
+{{- define "neuraltrust-platform.dataagent.cfg.enrolment.token" -}}
+{{- $enrolment := default dict .cfg.enrolment -}}
 {{- $enrolment.token | default "" -}}
 {{- end }}
 
-{{- define "neuraltrust-platform.dataagent.enrolment.existingSecretName" -}}
-{{- $cfg := include "neuraltrust-platform.dataagent.cfg" . | fromYaml -}}
-{{- $enrolment := default dict $cfg.enrolment -}}
+{{- define "neuraltrust-platform.dataagent.cfg.enrolment.existingSecretName" -}}
+{{- $enrolment := default dict .cfg.enrolment -}}
 {{- $existing := default dict $enrolment.existingSecret -}}
 {{- $existing.name | default "" -}}
 {{- end }}
 
-{{- define "neuraltrust-platform.dataagent.enrolment.existingSecretKey" -}}
-{{- $cfg := include "neuraltrust-platform.dataagent.cfg" . | fromYaml -}}
-{{- $enrolment := default dict $cfg.enrolment -}}
-{{- $existing := default dict $enrolment.existingSecret -}}
-{{- $existing.key | default "ENROLMENT_TOKEN" -}}
+{{/*
+Merged values for one DataAgent instance.
+Usage: {{ include "neuraltrust-platform.dataagent.instanceValues" (dict "ctx" $ "product" "trustgate") }}
+*/}}
+{{- define "neuraltrust-platform.dataagent.instanceValues" -}}
+{{- $root := .ctx -}}
+{{- $product := .product -}}
+{{- $valuesKey := include "neuraltrust-platform.product.valuesRoot" (dict "product" $product) -}}
+{{- $productRoot := default dict (index $root.Values $valuesKey) -}}
+{{- $nested := default dict $productRoot.dataagent -}}
+{{- $primary := include "neuraltrust-platform.dataagent.primaryProduct" $root -}}
+{{- /* Helm coalesces the library chart defaults into .Values.dataagent. */ -}}
+{{- $merged := mergeOverwrite (deepCopy (default dict $root.Values.dataagent)) $nested -}}
+{{- $fullname := "dataagent" -}}
+{{- if eq $product "trustguard" -}}{{- $fullname = "dataagent-trustguard" -}}{{- end -}}
+{{- $_ := set $merged "fullnameOverride" $fullname -}}
+{{- $sa := default dict $merged.serviceAccount -}}
+{{- $_ := set $sa "name" $fullname -}}
+{{- $_ := set $merged "serviceAccount" $sa -}}
+{{- $_ := set $merged "product" $product -}}
+{{- $_ := set $merged "egressPrimary" (and (eq $product $primary) (eq (include "neuraltrust-platform.clickstackHybridEnabled" $root) "true")) -}}
+{{- $_ := set $merged "global" (default dict $root.Values.global) -}}
+{{- toYaml $merged -}}
 {{- end }}
 
 {{/*
-DataAgent enablement gate. Requires:
-  - hybrid mode
-  - non-empty tenantId
-  - enrolment token (inline, existingSecret, or previously generated)
-  - database credentials (chart-generated or existingSecret)
+Credential readiness for a merged instance cfg (dict "ctx" $ "cfg" $merged).
 */}}
-{{- define "neuraltrust-platform.dataagentEnabled" -}}
-{{- $cfg := include "neuraltrust-platform.dataagent.cfg" . | fromYaml -}}
-{{- $tenantId := $cfg.tenantId | default "" -}}
-{{- $token := include "neuraltrust-platform.dataagent.enrolment.token" . -}}
-{{- $existingName := include "neuraltrust-platform.dataagent.enrolment.existingSecretName" . -}}
-{{- $managedSecret := lookup "v1" "Secret" .Release.Namespace "dataagent-secrets" -}}
+{{- define "neuraltrust-platform.dataagent.cfgReady" -}}
+{{- $root := .ctx -}}
+{{- $cfg := .cfg -}}
+{{- $token := include "neuraltrust-platform.dataagent.cfg.enrolment.token" (dict "cfg" $cfg) -}}
+{{- $existingName := include "neuraltrust-platform.dataagent.cfg.enrolment.existingSecretName" (dict "cfg" $cfg) -}}
+{{- $secretName := "" -}}
+{{- if (default dict $cfg.existingSecret).name -}}
+  {{- $secretName = $cfg.existingSecret.name -}}
+{{- else if $cfg.fullnameOverride -}}
+  {{- $secretName = printf "%s-secrets" $cfg.fullnameOverride -}}
+{{- else -}}
+  {{- $secretName = "dataagent-secrets" -}}
+{{- end -}}
+{{- $managedSecret := lookup "v1" "Secret" $root.Release.Namespace $secretName -}}
 {{- $managedData := dict -}}
 {{- if and $managedSecret (kindIs "map" $managedSecret) $managedSecret.data -}}
   {{- $managedData = $managedSecret.data -}}
 {{- end -}}
 {{- $hasManagedToken := and (hasKey $managedData "ENROLMENT_TOKEN") (ne (index $managedData "ENROLMENT_TOKEN") "") -}}
-{{- $dataSecret := default dict $cfg.existingSecret -}}
-{{- $dataSecretName := $dataSecret.name | default "" -}}
+{{- $dataSecretName := (default dict $cfg.existingSecret).name | default "" -}}
 {{- $hasManagedDatabase := and (hasKey $managedData "DATABASE_URL") (ne (index $managedData "DATABASE_URL") "") -}}
-{{- $preserve := dig "preserveExistingSecrets" false (.Values.global | default dict) -}}
-{{- $chartGeneratesDatabase := and (eq (include "neuraltrust-platform.autoGenerateSecrets" .) "true") (not $preserve) -}}
+{{- $globalPg := default dict (default dict $root.Values.global).postgresql -}}
+{{- $globalPgExisting := default dict $globalPg.existingSecret -}}
+{{- $sharedPgSecretName := $globalPgExisting.name | default "postgresql-secrets" -}}
+{{- $sharedPgSecret := lookup "v1" "Secret" $root.Release.Namespace $sharedPgSecretName -}}
+{{- $sharedPgData := dict -}}
+{{- if and $sharedPgSecret (kindIs "map" $sharedPgSecret) $sharedPgSecret.data -}}
+  {{- $sharedPgData = $sharedPgSecret.data -}}
+{{- end -}}
+{{- $sharedPgReady := or ($globalPgExisting.name | default "") (and (hasKey $sharedPgData "SENSIBLE_PG_DSN") (ne (index $sharedPgData "SENSIBLE_PG_DSN") "")) -}}
+{{- $preserve := dig "preserveExistingSecrets" false ($root.Values.global | default dict) -}}
+{{- $autoGenerate := eq (include "neuraltrust-platform.autoGenerateSecrets" $root) "true" -}}
+{{- $chartGeneratesDatabase := and $autoGenerate (not $preserve) -}}
+{{- $pgDeploy := true -}}
+{{- if hasKey $globalPg "deploy" -}}{{- $pgDeploy = $globalPg.deploy -}}{{- end -}}
+{{- $pgIam := and (eq ($globalPg.authMode | default "password" | toString | lower) "iam") (not $pgDeploy) -}}
+{{- $fallbackSharedPgReady := and (not $autoGenerate) (not $preserve) (not ($globalPgExisting.name | default "")) (or ($globalPg.password | default "") $pgIam) -}}
 {{- $tokenReady := or $existingName $hasManagedToken (and $token $chartGeneratesDatabase) -}}
-{{- if and
-  (eq (include "neuraltrust-platform.isHybrid" .) "true")
-  $tenantId
-  $tokenReady
-  (or $chartGeneratesDatabase $dataSecretName $hasManagedDatabase)
+{{/* tenant_id / instance_id live in the enrolment JWT — not Helm values. */}}
+{{- if and $tokenReady (or $chartGeneratesDatabase $fallbackSharedPgReady $sharedPgReady $dataSecretName $hasManagedDatabase) -}}true{{- end -}}
+{{- end }}
+
+{{/*
+Whether a product's DataAgent should render.
+Usage: (dict "ctx" $ "product" "trustgate")
+*/}}
+{{- define "neuraltrust-platform.dataagent.instanceEnabled" -}}
+{{- $root := .ctx -}}
+{{- $product := .product -}}
+{{- if ne (include "neuraltrust-platform.isHybrid" $root) "true" -}}
+{{- else if ne (include "neuraltrust-platform.product.enabled" (dict "ctx" $root "product" $product)) "true" -}}
+{{- else -}}
+  {{- $vals := include "neuraltrust-platform.dataagent.instanceValues" (dict "ctx" $root "product" $product) | fromYaml -}}
+  {{- if eq (include "neuraltrust-platform.dataagent.cfgReady" (dict "ctx" $root "cfg" $vals)) "true" -}}true{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Any product DataAgent enabled (hybrid).
+*/}}
+{{- define "neuraltrust-platform.dataagentEnabled" -}}
+{{- if or
+  (eq (include "neuraltrust-platform.dataagent.instanceEnabled" (dict "ctx" . "product" "trustgate")) "true")
+  (eq (include "neuraltrust-platform.dataagent.instanceEnabled" (dict "ctx" . "product" "trustguard")) "true")
 -}}true{{- end -}}
 {{- end }}
 
@@ -571,6 +666,8 @@ clickhouse
 {{- end }}
 
 {{- define "neuraltrust-platform.dataPlaneApiV2.enabled" -}}
+{{- if ne (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "dataPlane")) "true" -}}
+{{- else -}}
 {{- $dp := default dict .Values.dataPlane }}
 {{- $dpOn := true }}{{- if hasKey $dp "enabled" }}{{- $dpOn = $dp.enabled }}{{- end }}
 {{- $components := default dict $dp.components }}
@@ -590,6 +687,7 @@ clickhouse
 {{- end }}
 {{- end }}
 {{- if and $dpOn $apiOn $render }}true{{- end }}
+{{- end -}}
 {{- end }}
 
 {{/*
@@ -1149,33 +1247,15 @@ true
 {{- end }}
 
 {{/*
-Enrolment credential is resolvable for DataAgent and/or OTLP egress exchange.
-
-Works from the umbrella (`.Values.dataagent`) and the dataagent subchart
-(`.Values` is the dataagent block). AgentGateway/TrustGuard use
-clickstackEgress.useLocalEndpoint (global-only) for the OTLP endpoint switch.
+Enrolment credential is resolvable for at least one DataAgent instance.
 */}}
 {{- define "neuraltrust-platform.clickstack.enrolmentReady" -}}
-{{- $token := include "neuraltrust-platform.dataagent.enrolment.token" . -}}
-{{- $existingName := include "neuraltrust-platform.dataagent.enrolment.existingSecretName" . -}}
-{{- $managedSecret := lookup "v1" "Secret" .Release.Namespace "dataagent-secrets" -}}
-{{- $managedData := dict -}}
-{{- if and $managedSecret (kindIs "map" $managedSecret) $managedSecret.data -}}
-  {{- $managedData = $managedSecret.data -}}
-{{- end -}}
-{{- $hasManagedToken := and (hasKey $managedData "ENROLMENT_TOKEN") (ne (index $managedData "ENROLMENT_TOKEN") "") -}}
-{{- $preserve := dig "preserveExistingSecrets" false (.Values.global | default dict) -}}
-{{- $chartGenerates := and (eq (include "neuraltrust-platform.autoGenerateSecrets" .) "true") (not $preserve) -}}
-{{- if or $existingName $hasManagedToken (and $token $chartGenerates) -}}true{{- end -}}
+{{- if eq (include "neuraltrust-platform.dataagentEnabled" .) "true" -}}true{{- end -}}
 {{- end }}
 
 {{/*
-True when hybrid should co-locate the OTLP egress sidecar on DataAgent.
-
-Requires a fully enabled DataAgent (tenantId + enrolment + DB) because the
-collector is a sidecar, not a standalone Deployment. EXTERNAL installs never
-enable this: they keep the in-cluster clickstack-otel-collector → ClickHouse
-path with no internet hop.
+True when hybrid should co-locate the OTLP egress sidecar on the primary
+DataAgent. EXTERNAL installs never enable this.
 */}}
 {{- define "neuraltrust-platform.clickstackEgress.enabled" -}}
 {{- if and

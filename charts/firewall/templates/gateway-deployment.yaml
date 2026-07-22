@@ -1,4 +1,4 @@
-{{- if .Values.firewall.enabled }}
+{{- if eq (include "firewall.enabled" .) "true" }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -35,7 +35,7 @@ spec:
       containers:
         - name: gateway
           {{- $gwRepo := .Values.firewall.gateway.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu" }}
-          {{- $gwTag := .Values.firewall.gateway.image.tag | default "v2.14.0" }}
+          {{- $gwTag := .Values.firewall.gateway.image.tag | default "v2.15.0" }}
           image: {{ include "firewall.image" (dict "repository" $gwRepo "tag" $gwTag "global" .Values.global) | quote }}
           imagePullPolicy: {{ .Values.firewall.gateway.image.pullPolicy | default "IfNotPresent" }}
           {{- /* No args override: the firewall image CMD (`python -m src.serve`)

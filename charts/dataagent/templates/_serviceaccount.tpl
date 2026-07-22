@@ -1,4 +1,4 @@
-{{- if eq (include "neuraltrust-platform.dataagentEnabled" .) "true" }}
+{{- define "dataagent.serviceAccount" -}}
 {{- if .Values.serviceAccount.create }}
 apiVersion: v1
 kind: ServiceAccount

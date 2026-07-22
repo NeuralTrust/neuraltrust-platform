@@ -1,3 +1,4 @@
+{{- if eq (include "agentgateway.enabled" .) "true" }}
 {{- /*
 Native OpenShift Routes for AgentGateway proxy/MCP (and admin in external mode).
 Rendered when global.platform=openshift and ingress.resourceType is auto|route.
@@ -105,6 +106,7 @@ spec:
   tls:
     termination: {{ $termination }}
     insecureEdgeTerminationPolicy: {{ $insecurePolicy }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- end }}

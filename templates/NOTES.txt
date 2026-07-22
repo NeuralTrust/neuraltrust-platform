@@ -7,8 +7,10 @@ Secrets have been auto-generated for this deployment.
 {{- end }}
 
 {{- $isExternal := eq (include "neuraltrust-platform.isExternal" .) "true" }}
-{{- $isHybrid := eq (include "neuraltrust-platform.isHybrid" .) "true" }}
 {{- $dataagentEnabled := eq (include "neuraltrust-platform.dataagentEnabled" .) "true" }}
+{{- $trustgateEnabled := eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustgate")) "true" }}
+{{- $trustguardEnabled := eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustguard")) "true" }}
+{{- $dataPlaneEnabled := eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "dataPlane")) "true" }}
 {{- $platform := .Values.global.platform | default "gcp" }}
 {{- $ipField := "ip" }}
 {{- if eq $platform "aws" }}
@@ -47,14 +49,26 @@ Using external PostgreSQL at {{ .Values.global.postgresql.host }}:{{ .Values.glo
 {{- end }}
 
 Enabled v2 components:
+{{- if $trustgateEnabled }}
   - AgentGateway proxy{{ if $mcpEnabled }} + MCP server{{ end }} (runtime data plane)
+{{- end }}
+{{- if $trustguardEnabled }}
   - TrustGuard runtime (data plane)
+  - Firewall
+{{- end }}
+{{- if $dataPlaneEnabled }}
   - data-plane-api (analytics shim)
+{{- end }}
 {{- if $dataagentEnabled }}
-  - DataAgent (bridges local reads to the NeuralTrust SaaS control plane)
+  - DataAgent per selected TrustGate/TrustGuard product
 {{- end }}
 {{- if $isExternal }}
-  - AgentGateway Admin + TrustGuard Control Plane (on-prem control plane)
+{{- if $trustgateEnabled }}
+  - AgentGateway Admin (on-prem control plane)
+{{- end }}
+{{- if $trustguardEnabled }}
+  - TrustGuard Control Plane (on-prem control plane)
+{{- end }}
   - Control Plane API + App (on-prem console)
   - DataCore + ClickStack OTel Collector (self-hosted analytics)
   - AlertEngine
@@ -63,15 +77,9 @@ Enabled v2 components:
   - TrustLens
 {{- end }}
 
-{{- if and $isHybrid (not $dataagentEnabled) }}
-WARNING: DataAgent was not deployed because tenantId and enrolment credentials
-are not both configured. AgentGateway and TrustGuard runtime protection remain
-available, but SaaS DataBridge access is disabled. Set dataagent.tenantId and
-either dataagent.enrolment.token or dataagent.enrolment.existingSecret.name.
-{{- end }}
-
 Ingress endpoints:
   kubectl get ingress -n {{ .Release.Namespace }}
+{{- if $trustgateEnabled }}
 {{- $agGwHost := include "neuraltrust-platform.ingress.host" (dict "host" (dig "ingress" "dataPlane" "host" "" $ag) "prefix" "gateway" "global" .Values.global) }}
 {{- if $agGwHost }}
   - AgentGateway Gateway: https://{{ $agGwHost }}
@@ -86,6 +94,8 @@ Ingress endpoints:
   - AgentGateway MCP:     kubectl get ingress agentgateway-mcp -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].{{ $ipField }}}'
 {{- end }}
 {{- end }}
+{{- end }}
+{{- if $trustguardEnabled }}
 {{- $tg := .Values.trustguard | default dict }}
 {{- $tgHost := include "neuraltrust-platform.ingress.host" (dict "host" (dig "ingress" "dataPlane" "host" "" $tg) "prefix" "trustguard" "global" .Values.global) }}
 {{- if $tgHost }}
@@ -93,18 +103,24 @@ Ingress endpoints:
 {{- else }}
   - TrustGuard:           kubectl get ingress trustguard -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].{{ $ipField }}}'
 {{- end }}
+{{- end }}
 {{- if $isExternal }}
+{{- if $trustgateEnabled }}
 {{- $agAdminHost := include "neuraltrust-platform.ingress.host" (dict "host" (dig "ingress" "controlPlane" "host" "" $ag) "prefix" "admin" "global" .Values.global) }}
 {{- if $agAdminHost }}
   - AgentGateway Admin:   https://{{ $agAdminHost }}
 {{- else }}
   - AgentGateway Admin:   kubectl get ingress agentgateway-admin -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].{{ $ipField }}}'
 {{- end }}
+{{- end }}
+{{- if $trustguardEnabled }}
+{{- $tg := .Values.trustguard | default dict }}
 {{- $tgAdminHost := include "neuraltrust-platform.ingress.host" (dict "host" (dig "ingress" "controlPlane" "host" "" $tg) "prefix" "trustguard-admin" "global" .Values.global) }}
 {{- if $tgAdminHost }}
   - TrustGuard Admin:     https://{{ $tgAdminHost }}
 {{- else }}
   - TrustGuard Admin:     kubectl get ingress trustguard-admin -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].{{ $ipField }}}'
+{{- end }}
 {{- end }}
 {{- $cpApiHost := include "neuraltrust-platform.ingress.host" (dict "host" (dig "controlPlane" "components" "api" "host" "" $cpApi) "prefix" "api" "global" .Values.global) }}
 {{- if $cpApiHost }}
@@ -127,11 +143,13 @@ Ingress endpoints:
 {{- end }}
 {{- end }}
 {{- end }}
+{{- if $dataPlaneEnabled }}
 {{- $dpApiHost := include "neuraltrust-platform.ingress.host" (dict "host" (dig "dataPlane" "components" "api" "host" "" $dpValues) "prefix" "data-plane-api" "global" .Values.global) }}
 {{- if $dpApiHost }}
   - Data Plane API:       https://{{ $dpApiHost }}
 {{- else }}
   - Data Plane API:       kubectl get ingress data-plane-api -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].{{ $ipField }}}'
+{{- end }}
 {{- end }}
 
 {{- if eq $platform "aws" }}

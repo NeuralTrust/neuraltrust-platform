@@ -1,4 +1,4 @@
-{{- if eq (include "neuraltrust-platform.isV2" .) "true" }}
+{{- if eq (include "agentgateway.enabled" .) "true" }}
 {{- $isHybrid := eq (include "neuraltrust-platform.isHybrid" .) "true" }}
 apiVersion: v1
 kind: ConfigMap
@@ -81,10 +81,14 @@ data:
   # Apps send plain OTLP in-cluster; no direct SaaS Authorization header.
   {{- include "neuraltrust-platform.clickstack.otlpEnv" . | nindent 2 }}
   {{- end }}
+  {{- /* TrustGuard URL when Guard is on (hybrid positive select / external full). */ -}}
+  {{- $tg := default dict .Values.trustguard -}}
+  {{- if eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustguard")) "true" -}}
   # In-cluster TrustGuard data-plane URL. Derived from the stable Service name +
   # release namespace (Service listens on port 80), so it never needs setting in
   # a single-umbrella deploy. Override .Values.trustguard.baseURL only when
   # TrustGuard runs outside this release. TRUSTGUARD_CLIENT_ID/_SECRET are wired
   # from the shared trustguard-client-credentials Secret in the Deployment env.
-  TRUSTGUARD_BASE_URL: {{ .Values.trustguard.baseURL | default (printf "http://trustguard-data-plane.%s.svc.cluster.local" .Release.Namespace) | quote }}
+  TRUSTGUARD_BASE_URL: {{ $tg.baseURL | default (printf "http://trustguard-data-plane.%s.svc.cluster.local" .Release.Namespace) | quote }}
+  {{- end -}}
 {{- end }}
