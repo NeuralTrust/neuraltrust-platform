@@ -10,13 +10,13 @@ dependencies:
   version: 0.1.2
 - name: control-plane-app
   repository: file://./charts/control-plane-app
-  version: 0.1.15
+  version: 0.1.16
 - name: agentgateway
   repository: file://./charts/agentgateway
-  version: 0.1.29
+  version: 0.1.30
 - name: trustguard
   repository: file://./charts/trustguard
-  version: 0.1.27
+  version: 0.1.28
 - name: trustlens
   repository: file://./charts/trustlens
   version: 0.1.1
@@ -38,5 +38,5 @@ dependencies:
 - name: watchdog
   repository: file://./charts/watchdog
   version: 0.3.1
-digest: sha256:9604e4b8f0115390e5fc0dab2c40fcbc3d9f307bba63c5c91a3df72a7e16a228
-generated: "2026-07-23T10:19:45.855642+02:00"
+digest: sha256:6ead369b94615033e42c92df2b5f3331e521e1895dd1b22209b78190164d0895
+generated: "2026-07-23T16:16:34.817283998Z"

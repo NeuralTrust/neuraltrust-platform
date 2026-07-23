@@ -35,7 +35,7 @@ dependencies:
       - v2
   # Control-plane App/UI — v2 external only (SaaS-side in hybrid).
   - name: control-plane-app
-    version: 0.1.15
+    version: 0.1.16
     repository: file://./charts/control-plane-app
     tags:
       - neuraltrust
@@ -45,7 +45,7 @@ dependencies:
   # agentgateway-*. Loaded unconditionally; templates gate on
   # global.products.trustgate in hybrid and always render in external.
   - name: agentgateway
-    version: 0.1.29
+    version: 0.1.30
     repository: file://./charts/agentgateway
     tags:
       - neuraltrust
@@ -53,7 +53,7 @@ dependencies:
   # TrustGuard control + data plane. Templates gate on
   # global.products.trustguard in hybrid; always on in external.
   - name: trustguard
-    version: 0.1.27
+    version: 0.1.28
     repository: file://./charts/trustguard
     tags:
       - neuraltrust
