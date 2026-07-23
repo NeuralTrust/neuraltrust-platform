@@ -47,7 +47,7 @@ spec:
       initContainers:
       - name: init-db
         {{- $initImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
-        {{- $initImageTag := "v1.105.0" }}
+        {{- $initImageTag := "v1.107.1" }}
         {{- $initPullPolicy := "Always" }}
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.image }}
           {{- if .Values.controlPlane.components.app.image.repository }}{{- $initImageRepo = .Values.controlPlane.components.app.image.repository }}{{- end }}
@@ -189,7 +189,7 @@ spec:
       containers:
       - name: app
         {{- $appImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
-        {{- $appImageTag := "v1.105.0" }}
+        {{- $appImageTag := "v1.107.1" }}
         {{- $appPullPolicy := "Always" }}
         {{- $appPort := 3000 }}
         {{- $nodeEnv := "production" }}
@@ -434,6 +434,20 @@ spec:
         - name: DEPLOYMENT_MODE
           value: "external"
         {{- $sa := default dict (default dict .Values.global).superadmin }}
+        {{- $saExisting := default dict $sa.existingSecret }}
+        {{- $saSecretName := $saExisting.name | default "" }}
+        {{- if $saSecretName }}
+        - name: ONPREM_SUPERADMIN_EMAIL
+          valueFrom:
+            secretKeyRef:
+              name: {{ $saSecretName | quote }}
+              key: {{ $saExisting.emailKey | default "ONPREM_SUPERADMIN_EMAIL" | quote }}
+        - name: ONPREM_SUPERADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ $saSecretName | quote }}
+              key: {{ $saExisting.passwordKey | default "ONPREM_SUPERADMIN_PASSWORD" | quote }}
+        {{- else }}
         {{- $saEmail := $sa.email | default "" }}
         {{- $saPassword := $sa.password | default "" }}
         {{- if and $saEmail $saPassword }}
@@ -441,6 +455,7 @@ spec:
           value: {{ $saEmail | quote }}
         - name: ONPREM_SUPERADMIN_PASSWORD
           value: {{ $saPassword | quote }}
+        {{- end }}
         {{- end }}
         - name: NEXTAUTH_URL
           {{- /* Explicit config.nextAuthUrl wins; else resolve to the real ingress

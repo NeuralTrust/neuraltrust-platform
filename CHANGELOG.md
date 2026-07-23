@@ -31,16 +31,18 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 - Render scenarios for hybrid no-selection failure, standalone / pairwise /
   all-product mixes, and external full-stack compatibility without product
   flags.
-- **External on-prem superadmin.** Optional `global.superadmin.email` /
-  `password` (empty by default). When both are set, control-plane-app emits
-  `ONPREM_SUPERADMIN_EMAIL` and `ONPREM_SUPERADMIN_PASSWORD`. Ignored in
-  hybrid (app does not render). Inline password enters Helm release history.
+- **External on-prem superadmin.** Optional bootstrap admin on
+  control-plane-app. Prefer `global.superadmin.existingSecret.name` (keys
+  default to `ONPREM_SUPERADMIN_EMAIL` / `ONPREM_SUPERADMIN_PASSWORD`);
+  inline `email` + `password` remains as an escape hatch (enters Helm
+  release history). Ignored in hybrid (app does not render). Control Plane
+  App subchart `0.1.13 → 0.1.14`.
 
 ### Changed
 
-- Image bumps (local AR latest): control-plane-app `v1.105.0`, firewall
+- Image bumps (local AR latest): control-plane-app `v1.107.1`, firewall
   `v2.15.0`, agentgateway `v0.18.1`, trustguard `v0.19.1`. Control Plane App
-  subchart `0.1.12 → 0.1.13`.
+  subchart `0.1.14 → 0.1.15`.
 - **Firewall workers new module set.** Dropped the retired
   `toolguard-worker` (`src.workers.toolguard` removed in firewall v2.15.0+)
   and added `indirect-prompt-injections-worker`

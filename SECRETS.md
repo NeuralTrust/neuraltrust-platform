@@ -95,15 +95,16 @@ All required secrets must exist in the namespace before deployment.
 These Secrets apply when `global.deploymentMode: external` renders
 control-plane-api/app. Hybrid keeps the console in NeuralTrust SaaS.
 
-Optional bootstrap admin (not a Kubernetes Secret): set both
-`global.superadmin.email` and `global.superadmin.password` to inject
-`ONPREM_SUPERADMIN_EMAIL` / `ONPREM_SUPERADMIN_PASSWORD` on control-plane-app.
-Empty defaults leave the feature off. Inline password values enter Helm
-release history — prefer short-lived bootstrap secrets and rotate after first
-login when possible.
+Optional bootstrap admin for control-plane-app (external only). Prefer a
+pre-created Secret via `global.superadmin.existingSecret.name` (keys default
+to `ONPREM_SUPERADMIN_EMAIL` / `ONPREM_SUPERADMIN_PASSWORD`). Inline
+`global.superadmin.email` + `password` still works when both are set, but
+those values enter Helm release history — prefer `existingSecret` and rotate
+after first login when possible. Empty defaults leave the feature off.
 
 | Kubernetes Secret | Key | Required | Description |
 |---|---|---|---|
+| `<your-name>` (caller-controlled) | `ONPREM_SUPERADMIN_EMAIL` / `ONPREM_SUPERADMIN_PASSWORD` (override via `emailKey` / `passwordKey`) | Only when `global.superadmin.existingSecret.name` is set | Bootstrap admin for control-plane-app. Chart does not create this Secret. |
 | `control-plane-secrets` | `CONTROL_PLANE_JWT_SECRET` | Auto-generated | JWT for Control Plane API auth |
 | `control-plane-secrets` | `TRUSTGATE_JWT_SECRET` | Auto-generated | Control-plane ↔ AgentGateway integration key |
 | `control-plane-secrets` | `FIREWALL_JWT_SECRET` | No | JWT for firewall service |

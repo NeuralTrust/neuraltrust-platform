@@ -384,6 +384,26 @@ assert_contains "$out3sa" 'name: ONPREM_SUPERADMIN_EMAIL'$'\n''          value: 
 assert_contains "$out3sa" 'name: ONPREM_SUPERADMIN_PASSWORD'$'\n''          value: "s3cret"' \
   "external+superadmin: ONPREM_SUPERADMIN_PASSWORD set on control-plane-app"
 
+blue "==> Scenario 3-superadmin-secret: existingSecret wins over inline"
+out3sas="$TMP/scenario-external-superadmin-secret.yaml"
+render_default "$out3sas" \
+  --set global.deploymentMode=external \
+  --set global.superadmin.existingSecret.name=onprem-superadmin \
+  --set global.superadmin.email=ignored@example.com \
+  --set global.superadmin.password=ignored
+assert_contains "$out3sas" 'name: ONPREM_SUPERADMIN_EMAIL'$'\n''          valueFrom:'$'\n''            secretKeyRef:'$'\n''              name: "onprem-superadmin"' \
+  "external+superadmin secret: EMAIL from existingSecret"
+assert_contains "$out3sas" 'key: "ONPREM_SUPERADMIN_EMAIL"' \
+  "external+superadmin secret: default email key"
+assert_contains "$out3sas" 'name: ONPREM_SUPERADMIN_PASSWORD'$'\n''          valueFrom:'$'\n''            secretKeyRef:'$'\n''              name: "onprem-superadmin"' \
+  "external+superadmin secret: PASSWORD from existingSecret"
+assert_contains "$out3sas" 'key: "ONPREM_SUPERADMIN_PASSWORD"' \
+  "external+superadmin secret: default password key"
+assert_not_contains "$out3sas" 'value: "ignored@example.com"' \
+  "external+superadmin secret: inline email not used when existingSecret set"
+assert_not_contains "$out3sas" 'value: "ignored"' \
+  "external+superadmin secret: inline password not used when existingSecret set"
+
 # External config-sync servers and clients must share each component's
 # operator-owned credentials.
 blue "==> Scenario 3a: external config-sync uses shared operator Secrets"
