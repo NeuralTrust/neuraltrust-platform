@@ -503,7 +503,7 @@ control-plane-app:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.107.1"
+          tag: "v1.109.0"
           pullPolicy: "Always"
         config:
           nodeEnv: production
@@ -573,7 +573,7 @@ control-plane-app:
 # stays agentgateway for now; K8s names stay agentgateway-*.
 agentgateway:
   image:
-    tag: "v0.18.1"
+    tag: "v0.19.1"
   database:
     sslMode: "prefer"
     iamAuth: false
@@ -597,7 +597,7 @@ agentgateway:
 # TrustGuard: control-plane + data-plane (/v1/evaluate).
 trustguard:
   image:
-    tag: "v0.19.1"
+    tag: "v0.19.2"
   database:
     sslMode: "prefer"
     iamAuth: false
