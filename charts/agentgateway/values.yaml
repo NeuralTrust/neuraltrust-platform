@@ -9,7 +9,7 @@ fullnameOverride: "agentgateway"
 securityHardening: true
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/agentgateway
-  tag: "v0.18.1"
+  tag: "v0.19.1"
   pullPolicy: IfNotPresent
 # Image pull secret name (string) or list. "none"/"" suppresses it.
 # Falls back to global.imagePullSecrets when empty.
