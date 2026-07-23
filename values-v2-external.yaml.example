@@ -3,9 +3,12 @@
 
 global:
   deploymentMode: "external"
+  # Prefer a pre-created Secret (keys default to ONPREM_SUPERADMIN_EMAIL /
+  # ONPREM_SUPERADMIN_PASSWORD). Inline email+password still works but enters
+  # Helm release history.
   superadmin:
-    email: "admin@example.com"
-    password: "change-me"
+    existingSecret:
+      name: "onprem-superadmin"
   platform: "kubernetes"
   domain: "platform.example.com"
   observability:

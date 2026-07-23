@@ -83,8 +83,8 @@ Postgres-managed configuration.
 global:
   deploymentMode: "external"
   superadmin:
-    email: "admin@example.com"
-    password: "change-me"
+    existingSecret:
+      name: "onprem-superadmin"
   observability:
     hostedExport:
       enabled: false
@@ -94,10 +94,10 @@ alertengine:
 ```
 
 External mode renders ClickStack, DataCore, AlertEngine, the product API/app,
-and the control and data planes. It does not render DataAgent. When both
-`global.superadmin.email` and `password` are set, control-plane-app receives
-`ONPREM_SUPERADMIN_EMAIL` / `ONPREM_SUPERADMIN_PASSWORD` (inline values enter
-Helm release history).
+and the control and data planes. It does not render DataAgent. Bootstrap
+admin: prefer `global.superadmin.existingSecret.name` pointing at a
+pre-created Secret; inline `email` + `password` still works but enters Helm
+release history.
 
 ## Scenario: managed datastores
 

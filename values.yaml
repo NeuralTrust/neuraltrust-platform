@@ -20,10 +20,15 @@ global:
   #                DataAgent is not deployed.
   deploymentMode: "hybrid"
   # External-only bootstrap admin for control-plane-app. Ignored in hybrid
-  # (app does not render). Both must be non-empty to enable the feature.
+  # (app does not render). Prefer existingSecret (avoids Helm release history);
+  # inline email+password is the escape hatch when both are non-empty.
   superadmin:
     email: ""
     password: ""
+    existingSecret:
+      name: ""
+      emailKey: "ONPREM_SUPERADMIN_EMAIL"
+      passwordKey: "ONPREM_SUPERADMIN_PASSWORD"
   # Hybrid product selection (positive opt-in). Defaults are all false so
   # overlays only declare what they want. External mode ignores these flags
   # and always deploys the full product stack. Firewall follows TrustGuard.
@@ -498,7 +503,7 @@ control-plane-app:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.105.0"
+          tag: "v1.107.1"
           pullPolicy: "Always"
         config:
           nodeEnv: production

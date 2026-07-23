@@ -24,10 +24,11 @@
 
 global:
   deploymentMode: "external"
-  # Optional bootstrap admin (set both; password enters Helm release history):
+  # Optional bootstrap admin — prefer existingSecret over inline password:
   # superadmin:
-  #   email: "admin@example.com"
-  #   password: "change-me"
+  #   existingSecret:
+  #     name: "onprem-superadmin"
+
   platform: "kubernetes"
   domain: "platform.example.com"
   autoGenerateSecrets: false
