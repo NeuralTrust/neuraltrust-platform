@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.3.1] — 2026-07-23
+
 ### Breaking
 
 - **Positive hybrid product selection.** `global.products.trustgate`,
