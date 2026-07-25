@@ -1,3 +1,4 @@
+{{- define "neuraltrust-watchdog.configMap" -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -145,6 +146,33 @@ data:
       {{- else }}
         {{- $enabledIds = concat $enabledIds (default (list) .Values.v1EnabledCheckIds) }}
       {{- end }}
+      {{- $configMap := default dict .Values.configMap }}
+      {{- if $configMap.umbrellaTopologyChecks }}
+      {{- range $product := list "trustgate" "trustguard" }}
+      {{- if eq (include "neuraltrust-platform.dataagent.instanceEnabled" (dict "ctx" $ "product" $product)) "true" }}
+      {{- $vals := include "neuraltrust-platform.dataagent.instanceValues" (dict "ctx" $ "product" $product) | fromYaml }}
+      {{- $name := $vals.fullnameOverride }}
+      - id: dataagent-{{ $product }}-readyz
+        kind: httpsynthetic
+        enabled: true
+        dryRun: true
+        target:
+          urls:
+            - name: ready
+              url: http://{{ $name }}:{{ $vals.ports.health }}/readyz
+              expectedStatus: 200
+        actions: [notify.otlp, notify.slack]
+      - id: dataagent-{{ $product }}-deployment-health
+        kind: deployment_health
+        enabled: true
+        dryRun: true
+        target:
+          namespace: {{ include "neuraltrust-watchdog.platformNamespace" $ | quote }}
+          deployments: [{{ $name }}]
+        actions: [notify.otlp, notify.slack]
+      {{- end }}
+      {{- end }}
+      {{- end }}
       {{- $allChecks := concat (default (list) .Values.checks) (default (list) .Values.extraChecks) }}
       {{- range $allChecks }}
       {{- $c := . }}
@@ -153,3 +181,10 @@ data:
       {{- end }}
       - {{ include "neuraltrust-watchdog.resolveCheck" (dict "check" $c "ctx" $) | nindent 8 | trim }}
       {{- end }}
+{{- end }}
+{{- $configMap := default dict .Values.configMap -}}
+{{- $create := true -}}
+{{- if hasKey $configMap "create" -}}{{- $create = $configMap.create -}}{{- end -}}
+{{- if $create }}
+{{ include "neuraltrust-watchdog.configMap" . }}
+{{- end }}

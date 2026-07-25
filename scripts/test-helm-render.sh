@@ -3,7 +3,8 @@
 #
 # Render the umbrella chart in the representative v2 scenarios and assert
 # structural invariants. Runs in CI via
-# .github/workflows/helm-render-tests.yml and locally:
+# .github/workflows/helm-render-tests.yml (Helm v3.21.3 and v4.2.3) and
+# locally:
 #
 #   ./scripts/test-helm-render.sh
 #
@@ -130,6 +131,17 @@ assert_occurrences() {
   green "ok  - $msg"
 }
 
+assert_resource_count() {
+  local file="$1" kind="$2" name="$3" expected="$4" msg="$5" count
+  count="$(ruby -ryaml -e 'puts YAML.load_stream(File.read(ARGV.fetch(0))).count { |doc| doc.is_a?(Hash) && doc["kind"] == ARGV.fetch(1) && doc.dig("metadata", "name") == ARGV.fetch(2) }' "$file" "$kind" "$name")"
+  if [[ "$count" -ne "$expected" ]]; then
+    red "FAIL: $msg"
+    red "  expected $expected $kind resource(s) named $name; found: $count"
+    exit 1
+  fi
+  green "ok  - $msg"
+}
+
 # ---------------------------------------------------------------------------
 # 1. Minimal v2 hybrid — shared PG/Redis + enrolment-backed ClickStack egress
 # ---------------------------------------------------------------------------
@@ -158,6 +170,10 @@ assert_contains "$out1" 'name: dataagent$' \
   "hybrid: trustgate DataAgent preserves stable name"
 assert_contains "$out1" 'name: dataagent-trustguard' \
   "hybrid: trustguard DataAgent renders"
+assert_resource_count "$out1" Service dataagent 1 \
+  "hybrid: TrustGate DataAgent health Service renders once"
+assert_resource_count "$out1" Service dataagent-trustguard 1 \
+  "hybrid: TrustGuard DataAgent health Service renders once"
 assert_contains "$out1" 'name: data-plane-api' \
   "hybrid: data-plane-api shim renders"
 assert_contains "$out1" 'name: clickstack-egress-collector' \
@@ -481,6 +497,12 @@ assert_contains "$out4" 'name: firewall' \
   "firewall: Deployment follows enabled TrustGuard"
 assert_contains "$out4" 'name: neuraltrust-watchdog' \
   "watchdog root: stable K8s name neuraltrust-watchdog preserved"
+assert_resource_count "$out4" Service dataagent 0 \
+  "external: TrustGate DataAgent health Service absent"
+assert_resource_count "$out4" Service dataagent-trustguard 0 \
+  "external: TrustGuard DataAgent health Service absent"
+assert_not_contains "$out4" 'dataagent-(trustgate|trustguard)-(readyz|deployment-health)' \
+  "external: no orphan DataAgent watchdog checks"
 
 # ---------------------------------------------------------------------------
 # 5. ABSENCE of retired v1 components
@@ -816,7 +838,7 @@ assert_render_fails "hybrid no-selection: requires at least one product" \
 
 blue "==> Scenario 11a: trustgate-only hybrid"
 out11a="$TMP/scenario-trustgate-only.yaml"
-render_product_slice "$out11a" -f "$CHART_DIR/values-trustgate.yaml.example"
+render_product_slice "$out11a" -f "$CHART_DIR/values-trustgate.yaml.example" --set watchdog.enabled=true
 assert_contains "$out11a" 'name: agentgateway-proxy' \
   "trustgate-only: proxy renders"
 assert_contains "$out11a" 'name: dataagent$' \
@@ -827,10 +849,14 @@ assert_not_contains "$out11a" 'TRUSTGUARD_BASE_URL:' \
   "trustgate-only: TRUSTGUARD_BASE_URL omitted"
 assert_contains "$out11a" 'name: clickstack-egress-collector' \
   "trustgate-only: egress Service present"
+assert_resource_count "$out11a" Service dataagent 1 "trustgate-only: health Service present"
+assert_resource_count "$out11a" Service dataagent-trustguard 0 "trustgate-only: TrustGuard health Service absent"
+assert_contains "$out11a" 'id: dataagent-trustgate-(readyz|deployment-health)' "trustgate-only: applicable watchdog checks render"
+assert_not_contains "$out11a" 'id: dataagent-trustguard-(readyz|deployment-health)' "trustgate-only: TrustGuard watchdog checks omitted"
 
 blue "==> Scenario 11b: trustguard-only hybrid"
 out11b="$TMP/scenario-trustguard-only.yaml"
-render_product_slice "$out11b" -f "$CHART_DIR/values-trustguard.yaml.example"
+render_product_slice "$out11b" -f "$CHART_DIR/values-trustguard.yaml.example" --set watchdog.enabled=true
 assert_contains "$out11b" 'name: trustguard-data-plane' \
   "trustguard-only: data-plane renders"
 assert_contains "$out11b" 'name: dataagent-trustguard$' \
@@ -841,10 +867,14 @@ assert_contains "$out11b" 'name: firewall$' \
   "trustguard-only: Firewall follows TrustGuard"
 assert_contains "$out11b" 'name: clickstack-egress-collector' \
   "trustguard-only: egress Service on primary DataAgent"
+assert_resource_count "$out11b" Service dataagent 0 "trustguard-only: TrustGate health Service absent"
+assert_resource_count "$out11b" Service dataagent-trustguard 1 "trustguard-only: health Service present"
+assert_contains "$out11b" 'id: dataagent-trustguard-(readyz|deployment-health)' "trustguard-only: applicable watchdog checks render"
+assert_not_contains "$out11b" 'id: dataagent-trustgate-(readyz|deployment-health)' "trustguard-only: TrustGate watchdog checks omitted"
 
 blue "==> Scenario 11c: data-plane-only (red-teaming) hybrid — no DataAgent"
 out11c="$TMP/scenario-red-teaming-only.yaml"
-render_product_slice "$out11c" -f "$CHART_DIR/values-red-teaming.yaml.example"
+render_product_slice "$out11c" -f "$CHART_DIR/values-red-teaming.yaml.example" --set watchdog.enabled=true
 assert_contains "$out11c" 'name: data-plane-api' \
   "red-teaming: data-plane-api renders"
 assert_not_contains "$out11c" 'name: dataagent' \
@@ -855,18 +885,30 @@ assert_not_contains "$out11c" 'name: agentgateway-proxy' \
   "red-teaming: trustgate absent"
 assert_not_contains "$out11c" 'name: trustguard-data-plane' \
   "red-teaming: trustguard absent"
+assert_resource_count "$out11c" Service dataagent 0 "red-teaming: TrustGate health Service absent"
+assert_resource_count "$out11c" Service dataagent-trustguard 0 "red-teaming: TrustGuard health Service absent"
+assert_not_contains "$out11c" 'id: dataagent-(trustgate|trustguard)-(readyz|deployment-health)' "red-teaming: no orphan DataAgent watchdog checks"
 
 blue "==> Scenario 11d: positive slices compose pairwise and all together"
 out11d1="$TMP/scenario-trustgate-trustguard.yaml"
 render_product_slice "$out11d1" \
   -f "$CHART_DIR/values-trustgate.yaml.example" \
-  -f "$CHART_DIR/values-trustguard.yaml.example"
+  -f "$CHART_DIR/values-trustguard.yaml.example" \
+  --set watchdog.enabled=true
 assert_contains "$out11d1" 'name: dataagent$' \
   "trustgate+trustguard: stable TrustGate DataAgent"
 assert_contains "$out11d1" 'name: dataagent-trustguard$' \
   "trustgate+trustguard: fixed TrustGuard DataAgent"
 assert_occurrences "$out11d1" '^  name: clickstack-egress-collector$' 1 \
   "trustgate+trustguard: exactly one egress Service"
+assert_resource_count "$out11d1" Service dataagent 1 "trustgate+trustguard: TrustGate health Service renders once"
+assert_resource_count "$out11d1" Service dataagent-trustguard 1 "trustgate+trustguard: TrustGuard health Service renders once"
+for product in trustgate trustguard; do
+  assert_contains "$out11d1" "id: dataagent-${product}-readyz" "trustgate+trustguard: ${product} readyz check renders"
+  assert_contains "$out11d1" "id: dataagent-${product}-deployment-health" "trustgate+trustguard: ${product} deployment check renders"
+done
+assert_occurrences "$out11d1" '^        dryRun: true$' 4 "trustgate+trustguard: all DataAgent checks are explicit dry-run"
+assert_occurrences "$out11d1" '^        actions: \[notify\.otlp, notify\.slack\]$' 4 "trustgate+trustguard: all DataAgent checks are notifier-only"
 
 out11d2="$TMP/scenario-trustgate-red-teaming.yaml"
 render_product_slice "$out11d2" \

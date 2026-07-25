@@ -950,3 +950,8 @@ firewall:
 # =============================================================================
 watchdog:
   enabled: false
+  # The umbrella renders this ConfigMap with full product/DataAgent context so
+  # topology checks use the exact same instance gates as the workloads.
+  configMap:
+    create: false
+    umbrellaTopologyChecks: true

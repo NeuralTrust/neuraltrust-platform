@@ -1,0 +1,16 @@
+{{- $watchdog := default dict .Values.watchdog -}}
+{{- if $watchdog.enabled -}}
+{{- $values := deepCopy $watchdog -}}
+{{- $_ := set $values "global" (default dict .Values.global) -}}
+{{- $_ := set $values "agentgateway" (default dict .Values.agentgateway) -}}
+{{- $_ := set $values "trustguard" (default dict .Values.trustguard) -}}
+{{- $_ := set $values "dataagent" (default dict .Values.dataagent) -}}
+{{- $ctx := dict
+  "Values" $values
+  "Release" .Release
+  "Chart" .Subcharts.watchdog.Chart
+  "Capabilities" .Capabilities
+  "Template" .Template
+-}}
+{{ include "neuraltrust-watchdog.configMap" $ctx }}
+{{- end }}

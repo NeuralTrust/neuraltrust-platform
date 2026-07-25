@@ -22,7 +22,7 @@ dependencies:
   version: 0.1.1
 - name: dataagent
   repository: file://./charts/dataagent
-  version: 0.1.11
+  version: 0.1.12
 - name: datacore
   repository: file://./charts/datacore
   version: 0.1.12
@@ -37,6 +37,6 @@ dependencies:
   version: 2.1.4
 - name: watchdog
   repository: file://./charts/watchdog
-  version: 0.3.1
-digest: sha256:6ead369b94615033e42c92df2b5f3331e521e1895dd1b22209b78190164d0895
-generated: "2026-07-23T16:16:34.817283998Z"
+  version: 0.3.2
+digest: sha256:878367e722344914c06c8f1a216168f608c3de47772508eb71f9ef2d6ec03cf5
+generated: "2026-07-24T17:34:37.64866+02:00"
