@@ -16,6 +16,8 @@ Templates come from the dataagent library chart.
 ---
 {{ include "dataagent.deployment" $ctx }}
 ---
+{{ include "dataagent.healthService" $ctx }}
+---
 {{ include "dataagent.pdb" $ctx }}
 ---
 {{ include "dataagent.egressConfigmap" $ctx }}

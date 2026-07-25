@@ -68,6 +68,11 @@ overlay:
   # healing — that stays an operator change in the seed. Mutation ALSO still
   # requires the RBAC verb regardless; this is defense in depth.
   allowActionEdits: false
+# The umbrella chart owns the ConfigMap render so it can evaluate the same
+# DataAgent instance gates as the workloads. Standalone installs keep this on.
+configMap:
+  create: true
+  umbrellaTopologyChecks: false
 service:
   type: ClusterIP
   port: 8080
