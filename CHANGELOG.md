@@ -4,6 +4,14 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Breaking
+
+- **Data Plane API PostgreSQL schema defaults to `public`.** Deployments can
+  override `data-plane-api.dataPlane.components.api.database.postgresql.schema`
+  with a pre-created schema whose application role has `USAGE` and `CREATE`.
+  The migration no longer executes `CREATE SCHEMA` or requires database-level
+  `CREATE`.
+
 ## [v2.3.3] — 2026-07-27
 
 ### Fixed

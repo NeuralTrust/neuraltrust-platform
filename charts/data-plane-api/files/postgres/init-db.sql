@@ -1,6 +1,6 @@
-CREATE SCHEMA IF NOT EXISTS neuraltrust;
+SET search_path TO public;
 
-CREATE TABLE IF NOT EXISTS neuraltrust.tests (
+CREATE TABLE IF NOT EXISTS tests (
     "id" TEXT NOT NULL,
     "scenarioId" TEXT NOT NULL,
     "targetId" TEXT NOT NULL,
@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS neuraltrust.tests (
     PRIMARY KEY ("scenarioId", "targetId", "id")
 );
 
-CREATE TABLE IF NOT EXISTS neuraltrust.test_runs (
+CREATE TABLE IF NOT EXISTS test_runs (
     "id" TEXT NOT NULL,
     "scenarioId" TEXT NOT NULL,
     "targetId" TEXT NOT NULL,
@@ -37,16 +37,16 @@ CREATE TABLE IF NOT EXISTS neuraltrust.test_runs (
 );
 
 CREATE INDEX IF NOT EXISTS tests_target_scenario_created_at_idx
-    ON neuraltrust.tests ("targetId", "scenarioId", "createdAt" DESC);
+    ON tests ("targetId", "scenarioId", "createdAt" DESC);
 
 CREATE INDEX IF NOT EXISTS tests_scenario_target_created_at_idx
-    ON neuraltrust.tests ("scenarioId", "targetId", "createdAt" DESC);
+    ON tests ("scenarioId", "targetId", "createdAt" DESC);
 
 CREATE INDEX IF NOT EXISTS test_runs_target_scenario_run_at_idx
-    ON neuraltrust.test_runs ("targetId", "scenarioId", "runAt" DESC);
+    ON test_runs ("targetId", "scenarioId", "runAt" DESC);
 
 CREATE INDEX IF NOT EXISTS test_runs_latest_test_idx
-    ON neuraltrust.test_runs (
+    ON test_runs (
         "targetId",
         "scenarioId",
         "testId",
@@ -54,7 +54,7 @@ CREATE INDEX IF NOT EXISTS test_runs_latest_test_idx
     );
 
 CREATE INDEX IF NOT EXISTS test_runs_run_group_idx
-    ON neuraltrust.test_runs (
+    ON test_runs (
         "targetId",
         "scenarioId",
         "runId",
@@ -62,4 +62,4 @@ CREATE INDEX IF NOT EXISTS test_runs_run_group_idx
     );
 
 CREATE INDEX IF NOT EXISTS test_runs_target_run_at_idx
-    ON neuraltrust.test_runs ("targetId", "runAt" DESC);
+    ON test_runs ("targetId", "runAt" DESC);

@@ -1,12 +1,15 @@
 {{- /* platform-v2: PostgreSQL schema migration for the data-plane-api shim.
        Renders only when the API shim is enabled AND its resolved SQL backend is
        PostgreSQL (the v2 hybrid default). The ConfigMap carries the idempotent
-       DDL (schema neuraltrust + tests/test_runs + indexes) applied by the
-       postgres-migrations initContainer. Kept byte-identical to the data-plane-api
-       source schema (files/postgres/init-db.sql). */ -}}
+       DDL (tests/test_runs + indexes) applied by the
+       postgres-migrations initContainer. The configured schema is substituted
+       into files/postgres/init-db.sql at render time. */ -}}
 {{- if or (not (eq (include "neuraltrust-platform.isV2" .) "true")) (eq (include "neuraltrust-platform.dataPlaneApiV2.enabled" .) "true") }}
 {{- if eq (include "neuraltrust-platform.dataPlaneApi.sqlBackend" .) "postgres" }}
 {{- $pgCfg := include "neuraltrust-platform.dataPlaneApi.postgresConfig" . | fromYaml }}
+{{- $pgSchema := include "neuraltrust-platform.dataPlaneApi.postgresSchema" . }}
+{{- $pgDdl := .Files.Get "files/postgres/init-db.sql" }}
+{{- $pgDdl = $pgDdl | replace "SET search_path TO public;" (printf "SET search_path TO %s;" $pgSchema) }}
 {{- $pgMigration := default dict $pgCfg.migration }}
 {{- $pgMigrationEnabled := true }}{{- if hasKey $pgMigration "enabled" }}{{- $pgMigrationEnabled = $pgMigration.enabled }}{{- end }}
 {{- if $pgMigrationEnabled }}
@@ -21,7 +24,7 @@ metadata:
     component: postgres
 data:
   init-db.sql: |
-{{ .Files.Get "files/postgres/init-db.sql" | indent 4 }}
+{{ $pgDdl | indent 4 }}
 {{- end }}
 {{- end }}
 {{- end }}
