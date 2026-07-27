@@ -759,7 +759,7 @@ data-plane-api:
                   memory: 128Mi
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.44.0
+          tag: v1.44.1
           pullPolicy: IfNotPresent
         accessMode: ReadWriteOnce
         huggingfaceToken: ""
