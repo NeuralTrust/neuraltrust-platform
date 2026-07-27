@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.3.3] — 2026-07-27
+
 ### Fixed
 
 - **Control Plane App migrations with hardened images.** The `init-db`
