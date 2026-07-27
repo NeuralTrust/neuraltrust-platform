@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.3.4] — 2026-07-27
+
 ### Breaking
 
 - **Data Plane API PostgreSQL schema defaults to `public`.** Deployments can
