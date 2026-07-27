@@ -4,7 +4,15 @@
 {{- $hosted := default dict $obs.hostedExport -}}
 {{- $auth := default dict $hosted.auth -}}
 {{- $renderHosted := include "neuraltrust-platform.otelCollector.hostedExportRender" . -}}
-{{- $bufEnabled := default true (default dict $coll.bufferPVC).enabled -}}
+{{- $bufferPVC := default dict $coll.bufferPVC -}}
+{{- $bufEnabled := true -}}
+{{- if hasKey $bufferPVC "enabled" -}}
+  {{- $bufEnabled = $bufferPVC.enabled -}}
+{{- end -}}
+{{- $autoscaling := default dict $coll.autoscaling -}}
+{{- if and $autoscaling.enabled $bufEnabled -}}
+  {{- fail "global.observability.collector.autoscaling.enabled requires bufferPVC.enabled=false; a shared ReadWriteOnce buffer cannot be mounted safely by multiple replicas" -}}
+{{- end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -13,7 +21,9 @@ metadata:
   labels:
     {{- include "neuraltrust-platform.otelCollector.labels" . | nindent 4 }}
 spec:
+  {{- if not $autoscaling.enabled }}
   replicas: {{ default 1 $coll.replicas }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "neuraltrust-platform.otelCollector.selectorLabels" . | nindent 6 }}
@@ -102,6 +112,13 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 3
             failureThreshold: 5
+          startupProbe:
+            httpGet:
+              path: /
+              port: health
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
           resources:
             {{- toYaml $coll.resources | nindent 12 }}
           {{- with $coll.securityContext }}

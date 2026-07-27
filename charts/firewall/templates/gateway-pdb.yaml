@@ -1,5 +1,11 @@
 {{- if eq (include "firewall.enabled" .) "true" }}
-{{- if and .Values.firewall.gateway.podDisruptionBudget .Values.firewall.gateway.podDisruptionBudget.enabled }}
+{{- $pdb := default dict .Values.firewall.gateway.podDisruptionBudget }}
+{{- $autoscaling := default dict .Values.firewall.gateway.autoscaling }}
+{{- $replicas := default 2 .Values.firewall.gateway.replicas }}
+{{- if $autoscaling.enabled }}
+  {{- $replicas = default 1 $autoscaling.minReplicas }}
+{{- end }}
+{{- if and $pdb.enabled (gt ($replicas | int) 1) }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -7,11 +13,11 @@ metadata:
   labels:
     {{- include "firewall.gateway.labels" . | nindent 4 }}
 spec:
-  {{- if hasKey .Values.firewall.gateway.podDisruptionBudget "minAvailable" }}
-  minAvailable: {{ .Values.firewall.gateway.podDisruptionBudget.minAvailable }}
+  {{- if hasKey $pdb "minAvailable" }}
+  minAvailable: {{ $pdb.minAvailable }}
   {{- end }}
-  {{- if hasKey .Values.firewall.gateway.podDisruptionBudget "maxUnavailable" }}
-  maxUnavailable: {{ .Values.firewall.gateway.podDisruptionBudget.maxUnavailable }}
+  {{- if hasKey $pdb "maxUnavailable" }}
+  maxUnavailable: {{ $pdb.maxUnavailable }}
   {{- end }}
   selector:
     matchLabels:

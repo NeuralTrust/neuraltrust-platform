@@ -4,6 +4,14 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Control Plane App migrations with hardened images.** The `init-db`
+  container invokes the image-bundled Prisma CLI directly because production
+  images no longer include `npm` or `npx`. It also applies versioned migrations
+  without running the production-unsafe `prisma db push`. Control Plane App
+  subchart is now `0.1.18`.
+
 ## [v2.3.1] — 2026-07-23
 
 ### Breaking

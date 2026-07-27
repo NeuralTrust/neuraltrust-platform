@@ -3,7 +3,12 @@
 {{- range $workerName, $workerCfg := .Values.firewall.workers }}
 {{- if $workerCfg.enabled }}
 {{- $pdb := $workerCfg.podDisruptionBudget | default $defaults.podDisruptionBudget }}
-{{- if and $pdb $pdb.enabled }}
+{{- $autoscaling := $workerCfg.autoscaling | default $defaults.autoscaling | default dict }}
+{{- $replicas := $workerCfg.replicas | default ($defaults.replicas | default 1) }}
+{{- if $autoscaling.enabled }}
+  {{- $replicas = default 1 $autoscaling.minReplicas }}
+{{- end }}
+{{- if and $pdb $pdb.enabled (gt ($replicas | int) 1) }}
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget

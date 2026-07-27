@@ -1,0 +1,53 @@
+{{- if eq (include "control-plane-api.enabled" .) "true" }}
+{{- $controlPlane := default dict .Values.controlPlane }}
+{{- $components := default dict $controlPlane.components }}
+{{- $api := default dict $components.api }}
+{{- $autoscaling := default dict $api.autoscaling }}
+{{- if $autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: control-plane-api
+  labels:
+    app: control-plane-api
+    plane: control
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: control-plane-api
+  minReplicas: {{ default 1 $autoscaling.minReplicas }}
+  maxReplicas: {{ default 10 $autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ default 80 $autoscaling.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ default 90 $autoscaling.targetMemoryUtilizationPercentage }}
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      selectPolicy: Max
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 15
+        - type: Percent
+          value: 100
+          periodSeconds: 15
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      selectPolicy: Min
+      policies:
+        - type: Percent
+          value: 25
+          periodSeconds: 60
+{{- end }}
+{{- end }}

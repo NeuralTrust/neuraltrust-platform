@@ -470,6 +470,14 @@ assert_contains "$out3b" 'value: "eu-west-1"' \
   "cp IAM: AWS_REGION=eu-west-1"
 assert_contains "$out3b" 'postgres-iam-url.mjs' \
   "cp IAM: app init-db mints Prisma URL via postgres-iam-url.mjs"
+assert_contains "$out3b" 'PRISMA_CLI="/app/node_modules/prisma/build/index.js"' \
+  "cp app: init-db uses the image-bundled Prisma CLI"
+assert_contains "$out3b" 'node "\$PRISMA_CLI" migrate deploy' \
+  "cp app: init-db executes versioned migrations with the bundled CLI"
+assert_not_contains "$out3b" 'npx prisma' \
+  "cp app: init-db does not require the removed npx binary"
+assert_not_contains "$out3b" 'prisma db push' \
+  "cp app: init-db applies versioned migrations only"
 assert_contains "$out3b" 'POSTGRES_LOGIN: "aws"' \
   "datacore IAM: emits POSTGRES_LOGIN=aws"
 assert_contains "$out3b" 'POSTGRES_USER: "datacore_iam"' \

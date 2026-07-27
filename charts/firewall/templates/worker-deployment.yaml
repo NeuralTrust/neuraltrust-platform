@@ -9,8 +9,11 @@ metadata:
   name: {{ $workerName }}-worker
   labels:
     {{- include "firewall.worker.labels" (dict "name" $workerName "context" $) | nindent 4 }}
+{{- $autoscaling := $workerCfg.autoscaling | default $defaults.autoscaling | default dict }}
 spec:
+  {{- if not $autoscaling.enabled }}
   replicas: {{ $workerCfg.replicas | default ($defaults.replicas | default 1) }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "firewall.worker.selectorLabels" (dict "name" $workerName) | nindent 6 }}

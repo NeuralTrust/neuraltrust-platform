@@ -1,0 +1,28 @@
+{{- if eq (include "control-plane-app.enabled" .) "true" }}
+{{- $controlPlane := default dict .Values.controlPlane }}
+{{- $components := default dict $controlPlane.components }}
+{{- $app := default dict $components.app }}
+{{- $autoscaling := default dict $app.autoscaling }}
+{{- $pdb := default dict $app.podDisruptionBudget }}
+{{- $replicas := default 1 $app.replicaCount }}
+{{- if $autoscaling.enabled }}
+  {{- $replicas = default 1 $autoscaling.minReplicas }}
+{{- end }}
+{{- if and $pdb.enabled (gt ($replicas | int) 1) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: control-plane-app
+  labels:
+    app: control-plane-app
+spec:
+  {{- if hasKey $pdb "maxUnavailable" }}
+  maxUnavailable: {{ $pdb.maxUnavailable }}
+  {{- else }}
+  minAvailable: {{ default 1 $pdb.minAvailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app: control-plane-app
+{{- end }}
+{{- end }}

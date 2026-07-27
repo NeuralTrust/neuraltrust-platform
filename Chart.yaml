@@ -2,7 +2,7 @@ apiVersion: v2
 name: neuraltrust-platform
 description: NeuralTrust platform Helm chart (v2 hybrid + external)
 type: application
-version: 2.3.3
+version: 2.3.4
 appVersion: "2.0.0"
 icon: https://neuraltrust.ai/favicon.ico
 # v1 is maintained only on the v1.14.x release line. Do NOT install this chart
@@ -35,7 +35,7 @@ dependencies:
       - v2
   # Control-plane App/UI — v2 external only (SaaS-side in hybrid).
   - name: control-plane-app
-    version: 0.1.16
+    version: 0.1.18
     repository: file://./charts/control-plane-app
     tags:
       - neuraltrust
@@ -45,7 +45,7 @@ dependencies:
   # agentgateway-*. Loaded unconditionally; templates gate on
   # global.products.trustgate in hybrid and always render in external.
   - name: agentgateway
-    version: 0.1.30
+    version: 0.1.31
     repository: file://./charts/agentgateway
     tags:
       - neuraltrust
@@ -53,7 +53,7 @@ dependencies:
   # TrustGuard control + data plane. Templates gate on
   # global.products.trustguard in hybrid; always on in external.
   - name: trustguard
-    version: 0.1.28
+    version: 0.1.29
     repository: file://./charts/trustguard
     tags:
       - neuraltrust
@@ -75,7 +75,7 @@ dependencies:
       - v2
   # DataCore — v2 external only.
   - name: datacore
-    version: 0.1.12
+    version: 0.1.13
     repository: file://./charts/datacore
     tags:
       - neuraltrust
@@ -89,7 +89,7 @@ dependencies:
       - v2
   # AlertEngine — v2 external only.
   - name: alertengine
-    version: 0.1.4
+    version: 0.1.5
     repository: file://./charts/alertengine
     tags:
       - neuraltrust
@@ -103,7 +103,7 @@ dependencies:
       - neuraltrust
   # Watchdog — optional self-monitoring/self-healing.
   - name: watchdog
-    version: 0.3.2
+    version: 0.3.3
     repository: file://./charts/watchdog
     condition: watchdog.enabled
     tags:
