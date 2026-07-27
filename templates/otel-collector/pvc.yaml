@@ -2,7 +2,11 @@
 {{- $obs := default dict (default dict .Values.global).observability }}
 {{- $coll := default dict $obs.collector }}
 {{- $buf := default dict $coll.bufferPVC }}
-{{- if and (default true $buf.enabled) }}
+{{- $bufEnabled := true }}
+{{- if hasKey $buf "enabled" }}
+  {{- $bufEnabled = $buf.enabled }}
+{{- end }}
+{{- if $bufEnabled }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

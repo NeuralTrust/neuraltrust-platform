@@ -3,7 +3,11 @@
 {{- $coll := default dict $obs.collector -}}
 {{- $hosted := default dict $obs.hostedExport -}}
 {{- $renderHosted := include "neuraltrust-platform.otelCollector.hostedExportRender" . -}}
-{{- $bufEnabled := default true (default dict $coll.bufferPVC).enabled -}}
+{{- $bufferPVC := default dict $coll.bufferPVC -}}
+{{- $bufEnabled := true -}}
+{{- if hasKey $bufferPVC "enabled" -}}
+  {{- $bufEnabled = $bufferPVC.enabled -}}
+{{- end -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:

@@ -1,5 +1,4 @@
-{{- /* platform-v2: legacy component disabled when global.platformVersion=v2 */ -}}
-{{- if not (eq (include "neuraltrust-platform.isV2" .) "true") }}
+{{- $isV2 := eq (include "neuraltrust-platform.isV2" .) "true" -}}
 {{- /*
   Optional HorizontalPodAutoscalers for data-plane api, worker, and kafka-connect.
   All default OFF — enable per component:
@@ -10,7 +9,8 @@
 */ -}}
 {{- if and .Values.dataPlane .Values.dataPlane.enabled }}
 {{- $dp := .Values.dataPlane }}
-{{- if and $dp.components $dp.components.api $dp.components.api.enabled }}
+{{- $apiEnabled := or (not $isV2) (eq (include "neuraltrust-platform.dataPlaneApiV2.enabled" .) "true") }}
+{{- if and $apiEnabled $dp.components $dp.components.api $dp.components.api.enabled }}
 {{- $as := default dict $dp.components.api.autoscaling }}
 {{- if and $as $as.enabled }}
 ---
@@ -48,6 +48,7 @@ spec:
     {{- end }}
 {{- end }}
 {{- end }}
+{{- if not $isV2 }}
 {{- if and $dp.components $dp.components.worker $dp.components.worker.enabled }}
 {{- $as := default dict $dp.components.worker.autoscaling }}
 {{- if and $as $as.enabled }}
@@ -124,5 +125,4 @@ spec:
 {{- end }}
 {{- end }}
 {{- end }}
-
 {{- end }}

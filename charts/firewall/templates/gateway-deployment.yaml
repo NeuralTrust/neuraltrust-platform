@@ -5,8 +5,11 @@ metadata:
   name: firewall
   labels:
     {{- include "firewall.gateway.labels" . | nindent 4 }}
+{{- $autoscaling := default dict .Values.firewall.gateway.autoscaling }}
 spec:
+  {{- if not $autoscaling.enabled }}
   replicas: {{ .Values.firewall.gateway.replicas | default 2 }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "firewall.gateway.selectorLabels" . | nindent 6 }}
@@ -23,6 +26,20 @@ spec:
       {{- if .Values.firewall.serviceAccount.create }}
       serviceAccountName: {{ .Values.firewall.serviceAccount.name | default "firewall" }}
       {{- end }}
+      terminationGracePeriodSeconds: 75
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "firewall.gateway.selectorLabels" . | nindent 14 }}
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "firewall.gateway.selectorLabels" . | nindent 14 }}
       {{- $imagePullSecret := .Values.firewall.imagePullSecrets | default "" }}
       {{- if and $imagePullSecret (ne $imagePullSecret "") }}
       imagePullSecrets:

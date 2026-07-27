@@ -21,7 +21,7 @@ firewall:
       minReplicas: 1
       maxReplicas: 4
       targetCPUUtilizationPercentage: 80
-      targetMemoryUtilizationPercentage: 85
+      targetMemoryUtilizationPercentage: 90
     podDisruptionBudget:
       enabled: false
       minAvailable: 1
@@ -63,7 +63,7 @@ firewall:
       minReplicas: 1
       maxReplicas: 6
       targetCPUUtilizationPercentage: 80
-      targetMemoryUtilizationPercentage: 85
+      targetMemoryUtilizationPercentage: 90
     podDisruptionBudget:
       enabled: false
       minAvailable: 1

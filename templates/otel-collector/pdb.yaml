@@ -2,6 +2,10 @@
 {{- $coll := default dict (default dict (default dict .Values.global).observability).collector -}}
 {{- $pdb := default dict $coll.podDisruptionBudget -}}
 {{- $replicas := default 1 $coll.replicas -}}
+{{- $autoscaling := default dict $coll.autoscaling -}}
+{{- if $autoscaling.enabled -}}
+  {{- $replicas = default 1 $autoscaling.minReplicas -}}
+{{- end -}}
 {{- if and $pdb.enabled (gt ($replicas | int) 1) }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget

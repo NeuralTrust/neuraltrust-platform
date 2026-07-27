@@ -7,12 +7,14 @@ metadata:
   name: control-plane-app
   labels:
     app: control-plane-app
+{{- $controlPlane := default dict .Values.controlPlane }}
+{{- $components := default dict $controlPlane.components }}
+{{- $app := default dict $components.app }}
+{{- $autoscaling := default dict $app.autoscaling }}
 spec:
-  {{- $replicas := 1 }}
-  {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.replicaCount }}
-    {{- $replicas = .Values.controlPlane.components.app.replicaCount }}
+  {{- if not $autoscaling.enabled }}
+  replicas: {{ default 1 $app.replicaCount }}
   {{- end }}
-  replicas: {{ $replicas }}
   selector:
     matchLabels:
       app: control-plane-app
@@ -22,6 +24,20 @@ spec:
         app: control-plane-app
     spec:
       serviceAccountName: {{ include "control-plane.serviceAccountName" . }}
+      terminationGracePeriodSeconds: 60
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: control-plane-app
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: control-plane-app
       {{- $imagePullSecret := "gcr-secret" }}
       {{- if .Values.imagePullSecrets }}
         {{- $imagePullSecret = .Values.imagePullSecrets }}
@@ -47,8 +63,8 @@ spec:
       initContainers:
       - name: init-db
         {{- $initImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
-        {{- $initImageTag := "v1.109.0" }}
-        {{- $initPullPolicy := "Always" }}
+        {{- $initImageTag := "v1.111.0" }}
+        {{- $initPullPolicy := "IfNotPresent" }}
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.image }}
           {{- if .Values.controlPlane.components.app.image.repository }}{{- $initImageRepo = .Values.controlPlane.components.app.image.repository }}{{- end }}
           {{- if .Values.controlPlane.components.app.image.tag }}{{- $initImageTag = .Values.controlPlane.components.app.image.tag }}{{- end }}
@@ -93,15 +109,11 @@ spec:
             export DATABASE_URL="$POSTGRES_PRISMA_URL"
           fi
 
-          echo "Running Prisma migrations..."
-          if ! npx prisma migrate deploy; then
-            echo "ERROR: Prisma migrations failed!"
-            exit 1
-          fi
+          PRISMA_CLI="/app/node_modules/prisma/build/index.js"
 
-          echo "Running Prisma db push..."
-          if ! npx prisma db push; then
-            echo "ERROR: Prisma db push failed!"
+          echo "Running Prisma migrations..."
+          if ! node "$PRISMA_CLI" migrate deploy; then
+            echo "ERROR: Prisma migrations failed!"
             exit 1
           fi
 
@@ -189,8 +201,8 @@ spec:
       containers:
       - name: app
         {{- $appImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
-        {{- $appImageTag := "v1.109.0" }}
-        {{- $appPullPolicy := "Always" }}
+        {{- $appImageTag := "v1.111.0" }}
+        {{- $appPullPolicy := "IfNotPresent" }}
         {{- $appPort := 3000 }}
         {{- $nodeEnv := "production" }}
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.image }}
@@ -606,6 +618,13 @@ spec:
           periodSeconds: {{ default 10 $hp.readinessPeriodSeconds }}
           timeoutSeconds: {{ default 3 $hp.readinessTimeoutSeconds }}
           failureThreshold: {{ default 3 $hp.readinessFailureThreshold }}
+        startupProbe:
+          httpGet:
+            path: {{ default "/api/health" $hp.path | quote }}
+            port: {{ $appPort }}
+          periodSeconds: 5
+          timeoutSeconds: {{ default 5 $hp.timeoutSeconds }}
+          failureThreshold: 30
         {{- end }}
       {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" .) | nindent 6 }}
       {{- include "neuraltrust-platform.tolerations" (dict "ctx" .) | nindent 6 }}

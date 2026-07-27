@@ -8,18 +8,14 @@ metadata:
   labels:
     app: control-plane-api
     plane: control
+{{- $controlPlane := default dict .Values.controlPlane }}
+{{- $components := default dict $controlPlane.components }}
+{{- $api := default dict $components.api }}
+{{- $autoscaling := default dict $api.autoscaling }}
 spec:
-  {{- $replicas := 2 }}
-  {{- if .Values.controlPlane }}
-    {{- if .Values.controlPlane.components }}
-      {{- if .Values.controlPlane.components.api }}
-        {{- if .Values.controlPlane.components.api.replicas }}
-          {{- $replicas = .Values.controlPlane.components.api.replicas }}
-        {{- end }}
-      {{- end }}
-    {{- end }}
+  {{- if not $autoscaling.enabled }}
+  replicas: {{ default 2 $api.replicaCount }}
   {{- end }}
-  replicas: {{ $replicas }}
   selector:
     matchLabels:
       app: control-plane-api
@@ -30,6 +26,20 @@ spec:
         plane: control
     spec:
       serviceAccountName: {{ include "control-plane.serviceAccountName" . }}
+      terminationGracePeriodSeconds: 60
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: control-plane-api
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: control-plane-api
       {{- $imagePullSecret := "gcr-secret" }}
       {{- if .Values.imagePullSecrets }}
         {{- $imagePullSecret = .Values.imagePullSecrets }}
@@ -65,11 +75,14 @@ spec:
       - name: wait-for-postgresql
         {{- $pgWaitImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/postgres" }}
         {{- $pgWaitImageTag := "17-alpine" }}
+        {{- $pgWaitPullPolicy := "IfNotPresent" }}
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.postgresql .Values.controlPlane.components.postgresql.image }}
           {{- if .Values.controlPlane.components.postgresql.image.repository }}{{- $pgWaitImageRepo = .Values.controlPlane.components.postgresql.image.repository }}{{- end }}
           {{- if .Values.controlPlane.components.postgresql.image.tag }}{{- $pgWaitImageTag = .Values.controlPlane.components.postgresql.image.tag }}{{- end }}
+          {{- if .Values.controlPlane.components.postgresql.image.pullPolicy }}{{- $pgWaitPullPolicy = .Values.controlPlane.components.postgresql.image.pullPolicy }}{{- end }}
         {{- end }}
         image: {{ include "control-plane.image" (dict "repository" $pgWaitImageRepo "tag" $pgWaitImageTag "global" .Values.global) | quote }}
+        imagePullPolicy: {{ $pgWaitPullPolicy }}
         command:
         - /bin/sh
         - -c
@@ -131,7 +144,7 @@ spec:
       - name: control-plane-api
         {{- $apiImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api" }}
         {{- $apiImageTag := "v1.23.1" }}
-        {{- $apiPullPolicy := "Always" }}
+        {{- $apiPullPolicy := "IfNotPresent" }}
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.api .Values.controlPlane.components.api.image }}
           {{- if .Values.controlPlane.components.api.image.repository }}{{- $apiImageRepo = .Values.controlPlane.components.api.image.repository }}{{- end }}
           {{- if .Values.controlPlane.components.api.image.tag }}{{- $apiImageTag = .Values.controlPlane.components.api.image.tag }}{{- end }}

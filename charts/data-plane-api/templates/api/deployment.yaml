@@ -19,6 +19,8 @@
 {{- $renderPgInit := and (eq $sqlBackend "postgres") $pgMigrationEnabled }}
 {{- $dpRedisCfg := default dict .Values.dataPlane.components.api.redis }}
 {{- $dpRedisBackend := include "neuraltrust-platform.dataPlaneApi.redisBackend" . }}
+{{- $api := default dict .Values.dataPlane.components.api }}
+{{- $autoscaling := default dict $api.autoscaling }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -27,10 +29,8 @@ metadata:
     app: api
     plane: data
 spec:
-  {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api (hasKey .Values.dataPlane.components.api "replicas") }}
-  replicas: {{ .Values.dataPlane.components.api.replicas }}
-  {{- else }}
-  replicas: 2
+  {{- if not $autoscaling.enabled }}
+  replicas: {{ default 2 $api.replicas }}
   {{- end }}
   selector:
     matchLabels:
@@ -43,6 +43,20 @@ spec:
     spec:
       {{- include "data-plane.imagePullSecrets" . | nindent 6 }}
       serviceAccountName: {{ include "data-plane.serviceAccountName" . }}
+      terminationGracePeriodSeconds: 60
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: api
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: api
       {{- if .Values.securityHardening }}
       securityContext:
         seccompProfile:
@@ -293,11 +307,11 @@ spec:
         {{- $apiRepo := .Values.dataPlane.components.api.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api" }}
         {{- $apiTag := .Values.dataPlane.components.api.image.tag | default "v1.42.0" }}
         image: {{ include "data-plane.image" (dict "repository" $apiRepo "tag" $apiTag "global" .Values.global) | quote }}
-        imagePullPolicy: {{ .Values.dataPlane.components.api.image.pullPolicy | default "Always" }}
+        imagePullPolicy: {{ .Values.dataPlane.components.api.image.pullPolicy | default "IfNotPresent" }}
         {{- else }}
         {{- $fallbackApiTag := "v1.42.0" }}
         image: {{ include "data-plane.image" (dict "repository" "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api" "tag" $fallbackApiTag "global" .Values.global) | quote }}
-        imagePullPolicy: Always
+        imagePullPolicy: IfNotPresent
         {{- end }}
         {{- if .Values.securityHardening }}
         securityContext:
