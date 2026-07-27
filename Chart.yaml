@@ -19,7 +19,7 @@ dependencies:
   # unconditionally; templates gate on global.products.dataPlane in hybrid
   # and always render in external.
   - name: data-plane-api
-    version: 1.4.4
+    version: 1.4.5
     repository: file://./charts/data-plane-api
     tags:
       - neuraltrust
