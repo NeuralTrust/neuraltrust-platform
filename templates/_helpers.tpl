@@ -748,6 +748,15 @@ redis
 {{- default dict $db.postgresql | toYaml }}
 {{- end }}
 
+{{- define "neuraltrust-platform.dataPlaneApi.postgresSchema" -}}
+{{- $pg := include "neuraltrust-platform.dataPlaneApi.postgresConfig" . | fromYaml }}
+{{- $schema := $pg.schema | default "public" }}
+{{- if not (regexMatch "^[a-z_][a-z0-9_]*$" $schema) }}
+{{- fail "data-plane-api PostgreSQL schema must be a lowercase SQL identifier" }}
+{{- end }}
+{{- $schema }}
+{{- end }}
+
 {{- define "neuraltrust-platform.dataPlaneApi.postgresEnv" -}}
 {{- $pg := include "neuraltrust-platform.dataPlaneApi.postgresConfig" . | fromYaml }}
 {{- $es := default dict $pg.existingSecret }}
@@ -801,6 +810,8 @@ redis
     secretKeyRef:
       name: {{ $secretName | quote }}
       key: {{ $passwordKey | quote }}
+- name: POSTGRES_SCHEMA
+  value: {{ include "neuraltrust-platform.dataPlaneApi.postgresSchema" . | quote }}
 - name: PGSSLMODE
   value: {{ $pg.sslMode | default "prefer" | quote }}
 {{- end -}}

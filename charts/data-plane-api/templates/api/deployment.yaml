@@ -85,7 +85,7 @@ spec:
           - /bin/sh
           - -c
           - |
-            set -e
+            set -eu
             echo "Running ClickHouse initialization scripts..."
             # Use port 9000 for native protocol (migrations require native protocol, not HTTP)
             CLICKHOUSE_NATIVE_PORT="9000"
@@ -242,7 +242,7 @@ spec:
           - /bin/sh
           - -c
           - |
-            set -e
+            set -eu
             echo "Applying PostgreSQL schema migrations..."
             export PGPASSWORD="${POSTGRES_PASSWORD}"
 
@@ -305,11 +305,11 @@ spec:
       - name: api
         {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.image }}
         {{- $apiRepo := .Values.dataPlane.components.api.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api" }}
-        {{- $apiTag := .Values.dataPlane.components.api.image.tag | default "v1.43.0" }}
+        {{- $apiTag := .Values.dataPlane.components.api.image.tag | default "v1.44.0" }}
         image: {{ include "data-plane.image" (dict "repository" $apiRepo "tag" $apiTag "global" .Values.global) | quote }}
         imagePullPolicy: {{ .Values.dataPlane.components.api.image.pullPolicy | default "IfNotPresent" }}
         {{- else }}
-        {{- $fallbackApiTag := "v1.43.0" }}
+        {{- $fallbackApiTag := "v1.44.0" }}
         image: {{ include "data-plane.image" (dict "repository" "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api" "tag" $fallbackApiTag "global" .Values.global) | quote }}
         imagePullPolicy: IfNotPresent
         {{- end }}

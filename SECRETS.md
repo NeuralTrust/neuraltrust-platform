@@ -327,8 +327,10 @@ install, missing Secrets/keys are created; later upgrades reuse them with `looku
   `data-plane-api.dataPlane.components.api.database.postgresql.{host,port,user,database}`
   (they override the matching Secret key) and/or point `…database.postgresql.existingSecret.name`
   (with an optional `keys` map) at a pre-created Secret holding the password. A
-  `postgres-migrations` initContainer applies the idempotent schema, so the
-  configured role needs `CREATE SCHEMA`/`CREATE TABLE` on the target database.
+  `postgres-migrations` initContainer applies the idempotent tables and indexes.
+  The schema defaults to `public`; set `…database.postgresql.schema` to use a
+  custom pre-created schema. The configured role needs `USAGE` and `CREATE` on
+  that schema, but does not need database-level `CREATE`.
   The ClickHouse credential below applies only when the shim is on ClickHouse
   (v2 external, or hybrid pinned to an external ClickHouse).
 - **Optional IAM DB/Redis auth (AWS)**: the v2 Go services accept

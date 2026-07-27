@@ -160,6 +160,14 @@ assert_contains "$out1" 'runAsNonRoot: true'$'\n''      imagePullSecrets:'$'\n''
   "hybrid: postgresql Deployment defaults imagePullSecrets to gcr-secret"
 assert_contains "$out1" 'name: postgresql-secrets' \
   "hybrid: postgresql-secrets rendered"
+assert_contains "$out1" 'name: POSTGRES_SCHEMA'$'\n''          value: "public"' \
+  "data-plane PostgreSQL: default schema reaches the runtime"
+assert_contains "$out1" 'SET search_path TO public;' \
+  "data-plane PostgreSQL: default schema reaches the migration"
+assert_contains "$out1" 'CREATE TABLE IF NOT EXISTS tests' \
+  "data-plane PostgreSQL: migration uses the configured search path"
+assert_not_contains "$out1" 'CREATE SCHEMA IF NOT EXISTS' \
+  "data-plane PostgreSQL: migration does not require database CREATE"
 assert_contains "$out1" 'name: redis-secrets' \
   "hybrid: redis-secrets rendered"
 assert_contains "$out1" 'name: agentgateway-proxy' \
@@ -294,6 +302,7 @@ render_default "$out2" \
   --set global.postgresql.deploy=false \
   --set global.postgresql.host=pg.internal.example.com \
   --set global.postgresql.password=external-pg-secret \
+  --set data-plane-api.dataPlane.components.api.database.postgresql.schema=tenant_schema \
   --set global.redis.deploy=false \
   --set global.redis.host=redis.internal.example.com \
   --set global.redis.password=external-redis-secret
@@ -304,6 +313,18 @@ assert_not_contains "$out2" '^  name: control-plane-postgresql$' \
 #   $ echo -n pg.internal.example.com | base64 → cGcuaW50ZXJuYWwuZXhhbXBsZS5jb20=
 assert_contains "$out2" 'cGcuaW50ZXJuYWwuZXhhbXBsZS5jb20=' \
   "external PG: host reaches templates (base64-encoded in Secret)"
+assert_contains "$out2" 'name: POSTGRES_SCHEMA'$'\n''          value: "tenant_schema"' \
+  "external PG: configured schema reaches the runtime"
+assert_not_contains "$out2" 'CREATE SCHEMA IF NOT EXISTS' \
+  "external PG: custom schema does not require database CREATE"
+assert_contains "$out2" 'SET search_path TO tenant_schema;' \
+  "external PG: configured schema reaches the migration"
+assert_contains "$out2" 'CREATE TABLE IF NOT EXISTS tests' \
+  "external PG: migration uses the configured search path"
+assert_not_contains "$out2" 'SET search_path TO public;' \
+  "external PG: migration has no stale default schema"
+assert_render_fails "invalid data-plane PostgreSQL schema fails render" \
+  --set data-plane-api.dataPlane.components.api.database.postgresql.schema=invalid-schema
 
 # ---------------------------------------------------------------------------
 # 2b. autoGenerateSecrets=false fallback still emits postgresql-secrets
