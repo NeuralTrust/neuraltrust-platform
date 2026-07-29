@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.3.6] — 2026-07-29
+
 ### Changed
 
 - **Operator docs and chart comments:** replaced “SaaS” / internal overlay
