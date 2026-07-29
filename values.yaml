@@ -312,7 +312,7 @@ clickhouse:
   imagePullSecrets: "gcr-secret"
   image:
     repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickhouse-server
-    tag: "26.6"
+    tag: "26.7"
     pullPolicy: IfNotPresent
   global:
     imagePullSecrets: []
@@ -482,7 +482,7 @@ control-plane-app:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.111.0"
+          tag: "v1.115.2"
           pullPolicy: IfNotPresent
         config:
           nodeEnv: production
@@ -556,7 +556,7 @@ control-plane-app:
 # stays agentgateway for now; K8s names stay agentgateway-*.
 agentgateway:
   image:
-    tag: "v0.19.2"
+    tag: "v0.23.0"
   database:
     sslMode: "prefer"
     iamAuth: false
@@ -580,7 +580,7 @@ agentgateway:
 # TrustGuard: control-plane + data-plane (/v1/evaluate).
 trustguard:
   image:
-    tag: "v0.21.0"
+    tag: "v0.23.0"
   database:
     sslMode: "prefer"
     iamAuth: false
@@ -618,7 +618,7 @@ dataagent:
 # `global.postgresql` block.
 datacore:
   image:
-    tag: "v0.15.0"
+    tag: "v0.15.1"
   database:
     host: ""
     port: 5432
@@ -634,7 +634,7 @@ datacore:
 # ClickStack OTel collector (v2 external only): OTLP-to-ClickHouse pipeline.
 clickstack-otel-collector:
   image:
-    tag: "2.31.0"
+    tag: "2.32.0"
     repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickstack-otel-collector
   clickhouse:
     endpoint: "http://clickhouse:8123"
@@ -740,7 +740,7 @@ data-plane-api:
                   memory: 128Mi
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.44.1
+          tag: v1.44.3
           pullPolicy: IfNotPresent
         accessMode: ReadWriteOnce
         huggingfaceToken: ""
@@ -816,7 +816,7 @@ firewall:
       replicas: 2
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-        tag: "v2.15.0"
+        tag: "v2.15.1"
         pullPolicy: IfNotPresent
       resources:
         requests:
@@ -843,7 +843,7 @@ firewall:
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
         # Keep in lockstep with gateway.image.tag.
-        tag: "v2.15.0"
+        tag: "v2.15.1"
         pullPolicy: IfNotPresent
       replicas: 1
       resources:
