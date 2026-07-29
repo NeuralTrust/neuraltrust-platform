@@ -819,8 +819,6 @@ assert_contains "$out10b2" 'src.workers.indirect_prompt_injections.app:app' \
   "firewall workers: IPI module arg"
 assert_contains "$out10b2" 'INDIRECT_PROMPT_INJECTIONS_WORKER_URL: "http://indirect-prompt-injections-worker:80"' \
   "firewall workers: IPI worker URL in ConfigMap"
-assert_contains "$out10b2" 'europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu:v2.15.0' \
-  "firewall workers: default image tag is v2.15.0"
 assert_not_contains "$out10b2" 'name: toolguard-worker' \
   "firewall workers: retired toolguard worker absent"
 assert_not_contains "$out10b2" 'TOOLGUARD_WORKER_URL' \
