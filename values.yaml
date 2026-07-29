@@ -1,23 +1,10 @@
-# NeuralTrust Platform (v2 only)
-# =============================================================================
-# v1 is maintained only on the v1.14.x release line — do not install this
-# chart on a v1 cluster. Chart 2.0.0 is the official v2-only GA release.
-# =============================================================================
+# NeuralTrust Platform (v2 only). For v1 clusters pin --version ~1.14.0.
 
 global:
-  # Cloud platform / Kubernetes flavour. Auto-configures ingress, security
-  # contexts, and routing.
-  # Supported: "aws" | "gcp" | "azure" | "openshift" | "kubernetes"
+  # Cloud / Kubernetes flavour: "aws" | "gcp" | "azure" | "openshift" | "kubernetes"
   platform: "gcp"
-  # Split-plane boundary.
-  #   "hybrid"   → only data-plane components deploy at the customer; control
-  #                planes stay in NeuralTrust SaaS (default). DataAgent bridges
-  #                local reads to the SaaS DataBridge. In-cluster Postgres +
-  #                Redis deploy by default; ClickHouse does NOT deploy.
-  #   "external" → control planes AND data planes deploy on-prem PLUS the
-  #                self-hosted analytics stack (clickstack-otel-collector +
-  #                DataCore over local ClickHouse). No SaaS dependency;
-  #                DataAgent is not deployed.
+  # "hybrid" (default) → data planes in-cluster; control planes hosted.
+  # "external" → control + data planes + in-cluster analytics (no DataAgent).
   deploymentMode: "hybrid"
   # External-only bootstrap admin for control-plane-app. Ignored in hybrid
   # (app does not render). Prefer existingSecret (avoids Helm release history);
@@ -42,20 +29,10 @@ global:
     trustguardClientId: "agentgateway-platform"
     trustguardClientSecret: "" # Auto-generated when empty (global.autoGenerateSecrets)
     trustguardClientSecretName: ""
-  # ClickStack OTLP export for the v2 data planes (AgentGateway + TrustGuard).
-  #
-  # HYBRID: always on. Apps send plain OTLP to a local ClusterIP Service
-  # (clickstack-egress-collector) on the DataAgent pod. An OTel collector
-  # sidecar exchanges via DataAgent's loopback OAuth broker (enrolment stays
-  # on DataAgent only) and forwards to SaaS. There is no opt-out and no
-  # direct SaaS authToken path. Requires dataagent enrolment (JWT carries
-  # tenant_id / instance_id).
-  # Air-gapped / local-only product telemetry → use deploymentMode=external.
-  #
-  # EXTERNAL: this block is ignored. Product telemetry stays in-cluster
-  # (AgentGateway/TrustGuard → clickstack-otel-collector → local ClickHouse).
+  # Hybrid product OTLP: apps → local clickstack-egress-collector (DataAgent
+  # enrolment). No direct authToken. Air-gapped → deploymentMode=external.
+  # Ignored in external (in-cluster clickstack-otel-collector → ClickHouse).
   clickstack:
-    # Optional overrides for the egress sidecar's SaaS export target only.
     endpoint: ""
     protocol: ""
     insecure: false
@@ -63,9 +40,8 @@ global:
       nameOverride: "" # ClusterIP Service name (default clickstack-egress-collector)
       clientId: "otlp-egress" # non-secret oauth2client placeholder
       clientSecret: "unused" # non-secret oauth2client placeholder (broker ignores it)
-      endpoint: "" # SaaS OTLP/HTTP base; default https://telemetry.neuraltrust.ai
-      # OTel sidecar bind host (health + OTLP receivers). Chart emits [::]:port.
-      # Override to "0.0.0.0" only for rare IPv4-only kernels with bindv6only=1.
+      endpoint: "" # OTLP/HTTP base; default https://telemetry.neuraltrust.ai
+      # Sidecar bind host. Override to "0.0.0.0" only for IPv4-only kernels.
       listenHost: "::"
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/opentelemetry-collector-contrib
@@ -96,6 +72,10 @@ global:
     database: neuraltrust
     password: "" # Empty auto-generates and stores it in postgresql-secrets
     sslMode: prefer
+    # Prisma pool size baked into the generated DSN. Multiplies with app
+    # replicaCount against the server's max_connections — lower it when many
+    # services share one Postgres, or when replica counts go up.
+    connectionLimit: 15
     # authMode: password | iam (external Postgres only; ignored when deploy=true).
     # awsRegion is required for IAM token minting on control-plane api/app.
     authMode: "password"
@@ -292,8 +272,7 @@ global:
         clusterScoped: true
 # Infrastructure toggles.
 infrastructure:
-  # In-cluster ClickHouse deploys ONLY in v2 external (hybrid stores analytics
-  # in NeuralTrust SaaS). Set deploy=false to point at a hosted ClickHouse.
+  # In-cluster ClickHouse: external mode only. Set deploy=false for hosted CH.
   clickhouse:
     deploy: true
     external:
@@ -533,6 +512,10 @@ control-plane-app:
           limits:
             memory: 1Gi
             cpu: 500m
+        # Surge before retire; preStopSleepSeconds lets the ingress drain.
+        maxUnavailable: 0
+        maxSurge: 1
+        preStopSleepSeconds: 15
         initContainer:
           resources:
             requests:
@@ -612,7 +595,7 @@ trustguard:
         key: "ENROLMENT_TOKEN"
     existingSecret:
       name: ""
-# TrustLens (opt-in, WIP).
+# TrustLens (opt-in).
 trustlens:
   enabled: false
   image:
@@ -674,9 +657,7 @@ alertengine:
     database: "otel"
     username: "neuraltrust"
     secure: false
-# =============================================================================
-# data-plane-api shim (kept until TrustLens supersedes it).
-# =============================================================================
+# data-plane-api (analytics / evaluation API).
 data-plane-api:
   securityHardening: true
   dataPlane:
@@ -892,8 +873,7 @@ firewall:
         module: src.workers.toxicity.app:app
         extraEnv: []
         extraEnvFrom: []
-      # Replaces the retired toolguard worker. Gateway /v1/toolguard stays as a
-      # deprecated compatibility shim that forwards to this IPI worker.
+      # Gateway /v1/toolguard forwards here (deprecated path).
       indirect-prompt-injections:
         enabled: true
         module: src.workers.indirect_prompt_injections.app:app

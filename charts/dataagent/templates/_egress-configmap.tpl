@@ -31,7 +31,6 @@ processors:
     timeout: 1s
 
 exporters:
-  # No observability redaction — product telemetry must reach SaaS intact.
   otlphttp/saas:
     endpoint: {{ include "neuraltrust-platform.clickstackEgress.saasEndpoint" . | quote }}
     auth:

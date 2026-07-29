@@ -74,12 +74,8 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
-Deployment mode selection. v2 supports two topologies:
-  - "hybrid" (default) → only data-plane components + DataAgent deploy at the
-                         customer; control-planes stay in NeuralTrust SaaS.
-  - "external"         → control-plane, data-plane, and the self-hosted
-                         analytics stack all deploy on-prem. No SaaS dependency;
-                         DataAgent is not deployed.
+deploymentMode: hybrid (default) → data planes + DataAgent; hosted control planes.
+external → control + data + in-cluster analytics; no DataAgent.
 */}}
 {{- define "neuraltrust-platform.isExternal" -}}
 {{- $global := default dict .Values.global }}
@@ -715,6 +711,22 @@ redis
 {{- end -}}
 {{- end -}}
 
+{{/*
+Prisma `connection_limit` for the generated Postgres DSN.
+
+Each app pod opens up to this many connections, so it multiplies with
+replicaCount against the server's max_connections. A shared or small Postgres
+needs this tunable. Prefer `global.postgresql.connectionLimit`, else 15.
+*/}}
+{{- define "neuraltrust-platform.postgresql.connectionLimit" -}}
+{{- $globalPg := default dict (default dict .Values.global).postgresql -}}
+{{- if and (hasKey $globalPg "connectionLimit") (ne ($globalPg.connectionLimit | toString) "") -}}
+{{- $globalPg.connectionLimit | toString -}}
+{{- else -}}
+15
+{{- end -}}
+{{- end }}
+
 {{- define "neuraltrust-platform.dataPlaneApi.redisUrl" -}}
 {{- if eq (include "neuraltrust-platform.dataPlaneApi.redisBackend" .) "redis" }}
 {{- $cfg := include "neuraltrust-platform.dataPlaneApi.redisConfig" . | fromYaml }}
@@ -1140,9 +1152,7 @@ true
 {{- end }}
 
 {{/*
-Config-sync data-plane environment (hybrid: dial the fixed public SaaS endpoint
-over TLS; external: dial the in-cluster control-plane Service). Rendered only
-when config-sync is effectively enabled.
+Config-sync env. Hybrid: public config-sync host:443. External: in-cluster Service.
 Usage: {{- include "neuraltrust-platform.configSyncEnv" (dict "ctx" . "product" "trustguard") | nindent 8 }}
 */}}
 {{- define "neuraltrust-platform.configSyncEnv" -}}
@@ -1276,8 +1286,7 @@ DataAgent. EXTERNAL installs never enable this.
 {{- end }}
 
 {{/*
-True when AgentGateway/TrustGuard should send plain OTLP to the local egress
-ClusterIP (DataAgent sidecar). Hybrid has no direct SaaS Authorization path.
+True when apps send plain OTLP to the local egress ClusterIP (DataAgent sidecar).
 */}}
 {{- define "neuraltrust-platform.clickstackEgress.useLocalEndpoint" -}}
 {{- if eq (include "neuraltrust-platform.clickstackHybridEnabled" .) "true" -}}
@@ -1339,11 +1348,9 @@ is the DataAgent loopback broker + enrolment on the DataAgent gRPC connection.
 {{- end }}
 
 {{/*
-SaaS OTLP/HTTP base URL for the egress collector exporter (no /v1/logs suffix).
-Defaults to https://telemetry.neuraltrust.ai; override via
-global.clickstack.egress.endpoint or the legacy global.clickstack.endpoint
-(strip path if present). Legacy host clickstack-collector.neuraltrust.ai remains
-accepted on the SaaS edge during cutover.
+OTLP/HTTP base for the egress exporter (no /v1/logs). Default
+https://telemetry.neuraltrust.ai; override via global.clickstack.egress.endpoint
+or legacy global.clickstack.endpoint (path stripped if present).
 */}}
 {{- define "neuraltrust-platform.clickstackEgress.saasEndpoint" -}}
 {{- $clickstack := default dict (default dict .Values.global).clickstack -}}
@@ -1361,7 +1368,7 @@ accepted on the SaaS edge during cutover.
 {{- end }}
 
 {{- define "neuraltrust-platform.clickstack.otlpEnv" -}}
-{{- /* Hybrid: plain OTLP to local egress (enrolment exchange owns SaaS auth). */ -}}
+{{- /* Hybrid: plain OTLP to local egress (enrolment owns auth). */ -}}
 OTEL_EXPORTER_OTLP_ENDPOINT: {{ include "neuraltrust-platform.clickstackEgress.otlpHTTPEndpoint" . | quote }}
 OTEL_EXPORTER_OTLP_PROTOCOL: {{ include "neuraltrust-platform.clickstack.defaultProtocol" . | quote }}
 OTEL_EXPORTER_OTLP_INSECURE: "true"

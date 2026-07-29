@@ -85,8 +85,7 @@ firewall:
       module: src.workers.toxicity.app:app
       extraEnv: []
       extraEnvFrom: []
-    # Replaces the retired toolguard worker. Gateway /v1/toolguard stays as a
-    # deprecated compatibility shim that forwards to this IPI worker.
+    # Gateway /v1/toolguard forwards here (deprecated path).
     indirect-prompt-injections:
       enabled: true
       module: src.workers.indirect_prompt_injections.app:app

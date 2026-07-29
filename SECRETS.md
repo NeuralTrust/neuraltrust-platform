@@ -93,7 +93,7 @@ All required secrets must exist in the namespace before deployment.
 ### Control Plane (external mode only)
 
 These Secrets apply when `global.deploymentMode: external` renders
-control-plane-api/app. Hybrid keeps the console in NeuralTrust SaaS.
+control-plane-api/app. Hybrid keeps the console on the hosted control plane.
 
 Optional bootstrap admin for control-plane-app (external only). Prefer a
 pre-created Secret via `global.superadmin.existingSecret.name` (keys default
@@ -275,14 +275,14 @@ source); the `envFrom` mounts map secret keys directly to env vars.
 | TrustLens DB password | `trustlens-secrets` | `DATABASE_PASSWORD` | auto-generated |
 | DataAgent DB password | `postgresql-secrets` (shared) | `DB_PASSWORD` | **v2 hybrid** — DataAgent envFrom's the shared `postgresql-secrets`. Set `dataagent.database.password` / `dataagent.databaseUrl` explicitly to keep a per-service credential in `dataagent-secrets` instead. |
 | DataAgent DB DSN | `postgresql-secrets` (shared) | `SENSIBLE_PG_DSN` | **v2 hybrid** — DataAgent connects as `global.postgresql.user` (default `neuraltrust`). Override the product's `dataagent.databaseUrl` to opt out of the shared credential. |
-| DataAgent enrolment token | `dataagent-secrets` / `dataagent-trustguard-secrets` or operator Secret | `ENROLMENT_TOKEN` (configurable key) | **never** auto-generated — SaaS-issued, from `agentgateway.dataagent.enrolment` / `trustguard.dataagent.enrolment` |
+| DataAgent enrolment token | `dataagent-secrets` / `dataagent-trustguard-secrets` or operator Secret | `ENROLMENT_TOKEN` (configurable key) | **never** auto-generated — from `agentgateway.dataagent.enrolment` / `trustguard.dataagent.enrolment` |
 | AlertEngine DB password | `alertengine-secrets` | `DB_PASSWORD` | auto-generated (own `alertengine` DB; external only); **omitted when `alertengine.database.iamAuth=true`** |
 | AlertEngine auth JWT | `alertengine-secrets` | `AUTH_JWT_SECRET` | auto-generated — must match the app BFF token signer for UI auth |
 | AlertEngine encryption key | `alertengine-secrets` | `APP_ENCRYPTION_KEY` | auto-generated (AES-256-GCM for integration secrets) |
 | DataCore JWT | `datacore-secrets` | `AUTH_JWT_HS256_SECRET` | auto-generated |
 | DataCore DB password | `datacore-secrets` | `POSTGRES_PASSWORD` | auto-generated (own `datacore` DB; external only); **omitted when `datacore.database.iamAuth=true`** (`POSTGRES_LOGIN=aws`) |
-| DataCore / AlertEngine / clickstack / data-plane-api ClickHouse password | `clickhouse` | `admin-password` | **shared** — all read `CLICKHOUSE_PASSWORD` from the in-cluster `clickhouse` secret via `clickhouse.existingSecret` (`dataPlane.components.clickhouse.existingSecret` for the shim; no per-service key). External ClickHouse: point `existingSecret.name`/`key` at your secret. |
-| v2 hybrid ClickStack OTLP | primary DataAgent enrolment Secret + in-memory access JWT | `ENROLMENT_TOKEN` (egress exchanges at DataCore) | **v2 hybrid — mandatory when TrustGate and/or TrustGuard enabled.** No direct SaaS bearer on apps. Local `clickstack-egress-collector` on the primary DataAgent exchanges enrolment for a short-lived OTLP JWT. Requires per-product `*.dataagent.enrolment`. data-plane-only hybrid skips this. Air-gapped / local-only product telemetry → `global.deploymentMode: external`. |
+| DataCore / AlertEngine / clickstack / data-plane-api ClickHouse password | `clickhouse` | `admin-password` | **shared** — all read `CLICKHOUSE_PASSWORD` from the in-cluster `clickhouse` secret via `clickhouse.existingSecret` (`dataPlane.components.clickhouse.existingSecret` for data-plane-api; no per-service key). External ClickHouse: point `existingSecret.name`/`key` at your secret. |
+| v2 hybrid ClickStack OTLP | primary DataAgent enrolment Secret + in-memory access JWT | `ENROLMENT_TOKEN` (egress exchanges at DataCore) | **v2 hybrid — mandatory when TrustGate and/or TrustGuard enabled.** No direct bearer on apps. Local `clickstack-egress-collector` on the primary DataAgent exchanges enrolment for a short-lived OTLP JWT. Requires per-product `*.dataagent.enrolment`. data-plane-only hybrid skips this. Air-gapped / local-only product telemetry → `global.deploymentMode: external`. |
 | v2 hybrid config-sync (TrustGate / TrustGuard) | operator Secrets (e.g. `agentgateway-config-sync`, `trustguard-config-sync`) | `CONFIG_SYNC_TOKEN`, `CONFIG_SYNC_LKG_KEY` | **On by default in hybrid** (mode-derived) for each enabled product. Prefer `agentgateway.configSync.existingSecret` / `trustguard.configSync.existingSecret`; do not restate `enabled: true`. Set `configSync.enabled: false` only for Postgres-managed configuration. Never auto-generated. |
 | v2 external ClickStack OTLP token | `clickstack-collector-secrets` | `OTLP_AUTH_TOKEN`, `OTEL_EXPORTER_OTLP_HEADERS` | **v2 external only** — auto-generated (or `clickstack-otel-collector.otlpAuthToken`). `OTLP_AUTH_TOKEN` is what the collector enforces; `OTEL_EXPORTER_OTLP_HEADERS` is `authorization=<same token>` and is mounted on TrustGuard / AgentGateway via `secretKeyRef`. |
 | Control-plane app auth | `control-plane-secrets` | `AUTH_SECRET` / `NEXTAUTH_SECRET` | one generated or reused value exposed under both aliases |
@@ -307,7 +307,7 @@ install, missing Secrets/keys are created; later upgrades reuse them with `looku
   authenticated Redis; the chart stores it in the shared `redis-secrets` Secret
   every hybrid workload envFrom's.
 - **Shared ClickHouse credential**: DataCore, AlertEngine, `clickstack-otel-collector`
-  and the `data-plane-api` shim read the ClickHouse password from the single
+  and `data-plane-api` read the ClickHouse password from the single
   `clickhouse` secret (key `admin-password`) — none store their own
   `CLICKHOUSE_PASSWORD`. Override per service with
   `datacore.clickhouse.existingSecret` / `alertengine.clickhouse.existingSecret` /
@@ -317,7 +317,7 @@ install, missing Secrets/keys are created; later upgrades reuse them with `looku
   secret matching `infrastructure.clickhouse.external.secretName`/`secretKey`, and set
   the ClickHouse host to your endpoint (a dotted/FQDN host is used verbatim; a bare
   name expands to `<name>.<namespace>.svc.cluster.local`).
-- **`data-plane-api` PostgreSQL backend (v2 hybrid default)**: in hybrid the shim
+- **`data-plane-api` PostgreSQL backend (v2 hybrid default)**: in hybrid the API
   reads its evaluation store from PostgreSQL (`SQL_DATABASE=postgres`), so it needs
   no ClickHouse. It resolves its five `POSTGRES_*` connection vars from the
   umbrella-managed `postgresql-secrets` (keys `POSTGRES_HOST`/`POSTGRES_PORT`/
@@ -331,7 +331,7 @@ install, missing Secrets/keys are created; later upgrades reuse them with `looku
   The schema defaults to `public`; set `…database.postgresql.schema` to use a
   custom pre-created schema. The configured role needs `USAGE` and `CREATE` on
   that schema, but does not need database-level `CREATE`.
-  The ClickHouse credential below applies only when the shim is on ClickHouse
+  The ClickHouse credential below applies only when the API is on ClickHouse
   (v2 external, or hybrid pinned to an external ClickHouse).
 - **Optional IAM DB/Redis auth (AWS)**: the v2 Go services accept
   `database.iamAuth` / `redis.iamAuth` (default false). When on they emit
@@ -347,7 +347,7 @@ install, missing Secrets/keys are created; later upgrades reuse them with `looku
   Use `values-v2-managed-datastores.yaml.example` as the tracked starting point.
 - **Each selected product DataAgent** renders when its nested `dataagent`
   has either `enrolment.token` or (preferred)
-  `enrolment.existingSecret.name` (SaaS-issued, never generated). The JWT
+  `enrolment.existingSecret.name` (never generated). The JWT
   carries `tenant_id` and `instance_id` — do not set them in Helm values.
   Its `DATABASE_URL` and `DB_PASSWORD` auto-derive from shared hybrid
   `postgresql-secrets`; overlay the product's `dataagent.database.host` +

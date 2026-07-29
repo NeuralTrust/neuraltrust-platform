@@ -61,7 +61,7 @@ emit_row "control-plane-app (external)" "$(yq_get "$V" '.["control-plane-app"].c
 emit_row "datacore (external)" "$(yq_get "$DCORE" '.image.repository')" "$(yq_get "$V" '.datacore.image.tag')"
 emit_row "clickstack-otel-collector (external)" "$(yq_get "$CSCOL" '.image.repository')" "$(yq_get "$V" '.["clickstack-otel-collector"].image.tag')"
 emit_row "alertengine (external)" "$(yq_get "$AENG" '.image.repository')" "$(yq_get "$V" '.alertengine.image.tag')"
-emit_row "trustlens (optional, WIP)" "$(yq_get "$TLENS" '.image.repository')" "$(yq_get "$V" '.trustlens.image.tag')"
+emit_row "trustlens (optional)" "$(yq_get "$TLENS" '.image.repository')" "$(yq_get "$V" '.trustlens.image.tag')"
 
 # Datastores.
 emit_row "clickhouse-server (external analytics)" "$CH_REPO" "$CH_TAG"

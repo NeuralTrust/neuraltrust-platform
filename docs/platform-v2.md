@@ -9,8 +9,8 @@ global:
 
 ## Hybrid: default split-plane
 
-Hybrid keeps control-plane services in NeuralTrust SaaS and deploys the data
-path in the customer cluster:
+Hybrid keeps control-plane services hosted and deploys the data path in the
+customer cluster:
 
 - TrustGate proxy and MCP (K8s resources remain `agentgateway-*`)
 - TrustGuard data plane
@@ -18,16 +18,16 @@ path in the customer cluster:
 - Firewall whenever TrustGuard is selected
 - DataAgent (enrolment required for hybrid OTLP egress and DataBridge)
 
-Hybrid does **not** deploy an in-cluster ClickHouse: analytics live in NeuralTrust
-SaaS. AgentGateway and TrustGuard **always dual-write** product data over OTLP
+Hybrid does **not** deploy an in-cluster ClickHouse: analytics use the hosted
+path. AgentGateway and TrustGuard **always dual-write** product data over OTLP
 via a local `clickstack-egress-collector` (enrolment-backed; see
 [hybrid ClickStack OTLP](#hybrid-clickstack-otlp-mandatory)) while ALSO
-persisting raw payloads to the local PostgreSQL for DataAgent. The temporary
-`data-plane-api` read shim renders **by default** in hybrid and reads from the
-umbrella-managed **PostgreSQL** (`SQL_DATABASE=postgres`), so no ClickHouse is
-required. Its schema is applied by a `postgres-migrations` initContainer
-(idempotent, advisory-locked). If you instead want it to read from an
-**external/managed ClickHouse**, either set a dotted
+persisting raw payloads to the local PostgreSQL for DataAgent. `data-plane-api`
+renders **by default** in hybrid and reads from the umbrella-managed
+**PostgreSQL** (`SQL_DATABASE=postgres`), so no ClickHouse is required. Its
+schema is applied by a `postgres-migrations` initContainer (idempotent,
+advisory-locked). If you instead want it to read from an **external/managed
+ClickHouse**, either set a dotted
 `data-plane-api.dataPlane.components.clickhouse.host` (auto-resolves to
 ClickHouse) or force it with
 `data-plane-api.dataPlane.components.api.database.backend: clickhouse`.
@@ -36,9 +36,9 @@ deploys only in external mode.
 
 ### Hybrid control and data channels
 
-SaaS-managed hybrid uses two config-sync channels, mandatory ClickStack OTLP
-(via the DataAgent egress sidecar), and DataAgent DataBridge. Every connection
-is initiated by the customer cluster over TLS:
+Hybrid uses two config-sync channels, mandatory ClickStack OTLP (via the
+DataAgent egress sidecar), and DataAgent DataBridge. Every connection is
+initiated by the customer cluster over TLS:
 
 1. AgentGateway proxy/MCP opens config-sync gRPC to
    `agentgateway-configsync.neuraltrust.ai:443`.
@@ -50,13 +50,16 @@ is initiated by the customer cluster over TLS:
    `https://telemetry.neuraltrust.ai` after exchanging the DataAgent
    enrolment JWT for a short-lived OTLP access token.
 
+Firewall / security-group allowlist (hostnames, IPs, and the NeuralTrust
+inbound source IP): [hybrid-network.md](./hybrid-network.md).
+
 There is no in-cluster `clickstack-otel-collector` product collector in hybrid
 (that subchart is external-mode only). The hybrid egress sidecar is co-located
 with DataAgent and is not an operator-facing collector.
 
 Hybrid config-sync is **on by default** (mode-derived; subchart
 `configSync.enabled: null`). Pre-create the two named Secrets below with
-independently issued SaaS bearer tokens under `CONFIG_SYNC_TOKEN` and separate
+independently issued bearer tokens under `CONFIG_SYNC_TOKEN` and separate
 base64-encoded 32-byte cache encryption keys under `CONFIG_SYNC_LKG_KEY`.
 Overlays set `existingSecret` only — do not restate `enabled: true`:
 
@@ -78,7 +81,7 @@ same token.
 
 Each data plane initiates a long-lived bidirectional gRPC stream, fetches a
 compiled snapshot, stores it in memory, and acknowledges applied versions. The
-encrypted last-known-good snapshot lets it serve during a temporary SaaS
+encrypted last-known-good snapshot lets it serve during a temporary control-plane
 outage. Config-sync replaces PostgreSQL as the runtime **configuration source**;
 the shared hybrid PostgreSQL remains the raw product-data store used by the
 Postgres telemetry exporters and DataAgent. TrustGate calls TrustGuard over
@@ -112,10 +115,9 @@ for the full-hybrid preset.
 ### DataAgent (one per enabled product)
 
 When TrustGate and/or TrustGuard are enabled, each needs its own DataAgent
-enrolment (distinct SaaS-issued tokens in production). The JWT carries
-`tenant_id` and `instance_id` (gateway or guard id); do not duplicate them in
-values. Prefer nested `enrolment.existingSecret` so the token never enters
-Helm values:
+enrolment (distinct tokens in production). The JWT carries `tenant_id` and
+`instance_id` (gateway or guard id); do not duplicate them in values. Prefer
+nested `enrolment.existingSecret` so the token never enters Helm values:
 
 ```yaml
 agentgateway:
@@ -145,9 +147,9 @@ resource name; TrustGuard uses `dataagent-trustguard`. The selected primary
 When TrustGate or TrustGuard is enabled, hybrid ClickStack export is **always
 on**. Apps send plain OTLP to a local ClusterIP Service
 (`clickstack-egress-collector`) on the primary DataAgent pod.
-The sidecar exchanges the DataAgent enrolment JWT at DataCore for a short-lived
-OTLP access token and forwards to SaaS. There is **no** direct SaaS bearer on
-TrustGate/TrustGuard and **no** hybrid opt-out:
+The sidecar exchanges the DataAgent enrolment JWT for a short-lived OTLP access
+token and exports to the hosted telemetry endpoint. There is **no** direct
+bearer on TrustGate/TrustGuard and **no** hybrid opt-out:
 
 - `global.clickstack.enabled: false` — rejected
 - `global.clickstack.egress.enabled` — rejected
@@ -156,9 +158,9 @@ Air-gapped or local-only product telemetry requires
 `global.deploymentMode: external` (in-cluster ClickStack collector + ClickHouse).
 
 Optional `global.clickstack.endpoint` / `protocol` / `insecure` and
-`global.clickstack.egress.*` knobs override only the egress sidecar's SaaS
-export target; leave empty for the fixed defaults. External mode always exports
-to its in-cluster ClickStack collector and ignores the hybrid egress path.
+`global.clickstack.egress.*` knobs override only the egress sidecar's export
+target; leave empty for the fixed defaults. External mode always exports to its
+in-cluster ClickStack collector and ignores the hybrid egress path.
 
 ## External: self-hosted
 
@@ -171,7 +173,7 @@ the self-hosted analytics stack:
 - ClickStack OTel Collector
 - DataCore
 - AlertEngine API and worker
-- temporary data-plane API read shim
+- data-plane API
 
 DataAgent never renders in external mode. The ClickStack collector is also
 external-only: AgentGateway and TrustGuard load metadata/raw OTLP exporter
@@ -186,28 +188,35 @@ DataCore serves residency queries and AlertEngine evaluates rules and forwards
 findings to configured SIEM/integration destinations.
 
 Set `global.observability.hostedExport.enabled: false` for a deployment with no
-NeuralTrust SaaS telemetry egress.
+hosted telemetry egress.
 
 ## Components
 
 | Component | Hybrid | External | Purpose |
 |---|:---:|:---:|---|
 | TrustGate proxy/MCP (`agentgateway:`; product `global.products.trustgate`; K8s `agentgateway-*`) | opt-in (default on) | yes | AI gateway data path |
-| TrustGate admin | SaaS | yes | Gateway administration |
+| TrustGate admin | hosted | yes | Gateway administration |
 | TrustGuard data plane | opt-in (default on) | yes | Runtime safety evaluation |
-| TrustGuard control plane | SaaS | yes | Policy administration |
-| data-plane API shim | opt-in (default on; PostgreSQL) | yes (ClickHouse) | Temporary read API — PostgreSQL by default in hybrid, ClickHouse in external |
+| TrustGuard control plane | hosted | yes | Policy administration |
+| data-plane API | opt-in (default on; PostgreSQL) | yes (ClickHouse) | Analytics / evaluation API — PostgreSQL by default in hybrid, ClickHouse in external |
 | DataAgent | one per enabled TrustGate/TrustGuard | no | Outbound entitled-query bridge; primary also powers ClickStack egress |
 | ClickStack OTel Collector | no | yes | OTLP to ClickHouse |
 | DataCore | no | yes | Residency query API (ClickHouse + Postgres metadata) |
 | AlertEngine | no | yes | Alert evaluation and SIEM/integration forwarding |
-| TrustLens | opt-in | opt-in | WIP analytics/inventory replacement |
+| TrustLens | opt-in | opt-in | Analytics/inventory |
 | Firewall | with TrustGuard | with TrustGuard | Prompt and response safety |
+
+## Cluster sizing
+
+Chart defaults are a comfortable starting point. Hybrid (all products) typically
+fits **3–4** workers at **8 vCPU / 16–32 GiB**; External typically wants
+**4–5** of the same class. Right-size and fine-tune for your traffic — see
+[sizing.md](./sizing.md).
 
 ## Datastores
 
 PostgreSQL and Redis deploy in-cluster by default in both modes. ClickHouse
-deploys in-cluster only in **external** — hybrid keeps analytics in SaaS, so no
+deploys in-cluster only in **external** — hybrid uses hosted analytics, so no
 in-cluster ClickHouse renders there.
 
 Hybrid PostgreSQL and Redis use ONE shared connection contract driven by two

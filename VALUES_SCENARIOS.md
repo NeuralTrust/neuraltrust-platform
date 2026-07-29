@@ -148,7 +148,7 @@ export while retaining the umbrella collector, Prometheus Operator resources
 when CRDs are available, and optional watchdog actions.
 
 In external mode, the ClickStack collector still writes product telemetry to
-the selected ClickHouse instance; it does not export to NeuralTrust SaaS.
+the selected ClickHouse instance; it does not export to the hosted telemetry path.
 
 ## Legacy v1
 

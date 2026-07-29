@@ -5,12 +5,12 @@ Deploy NeuralTrust on Kubernetes with one Helm umbrella chart. This chart
 
 ## Default topology: hybrid
 
-Hybrid keeps control-plane services in NeuralTrust SaaS and runs the data path
-in your cluster:
+Hybrid keeps control-plane services hosted and runs the data path in your
+cluster:
 
 - TrustGate proxy and MCP runtimes (product flag `global.products.trustgate`; values key `agentgateway:`; K8s names stay `agentgateway-*`)
 - TrustGuard runtime
-- the temporary data-plane API read shim (PostgreSQL-backed by default; no ClickHouse required)
+- data-plane API (PostgreSQL-backed by default; no ClickHouse required)
 - PostgreSQL and Redis by default (no in-cluster ClickHouse in hybrid)
 - NeuralTrust Firewall with TrustGuard
 - one DataAgent per enabled product (TrustGate / TrustGuard) after enrolment
@@ -25,9 +25,9 @@ deploys the full product stack.
 
 Hybrid product OTLP is mandatory when TrustGate and/or TrustGuard is enabled.
 Those apps send plain OTLP to a local `clickstack-egress-collector` on the
-primary DataAgent pod; the sidecar exchanges the DataAgent enrolment JWT at
-DataCore for a short-lived OTLP access token and forwards to SaaS. There is no
-direct SaaS ClickStack bearer path and no hybrid opt-out
+primary DataAgent pod; the sidecar exchanges the DataAgent enrolment JWT for a
+short-lived OTLP access token and exports to the hosted telemetry endpoint.
+There is no direct ClickStack bearer on apps and no hybrid opt-out
 (`global.clickstack.enabled` / `global.clickstack.egress.enabled` are rejected).
 Air-gapped or local-only product telemetry requires
 `global.deploymentMode: external`. data-plane-only hybrid skips DataAgent.
@@ -61,7 +61,7 @@ Set `global.deploymentMode: external` for a self-hosted deployment. It adds:
 
 ClickStack is external-mode only. DataAgent never runs in external mode.
 Disable `global.observability.hostedExport.enabled` when the deployment must
-have no SaaS telemetry egress.
+have no hosted telemetry egress.
 
 ## Quick start
 
@@ -106,16 +106,31 @@ reference pre-created Kubernetes Secrets; see [SECRETS.md](./SECRETS.md).
 
 ## Deployment modes
 
-| Mode | SaaS control plane | Workloads in cluster | Analytics path |
+| Mode | Hosted control plane | Workloads in cluster | Analytics path |
 |---|---:|---|---|
-| `hybrid` (default) | Yes | TrustGate / TrustGuard / data-plane-api via positive `global.products` (at least one); Firewall follows TrustGuard; per-product DataAgent when TrustGate/TrustGuard is on | Analytics in SaaS via mandatory enrolment-backed ClickStack OTLP when products are on; DataAgent also bridges entitled reads. No in-cluster ClickHouse |
-| `external` | No | Full product stack (product flags ignored) plus control planes, product API/app, DataCore, AlertEngine | ClickStack OTel Collector writes to ClickHouse; data-plane API shim reads ClickHouse |
+| `hybrid` (default) | Yes | TrustGate / TrustGuard / data-plane-api via positive `global.products` (at least one); Firewall follows TrustGuard; per-product DataAgent when TrustGate/TrustGuard is on | Hosted analytics via enrolment-backed ClickStack OTLP when products are on; DataAgent also bridges entitled reads. No in-cluster ClickHouse |
+| `external` | No | Full product stack (product flags ignored) plus control planes, product API/app, DataCore, AlertEngine | ClickStack OTel Collector writes to ClickHouse; data-plane API reads ClickHouse |
+
+## Cluster sizing (defaults)
+
+Chart defaults are a **sensible starting point**. Right-size and fine-tune for
+your traffic and budget — see [`docs/sizing.md`](./docs/sizing.md).
+
+| Mode | Comfortable starting shape |
+|---|---|
+| Hybrid (all products, CPU Firewall) | **3–4** workers · **8 vCPU / 16–32 GiB** each |
+| External (self-hosted) | **4–5** workers · **8 vCPU / 16–32 GiB** each |
+
+## Hybrid network allowlist
+
+Outbound config-sync / DataBridge hostnames and IPs, plus the NeuralTrust
+inbound source IP: [`docs/hybrid-network.md`](./docs/hybrid-network.md).
 
 ## Datastores
 
 The chart deploys PostgreSQL and Redis in-cluster by default in both modes;
-in-cluster ClickHouse renders only in `external` (hybrid keeps analytics in SaaS
-and runs the data-plane API shim on PostgreSQL). Each can be replaced with a
+in-cluster ClickHouse renders only in `external` (hybrid uses hosted analytics
+and runs data-plane-api on PostgreSQL). Each can be replaced with a
 managed service:
 
 ```yaml
@@ -133,8 +148,8 @@ infrastructure:
 Use [`values-v2-managed-datastores.yaml.example`](./values-v2-managed-datastores.yaml.example)
 for the complete endpoint and existing-secret pattern.
 
-In **hybrid**, AgentGateway, TrustGuard, DataAgent, and the `data-plane-api`
-read shim share ONE PostgreSQL role owning ONE database, driven by
+In **hybrid**, AgentGateway, TrustGuard, DataAgent, and `data-plane-api`
+share ONE PostgreSQL role owning ONE database, driven by
 `global.postgresql` (defaults: user `neuraltrust`, database `neuraltrust`).
 The chart renders shared `postgresql-secrets` and `redis-secrets` (from
 `global.redis`) that every hybrid workload `envFrom`'s. There is no
@@ -165,7 +180,7 @@ Set `global.domain` to derive service hostnames. Set
 ## Supported optional components
 
 - `firewall`: prompt and response safety, with CPU or GPU workers
-- `trustlens`: analytics/inventory service; still opt-in while WIP
+- `trustlens`: analytics/inventory service (opt-in)
 - `watchdog`: dry-run-first self-monitoring and self-healing (stable Kubernetes name `neuraltrust-watchdog`)
 - umbrella OTel Collector: portable cluster observability
 - AlertEngine: external-mode alert evaluation and SIEM/integration forwarding

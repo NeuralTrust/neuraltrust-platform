@@ -424,8 +424,7 @@ add_secret_key "control-plane-secrets" "AUTH_SECRET" "$APP_AUTH_SECRET_VALUE"
 add_secret_key "control-plane-secrets" "NEXTAUTH_SECRET" "$APP_AUTH_SECRET_VALUE"
 unset APP_AUTH_SECRET_VALUE
 
-# DataAgent's local database credential may be generated, but the SaaS-issued
-# enrolment token is deliberately never created by this script.
+# DataAgent DB credential may be generated; ENROLMENT_TOKEN is never created here.
 ensure_generated_secret_key "dataagent-secrets" "DB_PASSWORD" "DATAAGENT_DB_PASSWORD"
 DATAAGENT_DB_PASSWORD_VALUE=$(kubectl get secret dataagent-secrets -n "$NAMESPACE" \
     -o jsonpath='{.data.DB_PASSWORD}' 2>/dev/null | base64 -d 2>/dev/null || true)
@@ -434,7 +433,7 @@ DATAAGENT_DATABASE_URL="${DATAAGENT_DATABASE_URL:-postgresql://${DATAAGENT_DB_US
 add_secret_key "dataagent-secrets" "DATABASE_URL" "$DATAAGENT_DATABASE_URL"
 unset DATAAGENT_DB_PASSWORD_VALUE DATAAGENT_DB_PASSWORD_ENCODED DATAAGENT_DATABASE_URL
 echo -e "${GREEN}✓ Platform v2 stable secret keys are ready (values not printed)${NC}"
-echo -e "${YELLOW}DataAgent ENROLMENT_TOKEN was not generated; provide the SaaS-issued token separately.${NC}"
+echo -e "${YELLOW}DataAgent ENROLMENT_TOKEN was not generated; provide the enrolment token separately.${NC}"
 echo ""
 
 # ============================================================================
@@ -705,7 +704,7 @@ OBSERVABILITY_SECRET_KEY="token"
 
 if kubectl get secret "$OBSERVABILITY_SECRET_NAME" -n "$NAMESPACE" &>/dev/null; then
     if should_replace_secret "$OBSERVABILITY_SECRET_NAME"; then
-        OBSERVABILITY_TOKEN=$(prompt_secret "OBSERVABILITY_TOKEN" "Enter hosted OTLP bearer token (shared customer token from SaaS collector)")
+        OBSERVABILITY_TOKEN=$(prompt_secret "OBSERVABILITY_TOKEN" "Enter hosted OTLP bearer token")
         if [ -z "$OBSERVABILITY_TOKEN" ]; then
             echo -e "${RED}Error: OBSERVABILITY_TOKEN is required for hosted export${NC}"
             exit 1
@@ -715,7 +714,7 @@ if kubectl get secret "$OBSERVABILITY_SECRET_NAME" -n "$NAMESPACE" &>/dev/null; 
         echo -e "${GREEN}Skipping ${OBSERVABILITY_SECRET_NAME} (already exists)${NC}"
     fi
 else
-    OBSERVABILITY_TOKEN=$(prompt_secret "OBSERVABILITY_TOKEN" "Enter hosted OTLP bearer token (shared customer token from SaaS collector)")
+    OBSERVABILITY_TOKEN=$(prompt_secret "OBSERVABILITY_TOKEN" "Enter hosted OTLP bearer token")
     if [ -z "$OBSERVABILITY_TOKEN" ]; then
         echo -e "${YELLOW}No OBSERVABILITY_TOKEN provided — skipping ${OBSERVABILITY_SECRET_NAME}.${NC}"
         echo -e "${YELLOW}Watchdog hosted export stays offline until this Secret exists.${NC}"

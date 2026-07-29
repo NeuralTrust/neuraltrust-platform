@@ -1,12 +1,9 @@
 {{- define "dataagent.secrets" -}}
 {{- if and (include "neuraltrust-platform.autoGenerateSecrets" .) (not .Values.global.preserveExistingSecrets) (not (default dict .Values.existingSecret).name) }}
 {{- /*
-DataAgent secret. ENROLMENT_TOKEN is issued by SaaS and is never auto-generated —
-we source it from values, falling back to the existing in-cluster secret on upgrade.
-
-v2 hybrid: DB_* and SENSIBLE_PG_DSN (as DATABASE_URL) are supplied through the
-shared `postgresql-secrets` Secret (via envFrom + env override on the
-Deployment), so this Secret only carries ENROLMENT_TOKEN when using shared PG.
+ENROLMENT_TOKEN is never auto-generated (values or existing Secret).
+Hybrid: DB_* / DATABASE_URL come from postgresql-secrets; this Secret
+carries ENROLMENT_TOKEN when using shared PG.
 */}}
 {{- $secretName := include "dataagent.secretName" . }}
 {{- $existing := (lookup "v1" "Secret" .Release.Namespace $secretName) }}

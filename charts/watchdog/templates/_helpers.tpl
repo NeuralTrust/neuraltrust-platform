@@ -121,9 +121,7 @@ true
 {{- end }}
 
 {{/*
-Resolve the hosted OTLP endpoint from the umbrella observability block. This is
-used by the collector-less customer profile so watchdog can push directly to
-NeuralTrust SaaS without an in-cluster collector.
+Hosted OTLP endpoint from global.observability.hostedExport (collector-less path).
 */}}
 {{- define "neuraltrust-watchdog.hostedEndpoint" -}}
 {{- $obs := default dict (default dict .Values.global).observability -}}
@@ -143,9 +141,7 @@ purely in-cluster / air-gapped installs.
 {{- end }}
 
 {{/*
-Name/key of the hosted-export token Secret consumed by watchdog when pushing
-directly to SaaS. The Secret is owned by the operator (or rendered by the
-umbrella tokenValue path); watchdog only references it.
+Hosted-export token Secret name (operator-owned or umbrella tokenValue path).
 */}}
 {{- define "neuraltrust-watchdog.hostedTokenSecretName" -}}
 {{- $obs := default dict (default dict .Values.global).observability -}}

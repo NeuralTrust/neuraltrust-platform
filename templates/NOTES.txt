@@ -22,7 +22,7 @@ Secrets have been auto-generated for this deployment.
 {{- $cpApp := index .Values "control-plane-app" | default dict }}
 {{- $dpValues := index .Values "data-plane-api" | default dict }}
 
-Deployment profile: Platform v2 — {{ if $isExternal }}external (full on-prem: control plane + data plane + self-hosted analytics, no SaaS dependency){{ else }}hybrid (data plane on-prem; control plane in NeuralTrust SaaS){{ end }}.
+Deployment profile: Platform v2 — {{ if $isExternal }}external (control + data plane + in-cluster analytics){{ else }}hybrid (data plane in-cluster; hosted control plane){{ end }}.
 
 {{- if $isExternal }}
 {{- if .Values.infrastructure.clickhouse.deploy }}

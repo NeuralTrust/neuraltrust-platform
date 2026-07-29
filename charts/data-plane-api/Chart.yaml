@@ -1,6 +1,6 @@
 apiVersion: v2
 name: data-plane-api
-description: NeuralTrust Data Plane API shim (temporary until TrustLens)
+description: NeuralTrust Data Plane API (analytics / evaluation)
 type: application
 version: 1.4.7
 appVersion: "1.44.0"

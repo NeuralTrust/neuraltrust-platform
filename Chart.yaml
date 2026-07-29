@@ -5,68 +5,59 @@ type: application
 version: 2.3.5
 appVersion: "2.0.0"
 icon: https://neuraltrust.ai/favicon.ico
-# v1 is maintained only on the v1.14.x release line. Do NOT install this chart
-# on a v1 cluster — pin `helm install ... --version ~1.14.0` instead.
+# For v1 clusters pin --version ~1.14.0.
 dependencies:
-  # Infrastructure — in-cluster analytics store used in v2 external mode.
+  # In-cluster analytics store (external mode).
   - name: clickhouse
     version: 1.0.4
     repository: file://./charts/clickhouse
     condition: infrastructure.clickhouse.deploy
     tags:
       - infrastructure
-  # Data-plane API shim (kept until TrustLens supersedes it). Loaded
-  # unconditionally; templates gate on global.products.dataPlane in hybrid
-  # and always render in external.
+  # Analytics / evaluation API. Gated by global.products.dataPlane in hybrid.
   - name: data-plane-api
     version: 1.4.7
     repository: file://./charts/data-plane-api
     tags:
       - neuraltrust
       - v2
-  # Control-plane API — v2 external only (SaaS-side in hybrid). Loaded
-  # unconditionally so operators can flip global.deploymentMode without
-  # editing dependency conditions; every template is gated by isExternal.
+  # Control-plane API — external only (templates gated by isExternal).
   - name: control-plane-api
     version: 0.1.2
     repository: file://./charts/control-plane-api
     tags:
       - neuraltrust
       - v2
-  # Control-plane App/UI — v2 external only (SaaS-side in hybrid).
+  # Control-plane App/UI — external only.
   - name: control-plane-app
-    version: 0.1.18
+    version: 0.1.19
     repository: file://./charts/control-plane-app
     tags:
       - neuraltrust
       - v2
-  # TrustGate product (commercial name) — AgentGateway proxy/MCP admin +
-  # data plane. Values key is `agentgateway:`; K8s resource names stay
-  # agentgateway-*. Loaded unconditionally; templates gate on
-  # global.products.trustgate in hybrid and always render in external.
+  # TrustGate (values: agentgateway; K8s: agentgateway-*). Hybrid gated by
+  # global.products.trustgate.
   - name: agentgateway
     version: 0.1.31
     repository: file://./charts/agentgateway
     tags:
       - neuraltrust
       - v2
-  # TrustGuard control + data plane. Templates gate on
-  # global.products.trustguard in hybrid; always on in external.
+  # TrustGuard. Hybrid gated by global.products.trustguard.
   - name: trustguard
     version: 0.1.29
     repository: file://./charts/trustguard
     tags:
       - neuraltrust
       - v2
-  # TrustLens (opt-in, WIP).
+  # TrustLens (opt-in).
   - name: trustlens
     version: 0.1.1
     repository: file://./charts/trustlens
     tags:
       - neuraltrust
       - v2
-  # DataAgent library — hybrid dual instances rendered by umbrella templates
-  # (agentgateway.dataagent / trustguard.dataagent).
+  # DataAgent (hybrid; agentgateway.dataagent / trustguard.dataagent).
   - name: dataagent
     version: 0.1.12
     repository: file://./charts/dataagent

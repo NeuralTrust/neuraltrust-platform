@@ -27,11 +27,11 @@ the chart renders ServiceMonitor, PodMonitor, and PrometheusRule resources.
 
 In hybrid mode, product OTLP is always on. AgentGateway and TrustGuard send
 plain OTLP to a local ClusterIP Service (`clickstack-egress-collector`) on the
-DataAgent pod. The sidecar exchanges the DataAgent enrolment JWT at DataCore
-for a short-lived OTLP access token and forwards to SaaS. There is no direct
-SaaS bearer on apps and no hybrid opt-out (`global.clickstack.enabled` /
-`egress.enabled` are rejected). Air-gapped or local-only product telemetry
-requires `global.deploymentMode: external`.
+DataAgent pod. The sidecar exchanges the DataAgent enrolment JWT for a
+short-lived OTLP access token and exports to the hosted telemetry endpoint.
+There is no direct bearer on apps and no hybrid opt-out
+(`global.clickstack.enabled` / `egress.enabled` are rejected). Air-gapped or
+local-only product telemetry requires `global.deploymentMode: external`.
 
 ## ClickStack OTel Collector
 

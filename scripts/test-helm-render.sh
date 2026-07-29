@@ -211,11 +211,11 @@ assert_contains "$out1" 'endpoint: "\[::\]:4318"' \
 assert_contains "$out1" 'endpoint: "\[::\]:13133"' \
   "hybrid: egress health_check binds dual-stack ([::]) for IPv6-only clusters"
 assert_not_contains "$out1" 'name: control-plane-app' \
-  "hybrid: control-plane-app must not render (SaaS-side)"
+  "hybrid: control-plane-app must not render (hosted control plane)"
 assert_not_contains "$out1" 'name: control-plane-api' \
-  "hybrid: control-plane-api must not render (SaaS-side)"
+  "hybrid: control-plane-api must not render (hosted control plane)"
 assert_not_contains "$out1" 'OTEL_EXPORTER_OTLP_HEADERS:' \
-  "hybrid: apps do not carry SaaS Authorization headers"
+  "hybrid: apps do not carry remote Authorization headers"
 assert_not_contains "$out1" 'TENANT_ID:' \
   "hybrid: DataAgent env omits TENANT_ID when identity comes from enrolment JWT"
 assert_not_contains "$out1" 'INSTANCE_ID:' \
@@ -241,7 +241,7 @@ assert_render_fails "unknown product selector keys are rejected" \
 
 # Config-sync fail-closed (hybrid default-on) and writable LKG storage
 blue "==> Scenario 1d: config-sync token references and LKG storage"
-assert_render_fails "hybrid config-sync without a SaaS token source fails render" \
+assert_render_fails "hybrid config-sync without a token source fails render" \
   --set agentgateway.configSync.existingSecret.name= \
   --set trustguard.configSync.existingSecret.name=
 out1d="$TMP/scenario-hybrid-config-sync.yaml"
@@ -390,7 +390,7 @@ assert_contains "$out3" 'OTEL_EXPORTER_OTLP_ENDPOINT: "http://clickstack-collect
 assert_contains "$out3" 'OPENTELEMETRY_TRACES_ENDPOINT: "clickstack-collector.default.svc.cluster.local:4318"' \
   "external: runtime traces stay host:port (WithEndpoint appends /v1/traces)"
 assert_not_contains "$out3" 'name: clickstack-egress-collector' \
-  "external: SaaS egress collector must not render (air-gap in-cluster path)"
+  "external: hybrid egress collector must not render (in-cluster path)"
 assert_not_contains "$out3" 'clickstack-egress-collector.default.svc' \
   "external: product OTLP must not point at hybrid egress"
 assert_contains "$out3" 'name: clickstack-collector-secrets' \
@@ -828,7 +828,7 @@ assert_not_contains "$out10b2" 'TOOLGUARD_WORKER_URL' \
 assert_not_contains "$out10b2" 'src.workers.toolguard.app:app' \
   "firewall workers: retired toolguard module absent"
 
-blue "==> Scenario 10c: hybrid has no in-cluster ClickStack; egress to SaaS"
+blue "==> Scenario 10c: hybrid has no in-cluster ClickStack; egress via sidecar"
 out10c="$TMP/scenario-hybrid-clickstack-channels.yaml"
 render_default "$out10c"
 assert_not_contains "$out10c" 'name: clickstack-collector' \
@@ -842,7 +842,7 @@ assert_contains "$out10c" 'name: clickstack-egress-collector'$'\n''        image
 assert_contains "$out10c" 'token_url: "http://127.0.0.1:9465/oauth/token"' \
   "hybrid: egress sidecar exchanges via DataAgent loopback broker"
 assert_contains "$out10c" 'endpoint: "https://telemetry.neuraltrust.ai"' \
-  "hybrid: egress sidecar exports to SaaS ingest host"
+  "hybrid: egress sidecar exports to telemetry.neuraltrust.ai"
 assert_contains "$out10c" 'http://clickstack-egress-collector.default.svc.cluster.local:4318/v1/logs' \
   "hybrid: apps send OTLP to local egress only"
 

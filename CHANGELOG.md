@@ -4,6 +4,18 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Changed
+
+- **Operator docs and chart comments:** replaced “SaaS” / internal overlay
+  wording with hybrid / hosted control plane / external language; trimmed
+  verbose maintainer comments in values and templates.
+- **Cluster sizing guidance:** documented default Hybrid / External worker
+  shapes and that chart resource defaults are a starting point to right-size
+  (`docs/sizing.md`, README, DEPLOYMENT).
+- **Hybrid network allowlist:** documented egress hostnames/IPs for
+  config-sync and DataBridge, plus the NeuralTrust inbound source IP
+  (`docs/hybrid-network.md`).
+
 ## [v2.3.4] — 2026-07-27
 
 ### Breaking

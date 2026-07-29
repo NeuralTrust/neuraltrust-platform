@@ -220,8 +220,7 @@ networkPolicy:
   ingressFromNamespaces: []
   egress:
     enabled: true
-    # extraEgress is appended verbatim; allows custom cluster-scoped
-    # egress rules for the watchdog (e.g. to a managed observability SaaS).
+    # Appended verbatim for custom cluster-scoped egress rules.
     extraEgress: []
 # Telemetry: when otlp.endpoint is empty the umbrella can inject the hosted OTLP
 # endpoint from global.observability.hostedExport. When both are empty the OTel
@@ -279,13 +278,10 @@ kindDefaults:
     failureThreshold: 5
   deployment_health:
     thresholds: {maxRestartsPerInterval: 3, minAvailableRatio: 1.0}
-# Log bridge: tail ERROR/WARN from selected workloads, redact secrets, and ship
-# over OTLP push / HTTP pull / air-gapped bundle. For customer-minimal installs,
-# hosted export auto-renders this block as enabled and defaults sources to the
-# release namespace, so ERROR/WARN logs reach SaaS with no extra values. Set
-# global.observability.hostedExport.enabled=false for pure in-cluster/no-egress
-# installs. GET /logs and POST /logs/export are always bearer-gated, so set
-# server.authToken when using the pull transport. See README.md.
+# Log bridge: tail ERROR/WARN, redact secrets, ship via OTLP / pull / bundle.
+# Hosted export auto-enables this and defaults sources to the release namespace.
+# Set global.observability.hostedExport.enabled=false for no-egress installs.
+# Pull transport requires server.authToken.
 logExport:
   # When true, hostedExport automatically enables ERROR/WARN OTLP log export.
   # Set false to keep hosted check-status metrics while disabling remote logs.
@@ -314,11 +310,8 @@ logExport:
     otlp: {enabled: true}
     pull: {enabled: true, bufferSize: 1000}
     bundle: {enabled: false, outputDir: /var/run/watchdog/logbundles}
-# Product usage bridge (external customers only): discovers teams from
-# in-cluster data-plane-api, polls aggregate counters for each team, and pushes
-# them over OTLP. Default OFF — SaaS/hybrid keep the admin-console UsageSnapshot
-# job. When enabled, reuses the platform data-plane-jwt-secret
-# (DATA_PLANE_JWT_SECRET) to mint discovery and per-team JWTs.
+# Product usage bridge (external only): poll data-plane-api counters → OTLP.
+# Default OFF. Uses data-plane-jwt-secret (DATA_PLANE_JWT_SECRET).
 usageExport:
   enabled: false
   # In-cluster data-plane-api base URL (Service DNS, no public ingress).
@@ -336,14 +329,9 @@ usageExport:
   targetDiscovery: true
   interval: 1h
   timeout: 30s
-# Desired-state pull from deploy-api (the SaaS control plane). When enabled, the
-# watchdog reports observed state (per-service status + versions) to deploy-api
-# so the cluster appears on the admin-console fleet page, and pulls desired
-# monitoring policy revisions. OFF by default — customers stay pure GitOps/Helm.
-#
-# endpoint/clusterId are plain values; the ingest bearer token is referenced from
-# an existing Secret (never inlined). The watchdog binary reads the address via
-# fixed env-var names (DEPLOY_API_URL / DEPLOY_API_CLUSTER_ID / WATCHDOG_INGEST_TOKEN).
+# Desired-state sync with deploy-api (fleet status + policy pull). OFF by default.
+# Token from existing Secret only (DEPLOY_API_URL / DEPLOY_API_CLUSTER_ID /
+# WATCHDOG_INGEST_TOKEN).
 desiredState:
   enabled: false
   # deploy-api base URL including the API prefix, e.g.
@@ -539,7 +527,7 @@ checks:
       urls:
         - {name: api, url: 'http://control-plane-api-service/health', expectedStatus: 200, latencyWarnMs: 500, latencyCriticalMs: 2000}
         - {name: app, url: 'http://control-plane-app-service/api/health', expectedStatus: 200}
-  # v2 keeps the temporary analytics API. Readiness verifies the v2 dependencies.
+  # data-plane-api readiness.
   - id: v2-data-plane-synthetic
     kind: httpsynthetic
     enabled: false

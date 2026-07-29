@@ -1,4 +1,3 @@
-{{- /* platform-v2: App UI stays SaaS-side in hybrid; rendered only in external. */ -}}
 {{- if eq (include "control-plane-app.enabled" .) "true" }}
 
 apiVersion: apps/v1
@@ -15,6 +14,12 @@ spec:
   {{- if not $autoscaling.enabled }}
   replicas: {{ default 1 $app.replicaCount }}
   {{- end }}
+  {{- /* Surge first; keep full capacity during rollout (avoid 25%/25% default). */}}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: {{ default 0 $app.maxUnavailable }}
+      maxSurge: {{ default 1 $app.maxSurge }}
   selector:
     matchLabels:
       app: control-plane-app
@@ -188,8 +193,15 @@ spec:
         {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 8 }}
         {{- end }}
         resources:
-          {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.initContainerResources }}
-          {{- toYaml .Values.controlPlane.components.app.initContainerResources | nindent 10 }}
+          {{- /* values.yaml documents `app.initContainer.resources`, but this template
+                 only ever read `app.initContainerResources`, so anything a customer set
+                 under the documented key was silently dropped. Accept both: documented
+                 key first, legacy flat key second, defaults last. */}}
+          {{- $initRes := dict }}
+          {{- if $app.initContainer }}{{- $initRes = default dict $app.initContainer.resources }}{{- end }}
+          {{- if not $initRes }}{{- $initRes = default dict $app.initContainerResources }}{{- end }}
+          {{- if $initRes }}
+          {{- toYaml $initRes | nindent 10 }}
           {{- else }}
           requests:
             cpu: 250m
@@ -227,9 +239,8 @@ spec:
         {{- $datacoreUrl := "http://datacore" }}
         {{- $datacoreMetricsEnabled := "true" }}
         {{- $forceV2Ui := "true" }}
-        {{- /* External/on-prem: prefer platform env email (SES/SMTP/Resend) over
-               per-org DB email settings. SaaS leaves this unset (org-first).
-               Opt out with config.authEmailForceEnv: "false". */}}
+        {{- /* Prefer platform env email over per-org DB settings. Opt out:
+               config.authEmailForceEnv: "false". */}}
         {{- $authEmailForceEnv := "true" }}
         {{- $alertEngineApiUrl := "http://alertengine-api" }}
         {{- $trustlensApiUrl := "http://trustlens-api" }}
@@ -430,19 +441,15 @@ spec:
             secretKeyRef:
               name: control-plane-secrets
               key: NEXTAUTH_SECRET
-        # Self-hosted v2 installs have no v1 UI to preserve, so the console
-        # forces the v2 experience by default (see app/constants/uiVersion.ts).
-        # Set controlPlane.components.app.config.forceV2Ui: "false" to opt out.
+        # Default v2 UI. Opt out: config.forceV2Ui: "false".
         - name: FORCE_V2_UI
           value: "{{ $forceV2Ui }}"
         {{- end }}
-        # External/on-prem default: platform env email (AUTH_EMAIL_PROVIDER /
-        # SES/SMTP/Resend) wins over per-org TeamAuthConfig. SaaS leaves this
-        # unset. Opt out: config.authEmailForceEnv: "false".
+        # Platform env email wins over per-org TeamAuthConfig.
+        # Opt out: config.authEmailForceEnv: "false".
         - name: AUTH_EMAIL_FORCE_ENV
           value: {{ $authEmailForceEnv | quote }}
-        {{- /* App reads DEPLOYMENT_MODE (saas|external). This subchart only
-               renders in external mode, so always emit external. */}}
+        {{- /* App contract; this chart always emits external. */}}
         - name: DEPLOYMENT_MODE
           value: "external"
         {{- $sa := default dict (default dict .Values.global).superadmin }}
@@ -579,6 +586,11 @@ spec:
         {{- include "neuraltrust-platform.extraVolumeMounts" (dict "items" .) | nindent 8 }}
         {{- end }}
         {{- end }}
+        {{- /* Drain ingress traffic before SIGTERM. */}}
+        lifecycle:
+          preStop:
+            exec:
+              command: ["/bin/sh", "-c", "sleep {{ default 15 $app.preStopSleepSeconds }}"]
         resources:
           {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.resources }}
           {{- toYaml .Values.controlPlane.components.app.resources | nindent 10 }}

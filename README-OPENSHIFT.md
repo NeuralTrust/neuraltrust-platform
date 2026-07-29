@@ -33,7 +33,7 @@ global:
 ```
 
 Hybrid product OTLP is mandatory via the DataAgent-co-located egress collector
-(enrolment-backed; no direct SaaS ClickStack bearer). Air-gapped or local-only
+(enrolment-backed; no direct ClickStack bearer on apps). Air-gapped or local-only
 product telemetry requires `global.deploymentMode: external`. See
 [SECRETS.md](./SECRETS.md).
 
