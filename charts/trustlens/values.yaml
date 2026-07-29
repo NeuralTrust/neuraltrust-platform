@@ -40,6 +40,14 @@ controlPlane:
   name: trustlens-api
   args: ["/api"]
   replicas: 1
+  # Optional HPA (disabled by default). Customer scale: min 1 / max 3.
+  # When enabled, Deployment.spec.replicas is omitted so HPA owns the count.
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 80
+    targetMemoryUtilizationPercentage: 90
   ports:
     http: 8080
   resources:
@@ -56,9 +64,21 @@ dataPlane:
   name: trustlens-worker
   args: ["/worker"]
   replicas: 1
+  # Optional HPA (disabled by default). Customer scale: min 1 / max 3.
+  # When enabled, Deployment.spec.replicas is omitted so HPA owns the count.
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 80
+    targetMemoryUtilizationPercentage: 90
   resources:
     requests: { cpu: 250m, memory: 512Mi }
     limits: { cpu: 1000m, memory: 1Gi }
+  # Worker is a River consumer with no health port today. Set healthPort (and
+  # optionally healthPath) once the binary exposes HTTP /healthz.
+  healthPort: ""
+  healthPath: "/healthz"
   nodeSelector: {}
   tolerations: []
   extraEnv: []

@@ -8,7 +8,9 @@ metadata:
     {{- include "alertengine.labels" . | nindent 4 }}
     app.kubernetes.io/component: api
 spec:
+  {{- if not (default dict .Values.api.autoscaling).enabled }}
   replicas: {{ .Values.api.replicas }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "alertengine.selectorLabels" . | nindent 6 }}

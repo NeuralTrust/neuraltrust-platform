@@ -10,10 +10,10 @@ firewall:
     resources:
       limits:
         cpu: "500m"
-        memory: 512Mi
+        memory: 1Gi
       requests:
         cpu: "250m"
-        memory: 256Mi
+        memory: 512Mi
     startupProbe:
       failureThreshold: 12
     autoscaling:
@@ -24,7 +24,7 @@ firewall:
       targetMemoryUtilizationPercentage: 90
     podDisruptionBudget:
       enabled: false
-      minAvailable: 1
+      maxUnavailable: 1
     # Extra env vars appended to the gateway container (list of EnvVar).
     extraEnv: []
     # Extra envFrom sources appended to the gateway container (list of EnvFromSource: configMapRef/secretRef).
@@ -61,12 +61,12 @@ firewall:
     autoscaling:
       enabled: false
       minReplicas: 1
-      maxReplicas: 6
+      maxReplicas: 2
       targetCPUUtilizationPercentage: 80
-      targetMemoryUtilizationPercentage: 90
+      # No targetMemoryUtilizationPercentage: ML model RSS is constant per pod.
     podDisruptionBudget:
       enabled: false
-      minAvailable: 1
+      maxUnavailable: 1
   # --- Workers (each gets Deployment, Service, HPA, PDB) ---
   # Per-worker extraEnv / extraEnvFrom default to empty; add them under a worker entry
   # to inject extra env vars or envFrom sources into that specific worker container.

@@ -394,16 +394,6 @@ spec:
             value: {{ $dpRedisCfg.iamServerless | default false | quote }}
           {{- end }}
           {{- end }}
-          - name: HF_HOME
-            value: "/root/.cache/huggingface"
-          # Optional: the data-plane image bundles its own model (fastText) and
-          # needs no HF token to run. Only forwarded to eval Jobs when set.
-          - name: HUGGINGFACE_TOKEN
-            valueFrom:
-              secretKeyRef:
-                name: {{ if and .Values.dataPlane .Values.dataPlane.secrets .Values.dataPlane.secrets.huggingFaceTokenSecretName }}{{ .Values.dataPlane.secrets.huggingFaceTokenSecretName }}{{ else }}huggingface-secrets{{ end }}
-                key: HUGGINGFACE_TOKEN
-                optional: true
           - name: PYTHONPATH
             value: "/app"
           {{- if eq $sqlBackend "postgres" }}

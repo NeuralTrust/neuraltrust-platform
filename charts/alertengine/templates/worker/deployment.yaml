@@ -8,7 +8,9 @@ metadata:
     {{- include "alertengine.labels" . | nindent 4 }}
     app.kubernetes.io/component: worker
 spec:
+  {{- if not (default dict .Values.worker.autoscaling).enabled }}
   replicas: {{ .Values.worker.replicas }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "alertengine.selectorLabels" . | nindent 6 }}
