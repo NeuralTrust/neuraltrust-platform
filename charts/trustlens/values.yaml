@@ -1,9 +1,5 @@
-# TrustLens subchart (WIP).
-# Renders ONLY when enabled=true. Single image, two runtimes:
-#   worker (data-plane, args /worker) → hybrid + external
-#   api    (control-plane, args /api) → external only
-# Postgres-only (no Redis/Kafka/ClickHouse). Migrations run embedded on startup.
-# Disabled by default (WIP); set enabled: true to deploy under v2.
+# TrustLens. Opt-in (enabled=true). Postgres-only; migrations on startup.
+# worker → hybrid + external; api → external only.
 enabled: false
 nameOverride: ""
 fullnameOverride: "trustlens"

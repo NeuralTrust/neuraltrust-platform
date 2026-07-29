@@ -186,7 +186,7 @@ jobs:
           WATCHDOG=$(resolve_tag "watchdog" "${{ inputs.watchdog_tag }}")
           AGENTGATEWAY=$(resolve_tag "agentgateway" "${{ inputs.agentgateway_tag }}")
           TRUSTGUARD=$(resolve_tag "trustguard" "${{ inputs.trustguard_tag }}")
-          # TrustLens is WIP and has no AR repository yet; honor manual input only.
+          # TrustLens has no AR repository yet; honor manual input only.
           TRUSTLENS="${{ inputs.trustlens_tag }}"
           DATAAGENT=$(resolve_tag "dataagent" "${{ inputs.dataagent_tag }}")
           DATACORE=$(resolve_tag "datacore" "${{ inputs.datacore_tag }}")
@@ -353,7 +353,7 @@ jobs:
           fi
 
           # =============================================
-          # 3. Data-plane API shim
+          # 3. Data-plane API
           # =============================================
           TAG="${{ steps.tags.outputs.data_plane_api }}"
           if update_values_tag '.["data-plane-api"].dataPlane.components.api.image.tag' "$TAG" "data-plane-api"; then

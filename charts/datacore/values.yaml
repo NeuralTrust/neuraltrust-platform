@@ -19,10 +19,8 @@ serviceAccount:
   annotations: {}
 replicas: 1
 config:
-  # saas  → serve everything from ClickHouse (the self-hosted / external mode).
-  # hybrid → route hybrid-instance raw reads to DataBridge (SaaS) instead.
-  # Both modes require Postgres for deployment metadata unless
-  # RESIDENCY_ALLOW_STUB=true (local/dev only; not set by this chart).
+  # "saas" → ClickHouse residency (external/self-hosted). "hybrid" → DataBridge.
+  # Postgres still required unless RESIDENCY_ALLOW_STUB=true (dev only).
   residencyBackend: "saas"
   logLevel: "info"
   httpAddr: ":8080"
@@ -53,7 +51,7 @@ database:
 clickhouse:
   host: "clickhouse"
   nativePort: 9000
-  database: "default" # DB where DataCore owns its tables/materialized views. Matches DataCore's SaaS/prod overlays (CLICKHOUSE_DATABASE=default); "default" is a built-in ClickHouse DB, so nothing needs creating.
+  database: "default" # DataCore tables/MVs (built-in ClickHouse DB; no create needed)
   otelDatabase: "otel" # DB where clickstack-otel-collector writes otel_logs
   tls: false
   user: "neuraltrust"

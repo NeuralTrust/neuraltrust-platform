@@ -15,11 +15,7 @@ stable `control-plane` SA rendered by the umbrella chart.
 {{- default "control-plane" $sa.name -}}
 {{- end }}
 
-{{/*
-Whether the control-plane subchart should render its workloads. v2-only:
-render only in external mode (control planes live in NeuralTrust SaaS in
-hybrid).
-*/}}
+{{/* Control-plane workloads render only in external mode. */}}
 {{- define "control-plane-api.enabled" -}}
 {{- if eq (include "neuraltrust-platform.isExternal" .) "true" -}}true{{- end -}}
 {{- end }}

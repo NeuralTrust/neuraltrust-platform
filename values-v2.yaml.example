@@ -1,8 +1,7 @@
 # Platform v2 hybrid example.
-# Control planes remain in NeuralTrust SaaS; data-plane workloads run locally.
-# PostgreSQL and Redis deploy in-cluster by default; analytics live in SaaS, so
-# no in-cluster ClickHouse renders in hybrid. The temporary data-plane-api read
-# shim runs on PostgreSQL by default (no ClickHouse required).
+# Hosted control planes; data-plane workloads run locally. PostgreSQL and Redis
+# deploy in-cluster by default; no in-cluster ClickHouse. data-plane-api uses
+# PostgreSQL by default.
 #
 # Hybrid contract: one shared PostgreSQL block, one shared Redis block, and
 # DataAgent enrolment (powers ClickStack egress). Product OTLP and config-sync

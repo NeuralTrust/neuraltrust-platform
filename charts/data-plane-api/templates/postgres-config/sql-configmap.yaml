@@ -1,9 +1,4 @@
-{{- /* platform-v2: PostgreSQL schema migration for the data-plane-api shim.
-       Renders only when the API shim is enabled AND its resolved SQL backend is
-       PostgreSQL (the v2 hybrid default). The ConfigMap carries the idempotent
-       DDL (tests/test_runs + indexes) applied by the
-       postgres-migrations initContainer. The configured schema is substituted
-       into files/postgres/init-db.sql at render time. */ -}}
+{{- /* Postgres DDL for postgres-migrations initContainer; schema substituted at render. */ -}}
 {{- if or (not (eq (include "neuraltrust-platform.isV2" .) "true")) (eq (include "neuraltrust-platform.dataPlaneApiV2.enabled" .) "true") }}
 {{- if eq (include "neuraltrust-platform.dataPlaneApi.sqlBackend" .) "postgres" }}
 {{- $pgCfg := include "neuraltrust-platform.dataPlaneApi.postgresConfig" . | fromYaml }}

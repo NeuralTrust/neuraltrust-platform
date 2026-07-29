@@ -9,12 +9,12 @@ the OCI URL, a release archive, or `.` when testing the source tree.
 ### Hybrid (default)
 
 Hybrid runs AgentGateway and TrustGuard data-plane workloads in the cluster.
-Their control planes stay in NeuralTrust SaaS. PostgreSQL and Redis deploy
-in-cluster by default; ClickHouse is not part of hybrid. The temporary
-`data-plane-api` read shim renders by default on the shared hybrid PostgreSQL.
+Their control planes stay hosted. PostgreSQL and Redis deploy in-cluster by
+default; ClickHouse is not part of hybrid. `data-plane-api` renders by default
+on the shared hybrid PostgreSQL.
 
 Hybrid product OTLP is mandatory via a local `clickstack-egress-collector` and
-requires DataAgent enrolment (no direct SaaS bearer token; no
+requires DataAgent enrolment (no direct bearer token on apps; no
 `global.clickstack.enabled` / `egress.enabled` opt-out). Air-gapped or
 local-only product telemetry requires `global.deploymentMode: external`.
 
@@ -73,7 +73,27 @@ OTLP senders -> ClickStack OTel Collector -> ClickHouse
 ClickStack does not run in hybrid mode. AlertEngine provides the supported
 alert evaluation, SIEM, and integration forwarding path.
 
-## 2. Configure cluster integration
+## 2. Size the cluster (defaults)
+
+Use a **comfortable starting shape**, then right-size and fine-tune as you learn
+your traffic patterns. Chart defaults are not a hard ceiling.
+
+| Mode | Approx. chart requests | Comfortable starting shape |
+|---|---|---|
+| Hybrid (all products + CPU Firewall) | ~10 vCPU / ~28 GiB | **3–4** workers at **8 vCPU / 16–32 GiB** |
+| External (self-hosted) | ~15 vCPU / ~38 GiB | **4–5** workers at **8 vCPU / 16–32 GiB** |
+
+Leave headroom for the node OS, kube-system, and ingress. Firewall CPU workers
+dominate Hybrid memory when TrustGuard is on; fewer products need less.
+Details and tuning tips: [`docs/sizing.md`](./docs/sizing.md).
+
+## 3. Open hybrid network paths
+
+Hybrid needs outbound TCP 443 to NeuralTrust config-sync and DataBridge hosts,
+plus inbound allow from a NeuralTrust source IP to your published entry points.
+Hostnames and IPs: [`docs/hybrid-network.md`](./docs/hybrid-network.md).
+
+## 4. Configure cluster integration
 
 Set the provider, base domain, storage class, and optional registry mirror:
 
@@ -89,7 +109,7 @@ The chart defaults to the `gcr-secret` image pull secret for private NeuralTrust
 images. Use the documented per-component opt-out only when node or workload
 identity already authorizes image pulls.
 
-## 3. Choose datastore placement
+## 5. Choose datastore placement
 
 The chart uses PostgreSQL, Redis, and (external mode only) ClickHouse.
 
@@ -122,7 +142,7 @@ There is no chart-managed database init Job. When external PostgreSQL is
 selected, pre-create the role and database before installing; application
 migrations own their own tables.
 
-## 4. Configure observability
+## 6. Configure observability
 
 The umbrella OTel Collector is available in both v2 modes. It is separate from
 the external-only ClickStack collector:
@@ -141,7 +161,7 @@ global:
 
 See [docs/observability.md](./docs/observability.md).
 
-## 5. TrustGuard Firewall
+## 7. TrustGuard Firewall
 
 Firewall deploys whenever TrustGuard is selected. CPU workers use chart
 defaults. GPU workers require a GPU image, resource limit, node selection,
@@ -168,7 +188,7 @@ firewall:
 Use [`values-dataplane-gpu.yaml.example`](./values-dataplane-gpu.yaml.example)
 as the complete overlay.
 
-## 6. Validate before rollout
+## 8. Validate before rollout
 
 ```bash
 helm lint <chart> -f <values-file>

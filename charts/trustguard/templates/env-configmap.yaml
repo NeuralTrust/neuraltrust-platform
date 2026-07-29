@@ -91,12 +91,9 @@ data:
   OPENTELEMETRY_SERVICE_NAME: "trustguard"
   TELEMETRY_EXPORTERS_FILE: "/etc/telemetry/telemetry.yaml"
   {{- if eq (include "neuraltrust-platform.isExternal" .) "true" }}
-  # External mode: product telemetry (metadata/raw) is OTLP *logs* via
-  # otlploghttp.WithEndpointURL, which takes the URL path verbatim — so this
-  # endpoint MUST include /v1/logs (same as TrustGuard/TrustGate SaaS overlays).
-  # Runtime traces/metrics use OPENTELEMETRY_* with host:port + WithEndpoint,
-  # which appends /v1/traces and /v1/metrics itself. Authorization comes from
-  # clickstack-collector-secrets via the Deployment.
+  # OTLP logs via WithEndpointURL — path must include /v1/logs.
+  # Traces/metrics use OPENTELEMETRY_* host:port (app appends /v1/traces|metrics).
+  # Auth from clickstack-collector-secrets on the Deployment.
   OTEL_EXPORTER_OTLP_ENDPOINT: {{ printf "http://clickstack-collector.%s.svc.cluster.local:4318/v1/logs" .Release.Namespace | quote }}
   OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
   OTEL_EXPORTER_OTLP_INSECURE: "true"
@@ -105,8 +102,7 @@ data:
   OPENTELEMETRY_TRACES_ENDPOINT: {{ printf "clickstack-collector.%s.svc.cluster.local:4318" .Release.Namespace | quote }}
   OPENTELEMETRY_METRICS_ENDPOINT: {{ printf "clickstack-collector.%s.svc.cluster.local:4318" .Release.Namespace | quote }}
   {{- else if eq (include "neuraltrust-platform.clickstackHybridEnabled" .) "true" }}
-  # Hybrid: dual-write via local clickstack-egress-collector (enrolment → SaaS).
-  # Apps send plain OTLP in-cluster; no direct SaaS Authorization header.
+  # Hybrid: plain OTLP to local clickstack-egress-collector (enrolment auth).
   {{- include "neuraltrust-platform.clickstack.otlpEnv" . | nindent 2 }}
   {{- else }}
   {{- $obs := default dict .Values.global.observability }}

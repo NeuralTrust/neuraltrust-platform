@@ -1,4 +1,3 @@
-{{- /* platform-v2: App UI stays SaaS-side in hybrid; rendered only in external. */ -}}
 {{- if eq (include "control-plane-app.enabled" .) "true" }}
 
 {{- $gkeBackendConfigName := include "neuraltrust-platform.service.gkeBackendConfigName" (dict "global" .Values.global "localName" "control-plane-app-backendconfig") }}
