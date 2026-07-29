@@ -9,14 +9,14 @@ icon: https://neuraltrust.ai/favicon.ico
 dependencies:
   # In-cluster analytics store (external mode).
   - name: clickhouse
-    version: 1.0.4
+    version: 1.0.5
     repository: file://./charts/clickhouse
     condition: infrastructure.clickhouse.deploy
     tags:
       - infrastructure
   # Analytics / evaluation API. Gated by global.products.dataPlane in hybrid.
   - name: data-plane-api
-    version: 1.4.7
+    version: 1.4.8
     repository: file://./charts/data-plane-api
     tags:
       - neuraltrust
@@ -30,7 +30,7 @@ dependencies:
       - v2
   # Control-plane App/UI — external only.
   - name: control-plane-app
-    version: 0.1.19
+    version: 0.1.20
     repository: file://./charts/control-plane-app
     tags:
       - neuraltrust
@@ -38,14 +38,14 @@ dependencies:
   # TrustGate (values: agentgateway; K8s: agentgateway-*). Hybrid gated by
   # global.products.trustgate.
   - name: agentgateway
-    version: 0.1.31
+    version: 0.1.32
     repository: file://./charts/agentgateway
     tags:
       - neuraltrust
       - v2
   # TrustGuard. Hybrid gated by global.products.trustguard.
   - name: trustguard
-    version: 0.1.29
+    version: 0.1.30
     repository: file://./charts/trustguard
     tags:
       - neuraltrust
@@ -66,14 +66,14 @@ dependencies:
       - v2
   # DataCore — v2 external only.
   - name: datacore
-    version: 0.1.13
+    version: 0.1.14
     repository: file://./charts/datacore
     tags:
       - neuraltrust
       - v2
   # ClickStack OTel collector — v2 external only.
   - name: clickstack-otel-collector
-    version: 0.1.4
+    version: 0.1.5
     repository: file://./charts/clickstack-otel-collector
     tags:
       - neuraltrust
@@ -88,7 +88,7 @@ dependencies:
   # Firewall is part of TrustGuard. Templates follow the TrustGuard product
   # gate in hybrid; always on in external.
   - name: firewall
-    version: 2.1.4
+    version: 2.1.5
     repository: file://./charts/firewall
     tags:
       - neuraltrust
