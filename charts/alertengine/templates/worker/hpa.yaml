@@ -1,0 +1,36 @@
+{{- if eq (include "alertengine.deploy" .) "true" }}
+{{- $as := default dict .Values.worker.autoscaling }}
+{{- if $as.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ .Values.worker.name }}
+  labels:
+    {{- include "alertengine.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ .Values.worker.name }}
+  minReplicas: {{ default 1 $as.minReplicas }}
+  maxReplicas: {{ default 3 $as.maxReplicas }}
+  metrics:
+    {{- if $as.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $as.targetCPUUtilizationPercentage }}
+    {{- end }}
+    {{- if $as.targetMemoryUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ $as.targetMemoryUtilizationPercentage }}
+    {{- end }}
+{{- end }}
+{{- end }}

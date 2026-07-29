@@ -13,11 +13,13 @@ metadata:
   labels:
     {{- include "firewall.gateway.labels" . | nindent 4 }}
 spec:
-  {{- if hasKey $pdb "minAvailable" }}
-  minAvailable: {{ $pdb.minAvailable }}
-  {{- end }}
   {{- if hasKey $pdb "maxUnavailable" }}
   maxUnavailable: {{ $pdb.maxUnavailable }}
+  {{- else if hasKey $pdb "minAvailable" }}
+  minAvailable: {{ $pdb.minAvailable }}
+  {{- else }}
+  # maxUnavailable is HPA-safe (wave-2 rule 2).
+  maxUnavailable: 1
   {{- end }}
   selector:
     matchLabels:

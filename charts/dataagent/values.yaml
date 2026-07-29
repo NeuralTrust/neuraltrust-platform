@@ -50,7 +50,9 @@ supervisor:
   keepaliveTimeout: "3s"
   maxConcurrentQueries: 8
 pdb:
-  enabled: true
+  # Default off: a 1-replica minAvailable:1 PDB blocks every customer node
+  # drain with no operator present. DataAgent reconnects on restart.
+  enabled: false
   minAvailable: 1
 # Set by umbrella when this instance owns clickstack-egress-collector.
 egressPrimary: false

@@ -227,7 +227,7 @@ global:
         targetMemoryUtilizationPercentage: 90
       podDisruptionBudget:
         enabled: false
-        minAvailable: 1
+        maxUnavailable: 1
       service:
         type: ClusterIP
       resources:
@@ -439,7 +439,7 @@ control-plane-api:
           targetMemoryUtilizationPercentage: 90
         podDisruptionBudget:
           enabled: false
-          minAvailable: 1
+          maxUnavailable: 1
         extraEnv: []
         extraEnvFrom: []
       postgresql:
@@ -532,7 +532,7 @@ control-plane-app:
           targetMemoryUtilizationPercentage: 90
         podDisruptionBudget:
           enabled: false
-          minAvailable: 1
+          maxUnavailable: 1
         extraEnv: []
         extraEnvFrom: []
       postgresql:
@@ -756,7 +756,7 @@ data-plane-api:
           targetMemoryUtilizationPercentage: 90
         podDisruptionBudget:
           enabled: false
-          minAvailable: 1
+          maxUnavailable: 1
         resources:
           requests:
             cpu: 1
@@ -821,10 +821,10 @@ firewall:
       resources:
         requests:
           cpu: "250m"
-          memory: 256Mi
+          memory: 512Mi
         limits:
           cpu: "500m"
-          memory: 512Mi
+          memory: 1Gi
       startupProbe:
         failureThreshold: 12
       autoscaling:
@@ -835,7 +835,7 @@ firewall:
         targetMemoryUtilizationPercentage: 90
       podDisruptionBudget:
         enabled: false
-        minAvailable: 1
+        maxUnavailable: 1
       extraEnv: []
       extraEnvFrom: []
     workerDefaults:
@@ -861,12 +861,13 @@ firewall:
       autoscaling:
         enabled: false
         minReplicas: 1
-        maxReplicas: 6
+        # Cap at 2: customer GPU pools are smaller than SaaS; memory metric
+        # omitted because ML model RSS is constant per pod (wave-2 rule 1).
+        maxReplicas: 2
         targetCPUUtilizationPercentage: 80
-        targetMemoryUtilizationPercentage: 90
       podDisruptionBudget:
         enabled: false
-        minAvailable: 1
+        maxUnavailable: 1
     workers:
       toxicity:
         enabled: true

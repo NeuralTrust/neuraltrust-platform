@@ -8,7 +8,9 @@ metadata:
     {{- include "trustlens.labels" . | nindent 4 }}
     app.kubernetes.io/component: data-plane
 spec:
+  {{- if not (default dict .Values.dataPlane.autoscaling).enabled }}
   replicas: {{ .Values.dataPlane.replicas }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "trustlens.selectorLabels" . | nindent 6 }}
@@ -61,6 +63,29 @@ spec:
         {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 8 }}
         resources:
           {{- toYaml .Values.dataPlane.resources | nindent 10 }}
+        # Optional probes — the worker has no health port by default (River
+        # consumer only). Set dataPlane.healthPort when a /healthz endpoint exists.
+        {{- if .Values.dataPlane.healthPort }}
+        ports:
+        - name: health
+          containerPort: {{ .Values.dataPlane.healthPort }}
+        readinessProbe:
+          httpGet:
+            path: {{ .Values.dataPlane.healthPath | default "/healthz" }}
+            port: health
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: {{ .Values.dataPlane.healthPath | default "/healthz" }}
+            port: health
+          initialDelaySeconds: 30
+          periodSeconds: 20
+          timeoutSeconds: 3
+          failureThreshold: 3
+        {{- end }}
       {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" . "local" .Values.dataPlane.nodeSelector) | nindent 6 }}
       {{- include "neuraltrust-platform.tolerations" (dict "ctx" . "local" .Values.dataPlane.tolerations) | nindent 6 }}
 {{- end }}

@@ -8,7 +8,9 @@ metadata:
     {{- include "trustguard.labels" . | nindent 4 }}
     app.kubernetes.io/component: data-plane
 spec:
+  {{- if not (default dict .Values.dataPlane.autoscaling).enabled }}
   replicas: {{ .Values.dataPlane.replicas }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "trustguard.selectorLabels" . | nindent 6 }}

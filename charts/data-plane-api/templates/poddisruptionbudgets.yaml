@@ -30,8 +30,10 @@ metadata:
 spec:
   {{- if hasKey $pdb "maxUnavailable" }}
   maxUnavailable: {{ $pdb.maxUnavailable }}
+  {{- else if hasKey $pdb "minAvailable" }}
+  minAvailable: {{ $pdb.minAvailable }}
   {{- else }}
-  minAvailable: {{ default 1 $pdb.minAvailable }}
+  maxUnavailable: 1
   {{- end }}
   selector:
     matchLabels:

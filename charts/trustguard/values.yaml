@@ -116,6 +116,14 @@ controlPlane:
   name: trustguard-control-plane
   args: ["control"]
   replicas: 1
+  # Optional HPA (disabled by default). Customer scale: min 1 / max 3.
+  # When enabled, Deployment.spec.replicas is omitted so HPA owns the count.
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 80
+    targetMemoryUtilizationPercentage: 90
   ports:
     http: 8080
     # config-sync gRPC listener (CONFIG_SYNC_GRPC_LISTEN_ADDR default :8082).
@@ -136,6 +144,14 @@ dataPlane:
   name: trustguard-data-plane
   args: ["data"]
   replicas: 1
+  # Optional HPA (disabled by default). Customer scale: min 1 / max 3.
+  # When enabled, Deployment.spec.replicas is omitted so HPA owns the count.
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 80
+    targetMemoryUtilizationPercentage: 90
   ports:
     http: 8081
   resources:

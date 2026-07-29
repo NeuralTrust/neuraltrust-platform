@@ -69,11 +69,30 @@ spec:
           name: otlp
         - containerPort: {{ .Values.ports.otlpHttp }}
           name: otlp-http
+        - containerPort: 13133
+          name: health
         volumeMounts:
         - name: custom-config
           mountPath: /etc/otelcol-custom
         resources:
           {{- toYaml .Values.resources | nindent 10 }}
+        # ClickStack image ships health_check on :13133 (same as SaaS HelmRelease).
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: health
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: health
+          initialDelaySeconds: 15
+          periodSeconds: 20
+          timeoutSeconds: 3
+          failureThreshold: 3
       {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" . "local" .Values.nodeSelector) | nindent 6 }}
       {{- include "neuraltrust-platform.tolerations" (dict "ctx" . "local" .Values.tolerations) | nindent 6 }}
 {{- end }}

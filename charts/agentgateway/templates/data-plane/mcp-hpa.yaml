@@ -1,0 +1,36 @@
+{{- if and (eq (include "agentgateway.enabled" .) "true") .Values.mcp.enabled }}
+{{- $as := default dict .Values.mcp.autoscaling }}
+{{- if $as.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ .Values.mcp.name }}
+  labels:
+    {{- include "agentgateway.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mcp
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ .Values.mcp.name }}
+  minReplicas: {{ default 1 $as.minReplicas }}
+  maxReplicas: {{ default 3 $as.maxReplicas }}
+  metrics:
+    {{- if $as.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $as.targetCPUUtilizationPercentage }}
+    {{- end }}
+    {{- if $as.targetMemoryUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ $as.targetMemoryUtilizationPercentage }}
+    {{- end }}
+{{- end }}
+{{- end }}

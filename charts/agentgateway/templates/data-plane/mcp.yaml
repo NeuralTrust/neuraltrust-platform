@@ -8,7 +8,9 @@ metadata:
     {{- include "agentgateway.labels" . | nindent 4 }}
     app.kubernetes.io/component: mcp
 spec:
+  {{- if not (default dict .Values.mcp.autoscaling).enabled }}
   replicas: {{ .Values.mcp.replicas }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "agentgateway.selectorLabels" . | nindent 6 }}
