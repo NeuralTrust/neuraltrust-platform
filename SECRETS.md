@@ -2,11 +2,53 @@
 
 How secrets are created, stored, and managed across the NeuralTrust Platform chart.
 
+Most credentials are generated for you. A short list is not, and the chart fails
+the install rather than starting a workload that cannot authenticate. Read
+[Secrets you must create](#secrets-you-must-create) first; everything after it is
+reference material.
+
+## Secrets you must create
+
+The chart never generates these. Create them in the release namespace **before**
+`helm install`.
+
+### Hybrid
+
+| Secret | Keys | Needed when |
+|---|---|---|
+| `gcr-secret` | docker-registry credentials | Always, unless images are mirrored to a registry the nodes can already pull from |
+| `agentgateway-config-sync` | `CONFIG_SYNC_TOKEN`, `CONFIG_SYNC_LKG_KEY` | `global.products.trustgate: true` |
+| `trustguard-config-sync` | `CONFIG_SYNC_TOKEN`, `CONFIG_SYNC_LKG_KEY` | `global.products.trustguard: true` |
+| `dataagent-enrolment-trustgate` | `ENROLMENT_TOKEN` | `global.products.trustgate: true` |
+| `dataagent-enrolment-trustguard` | `ENROLMENT_TOKEN` | `global.products.trustguard: true` |
+
+Config-sync tokens and DataAgent enrolment JWTs are issued by the NeuralTrust
+console, one pair per product. A hybrid running only `global.products.dataPlane`
+needs neither — red teaming deploys no DataAgent and no config-sync.
+
+The names above are the ones [`values-required.yaml`](./values-required.yaml)
+already points at. Copy-pasteable `kubectl create secret` commands are in
+[README.md step 3](./README.md#3-create-the-four-operator-supplied-secrets).
+
+### External
+
+| Secret | Keys | Needed when |
+|---|---|---|
+| `gcr-secret` | docker-registry credentials | Same as hybrid |
+| `onprem-superadmin` | `ONPREM_SUPERADMIN_EMAIL`, `ONPREM_SUPERADMIN_PASSWORD` | You want a bootstrap console administrator (recommended — there is no hosted console to log in from) |
+
+External needs no config-sync tokens and no enrolment JWTs; it runs its own
+control planes and never deploys DataAgent. Before going live, also read
+[Login CAPTCHA](#login-captcha-turnstile_secret_key--can-lock-users-out) and
+[`NEXT_PUBLIC_*` cannot be configured at runtime](#next_public_-cannot-be-configured-at-runtime)
+— both can lock administrators out of a self-hosted console.
+
 ## Quick start
 
 ### Auto-generated secrets (default — recommended)
 
-No action required. Deploy and all secrets are created automatically:
+Everything not listed above is created for you on first install and reused on
+upgrade:
 
 ```bash
 helm upgrade --install neuraltrust-platform . --namespace neuraltrust --create-namespace
@@ -65,6 +107,18 @@ export CONTROL_PLANE_JWT_SECRET="your-secret"
 ./create-secrets.sh --no-replace-existing   # skip existing without asking
 ```
 
+> **The script does not cover everything the chart now expects.** It predates the
+> shared `platform-secrets` Secret and does not create it, and the
+> `postgresql-secrets` it writes is missing `SENSIBLE_PG_DSN`, `POSTGRES_SSLMODE`,
+> `POSTGRES_LOGIN` and the two mode flags while still writing the retired
+> `DATABASE_URL`. This only matters when the chart is not managing those Secrets
+> (`preserveExistingSecrets: true`, `autoGenerateSecrets: false`, or an
+> `existingSecret`): there nothing tops up the missing keys, and the services that
+> read `SENSIBLE_PG_DSN` — TrustGate and TrustGuard telemetry, and DataAgent's
+> `DATABASE_URL` — lose their connection string. DataAgent's reference is not optional,
+> so its pod stays in `CreateContainerConfigError` rather than starting unconfigured.
+> Add the missing keys yourself, or let the chart own these two Secrets.
+
 ### Pre-existing secrets (external management)
 
 For Vault, Sealed Secrets, or External Secrets Operator:
@@ -122,6 +176,56 @@ after first login when possible. Empty defaults leave the feature off.
 | `control-plane-secrets` | `resend-invite-sender` | No | Invitation email (unused by the app) |
 | `control-plane-secrets` | `resend-reply-to` | No | Legacy Reply-To; superseded by `global.email.replyTo` |
 
+### Login CAPTCHA (`TURNSTILE_SECRET_KEY`) — can lock users out
+
+The published `control-plane-app` images are built with a Cloudflare Turnstile **site
+key** baked in, and the app shows the CAPTCHA after **three** failed login attempts.
+The matching **secret key** is a runtime value that the chart does not set, so an
+on-premise install has none. The verification route then returns HTTP 500 and the
+client refuses the login, so a user who mistypes a password three times cannot get in
+until the pod is given the key or the browser state is cleared.
+
+Set it through the app's `extraEnv` (from your own Secret — do not inline the value):
+
+```yaml
+control-plane-app:
+  controlPlane:
+    components:
+      app:
+        extraEnv:
+          - name: TURNSTILE_SECRET_KEY
+            valueFrom:
+              secretKeyRef: { name: my-turnstile-secret, key: TURNSTILE_SECRET_KEY }
+```
+
+Verification calls `challenges.cloudflare.com` directly, so the pod needs egress to
+it. Without egress the route also fails closed with a 500 — an air-gapped install
+cannot satisfy the challenge at all, and needs an image built without a site key.
+
+A first-class chart value for this key, and removing the lockout itself, are planned.
+
+### `NEXT_PUBLIC_*` cannot be configured at runtime
+
+`control-plane-app` is a Next.js build. Every `NEXT_PUBLIC_*` variable is inlined into
+the JavaScript bundle when the image is built, so setting one as pod env — including
+through `extraEnv` — has **no effect**. The chart deliberately sets none of them.
+
+The one that matters on-premise is `NEXT_PUBLIC_APP_URL`, which falls back to the SaaS
+default `https://app.neuraltrust.ai`. It is used by two server-side paths, so a
+self-hosted install advertises the wrong host in:
+
+- the SCIM **tenant URL** shown after generating a SCIM token
+- the `meta.location` field of SCIM user resources, which IdPs consume
+
+Both need an image rebuilt with your own `NEXT_PUBLIC_APP_URL`, which the app's
+Dockerfile does not yet accept as a build argument — making these two paths read the
+runtime `APP_URL` instead is planned. Most other
+user-facing URLs are safe: the SSO/OIDC/Azure setup screens and the SCIM setup guide
+derive the origin from the browser, and invite links, magic links and server-side SSO
+callbacks use the runtime `APP_URL` / `NEXTAUTH_URL` that the chart does set from
+`global.domain` (override with
+`control-plane-app.controlPlane.components.app.config.appUrl`).
+
 ### Outbound email
 
 `control-plane-app` is the only sender. It builds one transport, chosen by
@@ -174,19 +278,45 @@ when convenient — it is validated at render time, `extraEnv` is not.
 | `postgresql-secrets` | `POSTGRES_USER` | Yes (if pre-generating) | Database username |
 | `postgresql-secrets` | `POSTGRES_PASSWORD` | Auto-generated (password mode) | Database password. Empty when `controlPlane.components.postgresql.authMode: iam`. |
 | `postgresql-secrets` | `POSTGRES_DB` | Yes (if pre-generating) | Database name |
-| `postgresql-secrets` | `DATABASE_AUTH_MODE` | No | `password` (default) or `iam`. Chart-level flag; IAM is only honored for external Postgres (`global.postgresql.deploy: false`). |
-| `postgresql-secrets` | `DATABASE_IAM_AUTH` | No | `"true"`/`"false"` mirror of the auth mode. |
-| `postgresql-secrets` | `POSTGRES_AUTH_MODE` | No | Same as `DATABASE_AUTH_MODE`. Read by the Next.js app (`lib/db/postgresConfig.ts`). |
+| `postgresql-secrets` | `POSTGRES_SSLMODE` | No | `sslmode` for the connection. |
+| `postgresql-secrets` | `POSTGRES_LOGIN` | No | `aws` (IAM) or `default`. The only IAM switch the Go services read (`pkg/config/config.go`). |
+| `postgresql-secrets` | `POSTGRES_AUTH_MODE` | No | `password` (default) or `iam`. Read by the Next.js app (`lib/db/postgresConfig.ts`). |
 | `postgresql-secrets` | `POSTGRES_CONNECTION_TYPE` | No | `postgres` (password) or `aurora` (IAM). Read by the Python API (`src/database.py`). |
-| `postgresql-secrets` | `DATABASE_URL` | Yes (if pre-generating) | Connection URL (URL-encoded). Password-less when `authMode: iam`. |
-| `postgresql-secrets` | `POSTGRES_PRISMA_URL` | Yes (if pre-generating) | Prisma-compatible URL. Password-less when `authMode: iam` (init-db mints a token at migrate time). |
-| `postgresql-secrets` | `SENSIBLE_PG_DSN` | Yes for hybrid DataAgent | lib/pq-compatible URL without Prisma-only query parameters. |
+| `postgresql-secrets` | `SENSIBLE_PG_DSN` | Yes (if pre-generating) | lib/pq-compatible DSN, without the Prisma-only query parameters. |
+| `postgresql-secrets` | `POSTGRES_PRISMA_URL` | Yes in external | Prisma-compatible URL, carrying `connection_limit`. Password-less when `authMode: iam` (init-db mints a token at migrate time). Not rendered in hybrid, which has no Prisma reader. |
+
+#### One canonical name per fact
+
+The Secret stores **one** name for each fact. Services that spell a fact differently
+are renamed at their own Deployment through the `neuraltrust-platform.postgresEnv`
+helper, so the manifest shows which variables a pod actually reads:
+
+| Stored key | Renamed to | Read by |
+|---|---|---|
+| `POSTGRES_HOST` / `_PORT` / `_USER` / `_PASSWORD` | `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` | TrustGate, TrustGuard |
+| `POSTGRES_DB` | `DB_NAME` | TrustGate, TrustGuard |
+| `POSTGRES_DB` | `POSTGRES_DATABASE` | control-plane-app, control-plane-api, DataCore |
+| `POSTGRES_SSLMODE` | `DB_SSL_MODE` | TrustGate, TrustGuard |
+| `SENSIBLE_PG_DSN` | `DATABASE_URL` | DataAgent (`lib/pq`) |
+| `POSTGRES_PRISMA_URL` | `DATABASE_URL` | control-plane-app (Prisma) |
+
+DataAgent must not receive the Prisma URL: its `connection_limit` parameter is not a
+`lib/pq` connection option, so `lib/pq` forwards it to the server as a runtime
+setting and every query fails with `42704`.
+
+Earlier revisions also stored `DB_*` copies of the first four rows plus
+`DATABASE_URL`, `DATABASE_AUTH_MODE` and `DATABASE_IAM_AUTH`. Those keys had either
+a single reader or none, and every consumer had to take the whole Secret through
+`envFrom` to get the few it used. They are no longer written. Keys left over in an
+existing Secret are harmless — nothing references them — and are removed on the next
+upgrade that rewrites the Secret.
 
 > **IAM auth for Control-Plane Postgres.** Setting
 > `control-plane-api.controlPlane.components.postgresql.authMode: iam`
 > (and/or `global.postgresql.authMode: iam`) makes the chart emit a password-less
-> `DATABASE_URL`/`POSTGRES_PRISMA_URL`, the `DATABASE_*` / `POSTGRES_AUTH_MODE` /
-> `POSTGRES_CONNECTION_TYPE` flags, and stops generating `POSTGRES_PASSWORD`.
+> `POSTGRES_PRISMA_URL` and `SENSIBLE_PG_DSN`, sets the three per-runtime switches
+> (`POSTGRES_LOGIN`, `POSTGRES_AUTH_MODE`, `POSTGRES_CONNECTION_TYPE`), and stops
+> generating `POSTGRES_PASSWORD`.
 > Set `awsRegion` (or `global.postgresql.awsRegion`) so Deployments get
 > `AWS_REGION` for token minting. Requirements:
 > - IRSA on the shared `control-plane` ServiceAccount (`rds-db:connect` for the
@@ -199,9 +329,12 @@ when convenient — it is validated at render time, `extraEnv` is not.
 
 ### Infrastructure
 
+External mode only — hybrid deploys no ClickHouse.
+
 | Kubernetes Secret | Key | Required | Description |
 |---|---|---|---|
-| `clickhouse` | `admin-password` | Auto-generated | ClickHouse admin password (external mode) |
+| `clickhouse` | `admin-password` | Auto-generated | ClickHouse admin password. Shared: DataCore, AlertEngine, the ClickStack collector, and `data-plane-api` all read it rather than keeping their own copy. |
+| `clickhouse-secrets` | `CLICKHOUSE_HOST`, `CLICKHOUSE_PORT`, `CLICKHOUSE_USER`, `CLICKHOUSE_DATABASE` | Auto-generated | Non-secret connection metadata, kept alongside the password so consumers resolve one reference. Contains no credentials. |
 
 > **`global.customCaCert`.** Mounts a corporate CA bundle for HTTP/TLS egress (LLM APIs, etc.).
 
@@ -225,21 +358,18 @@ hybrid; always in external). Firewall always accompanies TrustGuard:
 | `firewall-secrets` | `JWT_SECRET` | Yes | Shared with services calling the firewall |
 | `firewall-secrets` | `HUGGINGFACE_TOKEN` | No | Not needed for official images (models are baked in at build time). Only for custom runtime-download builds. |
 
-Align `controlPlane.secrets.firewallJwtSecret` (`FIREWALL_JWT_SECRET`) with `firewall-secrets` `JWT_SECRET` when the Control Plane validates firewall tokens.
+In external mode the Control Plane validates firewall tokens, so
+`control-plane-api.controlPlane.secrets.firewallJwtSecret` (`FIREWALL_JWT_SECRET`)
+must match `firewall-secrets` `JWT_SECRET`. The app's `FIREWALL_API_URL` derives
+itself from `control-plane-secrets/FIREWALL_API_URL`, pointing at the in-cluster
+firewall Service when TrustGuard is selected and falling back to the data-plane
+otherwise.
 
 ### Docker registry
 
 | Kubernetes Secret | Type | Required | Description |
 |---|---|---|---|
-| `gcr-secret` | `docker-registry` | Yes | Credentials for NeuralTrust container images |
-
-## Firewall integration
-
-The Control Plane app's `FIREWALL_API_URL` auto-derives from
-`control-plane-secrets/FIREWALL_API_URL` to the in-cluster firewall Service when
-TrustGuard is selected, falling back to the data-plane otherwise. Align
-`control-plane-api.controlPlane.secrets.firewallJwtSecret` (`FIREWALL_JWT_SECRET`)
-with `firewall-secrets` `JWT_SECRET` when the Control Plane validates firewall tokens.
+| `gcr-secret` | `docker-registry` | Yes | Credentials for NeuralTrust container images. Create it with `./create-image-pull-secret.sh --namespace <ns>`; the chart never generates it. |
 
 ## Secret reference in values
 
@@ -270,7 +400,7 @@ All secrets can be provided via environment variables:
 ```bash
 # Data Plane
 export DATA_PLANE_JWT_SECRET="your-secret"
-export DATA_PLANE_REDIS_URL="redis://user:pass@host:6379/0"  # optional; platform-v2 only, requires global.preserveExistingSecrets=true
+export DATA_PLANE_REDIS_URL="redis://user:pass@host:6379/0"  # optional; requires global.preserveExistingSecrets=true
 export OPENAI_API_KEY="sk-..."
 export GOOGLE_API_KEY="your-key"
 export RESEND_API_KEY="your-key"
@@ -296,50 +426,58 @@ export OBSERVABILITY_TOKEN="your-customer-token"
 ./create-secrets.sh --namespace neuraltrust
 ```
 
-## Platform v2 secrets
+## Full secret catalog
 
-The v2 services follow the same auto-generate + `lookup`-preserve model. Under
-`global.autoGenerateSecrets: true` the keys below are created on first install
-and reused on upgrade. Env var names are what each binary reads (verified in
-source); the `envFrom` mounts map secret keys directly to env vars.
+Every Secret and key the chart knows about, in one table. All of them follow the
+auto-generate + `lookup`-preserve model unless the Notes column says otherwise:
+under `global.autoGenerateSecrets: true` they are created on first install and
+reused on upgrade.
+
+Two columns that are easy to confuse: **Key** is the key name stored inside the
+Kubernetes Secret. That is not always the environment variable the container
+sees — where a Deployment maps a key to a differently-named variable, the Notes
+column says so.
+
+On names: **TrustGate** is the product; **AgentGateway** is its chart and
+Kubernetes identity, so its resources are `agentgateway-*`. TrustGuard uses the
+same name in both places.
 
 | Secret | Kubernetes Secret | Key | Notes |
 |---|---|---|---|
 | AgentGateway server key | `agentgateway-secrets` | `SERVER_SECRET_KEY` | auto-generated |
 | AgentGateway MCP STS signing | `agentgateway-secrets` | `STS_SIGNING_KEY` | auto-generated RSA PKCS#1 private key (RS256), lookup-preserved so MCP tokens survive upgrades; use `create-secrets.sh` to validate and pre-provision an explicit PEM/base64-PEM key |
-| AgentGateway DB password | `agentgateway-secrets` | `DB_PASSWORD` | **v2 external only** — auto-generated (app reads `DB_PASSWORD`, not `DATABASE_PASSWORD`); **omitted when `agentgateway.database.iamAuth=true`**. In v2 **hybrid** the password comes from the shared `postgresql-secrets` (see below). |
-| AgentGateway raw-telemetry DSN | `agentgateway-secrets` | `SENSIBLE_PG_DSN` | **v2 external only** (assembled DSN when the raw exporter is enabled). In v2 **hybrid** it lives in `postgresql-secrets`. |
+| AgentGateway DB password | `agentgateway-secrets` | `DB_PASSWORD` | **External only** — auto-generated (app reads `DB_PASSWORD`, not `DATABASE_PASSWORD`); **omitted when `agentgateway.database.iamAuth=true`**. In **hybrid** the password comes from the shared `postgresql-secrets` (see below). |
+| AgentGateway raw-telemetry DSN | `agentgateway-secrets` | `SENSIBLE_PG_DSN` | **External only** (assembled DSN when the raw exporter is enabled). In **hybrid** it lives in `postgresql-secrets`. |
 | TrustGuard admin JWT | `trustguard-secrets` | `ADMIN_JWT_SECRET` | auto-generated |
 | TrustGuard token signing | `trustguard-secrets` | `TRUSTGUARD_TOKEN_SIGNING_SECRET` | auto-generated |
 | TrustGuard Redis events | `trustguard-secrets` | `REDIS_EVENTS_SECRET` | auto-generated; authenticates cache pub/sub events |
 | TrustGuard Firewall client | `firewall-secrets` (mounted as env) | `JWT_SECRET` → `NEURAL_TRUST_FIREWALL_SECRET_KEY` | Present when TrustGuard is on (hybrid product flag or external full stack). Base URL is ConfigMap `NEURAL_TRUST_FIREWALL_BASE_URL` → in-cluster `http://firewall.<ns>.svc.cluster.local`. |
-| TrustGuard DB password | `trustguard-secrets` | `DB_PASSWORD` | **v2 external only** — auto-generated; **omitted when `trustguard.database.iamAuth=true`**. In v2 **hybrid** the password comes from the shared `postgresql-secrets`. |
-| TrustGuard raw-telemetry DSN | `trustguard-secrets` | `SENSIBLE_PG_DSN` | **v2 external only**. In v2 **hybrid** it lives in `postgresql-secrets`. |
-| Shared v2 hybrid Postgres credential | `postgresql-secrets` | `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` / `DB_SSL_MODE` / `SENSIBLE_PG_DSN` (aliased alongside the `POSTGRES_*` + `DATABASE_URL` keys) | **v2 hybrid only** — the umbrella renders one shared Secret from `global.postgresql.*` (default `user`/`database` = `neuraltrust`). Every hybrid workload (AgentGateway, TrustGuard, DataAgent, `data-plane-api`) `envFrom`'s this Secret, so all four connect as the same role. Set `global.postgresql.existingSecret.name` to point at a pre-created Secret instead. |
-| Shared v2 hybrid Redis credential | `redis-secrets` | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` / `REDIS_USERNAME` / `REDIS_TLS` | **v2 hybrid only** — rendered from `global.redis.*`. Empty `REDIS_PASSWORD` for the passwordless in-cluster default. Set `global.redis.existingSecret.name` to reuse a pre-created Secret. |
+| TrustGuard DB password | `trustguard-secrets` | `DB_PASSWORD` | **External only** — auto-generated; **omitted when `trustguard.database.iamAuth=true`**. In **hybrid** the password comes from the shared `postgresql-secrets`. |
+| TrustGuard raw-telemetry DSN | `trustguard-secrets` | `SENSIBLE_PG_DSN` | **External only**. In **hybrid** it lives in `postgresql-secrets`. |
+| Shared hybrid Postgres credential | `postgresql-secrets` | `POSTGRES_*` plus `SENSIBLE_PG_DSN` — see [One canonical name per fact](#one-canonical-name-per-fact) | **Hybrid only** — the umbrella renders one shared Secret from `global.postgresql.*` (default `user`/`database` = `neuraltrust`), and every hybrid workload connects as that one role. Containers receive `DB_*` / `DATABASE_URL` names through explicit `env` mappings; those are **not** keys in the Secret. Set `global.postgresql.existingSecret.name` to supply your own instead — but then the chart injects it with `envFrom` and cannot rename anything, so **your keys must be `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` / `DB_SSL_MODE` / `SENSIBLE_PG_DSN`**. |
+| Shared hybrid Redis credential | `redis-secrets` | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` / `REDIS_USERNAME` / `REDIS_TLS` | **Hybrid only** — taken wholesale with `envFrom`, and rendered from `global.redis.*`. Empty `REDIS_PASSWORD` for the passwordless in-cluster default. Set `global.redis.existingSecret.name` to reuse a pre-created Secret. |
 | Shared TrustGuard client creds | `trustguard-client-credentials` | `CLIENT_ID` / `CLIENT_SECRET` | id defaults to `agentgateway-platform`; secret auto-generated (or `global.v2.trustguardClientSecret`). Injected into both AgentGateway (`TRUSTGUARD_CLIENT_ID`/`_SECRET`) and TrustGuard (`TRUSTGUARD_PLATFORM_CLIENT_ID`/`_SECRET`) so the pair matches. The prerelease `v2-trustguard-client-secret` values are copied during upgrade. |
 | TrustLens JWT | `trustlens-secrets` | `JWT_SECRET` | auto-generated (only when `trustlens.enabled=true`) |
 | TrustLens encryption keyset | `trustlens-secrets` | `ENCRYPTION_KEYSET` | auto-generated |
 | TrustLens DB password | `trustlens-secrets` | `DATABASE_PASSWORD` | auto-generated |
-| DataAgent DB password | `postgresql-secrets` (shared) | `DB_PASSWORD` | **v2 hybrid** — DataAgent envFrom's the shared `postgresql-secrets`. Set `dataagent.database.password` / `dataagent.databaseUrl` explicitly to keep a per-service credential in `dataagent-secrets` instead. |
-| DataAgent DB DSN | `postgresql-secrets` (shared) | `SENSIBLE_PG_DSN` | **v2 hybrid** — DataAgent connects as `global.postgresql.user` (default `neuraltrust`). Override the product's `dataagent.databaseUrl` to opt out of the shared credential. |
-| DataAgent enrolment token | `dataagent-secrets` / `dataagent-trustguard-secrets` or operator Secret | `ENROLMENT_TOKEN` (configurable key) | **never** auto-generated — from `agentgateway.dataagent.enrolment` / `trustguard.dataagent.enrolment` |
+| DataAgent DB DSN | `postgresql-secrets` (shared) | `SENSIBLE_PG_DSN` | **Hybrid** — DataAgent reads this one key and receives it as `DATABASE_URL`; it connects as `global.postgresql.user` (default `neuraltrust`). There is no separate DataAgent password key in the shared Secret. Override the product's `dataagent.databaseUrl` (or `dataagent.database.password`) to keep a per-service credential in `dataagent-secrets` instead. |
+| DataAgent enrolment token | operator Secret (e.g. `dataagent-enrolment-trustgate`), or `dataagent-secrets` / `dataagent-trustguard-secrets` when supplied inline | `ENROLMENT_TOKEN` (configurable key) | **Never** auto-generated — from `agentgateway.dataagent.enrolment` / `trustguard.dataagent.enrolment`. With the preferred `existingSecret.name` path the chart-managed `dataagent-*-secrets` render empty and the token is read straight from your Secret. |
 | AlertEngine DB password | `alertengine-secrets` | `DB_PASSWORD` | auto-generated (own `alertengine` DB; external only); **omitted when `alertengine.database.iamAuth=true`** |
 | AlertEngine auth JWT | `alertengine-secrets` | `AUTH_JWT_SECRET` | auto-generated — must match the app BFF token signer for UI auth |
 | AlertEngine encryption key | `alertengine-secrets` | `APP_ENCRYPTION_KEY` | auto-generated (AES-256-GCM for integration secrets) |
 | DataCore JWT | `datacore-secrets` | `AUTH_JWT_HS256_SECRET` | auto-generated |
 | DataCore DB password | `datacore-secrets` | `POSTGRES_PASSWORD` | auto-generated (own `datacore` DB; external only); **omitted when `datacore.database.iamAuth=true`** (`POSTGRES_LOGIN=aws`) |
 | DataCore / AlertEngine / clickstack / data-plane-api ClickHouse password | `clickhouse` | `admin-password` | **shared** — all read `CLICKHOUSE_PASSWORD` from the in-cluster `clickhouse` secret via `clickhouse.existingSecret` (`dataPlane.components.clickhouse.existingSecret` for data-plane-api; no per-service key). External ClickHouse: point `existingSecret.name`/`key` at your secret. |
-| v2 hybrid ClickStack OTLP | primary DataAgent enrolment Secret + in-memory access JWT | `ENROLMENT_TOKEN` (egress exchanges at DataCore) | **v2 hybrid — mandatory when TrustGate and/or TrustGuard enabled.** No direct bearer on apps. Local `clickstack-egress-collector` on the primary DataAgent exchanges enrolment for a short-lived OTLP JWT. Requires per-product `*.dataagent.enrolment`. data-plane-only hybrid skips this. Air-gapped / local-only product telemetry → `global.deploymentMode: external`. |
-| v2 hybrid config-sync (TrustGate / TrustGuard) | operator Secrets (e.g. `agentgateway-config-sync`, `trustguard-config-sync`) | `CONFIG_SYNC_TOKEN`, `CONFIG_SYNC_LKG_KEY` | **On by default in hybrid** (mode-derived) for each enabled product. Prefer `agentgateway.configSync.existingSecret` / `trustguard.configSync.existingSecret`; do not restate `enabled: true`. Set `configSync.enabled: false` only for Postgres-managed configuration. Never auto-generated. |
-| v2 external ClickStack OTLP token | `clickstack-collector-secrets` | `OTLP_AUTH_TOKEN`, `OTEL_EXPORTER_OTLP_HEADERS` | **v2 external only** — auto-generated (or `clickstack-otel-collector.otlpAuthToken`). `OTLP_AUTH_TOKEN` is what the collector enforces; `OTEL_EXPORTER_OTLP_HEADERS` is `authorization=<same token>` and is mounted on TrustGuard / AgentGateway via `secretKeyRef`. |
+| Hybrid ClickStack OTLP | primary DataAgent enrolment Secret + in-memory access JWT | `ENROLMENT_TOKEN` (egress exchanges at DataCore) | **Hybrid — mandatory when TrustGate and/or TrustGuard enabled.** No direct bearer on apps. Local `clickstack-egress-collector` on the primary DataAgent exchanges enrolment for a short-lived OTLP JWT. Requires per-product `*.dataagent.enrolment`. data-plane-only hybrid skips this. Air-gapped / local-only product telemetry → `global.deploymentMode: external`. |
+| Hybrid config-sync (TrustGate / TrustGuard) | operator Secrets (e.g. `agentgateway-config-sync`, `trustguard-config-sync`) | `CONFIG_SYNC_TOKEN`, `CONFIG_SYNC_LKG_KEY` | **On by default in hybrid** (mode-derived) for each enabled product. Prefer `agentgateway.configSync.existingSecret` / `trustguard.configSync.existingSecret`; do not restate `enabled: true`. Set `configSync.enabled: false` only for Postgres-managed configuration. Never auto-generated. |
+| External ClickStack OTLP token | `clickstack-collector-secrets` | `OTLP_AUTH_TOKEN`, `OTEL_EXPORTER_OTLP_HEADERS` | **External only** — auto-generated (or `clickstack-otel-collector.otlpAuthToken`). `OTLP_AUTH_TOKEN` is what the collector enforces; `OTEL_EXPORTER_OTLP_HEADERS` is `authorization=<same token>` and is mounted on TrustGuard / AgentGateway via `secretKeyRef`. |
 | Control-plane app auth | `control-plane-secrets` | `AUTH_SECRET` / `NEXTAUTH_SECRET` | one generated or reused value exposed under both aliases |
 
 AlertEngine and TrustLens URLs are non-secret values wired directly into the
 control-plane app Deployment, alongside the other backend service URLs. On first
 install, missing Secrets/keys are created; later upgrades reuse them with `lookup`.
 
-- **Postgres (v2 hybrid)**: the chart no longer runs a schema/role init Job.
+- **Postgres (hybrid)**: the chart no longer runs a schema/role init Job.
   Application migrations own their tables in the shared `neuraltrust` database
   (`trustgate_migration_versions` / `trustguard_migration_versions` are already
   namespaced). For **in-cluster PostgreSQL** the umbrella renders
@@ -365,7 +503,7 @@ install, missing Secrets/keys are created; later upgrades reuse them with `looku
   secret matching `infrastructure.clickhouse.external.secretName`/`secretKey`, and set
   the ClickHouse host to your endpoint (a dotted/FQDN host is used verbatim; a bare
   name expands to `<name>.<namespace>.svc.cluster.local`).
-- **`data-plane-api` PostgreSQL backend (v2 hybrid default)**: in hybrid the API
+- **`data-plane-api` PostgreSQL backend (hybrid default)**: in hybrid the API
   reads its evaluation store from PostgreSQL (`SQL_DATABASE=postgres`), so it needs
   no ClickHouse. It resolves its five `POSTGRES_*` connection vars from the
   umbrella-managed `postgresql-secrets` (keys `POSTGRES_HOST`/`POSTGRES_PORT`/
@@ -380,8 +518,8 @@ install, missing Secrets/keys are created; later upgrades reuse them with `looku
   custom pre-created schema. The configured role needs `USAGE` and `CREATE` on
   that schema, but does not need database-level `CREATE`.
   The ClickHouse credential below applies only when the API is on ClickHouse
-  (v2 external, or hybrid pinned to an external ClickHouse).
-- **Optional IAM DB/Redis auth (AWS)**: the v2 Go services accept
+  (external mode, or hybrid pinned to an external ClickHouse).
+- **Optional IAM DB/Redis auth (AWS)**: the Go services accept
   `database.iamAuth` / `redis.iamAuth` (default false). When on they emit
   `DB_IAM_AUTH`/`DB_AUTH_MODE`/`POSTGRES_LOGIN=aws` (Postgres) or
   `REDIS_LOGIN=aws`/`REDIS_CACHE_NAME`/`REDIS_IAM_AUTH` (Redis) and ship no
@@ -392,7 +530,7 @@ install, missing Secrets/keys are created; later upgrades reuse them with `looku
   (v0.4.0+) mints RDS IAM tokens via `database.iamAuth` (`DB_AUTH_MODE=iam`) and
   requires `database.awsRegion` → `AWS_REGION`. RDS IAM is also live for the
   Python control-plane (`controlPlane.components.postgresql.authMode: iam`).
-  Use `values-v2-managed-datastores.yaml.example` as the tracked starting point.
+  Use `values-managed-datastores.yaml.example` as the tracked starting point.
 - **Each selected product DataAgent** renders when its nested `dataagent`
   has either `enrolment.token` or (preferred)
   `enrolment.existingSecret.name` (never generated). The JWT

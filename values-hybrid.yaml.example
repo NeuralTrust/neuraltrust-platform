@@ -1,4 +1,4 @@
-# Platform v2 hybrid overlay for a fully-configured deployment.
+# Hybrid overlay for a fully-configured deployment.
 # Documents the "one Postgres block, one Redis block, per-product DataAgent"
 # hybrid contract using pre-created Secrets. Prefer existingSecret for
 # DataAgent enrolment (also powers ClickStack egress) and config-sync.

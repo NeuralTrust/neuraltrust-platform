@@ -38,5 +38,5 @@ they do not require opening inbound ports for those services.
 
 ## Related
 
-- [docs/platform-v2.md](./platform-v2.md) — hybrid control and data channels
+- [docs/architecture.md](./architecture.md) — hybrid control and data channels
 - [DEPLOYMENT.md](../DEPLOYMENT.md) — install paths

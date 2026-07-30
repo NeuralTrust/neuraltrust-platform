@@ -1,4 +1,4 @@
-# Detailed Platform v2 watchdog overlay (hybrid).
+# Detailed watchdog overlay (hybrid).
 # Layer over values-required.yaml (DataAgent enrolment + config-sync Secrets).
 # Healing remains dry-run until both RBAC and per-check policy are approved.
 # Hybrid has no in-cluster ClickHouse — omit that check id.

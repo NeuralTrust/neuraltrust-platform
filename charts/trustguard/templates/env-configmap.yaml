@@ -48,9 +48,10 @@ data:
   DB_USER: {{ include "neuraltrust-platform.v2.writerUser" (dict "ctx" . "explicit" .Values.database.user "default" "trustguard") | quote }}
   DB_SSL_MODE: {{ .Values.database.sslMode | quote }}
   {{- if .Values.database.iamAuth }}
-  # IAM (RDS) DB auth: no static DB_PASSWORD is shipped; the service mints a token.
-  DB_IAM_AUTH: "true"
-  DB_AUTH_MODE: "iam"
+  {{- /* IAM (RDS) DB auth: no static DB_PASSWORD is shipped; the service mints a
+         token. POSTGRES_LOGIN is the only switch TrustGuard reads for this
+         (internal/config/config.go line 602). DB_IAM_AUTH and DB_AUTH_MODE used to
+         be set here too and have no reader in the binary. */}}
   POSTGRES_LOGIN: "aws"
   {{- end }}
   REDIS_HOST: {{ .Values.redis.host | quote }}

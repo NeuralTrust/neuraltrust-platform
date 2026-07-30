@@ -52,16 +52,23 @@ spec:
             name: agentgateway-secrets
         {{- if eq (include "neuraltrust-platform.isHybrid" .) "true" }}
         - secretRef:
-            name: {{ include "neuraltrust-platform.v2.hybridPg.secretName" . | quote }}
-            optional: true
-        - secretRef:
             name: {{ include "neuraltrust-platform.v2.hybridRedis.secretName" . | quote }}
             optional: true
+        {{- if ne (include "neuraltrust-platform.v2.hybridPg.chartManagedSecret" .) "true" }}
+        {{- /* An operator-supplied Secret keeps the passthrough: its key names are
+               theirs, so the chart cannot rename them. */}}
+        - secretRef:
+            name: {{ include "neuraltrust-platform.v2.hybridPg.secretName" . | quote }}
+            optional: true
+        {{- end }}
         {{- end }}
         env:
         {{- /* Shared credentials come from platform-secrets; an explicit env
                entry outranks the legacy copy still arriving via envFrom. */}}
         {{- include "neuraltrust-platform.platformSecretEnv" (dict "ctx" . "keys" (dict "SERVER_SECRET_KEY" "SERVER_SECRET_KEY") "skip" .Values.mcp.extraEnv) | nindent 8 }}
+        {{- if and (eq (include "neuraltrust-platform.isHybrid" .) "true") (eq (include "neuraltrust-platform.v2.hybridPg.chartManagedSecret" .) "true") }}
+        {{- include "neuraltrust-platform.postgresEnv" (dict "ctx" . "dsn" true "skip" .Values.mcp.extraEnv) | nindent 8 }}
+        {{- end }}
         {{- with .Values.mcp.extraEnv }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

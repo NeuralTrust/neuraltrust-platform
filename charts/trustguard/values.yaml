@@ -31,8 +31,10 @@ database:
   user: "trustguard" # v2 external only; hybrid overrides via global.postgresql.user
   password: "" # Auto-generated if empty
   sslMode: "prefer" # TLS when available, plaintext fallback for the non-TLS in-cluster PG; use "require" for hosted DBs
-  # IAM (e.g. AWS RDS) database auth. Emits DB_IAM_AUTH/DB_AUTH_MODE/POSTGRES_LOGIN=aws
-  # and omits the static DB_PASSWORD; the service mints a SigV4 token at connect time.
+  # IAM (e.g. AWS RDS) database auth. Emits POSTGRES_LOGIN=aws and omits the static
+  # DB_PASSWORD; the service mints a SigV4 token at connect time. In external mode
+  # this flag is independent of global.postgresql.authMode, so set both when the
+  # data plane and the control plane share an IAM-authenticated database.
   # Requires an IRSA-annotated serviceAccount. Leave false for password auth.
   iamAuth: false
 redis:

@@ -193,15 +193,12 @@ global:
     # awsRegion is required for IAM token minting on control-plane api/app.
     authMode: "password"
     awsRegion: ""
+    # Naming a Secret here hands it to you wholesale: the chart injects it with
+    # envFrom and cannot rename its keys, so use the variable names your services
+    # read. Leave empty to let the chart write the canonical POSTGRES_* family and
+    # rename per service (see SECRETS.md).
     existingSecret:
       name: ""
-      keys:
-        host: "DB_HOST"
-        port: "DB_PORT"
-        user: "DB_USER"
-        password: "DB_PASSWORD"
-        database: "DB_NAME"
-        sslMode: "DB_SSL_MODE"
     # In-cluster PostgreSQL Deployment image/resources/persistence knobs.
     image:
       repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/postgres

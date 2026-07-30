@@ -181,10 +181,14 @@ spec:
               key: POSTGRES_PRISMA_URL
               name: {{ $pgSecretName }}
               optional: true
+        {{- /* Prisma reads POSTGRES_PRISMA_URL; DATABASE_URL is the same value
+               under the name the env validator and the CLI accept. It used to be a
+               second copy stored in the Secret, which is one more place for the two
+               to drift apart. */}}
         - name: DATABASE_URL
           valueFrom:
             secretKeyRef:
-              key: DATABASE_URL
+              key: POSTGRES_PRISMA_URL
               name: {{ $pgSecretName }}
               optional: true
         {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "node" "ctx" .) | nindent 8 }}
@@ -349,11 +353,12 @@ spec:
         - name: POSTGRES_IAM_SSL_REJECT_UNAUTHORIZED
           value: "false"
         {{- end }}
+        {{- /* Both names, one stored key — see the init container above. */}}
         - name: DATABASE_URL
           valueFrom:
             secretKeyRef:
               name: {{ $pgSecretName }}
-              key: DATABASE_URL
+              key: POSTGRES_PRISMA_URL
               optional: true
         - name: POSTGRES_PRISMA_URL
           valueFrom:
