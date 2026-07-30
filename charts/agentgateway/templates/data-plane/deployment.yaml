@@ -39,6 +39,11 @@ spec:
       - name: config-sync-lkg
         emptyDir: {}
       {{- end }}
+      {{- if and (eq (include "neuraltrust-platform.configSync.enabled" .) "true") (eq (include "agentgateway.configSyncTls.active" .) "true") }}
+      - name: configsync-tls
+        secret:
+          secretName: {{ include "agentgateway.configSyncTls.secretName" . }}
+      {{- end }}
       {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 6 }}
       containers:
       - name: proxy
@@ -73,13 +78,18 @@ spec:
         {{- if and (eq (include "neuraltrust-platform.isHybrid" .) "true") (eq (include "neuraltrust-platform.v2.hybridPg.chartManagedSecret" .) "true") }}
         {{- include "neuraltrust-platform.postgresEnv" (dict "ctx" . "dsn" true "skip" .Values.dataPlane.extraEnv) | nindent 8 }}
         {{- end }}
+        {{- include "neuraltrust-platform.hybridRedisTlsEnv" . | nindent 8 }}
         {{- with .Values.dataPlane.extraEnv }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
         {{- include "neuraltrust-platform.trustguardClientEnv" (dict "ctx" . "idVar" "TRUSTGUARD_CLIENT_ID" "secretVar" "TRUSTGUARD_CLIENT_SECRET") | nindent 8 }}
         {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
         {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "go" "ctx" .) | nindent 8 }}
+        {{- if eq (include "agentgateway.configSyncTls.active" .) "true" }}
+        {{- include "neuraltrust-platform.configSyncEnv" (dict "ctx" . "product" "agentgateway" "tlsCaPath" (printf "%s/ca.crt" (include "agentgateway.configSyncTls.mountPath" .))) | nindent 8 }}
+        {{- else }}
         {{- include "neuraltrust-platform.configSyncEnv" (dict "ctx" . "product" "agentgateway") | nindent 8 }}
+        {{- end }}
         {{- include "neuraltrust-platform.configSyncTokenEnv" . | nindent 8 }}
         {{- include "neuraltrust-platform.appVersionEnv" (dict "tag" .Values.image.tag) | nindent 8 }}
         {{- if eq (include "neuraltrust-platform.isExternal" .) "true" }}
@@ -104,6 +114,11 @@ spec:
         {{- if (eq (include "neuraltrust-platform.configSync.enabled" .) "true") }}
         - name: config-sync-lkg
           mountPath: /var/lib/trustgate
+        {{- end }}
+        {{- if and (eq (include "neuraltrust-platform.configSync.enabled" .) "true") (eq (include "agentgateway.configSyncTls.active" .) "true") }}
+        - name: configsync-tls
+          mountPath: {{ include "agentgateway.configSyncTls.mountPath" . | quote }}
+          readOnly: true
         {{- end }}
         {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 8 }}
         resources:

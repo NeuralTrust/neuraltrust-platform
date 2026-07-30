@@ -21,6 +21,11 @@ serviceAccount:
 # Non-secret config injected into every workload via the env ConfigMap.
 config:
   logLevel: "info"
+  # A deployed value (prod/production/staging/stage) makes the binary refuse
+  # cleartext config-sync: the control plane requires a gRPC TLS keypair and the
+  # data plane rejects CONFIG_SYNC_TLS_INSECURE=true. The chart provisions both
+  # sides in external mode — see configSync.grpcTls.
+  appEnv: "production"
   # Dual discovery (always on): exact primary host uses a gateway header;
   # wildcard slug hosts (<gw>.llm.<domain> / <slug>.mcp.<domain>) need none.
   # Empty base domains → GATEWAY_BASE_DOMAIN=llm.<global.domain>,
@@ -49,6 +54,10 @@ database:
   user: "agentgateway" # v2 external only; hybrid overrides via global.postgresql.user
   password: "" # Auto-generated if empty (when global.autoGenerateSecrets=true)
   sslMode: "prefer" # TLS when available, plaintext fallback for the non-TLS in-cluster PG; use "require" for hosted DBs
+  # AWS region for RDS IAM token minting. Empty => global.postgresql.awsRegion.
+  # IRSA does not supply a region, so leaving both empty makes IAM depend on
+  # node-level configuration and fail with "aws region is required" without it.
+  awsRegion: ""
   # IAM (e.g. AWS RDS) database auth. Emits POSTGRES_LOGIN=aws and omits the static
   # DB_PASSWORD; the service mints a SigV4 token at connect time. In external mode
   # this flag is independent of global.postgresql.authMode, so set both when the
@@ -82,8 +91,10 @@ configSync:
   endpoint: ""
   # Hybrid DNS suffix for the mode-derived endpoint. Ignored in external.
   saasDomain: "neuraltrust.ai"
-  # External plaintext dial. App rejects TLS insecure when APP_ENV is
-  # staging/production — use a non-prod APP_ENV. Ignored in hybrid.
+  # External plaintext dial, used only when the chart is not provisioning
+  # config-sync TLS (see grpcTls). Ignored in hybrid, and ignored in external
+  # whenever grpcTls is active — there the data plane always verifies the
+  # generated CA, because the binary rejects insecure in a deployed APP_ENV.
   tlsInsecure: true
   # TLS SNI (empty => host of endpoint).
   serverName: ""
@@ -97,6 +108,13 @@ configSync:
     lkgKey: "CONFIG_SYNC_LKG_KEY"
   # Local LKG cache key (base64, 32 bytes). Auto-generated when empty.
   lkgKey: ""
+  # gRPC listener TLS, provisioned in external mode under a deployed appEnv.
+  # Setting autoGenerate: false without an existingSecret leaves the control
+  # plane unable to start; the chart rejects that combination at render time.
+  grpcTls:
+    autoGenerate: true # false + existingSecret to bring your own cert/key/ca
+    existingSecret: "" # kubernetes.io/tls-style Secret with tls.crt, tls.key, ca.crt
+    durationDays: 3650
 # TrustGuard integration (proxy → trustguard /v1/evaluate via client-credentials).
 trustguard:
   # Empty ⇒ auto-derived to the in-cluster data-plane Service

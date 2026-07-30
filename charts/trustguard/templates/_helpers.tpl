@@ -121,6 +121,16 @@ imagePullSecrets:
 {{- end }}
 
 {{/*
+AWS region for RDS IAM token minting. Subchart value wins, else the umbrella's
+global.postgresql.awsRegion, so one setting covers every IAM-authenticated
+service instead of being repeated per chart.
+*/}}
+{{- define "trustguard.awsRegion" -}}
+{{- $global := default dict (default dict .Values.global).postgresql -}}
+{{- (default dict .Values.database).awsRegion | default $global.awsRegion | default "" -}}
+{{- end }}
+
+{{/*
 config-sync gRPC TLS: fixed secret name, mount path and verified server name.
 The control plane's config-sync gRPC listener REQUIRES TLS (cert+key) whenever
 APP_ENV is a deployed environment (prod/production/staging/stage); the data plane
@@ -138,6 +148,20 @@ verifies the listener against the generated CA using this DNS server name.
 {{- end }}
 
 {{/*
+Whether the chart generates the keypair. Resolved through hasKey because sprig's
+`default` treats boolean false as empty, so `autoGenerate | default true` would
+read an explicit false back as true.
+*/}}
+{{- define "trustguard.configSyncTls.autoGenerate" -}}
+{{- $tls := (default dict .Values.configSync).grpcTls | default dict -}}
+{{- if hasKey $tls "autoGenerate" -}}
+{{- if $tls.autoGenerate }}true{{- end -}}
+{{- else -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/*
 Returns "true" (non-empty) when the config-sync gRPC listener must run with TLS:
 v2 + external/full + a deployed APP_ENV. In that case the chart provisions a
 server cert/key (auto-generated CA, or an operator-provided existingSecret).
@@ -148,6 +172,6 @@ server cert/key (auto-generated CA, or an operator-provided existingSecret).
 {{- $appEnv := lower (trim (.Values.config.appEnv | default "")) -}}
 {{- $deployed := has $appEnv (list "prod" "production" "staging" "stage") -}}
 {{- $tls := (default dict .Values.configSync).grpcTls | default dict -}}
-{{- $provisioned := or ($tls.existingSecret | default "") (ne ($tls.autoGenerate | default true) false) -}}
+{{- $provisioned := or ($tls.existingSecret | default "") (eq (include "trustguard.configSyncTls.autoGenerate" .) "true") -}}
 {{- if and $isV2 $isFull $deployed $provisioned }}true{{- end -}}
 {{- end }}

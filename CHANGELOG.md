@@ -4,6 +4,64 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Added
+
+- **AgentGateway config-sync gRPC now runs over TLS in external mode.** TrustGate's
+  control plane refuses to build its config-sync listener without a keypair once
+  `APP_ENV` is a deployed value, and its data plane refuses to dial that listener in
+  cleartext. TrustGuard has provisioned both sides for some time; AgentGateway had
+  neither, and stayed reachable only because the chart never set `APP_ENV`, leaving the
+  binary on its `dev` default. The chart now sets `agentgateway.config.appEnv`
+  (default `production`, matching TrustGuard) and generates a self-signed CA plus a
+  server certificate whose SANs cover the control-plane Service DNS names. The admin
+  pod serves it; the proxy and MCP data planes verify against the generated CA instead
+  of dialing insecurely. Preserved across upgrades through `lookup` and
+  `helm.sh/resource-policy: keep`, so it is never rotated.
+
+  Configured under `agentgateway.configSync.grpcTls` (`autoGenerate`, `existingSecret`,
+  `durationDays`). Skipped when an operator supplies `existingSecret`, when
+  `global.preserveExistingSecrets` is set, or when `config.appEnv` is not a deployed
+  value. Hybrid is unaffected: it runs no control plane and already dialed SaaS with
+  verification on.
+
+- **`TRUSTGUARD_PUBLIC_URL` on the console.** Collector, WAF and SDK setup snippets
+  build their evaluate URL from this variable, and the console deliberately refuses to
+  print in-cluster hostnames in customer-facing instructions — so `TRUSTGUARD_URL`
+  could not stand in for it and the snippets rendered with no endpoint at all. It is
+  now derived as `https://trustguard.<global.domain>`, matching the TrustGuard chart's
+  data-plane ingress, and overridable through
+  `control-plane-app.controlPlane.components.app.config.trustguardPublicUrl`.
+
+- **`AWS_REGION` for RDS IAM on the two Go gateways.** AgentGateway and TrustGuard mint
+  a SigV4 token per connection, but were the only IAM-authenticated services the chart
+  never told which region to sign for — AlertEngine, DataCore and the control plane all
+  set it. IRSA supplies a role and a token file, not a region, so the SDK's default
+  chain resolved nothing and the pool failed to initialise unless the region happened to
+  be present in node-level configuration. Emitted from `global.postgresql.awsRegion`,
+  overridable per chart via `<chart>.database.awsRegion`, and only when `iamAuth` is on.
+
+### Fixed
+
+- **Hybrid Redis TLS never reached AgentGateway.** TrustGate reads `REDIS_TLS_ENABLED`
+  while TrustGuard reads `REDIS_TLS`. The shared `redis-secrets` stores the canonical
+  `REDIS_TLS` and is injected wholesale, so setting `global.redis.tls` secured
+  TrustGuard and left both AgentGateway data planes connecting in plaintext to a
+  TLS-only Redis, with nothing in the manifest to show it. The flag is now renamed at
+  the AgentGateway consumption sites, the same way Postgres variables are. Emitted only
+  when `global.redis.tls` is set, so a subchart-level `redis.tls` still wins where the
+  global is unset.
+
+- **A boolean `global.redis.tls` aborted the render.** The value reached `b64enc`
+  unconverted, failing with `wrong type for value; expected string; got bool`, so the
+  setting only ever worked when quoted. It is now converted explicitly.
+
+- **`configSync.grpcTls.autoGenerate: false` was silently ignored.** The condition read
+  the value through sprig's `default`, which treats boolean `false` as empty and so
+  resolved an explicit `false` back to `true`. Both gateway charts now resolve it with
+  `hasKey`. Turning generation off without supplying an `existingSecret` produces a
+  control plane that cannot start, so the chart also rejects that combination at render
+  time rather than at rollout.
+
 ## [v2.4.1] — 2026-07-30
 
 ### Changed
@@ -55,6 +113,37 @@ and are removed on the next upgrade that rewrites the Secret.
 
 ### Documentation
 
+- **Stopped describing Firewall as optional — it is not.** Firewall renders
+  whenever TrustGuard does and cannot be switched off: rendering
+  `values-trustguard.yaml.example` with `firewall.enabled`,
+  `firewall.firewall.enabled`, and `trustguard.firewall.enabled` all set to
+  `false` still produces the gateway and all five workers, byte-identical to the
+  default. Since Firewall's CPU workers are the largest memory consumer in the
+  data path, an operator who trusted those flags to trim a deployment would have
+  under-provisioned. The chart READMEs and the docs-site Firewall, External,
+  feature-flags, overview, and secrets pages now state the dependency and mark
+  the three flags as no-ops. AlertEngine, which *is* genuinely optional
+  (`alertengine.enabled: false` removes it), is called out separately. Two
+  unrelated errors on the Firewall page were corrected in passing: `toolguard`
+  was listed as a worker when it is a deprecated gateway path forwarding to
+  `indirect-prompt-injections`, and the image pin was quoted as `v2.14.0` when
+  the chart ships `v2.16.0` — the page now refers to the chart-pinned tag rather
+  than restating a version that drifts.
+- **Removed Watchdog and TrustLens from operator-facing documentation.** Both are
+  still under development, so the READMEs, `SECRETS.md`, `VALUES_SCENARIOS.md`,
+  `docs/architecture.md`, and `docs/observability.md` no longer present them as
+  deployable options. **`values-watchdog.yaml.example` and
+  `values-self-monitoring.yaml.example` are deleted**, and the `watchdog:` block
+  is dropped from `values-observability-self-hosted.yaml.example` — pipelines
+  passing the removed files with `-f` must drop them. The subcharts themselves
+  are untouched and still default to `enabled: false`; past release entries in
+  this changelog are left as written.
+- **`README-EXTERNAL.md` now lists the external component set in full** instead
+  of describing it as "everything hybrid runs, plus". The list is grouped by
+  TrustGate, TrustGuard and Firewall, control plane, analytics, and datastores,
+  and matches a render of `values-external.yaml.example` with every
+  `global.products` flag off — external ignores those flags, so the set is
+  fixed.
 - **Documented both image-pull paths, and the two places mirroring silently
   breaks.** Operators receive a registry key from NeuralTrust and can either pull
   directly or mirror into their own registry, but the docs only described
