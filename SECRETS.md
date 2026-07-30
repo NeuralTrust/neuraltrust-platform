@@ -111,9 +111,57 @@ after first login when possible. Empty defaults leave the feature off.
 | `control-plane-secrets` | `FIREWALL_API_URL` | Auto-populated | Firewall base URL (FQDN when firewall enabled, data-plane fallback otherwise) |
 | `control-plane-secrets` | `MODEL_SCANNER_SECRET` | No | Model scanner service secret |
 | `control-plane-secrets` | `OPENAI_API_KEY` | No | OpenAI API key |
-| `control-plane-secrets` | `resend-api-key` | No | Resend API key |
-| `control-plane-secrets` | `resend-alert-sender` | No | Alert notification email |
-| `control-plane-secrets` | `resend-invite-sender` | No | Invitation email |
+| `control-plane-secrets` | `ONPREM_SUPERADMIN_EMAIL` | No | Bootstrap admin address; only when `global.superadmin.email`/`password` are set inline |
+| `control-plane-secrets` | `ONPREM_SUPERADMIN_PASSWORD` | No | Bootstrap admin password; referenced via `secretKeyRef`, never a plain env value |
+| `control-plane-secrets` | `RESEND_API_KEY` | No | Resend API key (`global.email.resend.apiKey`) |
+| `control-plane-secrets` | `SMTP_PASSWORD` | No | SMTP password; injected as `SMTP_PASS`, the name the app reads |
+| `control-plane-secrets` | `SES_ACCESS_KEY_ID` | No | Static SES key; omit to use the pod IAM role |
+| `control-plane-secrets` | `SES_SECRET_ACCESS_KEY` | No | Static SES secret; omit to use the pod IAM role |
+| `control-plane-secrets` | `resend-api-key` | No | Legacy alias of `RESEND_API_KEY`, kept in sync |
+| `control-plane-secrets` | `resend-alert-sender` | No | Legacy "from" address; superseded by `global.email.from` |
+| `control-plane-secrets` | `resend-invite-sender` | No | Invitation email (unused by the app) |
+| `control-plane-secrets` | `resend-reply-to` | No | Legacy Reply-To; superseded by `global.email.replyTo` |
+
+### Outbound email
+
+`control-plane-app` is the only sender. It builds one transport, chosen by
+`global.email.provider` (`resend` | `ses` | `smtp`), and a misconfigured provider
+fails at render time rather than silently dropping mail.
+
+| Provider | Required | Optional |
+|---|---|---|
+| `resend` | `resend.apiKey` | — |
+| `ses` | `ses.region` | `ses.accessKeyId` + `ses.secretAccessKey` (omit both for IRSA) |
+| `smtp` | `smtp.host`, `smtp.port` | `smtp.secure`, `smtp.user` + `smtp.password` |
+
+Two things to know:
+
+- **Addresses are not secrets.** `global.email.from` and `replyTo` ship in every
+  message header, so they render as plain Deployment env (`SENDER` /
+  `AUTH_EMAIL_FROM`, `REPLY_TO_EMAIL` / `AUTH_EMAIL_REPLY_TO`). Only credentials
+  go through a Secret. When neither is set in values the chart falls back to the
+  legacy `resend-alert-sender` / `resend-reply-to` keys, so installs that
+  pre-created `control-plane-secrets` keep working.
+- **Static SES keys are cluster-wide.** Setting `ses.accessKeyId` injects
+  `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, which override the AWS SDK
+  credential chain for *every* AWS call in the pod — including Postgres IAM auth.
+  Prefer IRSA and leave both empty.
+
+`RESEND_API_KEY` is emitted for every provider because the legacy password-reset
+and invite senders are Resend-only and read it directly, independent of
+`AUTH_EMAIL_PROVIDER`.
+
+Point `global.email.existingSecret.name` at your own Secret to keep credentials
+out of Helm release history; the `*Key` fields there map your key names onto the
+chart's. Inline credentials and `existingSecret` are mutually exclusive.
+
+**`extraEnv` wins.** Before `global.email` existed, the only way to select a
+provider was `controlPlane.components.app.extraEnv`. The chart skips any email
+env name already present there, so those overlays upgrade unchanged. This matters
+beyond precedence: two entries with the same `name` make the API server reject
+the Deployment patch (`the order in patch list ... doesn't match
+$setElementOrder`), which fails the whole release. Migrate to `global.email.*`
+when convenient — it is validated at render time, `extraEnv` is not.
 
 ### PostgreSQL
 
