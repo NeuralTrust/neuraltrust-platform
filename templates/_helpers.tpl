@@ -1854,6 +1854,79 @@ true
 {{- end }}
 
 {{/*
+The operator's intent for MCP OAuth, normalised to "on", "off" or "auto".
+
+Exists because `enabled` is read in two places — this helper family and
+validate-values — and a raw `kindIs "bool"` test disagrees with Go truthiness for
+a string. That is not exotic: a Flux HelmRelease sourcing values from a ConfigMap
+yields every value as a string, as does Helmfile templating, so `enabled: "false"`
+would otherwise turn the feature ON in external and get a hybrid install rejected
+for disabling it.
+
+Anything that is neither truthy nor falsy fails loudly rather than being guessed at.
+*/}}
+{{- define "neuraltrust-platform.mcpOAuth.intent" -}}
+{{- $mcp := default dict (default dict .Values.global).mcpOAuth -}}
+{{- $raw := $mcp.enabled -}}
+{{- if kindIs "invalid" $raw -}}
+auto
+{{- else if kindIs "bool" $raw -}}
+{{- if $raw }}on{{ else }}off{{ end -}}
+{{- else -}}
+{{- $v := toString $raw | trim | lower -}}
+{{- if eq $v "" -}}
+auto
+{{- else if has $v (list "true" "yes" "on" "1") -}}
+on
+{{- else if has $v (list "false" "no" "off" "0") -}}
+off
+{{- else -}}
+{{- fail (printf "global.mcpOAuth.enabled must be true, false, or unset for automatic (got %q). Leave it unset to have MCP OAuth follow the deployment mode." $raw) -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Whether the chart can actually deliver `MCP_OAUTH_CLIENT_SECRET` to both sides.
+
+The app and TrustGate must hold the same client secret, and both read it from the
+Secret `secretRef` resolves to. When the shared Secret is out of play — through
+platformSecret.enabled=false, preserveExistingSecrets, or autoGenerateSecrets=false
+— those refs fall back to legacy per-service Secrets that this chart never writes
+this key into. The refs are `optional`, so the env is simply absent and the login
+fails at request time with nothing pointing at the cause.
+
+An operator-owned `existingSecret` is a separate case: it may well carry the key,
+but the chart cannot see inside it, so it does not auto-enable on that basis.
+*/}}
+{{- define "neuraltrust-platform.mcpOAuth.clientSecretDeliverable" -}}
+{{- $shared := default dict (default dict .Values.global).platformSecret -}}
+{{- $existing := default dict $shared.existingSecret -}}
+{{- if and (include "neuraltrust-platform.platformSecret.name" .) (not $existing.name) -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/*
+Callback origins the app will accept, shared by the app deployment and by
+validate-values so the two cannot disagree about whether one exists.
+
+Empty is dangerous rather than merely unset: the app treats an empty allowlist as
+"any https origin", which turns the authorization-code redirect into an open
+redirect. Callers must refuse to enable the feature without one.
+*/}}
+{{- define "neuraltrust-platform.mcpOAuth.allowedRedirectHosts" -}}
+{{- $mcp := default dict (default dict .Values.global).mcpOAuth -}}
+{{- $hosts := $mcp.allowedRedirectHosts | default "" -}}
+{{- if $hosts -}}
+{{- $hosts -}}
+{{- else -}}
+{{- $domain := include "neuraltrust-platform.domain" . -}}
+{{- if $domain }}{{- printf "https://*.mcp.%s" $domain -}}{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Name of the hook-owned Secret holding the generated signing key. Deliberately
 separate from `platform-secrets`: the generator runs as a pre-install hook, before
 Helm has created any manifest, so writing into the chart-owned Secret would
@@ -1879,7 +1952,11 @@ key will exist.
 {{- $mcp := default dict (default dict .Values.global).mcpOAuth -}}
 {{- $wanted := true -}}
 {{- if kindIs "bool" $mcp.generateSigningKey -}}{{- $wanted = $mcp.generateSigningKey -}}{{- end -}}
-{{- if and (kindIs "bool" $mcp.enabled) (not $mcp.enabled) -}}{{- $wanted = false -}}{{- end -}}
+{{- if eq (include "neuraltrust-platform.mcpOAuth.intent" .) "off" -}}{{- $wanted = false -}}{{- end -}}
+{{- /* No point minting a signing key when the client secret cannot reach both
+       sides: the login would fail anyway, and the Job would leave a credential
+       nobody reads. */ -}}
+{{- if ne (include "neuraltrust-platform.mcpOAuth.clientSecretDeliverable" .) "true" -}}{{- $wanted = false -}}{{- end -}}
 {{- if and $wanted
       (eq (include "neuraltrust-platform.isExternal" .) "true")
       (ne (include "neuraltrust-platform.mcpOAuth.signingKeyPresent" .) "true") -}}
@@ -1921,10 +1998,20 @@ hybrid install does not deploy. An explicit `true` there is rejected by
 validate-values with a message about the mode, so this helper stays silent.
 */}}
 {{- define "neuraltrust-platform.mcpOAuth.enabled" -}}
-{{- $mcp := default dict (default dict .Values.global).mcpOAuth -}}
-{{- $explicit := kindIs "bool" $mcp.enabled -}}
-{{- if and $explicit (not $mcp.enabled) -}}
+{{- $intent := include "neuraltrust-platform.mcpOAuth.intent" . -}}
+{{- $explicit := eq $intent "on" -}}
+{{- if eq $intent "off" -}}
 {{- else if ne (include "neuraltrust-platform.isExternal" .) "true" -}}
+{{- /* Both sides must read one client secret from a Secret this chart writes. */ -}}
+{{- else if ne (include "neuraltrust-platform.mcpOAuth.clientSecretDeliverable" .) "true" -}}
+{{- if $explicit -}}
+{{- fail "global.mcpOAuth.enabled=true cannot be honoured while the shared platform Secret is out of play: platformSecret.enabled=false, preserveExistingSecrets, autoGenerateSecrets=false, or an operator-owned platformSecret.existingSecret all leave MCP_OAUTH_CLIENT_SECRET pointing at a legacy Secret this chart never writes it into, so the app and TrustGate would never agree on a client secret and every login would fail. Enable the shared Secret, or add MCP_OAUTH_CLIENT_SECRET and MCP_OAUTH_SIGNING_KEY to your own Secret and wire them through extraEnv." -}}
+{{- end -}}
+{{- else if not (include "neuraltrust-platform.mcpOAuth.allowedRedirectHosts" .) -}}
+{{- /* An empty allowlist means the app accepts a callback on any https origin. */ -}}
+{{- if $explicit -}}
+{{- fail "global.mcpOAuth.enabled=true needs a callback allowlist: with none the app accepts an OAuth redirect to ANY https origin, which hands the authorization code to whoever asks. Set global.mcpOAuth.allowedRedirectHosts (e.g. \"https://*.mcp.example.com\"), or set global.domain so it can be derived." -}}
+{{- end -}}
 {{- else if eq (include "neuraltrust-platform.mcpOAuth.signingKeyPresent" .) "true" -}}
 true
 {{- else if eq (include "neuraltrust-platform.mcpOAuth.generateSigningKey" .) "true" -}}

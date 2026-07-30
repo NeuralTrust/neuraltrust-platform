@@ -143,11 +143,19 @@ global:
     # not served from app.<global.domain>, since the client resolves JWKS through
     # this URL and a wrong host fails only at request time.
     issuer: ""
-    # Audience for issued access tokens.
+    # Audience TrustGate validates the `aud` claim against. This default matches
+    # what the app mints, which is a compiled-in constant it does NOT read from the
+    # environment — so changing this configures only one side and TrustGate will
+    # reject every token the app issues. Leave it alone unless the app gains a
+    # matching setting (AUT-391).
     audience: "neuraltrust-mcp"
+    # Comma-separated scopes TrustGate requires on the token. Client-side only, as
+    # with audience above. Empty ⇒ none required.
+    scopes: ""
     # Comma-separated callback origins, e.g. "https://*.mcp.example.com".
     # Empty ⇒ https://*.mcp.<global.domain>. Do not widen this to bare "https://":
-    # an empty allowlist makes the app accept a callback on ANY https origin.
+    # an empty allowlist makes the app accept a callback on ANY https origin, so the
+    # chart refuses to enable MCP OAuth when neither this nor global.domain is set.
     allowedRedirectHosts: ""
     # Supplying your own RS256 signing key is optional — leave it to
     # generateSigningKey above unless you need to control the material.

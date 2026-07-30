@@ -1559,9 +1559,18 @@ green "ok  - mcpOAuth on: app and TrustGate share one client secret and one issu
 # Empty allowlist means the app accepts a callback on any https origin.
 assert_contains "$out12mcp" 'name: MCP_OAUTH_ALLOWED_REDIRECT_HOSTS' \
   "mcpOAuth on: the redirect-host allowlist is always set"
-assert_render_fails "mcpOAuth without a resolvable issuer fails loudly" \
+# With no domain there is neither a derivable issuer nor a derivable allowlist. Auto
+# resolves to off, which is the point of the three-state gate; an explicit enable
+# must still refuse rather than wire a login that cannot complete.
+out12nodomain="$TMP/scenario-mcp-oauth-no-domain.yaml"
+render_default "$out12nodomain" --set global.deploymentMode=external --set global.domain= \
+  --set global.platformSecret.values.MCP_OAUTH_SIGNING_KEY="$mcpkey"
+assert_not_contains "$out12nodomain" 'MCP_DEFAULT_IDP_|name: MCP_OAUTH_CLIENT_ID' \
+  "no domain: auto leaves MCP OAuth off even with a signing key present"
+assert_render_fails "mcpOAuth without a resolvable issuer fails loudly when required" \
   --set global.deploymentMode=external \
   --set global.platformSecret.values.MCP_OAUTH_SIGNING_KEY="$mcpkey" \
+  --set global.mcpOAuth.enabled=true \
   --set global.domain=
 # Hybrid deploys no control-plane app, so there is no authorization server to
 # point at. Refuse rather than hand TrustGate an issuer nobody serves.
@@ -1629,6 +1638,87 @@ ruby -ryaml -e '
   abort "the Role touches something other than secrets" unless role["rules"].all? { |r| r["resources"] == ["secrets"] }
 ' "$out12ext" || { red "FAIL: the signing key generator is not correctly scoped"; exit 1; }
 green "ok  - the generator reuses the app image and can write only its own Secret"
+
+# `enabled` is read by this helper family and by validate-values. A raw bool test
+# and Go truthiness disagree for a string, and a Flux HelmRelease sourcing values
+# from a ConfigMap makes every value a string — so a string-typed flag must mean the
+# same thing everywhere, or disabling the feature turns it on.
+blue "==> Scenario 12i: the gate reads the same way however enabled is typed"
+out12strfalse="$TMP/scenario-mcp-oauth-string-false.yaml"
+render_default "$out12strfalse" --set global.deploymentMode=external \
+  --set-string global.mcpOAuth.enabled=false
+assert_not_contains "$out12strfalse" 'MCP_DEFAULT_IDP_|name: MCP_OAUTH_CLIENT_ID' \
+  'enabled="false" as a string disables the feature, as a bool would'
+assert_not_contains "$out12strfalse" 'component: mcp-signing-key' \
+  'enabled="false" as a string also stands the generator down'
+# The same string in hybrid must not be read as intent to enable, which would
+# reject the install for turning the feature off.
+out12strhyb="$TMP/scenario-mcp-oauth-string-false-hybrid.yaml"
+render_default "$out12strhyb" --set global.deploymentMode=hybrid \
+  --set-string global.mcpOAuth.enabled=false
+assert_contains "$out12strhyb" '^  name: platform-secrets$' \
+  'hybrid with enabled="false" as a string still renders'
+# An explicit string true must be honoured as intent, so it still fails loudly.
+assert_render_fails 'enabled="true" as a string is honoured as required' \
+  --set global.deploymentMode=external \
+  --set global.mcpOAuth.generateSigningKey=false \
+  --set-string global.mcpOAuth.enabled=true
+# Anything else is a typo, not a third state to guess at.
+assert_render_fails 'a non-boolean enabled is rejected rather than guessed at' \
+  --set global.deploymentMode=external \
+  --set-string global.mcpOAuth.enabled=maybe
+
+# Both sides read one client secret from whichever Secret secretRef resolves to.
+# When the shared Secret is out of play those refs land on legacy Secrets the chart
+# never writes this key into, and since they are optional the env is simply absent:
+# the login fails at request time with nothing pointing at the cause.
+blue "==> Scenario 12j: MCP OAuth needs a Secret that actually carries the client secret"
+for flag in global.platformSecret.enabled=false global.preserveExistingSecrets=true \
+            global.autoGenerateSecrets=false global.platformSecret.existingSecret.name=my-secret; do
+  out12nodel="$TMP/scenario-mcp-oauth-undeliverable-${flag%%=*}.yaml"
+  render_default "$out12nodel" --set global.deploymentMode=external --set "$flag"
+  assert_not_contains "$out12nodel" 'MCP_DEFAULT_IDP_|name: MCP_OAUTH_CLIENT_ID' \
+    "${flag}: MCP OAuth stays off rather than half-wired"
+  assert_not_contains "$out12nodel" 'component: mcp-signing-key' \
+    "${flag}: no signing key is minted for a login that cannot complete"
+  assert_render_fails "${flag}: an explicit enable is refused with guidance" \
+    --set global.deploymentMode=external --set "$flag" \
+    --set global.mcpOAuth.enabled=true
+done
+
+# An empty allowlist is not merely unset: the app then accepts an OAuth callback on
+# ANY https origin, handing the authorization code to whoever asks. It was possible
+# to reach that state with an explicit issuer and no domain.
+blue "==> Scenario 12k: MCP OAuth refuses to run without a callback allowlist"
+out12noallow="$TMP/scenario-mcp-oauth-no-allowlist.yaml"
+render_default "$out12noallow" --set global.deploymentMode=external --set global.domain= \
+  --set global.mcpOAuth.issuer=https://console.example.com/api/mcp/oauth
+assert_not_contains "$out12noallow" 'MCP_DEFAULT_IDP_|name: MCP_OAUTH_CLIENT_ID' \
+  "an issuer without a derivable allowlist leaves MCP OAuth off"
+assert_render_fails "an explicit enable without an allowlist is refused" \
+  --set global.deploymentMode=external --set global.domain= \
+  --set global.mcpOAuth.issuer=https://console.example.com/api/mcp/oauth \
+  --set global.mcpOAuth.enabled=true
+# Supplying one explicitly is the documented way out, with no domain at all.
+out12allow="$TMP/scenario-mcp-oauth-explicit-allowlist.yaml"
+render_default "$out12allow" --set global.deploymentMode=external --set global.domain= \
+  --set global.mcpOAuth.issuer=https://console.example.com/api/mcp/oauth \
+  --set 'global.mcpOAuth.allowedRedirectHosts=https://*.mcp.example.com'
+assert_contains "$out12allow" 'name: MCP_OAUTH_ALLOWED_REDIRECT_HOSTS' \
+  "an explicit allowlist enables the feature without global.domain"
+
+# The issuer is derived as app.<domain> because a subchart cannot read a sibling's
+# values. An install serving the app elsewhere would advertise an issuer nobody
+# serves, and default-on means the operator never opts into finding out.
+assert_render_fails "a custom app host without an explicit issuer is refused" \
+  --set global.deploymentMode=external \
+  --set 'control-plane-app.controlPlane.components.app.host=console.acme.test'
+out12host="$TMP/scenario-mcp-oauth-custom-host.yaml"
+render_default "$out12host" --set global.deploymentMode=external \
+  --set 'control-plane-app.controlPlane.components.app.host=console.acme.test' \
+  --set global.mcpOAuth.issuer=https://console.acme.test/api/mcp/oauth
+assert_contains "$out12host" 'https://console.acme.test/api/mcp/oauth' \
+  "a custom app host works once the issuer is explicit"
 
 # The generator's premise is that it costs no new image: if the app can be pulled,
 # so can the Job. That must survive a mirrored registry and operator pull secrets,

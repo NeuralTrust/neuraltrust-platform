@@ -33,8 +33,27 @@ no Kubernetes resource when validation succeeds.
        platform instead. Enabling it in hybrid would point TrustGate at an issuer
        nobody serves in the cluster and generate a client secret the hosted side
        has never seen, so refuse instead of wiring a login that cannot complete. */ -}}
-{{- if and (default dict $global.mcpOAuth).enabled (ne $mode "external") -}}
+{{- /* Read through the intent helper, not the raw value: a string-typed `enabled`
+       (what Flux valuesFrom and Helmfile produce) is truthy either way, so a plain
+       truthiness test here would reject a hybrid install for turning the feature
+       OFF while the gate helper read the same value as disabled. */ -}}
+{{- if and (eq (include "neuraltrust-platform.mcpOAuth.intent" .) "on") (ne $mode "external") -}}
   {{- fail "global.mcpOAuth.enabled requires global.deploymentMode=external: the MCP OAuth authorization server is the control-plane app, which a hybrid install does not deploy." -}}
+{{- end -}}
+
+{{- /* The issuer is derived from global.domain as app.<domain>, because a subchart
+       cannot read a sibling's values and both sides must agree on one string. An
+       install that serves the app from somewhere else therefore advertises an
+       issuer nobody serves, and since the feature is on by default the operator
+       never opts into discovering that. Fail with the one-line fix rather than let
+       JWKS fetches break at request time. */ -}}
+{{- if eq (include "neuraltrust-platform.mcpOAuth.enabled" .) "true" -}}
+  {{- $appValues := default dict (index .Values "control-plane-app") -}}
+  {{- $appComponent := default dict (default dict (default dict $appValues.controlPlane).components).app -}}
+  {{- $customHost := or ($appComponent.host | default "") (and $appComponent.hostPrefix (ne $appComponent.hostPrefix "app")) -}}
+  {{- if and $customHost (not (default dict $global.mcpOAuth).issuer) -}}
+    {{- fail "MCP OAuth derives its issuer from global.domain as app.<domain>, but this install serves the control-plane app from a different host, so the issuer would point somewhere that serves no JWKS and every MCP login would fail. Set global.mcpOAuth.issuer to the app's real public URL plus /api/mcp/oauth, or set global.mcpOAuth.enabled=false." -}}
+  {{- end -}}
 {{- end -}}
 
 {{- $trustlens := default dict .Values.trustlens -}}

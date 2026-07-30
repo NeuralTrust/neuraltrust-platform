@@ -456,6 +456,13 @@ pinning `global.platformSecret.values.AUTH_SECRET_KEY` once the existing
 ciphertext no longer matters (SSO client secrets and SMTP credentials have to be
 re-entered afterwards).
 
+Never `kubectl apply` the output of `helm template` to an existing release. Helm
+renders every template as an *install*, so the output carries a freshly generated
+`AUTH_SECRET_KEY` (and new values for the other generated keys). Applying it rotates
+the at-rest encryption key and makes anything already encrypted unreadable. Use
+`helm upgrade`, which resolves these keys from the live Secret. For the same reason
+a `helm template`-based diff shows spurious credential changes.
+
 Credentials that only one service reads stay in their own Secret and are **not**
 here — third-party API keys (`OPENAI_API_KEY`), the TrustGuard client credential
 pair, and every per-service database password. Copying those in would create a
@@ -512,7 +519,26 @@ admin and proxy do not broker logins.
 
 `allowedRedirectHosts` matters: left empty the app accepts an OAuth callback on
 **any** https origin. The chart defaults it to `https://*.mcp.<global.domain>`,
-the gateway's own MCP wildcard. Widen it only to origins you control.
+the gateway's own MCP wildcard, and **refuses to enable MCP OAuth** when neither
+that nor `global.domain` is set, rather than shipping an open redirect. Widen it
+only to origins you control.
+
+Two knobs configure only TrustGate's side of the exchange, so leave them at their
+defaults unless you have checked the app agrees. `audience` is what TrustGate
+validates the `aud` claim against; the app mints it from a compiled-in constant it
+does not read from the environment, so the matching defaults are what make it work
+and changing one side makes TrustGate reject every token. `scopes` is required by
+TrustGate but never requested by the app.
+
+`enabled` accepts `true`/`false` as booleans or as strings, since a Flux
+`HelmRelease` sourcing values from a ConfigMap makes every value a string. Anything
+that is neither is rejected rather than guessed at.
+
+MCP OAuth also needs the shared platform Secret to be in play, because both sides
+read one client secret from it. With `platformSecret.enabled: false`,
+`preserveExistingSecrets`, `autoGenerateSecrets: false`, or an operator-owned
+`platformSecret.existingSecret`, the chart cannot deliver that key and leaves the
+feature off — an explicit `enabled: true` there fails with the reason.
 
 #### The signing key
 
