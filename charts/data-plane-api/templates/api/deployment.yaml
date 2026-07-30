@@ -329,8 +329,12 @@ spec:
           - name: DATA_PLANE_JWT_SECRET
             valueFrom:
               secretKeyRef:
-                name: {{ if and .Values.dataPlane .Values.dataPlane.secrets .Values.dataPlane.secrets.dataPlaneJWTSecretName }}{{ .Values.dataPlane.secrets.dataPlaneJWTSecretName }}{{ else }}data-plane-jwt-secret{{ end }}
+                {{- if and .Values.dataPlane .Values.dataPlane.secrets .Values.dataPlane.secrets.dataPlaneJWTSecretName }}
+                name: {{ .Values.dataPlane.secrets.dataPlaneJWTSecretName }}
                 key: DATA_PLANE_JWT_SECRET
+                {{- else }}
+                {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "DATA_PLANE_JWT_SECRET") | nindent 16 }}
+                {{- end }}
           - name: OPENAI_API_KEY
             valueFrom:
               secretKeyRef:

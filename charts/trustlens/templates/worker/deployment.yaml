@@ -44,6 +44,9 @@ spec:
             name: trustlens-secrets
             optional: true
         env:
+        {{- /* Shared credentials come from platform-secrets; an explicit env
+               entry outranks the legacy copy still arriving via envFrom. */}}
+        {{- include "neuraltrust-platform.platformSecretEnv" (dict "ctx" . "keys" (dict "JWT_SECRET" "TRUSTLENS_JWT_SECRET" "ENCRYPTION_KEYSET" "ENCRYPTION_KEYSET") "skip" .Values.dataPlane.extraEnv) | nindent 8 }}
         {{- with .Values.dataPlane.extraEnv }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
