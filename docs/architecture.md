@@ -213,7 +213,6 @@ it. External ignores the flags and deploys everything.
 | ClickStack OTel Collector | no | yes | OTLP to ClickHouse |
 | DataCore | no | yes | Residency query API (ClickHouse + Postgres metadata) |
 | AlertEngine | no | yes | Alert evaluation and SIEM/integration forwarding |
-| TrustLens | opt-in | opt-in | Analytics/inventory |
 | Firewall | with TrustGuard | with TrustGuard | Prompt and response safety |
 
 ## Cluster sizing
@@ -300,8 +299,8 @@ also owns its own PostgreSQL database. In external mode the data-plane API shim
 stays on ClickHouse; ClickStack, DataCore, AlertEngine, and the data-plane API
 shim share the selected ClickHouse credentials through existing Kubernetes
 Secrets. The per-service `agentgateway.database` / `trustguard.database` /
-`trustlens.database` / `alertengine.database` overlays remain the source of truth
-for external mode — `global.postgresql.*` is ignored there.
+`alertengine.database` overlays remain the source of truth for external mode —
+`global.postgresql.*` is ignored there.
 
 The data-plane API shim also uses Redis for its evaluation-progress cache
 (`EVALUATION_PROGRESS_BACKEND`), pointed at the same Redis AgentGateway and

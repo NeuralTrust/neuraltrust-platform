@@ -118,21 +118,55 @@ bootstrap admin credentials from step 2 and rotate the password.
 
 ## What external deploys
 
-Everything hybrid runs, plus:
+External runs the whole platform in your cluster — both control planes and the
+data path. With the defaults in `values-external.yaml.example`, the release
+contains:
 
-| Component | Role |
+**TrustGate** (values key `agentgateway:`; Kubernetes names stay `agentgateway-*`)
+
+| Workload | Role |
 |---|---|
-| `agentgateway-admin` | TrustGate control plane |
-| `trustguard-control-plane` | TrustGuard control plane |
+| `agentgateway-admin` | Control plane and admin API |
+| `agentgateway-proxy` | LLM gateway runtime |
+| `agentgateway-mcp` | MCP gateway runtime |
+
+**TrustGuard and Firewall**
+
+| Workload | Role |
+|---|---|
+| `trustguard-control-plane` | Policy and admin API |
+| `trustguard-data-plane` | `/v1/guard` evaluation runtime |
+| `firewall` | NeuralTrust Firewall model server, deployed with TrustGuard |
+| `prompt-jailbreak-worker`, `response-jailbreak-worker`, `prompt-moderation-worker`, `toxicity-worker`, `indirect-prompt-injections-worker` | Per-detector Firewall workers |
+
+**Platform control plane**
+
+| Workload | Role |
+|---|---|
 | `control-plane-api` | Platform API |
 | `control-plane-app` | Console web application; runs Prisma migrations and seed on start |
+| `data-plane-api` | Read and analytics API over ClickHouse |
+
+**Analytics and alerting**
+
+| Workload | Role |
+|---|---|
 | `clickstack-collector` (values key `clickstack-otel-collector:`) | Receives product OTLP on 4317/4318, writes to ClickHouse |
 | `clickhouse` | Analytics store (StatefulSet, external mode only) |
 | `datacore` | Residency and analytics queries over landed telemetry |
 | `alertengine-api` / `alertengine-worker` | Rule evaluation, alert state, SIEM and integration forwarding |
 
+**Datastores and setup** — all in-cluster by default, see [Datastores](#datastores)
+
+| Workload | Role |
+|---|---|
+| `control-plane-postgresql` | PostgreSQL for every service that needs one |
+| `redis` | Shared cache and queue |
+| `neuraltrust-platform-mcp-signing-key` (Job) | Generates the MCP signing key on install |
+
 Absent in external: `dataagent`, `dataagent-trustguard`, and the
-`clickstack-egress-collector` sidecar.
+`clickstack-egress-collector` sidecar. External never enrols a DataAgent, so
+`global.products` is ignored — every component above renders regardless.
 
 The analytics path is:
 
@@ -241,12 +275,14 @@ prerequisites, and Security Context Constraints.
 
 ## Optional components
 
-- `firewall`: always on in external (CPU workers by default; GPU via
-  [`values-dataplane-gpu.yaml.example`](./values-dataplane-gpu.yaml.example))
-- `trustlens`: opt-in analytics/inventory service; requires `trustlens.image.tag`
-- `watchdog`: dry-run-first self-monitoring and self-healing
 - umbrella OTel Collector: portable cluster observability, separate from
   ClickStack
+- AlertEngine: set `alertengine.enabled: false` to omit rule evaluation and SIEM
+  forwarding
+
+**Firewall is not optional** in external — it always deploys with TrustGuard and
+cannot be switched off. The only choice is CPU workers (default) or GPU via
+[`values-dataplane-gpu.yaml.example`](./values-dataplane-gpu.yaml.example).
 
 ## Validate before rollout
 

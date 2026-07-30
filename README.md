@@ -288,14 +288,18 @@ per cloud in the public docs:
 [OpenShift](https://docs.neuraltrust.ai/neuraltrust/deployment/openshift/overview) ·
 [vanilla Kubernetes](https://docs.neuraltrust.ai/neuraltrust/deployment/kubernetes/overview).
 
-## Supported optional components
+## Optional components
 
-- `firewall`: prompt and response safety, with CPU or GPU workers
-- `trustlens`: analytics/inventory service (opt-in; requires `trustlens.image.tag`)
-- `watchdog`: dry-run-first self-monitoring and self-healing (stable Kubernetes
-  name `neuraltrust-watchdog`)
 - umbrella OTel Collector: portable cluster observability
 - AlertEngine: external-mode alert evaluation and SIEM/integration forwarding
+  (`alertengine.enabled: false` to omit it)
+
+**Firewall is not optional.** It deploys with TrustGuard in both modes and
+cannot be switched off — `firewall.enabled`, `firewall.firewall.enabled`, and
+`trustguard.firewall.enabled` are no-ops. Its CPU workers are the largest memory
+consumer in the data path, so size for them whenever TrustGuard is on. Choose
+CPU or GPU workers via
+[`values-dataplane-gpu.yaml.example`](./values-dataplane-gpu.yaml.example).
 
 ## Values examples
 
@@ -312,8 +316,6 @@ per cloud in the public docs:
 | `values-external.yaml.example` | external | Minimal self-hosted external |
 | `values-managed-datastores.yaml.example` | external | Managed PostgreSQL, Redis, and ClickHouse endpoints |
 | `values-observability-self-hosted.yaml.example` | both | Local-only observability, hosted export off |
-| `values-self-monitoring.yaml.example` | both | Curated watchdog checks, dry-run first |
-| `values-watchdog.yaml.example` | both | Detailed watchdog configuration |
 
 Scenario walkthroughs: [VALUES_SCENARIOS.md](./VALUES_SCENARIOS.md).
 

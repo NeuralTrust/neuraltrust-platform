@@ -23,22 +23,3 @@ global:
 
 alertengine:
   enabled: true
-
-watchdog:
-  enabled: true
-  actions:
-    dryRun: true
-  enabledCheckIds:
-    - clickhouse
-    - firewall-health
-    - pod-health
-    - otel-collector
-  monitoring:
-    scrapeAnnotations:
-      enabled: true
-    podMonitor:
-      enabled: true
-      additionalLabels:
-        release: "kube-prometheus-stack"
-    prometheusRule:
-      enabled: true
