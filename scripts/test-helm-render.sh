@@ -1442,6 +1442,343 @@ render_default "$out12map" --set global.deploymentMode=external \
 assert_platform_key "$out12map" absent MODEL_SCANNER_SECRET \
   "a map-shaped credential is ignored rather than aborting the render"
 
+# AUTH_SECRET_KEY encrypts SSO client secrets and SMTP credentials at rest. The
+# app has a committed default, so an install already running on that default has
+# ciphertext bound to it: generating a new key on upgrade would make those rows
+# undecryptable. Fresh install gets one, upgrade does not.
+blue "==> Scenario 12f: AUTH_SECRET_KEY is generated on install only"
+assert_platform_key "$out12ext" present AUTH_SECRET_KEY \
+  "external install: platform-secrets carries AUTH_SECRET_KEY"
+out12askup="$TMP/scenario-shared-secret-authsecretkey-upgrade.yaml"
+render_default "$out12askup" --set global.deploymentMode=external --is-upgrade
+assert_platform_key "$out12askup" absent AUTH_SECRET_KEY \
+  "external upgrade: AUTH_SECRET_KEY is not generated, so nothing already encrypted breaks"
+out12askpin="$TMP/scenario-shared-secret-authsecretkey-pinned.yaml"
+render_default "$out12askpin" --set global.deploymentMode=external --is-upgrade \
+  --set global.platformSecret.values.AUTH_SECRET_KEY=operator-adopted
+assert_platform_key "$out12askpin" present AUTH_SECRET_KEY \
+  "external upgrade: an operator can still adopt AUTH_SECRET_KEY deliberately"
+# It signs nothing — AUTH_SECRET does. Sharing one value would be key reuse.
+ruby -ryaml -e '
+  docs = YAML.load_stream(File.read(ARGV.fetch(0))).compact
+  d = docs.find { |x| x["kind"] == "Secret" && x.dig("metadata", "name") == "platform-secrets" }
+  data = d["data"] || {}
+  abort "AUTH_SECRET or AUTH_SECRET_KEY missing" unless data["AUTH_SECRET"] && data["AUTH_SECRET_KEY"]
+  abort "AUTH_SECRET_KEY reuses the session signing key" if data["AUTH_SECRET"] == data["AUTH_SECRET_KEY"]
+' "$out12ext" || { red "FAIL: AUTH_SECRET_KEY must not equal AUTH_SECRET"; exit 1; }
+green "ok  - external: AUTH_SECRET_KEY is a distinct key from AUTH_SECRET"
+
+# MCP OAuth is on by default in external. A signing key is always available because
+# the chart generates one through a pre-install hook when nothing else provides it —
+# Helm's own templating cannot, since it emits PKCS#1 while the app parses PKCS#8,
+# and without a stable key each replica signs with its own ephemeral one. The gate
+# stays three-state: unset means auto, true means required, false means never.
+blue "==> Scenario 12g: MCP OAuth follows the signing key, not intent alone"
+# The signing key is opaque to the chart; only the app parses it, so a placeholder
+# is enough to prove the gate and the wiring.
+mcpkey="pem-placeholder"
+# Nothing supplied: the generator covers the key, so the feature is simply on.
+assert_platform_key "$out12ext" present MCP_OAUTH_CLIENT_SECRET \
+  "external defaults: MCP OAuth is on with no operator action"
+# The generated key lives in its own hook-owned Secret, never in platform-secrets.
+assert_platform_key "$out12ext" absent MCP_OAUTH_SIGNING_KEY \
+  "external defaults: the generated key stays out of platform-secrets"
+assert_contains "$out12ext" 'name: "mcp-oauth-signing"' \
+  "external defaults: the app reads the generated signing key"
+# Default-on: external plus a key, and nobody had to set the flag.
+out12mcp="$TMP/scenario-mcp-oauth-on.yaml"
+render_default "$out12mcp" --set global.deploymentMode=external \
+  --set global.platformSecret.values.MCP_OAUTH_SIGNING_KEY="$mcpkey"
+assert_platform_key "$out12mcp" present MCP_OAUTH_CLIENT_SECRET \
+  "auto with a signing key: MCP OAuth switches on without global.mcpOAuth.enabled"
+assert_platform_key "$out12mcp" present MCP_OAUTH_SIGNING_KEY \
+  "auto with a signing key: the operator-supplied key is emitted"
+# Adopted verbatim, never regenerated: a chart-invented value would not parse.
+ruby -ryaml -rbase64 -e '
+  docs = YAML.load_stream(File.read(ARGV.fetch(0))).compact
+  s = docs.find { |d| d["kind"] == "Secret" && d.dig("metadata", "name") == "platform-secrets" }
+  abort "platform-secrets not rendered" if s.nil?
+  got = Base64.decode64(s.fetch("data").fetch("MCP_OAUTH_SIGNING_KEY"))
+  abort "signing key was not adopted verbatim: #{got.inspect}" unless got == ARGV.fetch(1)
+' "$out12mcp" "$mcpkey" || { red "FAIL: the signing key must be adopted, not generated"; exit 1; }
+green "ok  - the signing key is adopted verbatim, never generated"
+# An operator key makes the generator redundant; running it anyway would leave a
+# second key nobody reads.
+assert_not_contains "$out12mcp" 'component: mcp-signing-key' \
+  "an operator-supplied key stands the generator down"
+assert_contains "$out12mcp" 'name: "platform-secrets"' \
+  "an operator-supplied key is read from platform-secrets, not the generated one"
+# Intent without the material is a misconfiguration, not a silent no-op: half the
+# logins would fail JWKS verification across replicas. Only reachable by refusing
+# the generator, since otherwise the chart always has a key.
+assert_render_fails "mcpOAuth=true with no key and no generator fails loudly" \
+  --set global.deploymentMode=external \
+  --set global.mcpOAuth.generateSigningKey=false \
+  --set global.mcpOAuth.enabled=true
+# An explicit false still wins over an available key.
+out12mcpoff="$TMP/scenario-mcp-oauth-forced-off.yaml"
+render_default "$out12mcpoff" --set global.deploymentMode=external \
+  --set global.mcpOAuth.enabled=false \
+  --set global.platformSecret.values.MCP_OAUTH_SIGNING_KEY="$mcpkey"
+assert_not_contains "$out12mcpoff" 'MCP_DEFAULT_IDP_|name: MCP_OAUTH_CLIENT_ID' \
+  "explicit false with a key present: MCP OAuth stays off"
+assert_platform_key "$out12mcpoff" absent MCP_OAUTH_CLIENT_SECRET \
+  "explicit false with a key present: no client secret is generated"
+assert_shared_secret_wiring "$out12mcp" \
+  "mcpOAuth on: every ref still resolves to an emitted key"
+# One value, two env names, and one issuer both sides resolve identically: a
+# mismatch on either would surface only as a failed login at request time.
+ruby -ryaml -e '
+  docs = YAML.load_stream(File.read(ARGV.fetch(0))).compact
+  def env_of(docs, name)
+    d = docs.find { |x| x["kind"] == "Deployment" && x.dig("metadata", "name") == name }
+    abort "#{name} not rendered" if d.nil?
+    (d.dig("spec", "template", "spec", "containers") || []).flat_map { |c| c["env"] || [] }
+  end
+  app = env_of(docs, "control-plane-app")
+  mcp = env_of(docs, "agentgateway-mcp")
+  app_ref = app.find { |e| e["name"] == "MCP_OAUTH_CLIENT_SECRET" }
+  mcp_ref = mcp.find { |e| e["name"] == "MCP_DEFAULT_IDP_CLIENT_SECRET" }
+  abort "client secret not wired on both sides" if app_ref.nil? || mcp_ref.nil?
+  a = app_ref.dig("valueFrom", "secretKeyRef")
+  b = mcp_ref.dig("valueFrom", "secretKeyRef")
+  unless a && b && a["name"] == b["name"] && a["key"] == b["key"]
+    abort "client secret sources differ: #{a.inspect} vs #{b.inspect}"
+  end
+  app_iss = app.find { |e| e["name"] == "MCP_OAUTH_ISSUER" }&.fetch("value", nil)
+  mcp_iss = mcp.find { |e| e["name"] == "MCP_DEFAULT_IDP_ISSUER" }&.fetch("value", nil)
+  abort "issuer missing on one side: #{app_iss.inspect} vs #{mcp_iss.inspect}" if app_iss.nil? || mcp_iss.nil?
+  abort "issuers differ: #{app_iss} vs #{mcp_iss}" unless app_iss == mcp_iss
+  # Only the MCP plane brokers logins; the others must not advertise an IdP.
+  %w[agentgateway-admin agentgateway-proxy].each do |name|
+    leaked = env_of(docs, name).map { |e| e["name"] }.grep(/^MCP_DEFAULT_IDP/)
+    abort "#{name} carries #{leaked.join(", ")}" unless leaked.empty?
+  end
+' "$out12mcp" || { red "FAIL: MCP OAuth wiring is not consistent across services"; exit 1; }
+green "ok  - mcpOAuth on: app and TrustGate share one client secret and one issuer"
+# Empty allowlist means the app accepts a callback on any https origin.
+assert_contains "$out12mcp" 'name: MCP_OAUTH_ALLOWED_REDIRECT_HOSTS' \
+  "mcpOAuth on: the redirect-host allowlist is always set"
+# With no domain there is neither a derivable issuer nor a derivable allowlist. Auto
+# resolves to off, which is the point of the three-state gate; an explicit enable
+# must still refuse rather than wire a login that cannot complete.
+out12nodomain="$TMP/scenario-mcp-oauth-no-domain.yaml"
+render_default "$out12nodomain" --set global.deploymentMode=external --set global.domain= \
+  --set global.platformSecret.values.MCP_OAUTH_SIGNING_KEY="$mcpkey"
+assert_not_contains "$out12nodomain" 'MCP_DEFAULT_IDP_|name: MCP_OAUTH_CLIENT_ID' \
+  "no domain: auto leaves MCP OAuth off even with a signing key present"
+assert_render_fails "mcpOAuth without a resolvable issuer fails loudly when required" \
+  --set global.deploymentMode=external \
+  --set global.platformSecret.values.MCP_OAUTH_SIGNING_KEY="$mcpkey" \
+  --set global.mcpOAuth.enabled=true \
+  --set global.domain=
+# Hybrid deploys no control-plane app, so there is no authorization server to
+# point at. Refuse rather than hand TrustGate an issuer nobody serves.
+assert_render_fails "mcpOAuth is rejected in hybrid, where the app is the hosted platform" \
+  --set global.deploymentMode=hybrid \
+  --set global.mcpOAuth.enabled=true
+assert_platform_key "$out12hyb" absent MCP_OAUTH_CLIENT_SECRET \
+  "hybrid: platform-secrets omits the MCP OAuth client secret"
+assert_not_contains "$out12hyb" 'MCP_DEFAULT_IDP_' \
+  "hybrid: agentgateway carries no MCP default IdP env"
+# Auto must not fire in hybrid just because a key happens to be present: the
+# authorization server is the hosted platform, which never saw this client secret.
+out12hybkey="$TMP/scenario-mcp-oauth-hybrid-key.yaml"
+render_default "$out12hybkey" --set global.deploymentMode=hybrid \
+  --set global.platformSecret.values.MCP_OAUTH_SIGNING_KEY="$mcpkey"
+assert_not_contains "$out12hybkey" 'MCP_DEFAULT_IDP_|name: MCP_OAUTH_CLIENT_ID' \
+  "hybrid with a signing key present: auto still leaves MCP OAuth off"
+assert_platform_key "$out12hybkey" absent MCP_OAUTH_CLIENT_SECRET \
+  "hybrid with a signing key present: no client secret is generated"
+
+# The signing key generator exists so a fresh external install needs no operator
+# step. It must reuse an image the install already pulls: some operators mirror
+# their own registry or run under a vulnerability allowlist, where an extra image
+# is a real cost.
+blue "==> Scenario 12h: the signing key generator is self-contained"
+ruby -ryaml -e '
+  docs = YAML.load_stream(File.read(ARGV.fetch(0))).compact
+  hook = docs.select { |d| d.dig("metadata", "labels", "app.kubernetes.io/component") == "mcp-signing-key" }
+  kinds = hook.map { |d| d["kind"] }.sort
+  want = %w[Job Role RoleBinding ServiceAccount]
+  abort "hook bundle is #{kinds.inspect}, want #{want.inspect}" unless kinds == want
+  hook.each do |d|
+    ann = d.dig("metadata", "annotations") || {}
+    unless ann["helm.sh/hook"] == "pre-install,pre-upgrade"
+      abort "#{d["kind"]} is not a pre-install,pre-upgrade hook: #{ann["helm.sh/hook"].inspect}"
+    end
+  end
+  # RBAC must exist before the Job that uses it.
+  weight = ->(k) { hook.find { |d| d["kind"] == k }.dig("metadata", "annotations", "helm.sh/hook-weight").to_i }
+  abort "the Job is not ordered after its RBAC" unless weight.call("Role") < weight.call("Job")
+
+  job = hook.find { |d| d["kind"] == "Job" }
+  app = docs.find { |d| d["kind"] == "Deployment" && d.dig("metadata", "name") == "control-plane-app" }
+  app_image = app.dig("spec", "template", "spec", "containers").find { |c| c["name"] == "app" }.fetch("image")
+  job_image = job.dig("spec", "template", "spec", "containers", 0).fetch("image")
+  abort "the Job pulls #{job_image}, not the app image #{app_image}" unless job_image == app_image
+
+  # A generator that rewrote an existing key would invalidate live access tokens.
+  script = job.dig("spec", "template", "spec", "containers", 0, "command").last
+  abort "the generator does not check for an existing key" unless script.include?("already present")
+  abort "the generator does not produce PKCS#8" unless script.include?("pkcs8")
+
+  role = hook.find { |d| d["kind"] == "Role" }
+  named = role["rules"].select { |r| r["resourceNames"] }
+  abort "no rule is scoped to a single Secret" if named.empty?
+  named.each do |r|
+    abort "a name-scoped rule reaches beyond the generated Secret: #{r["resourceNames"].inspect}" \
+      unless r["resourceNames"] == ["mcp-oauth-signing"]
+  end
+  # `create` cannot be name-scoped in RBAC, but nothing else may be unscoped.
+  role["rules"].reject { |r| r["resourceNames"] }.each do |r|
+    abort "an unscoped rule grants #{r["verbs"].inspect}, only create is acceptable" unless r["verbs"] == ["create"]
+  end
+  abort "the Role reaches outside the core API group" unless role["rules"].all? { |r| r["apiGroups"] == [""] }
+  abort "the Role touches something other than secrets" unless role["rules"].all? { |r| r["resources"] == ["secrets"] }
+' "$out12ext" || { red "FAIL: the signing key generator is not correctly scoped"; exit 1; }
+green "ok  - the generator reuses the app image and can write only its own Secret"
+
+# `enabled` is read by this helper family and by validate-values. A raw bool test
+# and Go truthiness disagree for a string, and a Flux HelmRelease sourcing values
+# from a ConfigMap makes every value a string — so a string-typed flag must mean the
+# same thing everywhere, or disabling the feature turns it on.
+blue "==> Scenario 12i: the gate reads the same way however enabled is typed"
+out12strfalse="$TMP/scenario-mcp-oauth-string-false.yaml"
+render_default "$out12strfalse" --set global.deploymentMode=external \
+  --set-string global.mcpOAuth.enabled=false
+assert_not_contains "$out12strfalse" 'MCP_DEFAULT_IDP_|name: MCP_OAUTH_CLIENT_ID' \
+  'enabled="false" as a string disables the feature, as a bool would'
+assert_not_contains "$out12strfalse" 'component: mcp-signing-key' \
+  'enabled="false" as a string also stands the generator down'
+# The same string in hybrid must not be read as intent to enable, which would
+# reject the install for turning the feature off.
+out12strhyb="$TMP/scenario-mcp-oauth-string-false-hybrid.yaml"
+render_default "$out12strhyb" --set global.deploymentMode=hybrid \
+  --set-string global.mcpOAuth.enabled=false
+assert_contains "$out12strhyb" '^  name: platform-secrets$' \
+  'hybrid with enabled="false" as a string still renders'
+# An explicit string true must be honoured as intent, so it still fails loudly.
+assert_render_fails 'enabled="true" as a string is honoured as required' \
+  --set global.deploymentMode=external \
+  --set global.mcpOAuth.generateSigningKey=false \
+  --set-string global.mcpOAuth.enabled=true
+# Anything else is a typo, not a third state to guess at.
+assert_render_fails 'a non-boolean enabled is rejected rather than guessed at' \
+  --set global.deploymentMode=external \
+  --set-string global.mcpOAuth.enabled=maybe
+
+# Both sides read one client secret from whichever Secret secretRef resolves to.
+# When the shared Secret is out of play those refs land on legacy Secrets the chart
+# never writes this key into, and since they are optional the env is simply absent:
+# the login fails at request time with nothing pointing at the cause.
+blue "==> Scenario 12j: MCP OAuth needs a Secret that actually carries the client secret"
+for flag in global.platformSecret.enabled=false global.preserveExistingSecrets=true \
+            global.autoGenerateSecrets=false global.platformSecret.existingSecret.name=my-secret; do
+  out12nodel="$TMP/scenario-mcp-oauth-undeliverable-${flag%%=*}.yaml"
+  render_default "$out12nodel" --set global.deploymentMode=external --set "$flag"
+  assert_not_contains "$out12nodel" 'MCP_DEFAULT_IDP_|name: MCP_OAUTH_CLIENT_ID' \
+    "${flag}: MCP OAuth stays off rather than half-wired"
+  assert_not_contains "$out12nodel" 'component: mcp-signing-key' \
+    "${flag}: no signing key is minted for a login that cannot complete"
+  assert_render_fails "${flag}: an explicit enable is refused with guidance" \
+    --set global.deploymentMode=external --set "$flag" \
+    --set global.mcpOAuth.enabled=true
+done
+
+# An empty allowlist is not merely unset: the app then accepts an OAuth callback on
+# ANY https origin, handing the authorization code to whoever asks. It was possible
+# to reach that state with an explicit issuer and no domain.
+blue "==> Scenario 12k: MCP OAuth refuses to run without a callback allowlist"
+out12noallow="$TMP/scenario-mcp-oauth-no-allowlist.yaml"
+render_default "$out12noallow" --set global.deploymentMode=external --set global.domain= \
+  --set global.mcpOAuth.issuer=https://console.example.com/api/mcp/oauth
+assert_not_contains "$out12noallow" 'MCP_DEFAULT_IDP_|name: MCP_OAUTH_CLIENT_ID' \
+  "an issuer without a derivable allowlist leaves MCP OAuth off"
+assert_render_fails "an explicit enable without an allowlist is refused" \
+  --set global.deploymentMode=external --set global.domain= \
+  --set global.mcpOAuth.issuer=https://console.example.com/api/mcp/oauth \
+  --set global.mcpOAuth.enabled=true
+# Supplying one explicitly is the documented way out, with no domain at all.
+out12allow="$TMP/scenario-mcp-oauth-explicit-allowlist.yaml"
+render_default "$out12allow" --set global.deploymentMode=external --set global.domain= \
+  --set global.mcpOAuth.issuer=https://console.example.com/api/mcp/oauth \
+  --set 'global.mcpOAuth.allowedRedirectHosts=https://*.mcp.example.com'
+assert_contains "$out12allow" 'name: MCP_OAUTH_ALLOWED_REDIRECT_HOSTS' \
+  "an explicit allowlist enables the feature without global.domain"
+
+# The issuer is derived as app.<domain> because a subchart cannot read a sibling's
+# values. An install serving the app elsewhere would advertise an issuer nobody
+# serves, and default-on means the operator never opts into finding out.
+assert_render_fails "a custom app host without an explicit issuer is refused" \
+  --set global.deploymentMode=external \
+  --set 'control-plane-app.controlPlane.components.app.host=console.acme.test'
+out12host="$TMP/scenario-mcp-oauth-custom-host.yaml"
+render_default "$out12host" --set global.deploymentMode=external \
+  --set 'control-plane-app.controlPlane.components.app.host=console.acme.test' \
+  --set global.mcpOAuth.issuer=https://console.acme.test/api/mcp/oauth
+assert_contains "$out12host" 'https://console.acme.test/api/mcp/oauth' \
+  "a custom app host works once the issuer is explicit"
+
+# The generator's premise is that it costs no new image: if the app can be pulled,
+# so can the Job. That must survive a mirrored registry and operator pull secrets,
+# where reaching for a different image would fail with ImagePullBackOff mid-upgrade.
+out12reg="$TMP/scenario-mcp-generator-mirrored-registry.yaml"
+render_default "$out12reg" --set global.deploymentMode=external \
+  --set global.imageRegistry=registry.internal.example.com/nt \
+  --set 'control-plane-app.imagePullSecrets=mirror-creds' \
+  --set 'control-plane-app.controlPlane.components.app.image.pullPolicy=Always'
+ruby -ryaml -e '
+  docs = YAML.load_stream(File.read(ARGV.fetch(0))).compact
+  app = docs.find { |d| d["kind"] == "Deployment" && d.dig("metadata", "name") == "control-plane-app" }
+  job = docs.find { |d| d["kind"] == "Job" && d.dig("metadata", "labels", "app.kubernetes.io/component") == "mcp-signing-key" }
+  abort "the generator Job is not rendered" if job.nil?
+  app_c = app.dig("spec", "template", "spec", "containers").find { |c| c["name"] == "app" }
+  job_c = job.dig("spec", "template", "spec", "containers", 0)
+  abort "the Job pulls #{job_c["image"]}, the app pulls #{app_c["image"]}" unless job_c["image"] == app_c["image"]
+  abort "the mirrored registry was not applied: #{job_c["image"]}" unless job_c["image"].start_with?("registry.internal.example.com/nt/")
+  pull = ->(d) { (d.dig("spec", "template", "spec", "imagePullSecrets") || []).map { |s| s["name"] } }
+  abort "pull secrets differ: #{pull.call(job).inspect} vs #{pull.call(app).inspect}" unless pull.call(job) == pull.call(app)
+  abort "the operator pull secret did not reach the Job: #{pull.call(job).inspect}" unless pull.call(job) == ["mirror-creds"]
+  unless job_c["imagePullPolicy"] == app_c["imagePullPolicy"]
+    abort "pull policies differ: #{job_c["imagePullPolicy"]} vs #{app_c["imagePullPolicy"]}"
+  end
+' "$out12reg" || { red "FAIL: the generator does not follow the app image into a custom registry"; exit 1; }
+green "ok  - the generator follows the app image through a mirrored registry and pull secrets"
+
+# The embedded script ships as a string, so a syntax error would surface as a
+# CrashLoopBackOff during an upgrade rather than at render time.
+if command -v node >/dev/null 2>&1; then
+  ruby -ryaml -e '
+    docs = YAML.load_stream(File.read(ARGV.fetch(0))).compact
+    job = docs.find { |d| d["kind"] == "Job" && d.dig("metadata", "labels", "app.kubernetes.io/component") == "mcp-signing-key" }
+    File.write(ARGV.fetch(1), job.dig("spec", "template", "spec", "containers", 0, "command").last)
+  ' "$out12ext" "$TMP/mcp-generator.js"
+  node --check "$TMP/mcp-generator.js" \
+    || { red "FAIL: the generator script is not valid JavaScript"; exit 1; }
+  green "ok  - the generator script parses under the Node it runs on"
+else
+  yellow "skip - node not available to syntax-check the generator script"
+fi
+
+# Turning the generator off leaves the operator in charge, and with no key of
+# their own the feature must stay off rather than half-work.
+out12nogen_mcp="$TMP/scenario-mcp-oauth-no-generator.yaml"
+render_default "$out12nogen_mcp" --set global.deploymentMode=external \
+  --set global.mcpOAuth.generateSigningKey=false
+assert_not_contains "$out12nogen_mcp" 'component: mcp-signing-key' \
+  "generateSigningKey=false: no Job, no RBAC"
+assert_not_contains "$out12nogen_mcp" 'MCP_DEFAULT_IDP_|name: MCP_OAUTH_CLIENT_ID' \
+  "generateSigningKey=false with no key: MCP OAuth stays off"
+# An explicit false must not leave a Job minting a key for a disabled feature.
+assert_not_contains "$out12mcpoff" 'component: mcp-signing-key' \
+  "mcpOAuth.enabled=false: the generator does not run"
+# Hybrid has no authorization server, so it must carry none of this.
+for f in "$out12hyb" "$out12hybkey"; do
+  assert_not_contains "$f" 'component: mcp-signing-key' \
+    "hybrid: no signing key generator is rendered"
+done
+
 blue "==> Scenario 12b: control-plane-app no longer couples to backend Secrets"
 for legacy in agentgateway-secrets trustguard-secrets datacore-secrets alertengine-secrets trustlens-secrets; do
   ruby -ryaml -e '

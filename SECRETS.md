@@ -438,9 +438,30 @@ Resolution order per key: `global.platformSecret.values` → live `platform-secr
 | `TRUSTLENS_JWT_SECRET` | `trustlens-secrets` / `JWT_SECRET` | generated | `trustlens.enabled` |
 | `ENCRYPTION_KEYSET` | `trustlens-secrets` / `ENCRYPTION_KEYSET` | generated | `trustlens.enabled` |
 | `MODEL_SCANNER_SECRET` | `control-plane-secrets` / `MODEL_SCANNER_SECRET` | adopted only | external |
+| `AUTH_SECRET_KEY` | `control-plane-secrets` / `AUTH_SECRET_KEY` | generated on install only | external |
+| `MCP_OAUTH_CLIENT_SECRET` | `control-plane-secrets` / `MCP_OAUTH_CLIENT_SECRET` | generated | external, when MCP OAuth is on |
+| `MCP_OAUTH_SIGNING_KEY` | `control-plane-secrets` / `MCP_OAUTH_SIGNING_KEY` | adopted only — a key you supply. Otherwise generated into its own `mcp-oauth-signing` Secret by a hook Job | external, when you supply a key |
 
 **Adopted only** means the chart never invents the value — the key is omitted
 until you supply it, because an operator owns it.
+
+**Generated on install only** applies to `AUTH_SECRET_KEY`, which encrypts SSO
+client secrets and SMTP credentials at rest. It is a different key from
+`AUTH_SECRET`, which signs sessions — one value for both signing and encryption
+would be key reuse. The app ships a built-in default, so any install running
+without this key has already encrypted rows with that default; handing it a new
+key on upgrade would make those rows undecryptable. A fresh install therefore gets
+a real key, an upgrade leaves it absent, and you can adopt one deliberately by
+pinning `global.platformSecret.values.AUTH_SECRET_KEY` once the existing
+ciphertext no longer matters (SSO client secrets and SMTP credentials have to be
+re-entered afterwards).
+
+Never `kubectl apply` the output of `helm template` to an existing release. Helm
+renders every template as an *install*, so the output carries a freshly generated
+`AUTH_SECRET_KEY` (and new values for the other generated keys). Applying it rotates
+the at-rest encryption key and makes anything already encrypted unreadable. Use
+`helm upgrade`, which resolves these keys from the live Secret. For the same reason
+a `helm template`-based diff shows spurious credential changes.
 
 Credentials that only one service reads stay in their own Secret and are **not**
 here — third-party API keys (`OPENAI_API_KEY`), the TrustGuard client credential
@@ -457,6 +478,138 @@ One logical name deliberately differs from both the legacy key and the env var t
 container sees, because the old name collided with another service's:
 `TRUSTLENS_JWT_SECRET` (legacy `trustlens-secrets` / `JWT_SECRET`, still
 `JWT_SECRET` inside the container).
+
+### MCP OAuth (`global.mcpOAuth`)
+
+An MCP consumer normally needs an identity provider of its own before it can log
+in. TrustGate can instead fall back to a built-in provider, with the
+control-plane app acting as the OAuth2 authorization server, so a proof of concept
+needs no external IdP.
+
+**External mode only.** A hybrid install deploys no control-plane app — it talks
+to the hosted platform — so there is no in-cluster issuer to point TrustGate at
+and no client secret the two sides could agree on locally. Enabling it in hybrid
+fails at render time instead of wiring a login that cannot complete.
+
+**On by default in external, with nothing to configure.** `enabled` is
+three-state, because wanting the feature and having the key it needs are separate
+questions:
+
+| `global.mcpOAuth.enabled` | Behaviour |
+| --- | --- |
+| unset (default) | On in external, always off in hybrid. The chart generates the signing key when nothing else provides one. |
+| `true` | Required. The render **fails** when no signing key is available, which needs `generateSigningKey: false` and no key of your own. |
+| `false` | Never. With no client id the app answers `503` on its MCP OAuth routes. |
+
+```yaml
+global:
+  mcpOAuth:
+    # enabled: left unset — on in external, and the key is generated for you.
+    # Optional; only when the app is not served from app.<global.domain>.
+    issuer: "https://app.example.com/api/mcp/oauth"
+    allowedRedirectHosts: "https://*.mcp.example.com"
+```
+
+The two sides must agree on one client secret, so the chart gives both the same
+`MCP_OAUTH_CLIENT_SECRET` from `platform-secrets` — the app reads it under that
+name, TrustGate as `MCP_DEFAULT_IDP_CLIENT_SECRET`. Both also derive the issuer
+from one helper, because a mismatch stays silent until TrustGate tries to fetch
+JWKS from an issuer nobody serves. Only the MCP workload gets this configuration;
+admin and proxy do not broker logins.
+
+`allowedRedirectHosts` matters: left empty the app accepts an OAuth callback on
+**any** https origin. The chart defaults it to `https://*.mcp.<global.domain>`,
+the gateway's own MCP wildcard, and **refuses to enable MCP OAuth** when neither
+that nor `global.domain` is set, rather than shipping an open redirect. Widen it
+only to origins you control.
+
+Two knobs configure only TrustGate's side of the exchange, so leave them at their
+defaults unless you have checked the app agrees. `audience` is what TrustGate
+validates the `aud` claim against; the app mints it from a compiled-in constant it
+does not read from the environment, so the matching defaults are what make it work
+and changing one side makes TrustGate reject every token. `scopes` is required by
+TrustGate but never requested by the app.
+
+`enabled` accepts `true`/`false` as booleans or as strings, since a Flux
+`HelmRelease` sourcing values from a ConfigMap makes every value a string. Anything
+that is neither is rejected rather than guessed at.
+
+MCP OAuth also needs the shared platform Secret to be in play, because both sides
+read one client secret from it. With `platformSecret.enabled: false`,
+`preserveExistingSecrets`, `autoGenerateSecrets: false`, or an operator-owned
+`platformSecret.existingSecret`, the chart cannot deliver that key and leaves the
+feature off — an explicit `enabled: true` there fails with the reason.
+
+#### The signing key
+
+The app signs with RS256 and loads the key with `importPKCS8`, so it needs an RSA
+key in PKCS#8 form, and it must be the *same* key on every replica — otherwise
+each one mints its own ephemeral key and tokens stop validating across replicas
+and restarts.
+
+Helm's templating cannot produce that key: `genPrivateKey "rsa"` emits PKCS#1,
+`"ecdsa"` emits SEC1, and the one generator that does emit PKCS#8 (`"ed25519"`) is
+the wrong algorithm. So the chart generates it with a `pre-install,pre-upgrade`
+hook Job instead, which:
+
+- runs the **app image this chart already deploys**, so there is no extra image to
+  mirror or take through a vulnerability review — Node generates PKCS#8 natively
+  and reaches the API server with its projected service-account token;
+- writes to its own `mcp-oauth-signing` Secret, kept separate from
+  `platform-secrets` because pre-install hooks run before Helm creates any
+  manifest, and pre-creating a chart-owned Secret would collide with Helm's
+  ownership metadata on a fresh install;
+- **never replaces an existing key.** Every run re-reads the Secret first and
+  leaves any key it finds alone, because that key signs access tokens already in
+  circulation. It also parses what it stores and logs the algorithm and size, so a
+  broken key fails the upgrade instead of surfacing as a failed login;
+- is skipped entirely as soon as you supply a key of your own, and can be turned
+  off with `global.mcpOAuth.generateSigningKey: false` if you want to own the key —
+  MCP OAuth then stays off until you do.
+
+Because the Secret is hook-owned rather than release-owned, `helm uninstall` leaves
+it in place and a later reinstall keeps the same key.
+
+To supply your own key instead, generate one base64-encoded so it survives a values
+file as a single line (the app accepts raw PEM, `\n`-escaped PEM, or base64):
+
+```bash
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 \
+  | openssl base64 -A > mcp-oauth-signing.b64
+```
+
+Node works too, if you would rather not depend on the local OpenSSL build:
+
+```bash
+node -e "const {generateKeyPairSync}=require('crypto');\
+const {privateKey}=generateKeyPairSync('rsa',{modulusLength:2048});\
+process.stdout.write(Buffer.from(privateKey.export({type:'pkcs8',format:'pem'})).toString('base64'))" \
+  > mcp-oauth-signing.b64
+```
+
+Then put it in your values file, which must be kept out of git:
+
+```yaml
+global:
+  platformSecret:
+    values:
+      MCP_OAUTH_SIGNING_KEY: "<the single line from mcp-oauth-signing.b64>"
+```
+
+You only need to supply it once. The chart writes it into `platform-secrets`, which
+carries `helm.sh/resource-policy: keep`, and later upgrades adopt it from there.
+
+Prefer keeping it out of your values file altogether? Put it straight into the
+Secret and leave every file clean — nothing then appears in `helm get values` or in
+stored release revisions:
+
+```bash
+kubectl -n <namespace> patch secret platform-secrets --type merge \
+  -p "{\"stringData\":{\"MCP_OAUTH_SIGNING_KEY\":\"$(cat mcp-oauth-signing.b64)\"}}"
+```
+
+Your key always wins over a generated one. Swapping one in later is a key rotation:
+it invalidates tokens signed by the previous key, so nothing does it implicitly.
 
 ### Managing it yourself
 
