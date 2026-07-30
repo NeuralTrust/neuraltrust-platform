@@ -117,6 +117,56 @@ global:
     # External Secrets. Pin the target of an alias, not the alias itself
     # (AUTH_SECRET, not NEXTAUTH_SECRET) — the chart rejects the latter.
     values: {}
+  # MCP OAuth. The control-plane app acts as the authorization server and
+  # TrustGate as a pre-registered confidential client; the chart gives both sides
+  # the same client secret from `platform-secrets`, so the pair cannot drift.
+  # external mode only — hybrid has no control-plane app (it uses the hosted
+  # platform), so enabling this in hybrid fails at render time rather than wiring
+  # a login that cannot complete.
+  mcpOAuth:
+    # Unset ⇒ on in external, off in hybrid. A signing key is always available
+    #          because generateSigningKey below creates one when nothing else
+    #          provides it, so the feature needs no operator action.
+    # true   ⇒ required. The render fails when no signing key is available, which
+    #          can only happen with generateSigningKey: false and no key of yours.
+    # false  ⇒ never. With no client id the app answers 503 on the OAuth routes.
+    enabled:
+    # Generate the RS256 signing key in-cluster on first install, via a hook Job
+    # that reuses the app image this chart already deploys — no extra image to
+    # mirror or scan. Skipped as soon as you supply a key of your own.
+    # Set false to own the key yourself; MCP OAuth then stays off until you do.
+    generateSigningKey: true
+    # Client id TrustGate presents. Both sides must agree.
+    clientId: "trustgate"
+    # Full issuer URL, e.g. "https://app.example.com/api/mcp/oauth".
+    # Empty ⇒ derived from global.domain. Set it explicitly whenever the app is
+    # not served from app.<global.domain>, since the client resolves JWKS through
+    # this URL and a wrong host fails only at request time.
+    issuer: ""
+    # Audience TrustGate validates the `aud` claim against. This default matches
+    # what the app mints, which is a compiled-in constant it does NOT read from the
+    # environment — so changing this configures only one side and TrustGate will
+    # reject every token the app issues. Leave it alone unless the app gains a
+    # matching setting (AUT-391).
+    audience: "neuraltrust-mcp"
+    # Comma-separated scopes TrustGate requires on the token. Client-side only, as
+    # with audience above. Empty ⇒ none required.
+    scopes: ""
+    # Comma-separated callback origins, e.g. "https://*.mcp.example.com".
+    # Empty ⇒ https://*.mcp.<global.domain>. Do not widen this to bare "https://":
+    # an empty allowlist makes the app accept a callback on ANY https origin, so the
+    # chart refuses to enable MCP OAuth when neither this nor global.domain is set.
+    allowedRedirectHosts: ""
+    # Supplying your own RS256 signing key is optional — leave it to
+    # generateSigningKey above unless you need to control the material.
+    # It must be PKCS#8, which is why the chart's own templating cannot produce it
+    # (Helm emits PKCS#1 for RSA, and its one PKCS#8 generator produces ed25519).
+    # Create one, base64 so it survives values as a single line:
+    #   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 \
+    #     | openssl base64 -A
+    # then pin it via global.platformSecret.values.MCP_OAUTH_SIGNING_KEY or put it
+    # straight in the platform Secret (see SECRETS.md). Yours always wins over a
+    # generated key; swapping one in later invalidates tokens signed by the old.
   # Shared PostgreSQL (v2 hybrid + external control-plane).
   # Hybrid: every service (AgentGateway, TrustGuard, DataAgent, data-plane-api)
   # connects to ONE shared database via envFrom on the `postgresql-secrets`
@@ -548,7 +598,7 @@ control-plane-app:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.115.2"
+          tag: "v1.117.0"
           pullPolicy: IfNotPresent
         config:
           nodeEnv: production
@@ -622,7 +672,7 @@ control-plane-app:
 # stays agentgateway for now; K8s names stay agentgateway-*.
 agentgateway:
   image:
-    tag: "v0.23.0"
+    tag: "v0.24.0"
   database:
     sslMode: "prefer"
     iamAuth: false
@@ -884,7 +934,7 @@ firewall:
       replicas: 2
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-        tag: "v2.15.1"
+        tag: "v2.16.0"
         pullPolicy: IfNotPresent
       resources:
         requests:
@@ -911,7 +961,7 @@ firewall:
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
         # Keep in lockstep with gateway.image.tag.
-        tag: "v2.15.1"
+        tag: "v2.16.0"
         pullPolicy: IfNotPresent
       replicas: 1
       resources:

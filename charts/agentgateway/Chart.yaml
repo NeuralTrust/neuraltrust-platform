@@ -3,4 +3,4 @@ name: agentgateway
 description: AgentGateway — admin control-plane + proxy/MCP data-plane. Core v2 runtime (hybrid + external).
 type: application
 version: 0.1.32
-appVersion: "v0.23.0"
+appVersion: "v0.24.0"
