@@ -16,6 +16,46 @@ global:
       name: ""
       emailKey: "ONPREM_SUPERADMIN_EMAIL"
       passwordKey: "ONPREM_SUPERADMIN_PASSWORD"
+  # Outbound platform email (control-plane-app is the only sender). The app
+  # instantiates one transport, selected by provider. Leaving provider on
+  # "resend" with no credentials keeps email off; the app logs and skips.
+  email:
+    # resend | ses | smtp
+    provider: "resend"
+    # "From" address. Empty falls back to the legacy
+    # controlPlane.secrets.resendAlertSender, then to the app's own default.
+    from: ""
+    # Optional Reply-To header.
+    replyTo: ""
+    # Reference an operator-managed Secret instead of the inline credentials
+    # below, so nothing lands in Helm release history.
+    existingSecret:
+      name: ""
+      resendApiKeyKey: "RESEND_API_KEY"
+      smtpPasswordKey: "SMTP_PASSWORD"
+      sesAccessKeyIdKey: "SES_ACCESS_KEY_ID"
+      sesSecretAccessKeyKey: "SES_SECRET_ACCESS_KEY"
+    resend:
+      # Falls back to controlPlane.secrets.resendApiKey when empty.
+      apiKey: ""
+    ses:
+      # Required when provider is ses. Independent of global.aws.region so SES
+      # can live in a different region than the cluster.
+      region: ""
+      # Leave both empty to use the pod's IAM role (IRSA / instance profile).
+      # Setting them overrides the SDK credential chain for every AWS call in
+      # the pod, including Postgres IAM auth.
+      accessKeyId: ""
+      secretAccessKey: ""
+    smtp:
+      # host and port are required when provider is smtp.
+      host: ""
+      port: 587
+      # false sends without TLS; anything else is treated as secure by the app.
+      secure: true
+      # Omit user/password for an unauthenticated relay.
+      user: ""
+      password: ""
   # Hybrid product selection (positive opt-in). Defaults are all false so
   # overlays only declare what they want. External mode ignores these flags
   # and always deploys the full product stack. Firewall follows TrustGuard.
@@ -397,8 +437,11 @@ control-plane-api:
       authSecret: ""
       openaiApiKey: ""
       resendApiKey: ""
+      # Outbound "from" address; the app reads it as SENDER.
       resendAlertSender: ""
       resendInviteSender: ""
+      # Optional Reply-To header on platform emails (REPLY_TO_EMAIL).
+      resendReplyTo: ""
       trustgateJwtSecret: ""
       firewallJwtSecret: ""
       modelScannerSecret: ""
