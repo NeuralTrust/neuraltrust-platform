@@ -1630,6 +1630,32 @@ ruby -ryaml -e '
 ' "$out12ext" || { red "FAIL: the signing key generator is not correctly scoped"; exit 1; }
 green "ok  - the generator reuses the app image and can write only its own Secret"
 
+# The generator's premise is that it costs no new image: if the app can be pulled,
+# so can the Job. That must survive a mirrored registry and operator pull secrets,
+# where reaching for a different image would fail with ImagePullBackOff mid-upgrade.
+out12reg="$TMP/scenario-mcp-generator-mirrored-registry.yaml"
+render_default "$out12reg" --set global.deploymentMode=external \
+  --set global.imageRegistry=registry.internal.example.com/nt \
+  --set 'control-plane-app.imagePullSecrets=mirror-creds' \
+  --set 'control-plane-app.controlPlane.components.app.image.pullPolicy=Always'
+ruby -ryaml -e '
+  docs = YAML.load_stream(File.read(ARGV.fetch(0))).compact
+  app = docs.find { |d| d["kind"] == "Deployment" && d.dig("metadata", "name") == "control-plane-app" }
+  job = docs.find { |d| d["kind"] == "Job" && d.dig("metadata", "labels", "app.kubernetes.io/component") == "mcp-signing-key" }
+  abort "the generator Job is not rendered" if job.nil?
+  app_c = app.dig("spec", "template", "spec", "containers").find { |c| c["name"] == "app" }
+  job_c = job.dig("spec", "template", "spec", "containers", 0)
+  abort "the Job pulls #{job_c["image"]}, the app pulls #{app_c["image"]}" unless job_c["image"] == app_c["image"]
+  abort "the mirrored registry was not applied: #{job_c["image"]}" unless job_c["image"].start_with?("registry.internal.example.com/nt/")
+  pull = ->(d) { (d.dig("spec", "template", "spec", "imagePullSecrets") || []).map { |s| s["name"] } }
+  abort "pull secrets differ: #{pull.call(job).inspect} vs #{pull.call(app).inspect}" unless pull.call(job) == pull.call(app)
+  abort "the operator pull secret did not reach the Job: #{pull.call(job).inspect}" unless pull.call(job) == ["mirror-creds"]
+  unless job_c["imagePullPolicy"] == app_c["imagePullPolicy"]
+    abort "pull policies differ: #{job_c["imagePullPolicy"]} vs #{app_c["imagePullPolicy"]}"
+  end
+' "$out12reg" || { red "FAIL: the generator does not follow the app image into a custom registry"; exit 1; }
+green "ok  - the generator follows the app image through a mirrored registry and pull secrets"
+
 # The embedded script ships as a string, so a syntax error would surface as a
 # CrashLoopBackOff during an upgrade rather than at render time.
 if command -v node >/dev/null 2>&1; then
