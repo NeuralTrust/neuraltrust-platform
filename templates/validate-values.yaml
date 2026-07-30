@@ -34,6 +34,48 @@ no Kubernetes resource when validation succeeds.
   {{- fail "trustlens.image.tag is required when trustlens.enabled=true; no default TrustLens release image is published yet." -}}
 {{- end -}}
 
+{{- /* Outbound email. A provider selected without its required settings would
+       leave the app silently unable to send, so fail at render time instead. */ -}}
+{{- $email := default dict $global.email -}}
+{{- $emailProvider := $email.provider | default "resend" -}}
+{{- if not (has $emailProvider (list "resend" "ses" "smtp")) -}}
+  {{- fail (printf "global.email.provider must be one of: resend, ses, smtp (got %q)" $emailProvider) -}}
+{{- end -}}
+{{- if eq $emailProvider "ses" -}}
+  {{- $ses := default dict $email.ses -}}
+  {{- if not ($ses.region | default "") -}}
+    {{- fail "global.email.ses.region is required when global.email.provider=ses" -}}
+  {{- end -}}
+  {{- if and $ses.accessKeyId (not $ses.secretAccessKey) -}}
+    {{- fail "global.email.ses.secretAccessKey is required when global.email.ses.accessKeyId is set (omit both to use the pod IAM role)" -}}
+  {{- end -}}
+{{- else if eq $emailProvider "smtp" -}}
+  {{- $smtp := default dict $email.smtp -}}
+  {{- if not ($smtp.host | default "") -}}
+    {{- fail "global.email.smtp.host is required when global.email.provider=smtp" -}}
+  {{- end -}}
+  {{- if not ($smtp.port | default "") -}}
+    {{- fail "global.email.smtp.port is required when global.email.provider=smtp" -}}
+  {{- end -}}
+  {{- if and $smtp.password (not ($smtp.user | default "")) -}}
+    {{- fail "global.email.smtp.user is required when global.email.smtp.password is set" -}}
+  {{- end -}}
+  {{- if and ($smtp.user | default "") (not $smtp.password) (not (default dict $email.existingSecret).name) -}}
+    {{- fail "global.email.smtp.user needs a password: set global.email.smtp.password or point global.email.existingSecret.name at a Secret holding it" -}}
+  {{- end -}}
+{{- end -}}
+{{- /* An operator-supplied Secret cannot be filled in by the chart. */ -}}
+{{- $emailExisting := default dict $email.existingSecret -}}
+{{- if $emailExisting.name -}}
+  {{- $inline := "" -}}
+  {{- if (default dict $email.resend).apiKey -}}{{- $inline = "resend.apiKey" -}}{{- end -}}
+  {{- if (default dict $email.smtp).password -}}{{- $inline = "smtp.password" -}}{{- end -}}
+  {{- if (default dict $email.ses).accessKeyId -}}{{- $inline = "ses.accessKeyId" -}}{{- end -}}
+  {{- if $inline -}}
+    {{- fail (printf "global.email.existingSecret.name and global.email.%s are mutually exclusive; drop the inline credential" $inline) -}}
+  {{- end -}}
+{{- end -}}
+
 {{- $autoGenerate := true -}}
 {{- if hasKey $global "autoGenerateSecrets" -}}{{- $autoGenerate = $global.autoGenerateSecrets -}}{{- end -}}
 {{- $preserveExisting := false -}}

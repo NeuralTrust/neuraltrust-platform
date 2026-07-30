@@ -337,18 +337,6 @@ spec:
               name: {{ $pgSecretName }}
               key: POSTGRES_AUTH_MODE
               optional: true
-        - name: DATABASE_AUTH_MODE
-          valueFrom:
-            secretKeyRef:
-              name: {{ $pgSecretName }}
-              key: DATABASE_AUTH_MODE
-              optional: true
-        - name: DATABASE_IAM_AUTH
-          valueFrom:
-            secretKeyRef:
-              name: {{ $pgSecretName }}
-              key: DATABASE_IAM_AUTH
-              optional: true
         {{- if eq (include "control-plane.postgresql.iam" .) "true" }}
         {{- $awsRegion := include "control-plane.postgresql.awsRegion" . }}
         {{- if $awsRegion }}
@@ -373,6 +361,70 @@ spec:
               name: {{ $pgSecretName }}
               key: POSTGRES_PRISMA_URL
               optional: true
+        {{- /* Outbound email. The app builds one transport chosen by
+               AUTH_EMAIL_PROVIDER (features/auth/server/authEmail/platformEnv.ts):
+               resend, ses or smtp. Addresses are plain env (they are public);
+               only credentials come from a Secret. */}}
+        {{- $emailCfg := include "neuraltrust-platform.email.config" . | fromYaml }}
+        {{- $legacySecrets := default dict (default dict .Values.controlPlane).secrets }}
+        {{- $emailGlobal := default dict (default dict .Values.global).email }}
+        {{- /* Before this chart had a provider setting, the only way to select one
+               was controlPlane.components.app.extraEnv. Emitting the same name
+               twice makes Kubernetes reject the strategic-merge patch ("order in
+               patch list doesn't match $setElementOrder"), so extraEnv keeps
+               winning: the chart skips any name the operator already set. */}}
+        {{- $ownEnv := list }}
+        {{- range (default list (default dict (default dict (default dict .Values.controlPlane).components).app).extraEnv) }}
+          {{- $ownEnv = append $ownEnv .name }}
+        {{- end }}
+        {{- if not (has "AUTH_EMAIL_PROVIDER" $ownEnv) }}
+        - name: AUTH_EMAIL_PROVIDER
+          value: {{ $emailCfg.provider | quote }}
+        {{- end }}
+        {{- $from := $emailGlobal.from | default $legacySecrets.resendAlertSender | default "" }}
+        {{- $replyTo := $emailGlobal.replyTo | default $legacySecrets.resendReplyTo | default "" }}
+        {{- /* SENDER is what the legacy senders read (server/actions/mailing.ts);
+               AUTH_EMAIL_FROM is the v2 auth path. Same value for both. When no
+               address is configured in values, fall back to the legacy Secret key
+               so installs that pre-created control-plane-secrets keep working. */}}
+        {{- if $from }}
+        {{- if not (has "SENDER" $ownEnv) }}
+        - name: SENDER
+          value: {{ $from | quote }}
+        {{- end }}
+        {{- if not (has "AUTH_EMAIL_FROM" $ownEnv) }}
+        - name: AUTH_EMAIL_FROM
+          value: {{ $from | quote }}
+        {{- end }}
+        {{- else if not (has "SENDER" $ownEnv) }}
+        - name: SENDER
+          valueFrom:
+            secretKeyRef:
+              name: control-plane-secrets
+              key: resend-alert-sender
+              optional: true
+        {{- end }}
+        {{- if $replyTo }}
+        {{- if not (has "REPLY_TO_EMAIL" $ownEnv) }}
+        - name: REPLY_TO_EMAIL
+          value: {{ $replyTo | quote }}
+        {{- end }}
+        {{- if not (has "AUTH_EMAIL_REPLY_TO" $ownEnv) }}
+        - name: AUTH_EMAIL_REPLY_TO
+          value: {{ $replyTo | quote }}
+        {{- end }}
+        {{- else if not (has "REPLY_TO_EMAIL" $ownEnv) }}
+        - name: REPLY_TO_EMAIL
+          valueFrom:
+            secretKeyRef:
+              name: control-plane-secrets
+              key: resend-reply-to
+              optional: true
+        {{- end }}
+        {{- /* RESEND_API_KEY is emitted for every provider: the legacy
+               password-reset / invite senders are Resend-only and read it
+               directly, independent of AUTH_EMAIL_PROVIDER. */}}
+        {{- if not (has "RESEND_API_KEY" $ownEnv) }}
         - name: RESEND_API_KEY
           valueFrom:
             secretKeyRef:
@@ -380,6 +432,10 @@ spec:
               {{- if and .Values.controlPlane .Values.controlPlane.secrets .Values.controlPlane.secrets.resendApiKey (kindIs "map" .Values.controlPlane.secrets.resendApiKey) }}
               name: {{ .Values.controlPlane.secrets.resendApiKey.secretName }}
               key: {{ .Values.controlPlane.secrets.resendApiKey.secretKey }}
+              {{- else if (default dict $emailGlobal.existingSecret).name }}
+              name: {{ $emailCfg.secretName | quote }}
+              key: {{ $emailCfg.resendApiKeyKey | quote }}
+              optional: true
               {{- else if $resendSecret }}
               name: resend-secrets
               key: RESEND_API_KEY
@@ -388,12 +444,64 @@ spec:
               key: resend-api-key
               optional: true
               {{- end }}
-        - name: RESEND_SENDER
+        {{- end }}
+        {{- if eq $emailCfg.provider "ses" }}
+        {{- if not (has "AWS_SES_REGION" $ownEnv) }}
+        - name: AWS_SES_REGION
+          value: {{ $emailCfg.sesRegion | quote }}
+        {{- end }}
+        {{- /* The key pair is emitted together, so an override of either name
+               hands both back to the operator. */}}
+        {{- if and $emailCfg.sesStaticCredentials (not (has "AWS_ACCESS_KEY_ID" $ownEnv)) (not (has "AWS_SECRET_ACCESS_KEY" $ownEnv)) }}
+        {{- /* Static keys override the SDK credential chain for every AWS call in
+               this pod, including Postgres IAM auth. Prefer IRSA: leave
+               global.email.ses.accessKeyId empty. */}}
+        - name: AWS_ACCESS_KEY_ID
           valueFrom:
             secretKeyRef:
-              name: control-plane-secrets
-              key: resend-alert-sender
+              name: {{ $emailCfg.secretName | quote }}
+              key: {{ $emailCfg.sesAccessKeyIdKey | quote }}
+              {{- if $emailCfg.secretOptional }}
               optional: true
+              {{- end }}
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ $emailCfg.secretName | quote }}
+              key: {{ $emailCfg.sesSecretAccessKeyKey | quote }}
+              {{- if $emailCfg.secretOptional }}
+              optional: true
+              {{- end }}
+        {{- end }}
+        {{- else if eq $emailCfg.provider "smtp" }}
+        {{- if not (has "SMTP_HOST" $ownEnv) }}
+        - name: SMTP_HOST
+          value: {{ $emailCfg.smtpHost | quote }}
+        {{- end }}
+        {{- if not (has "SMTP_PORT" $ownEnv) }}
+        - name: SMTP_PORT
+          value: {{ $emailCfg.smtpPort | quote }}
+        {{- end }}
+        {{- if not (has "SMTP_SECURE" $ownEnv) }}
+        - name: SMTP_SECURE
+          value: {{ $emailCfg.smtpSecure | quote }}
+        {{- end }}
+        {{- if and $emailCfg.smtpUser (not (has "SMTP_USER" $ownEnv)) }}
+        - name: SMTP_USER
+          value: {{ $emailCfg.smtpUser | quote }}
+        {{- end }}
+        {{- if and $emailCfg.smtpAuth (not (has "SMTP_PASS" $ownEnv)) }}
+        {{- /* App reads SMTP_PASS; the Secret key is SMTP_PASSWORD. */}}
+        - name: SMTP_PASS
+          valueFrom:
+            secretKeyRef:
+              name: {{ $emailCfg.secretName | quote }}
+              key: {{ $emailCfg.smtpPasswordKey | quote }}
+              {{- if $emailCfg.secretOptional }}
+              optional: true
+              {{- end }}
+        {{- end }}
+        {{- end }}
         - name: APP_URL
           {{- /* Resolve to the real ingress host (app.<domain>), not the in-cluster
                  service name, so magic links / auth callbacks are correct. Explicit
@@ -452,6 +560,10 @@ spec:
         {{- /* App contract; this chart always emits external. */}}
         - name: DEPLOYMENT_MODE
           value: "external"
+        {{- /* Bootstrap admin. Always injected via secretKeyRef so the password
+               never appears as a literal value in the Deployment spec. Inline
+               global.superadmin.email/password are rendered into
+               control-plane-secrets by the umbrella chart. */}}
         {{- $sa := default dict (default dict .Values.global).superadmin }}
         {{- $saExisting := default dict $sa.existingSecret }}
         {{- $saSecretName := $saExisting.name | default "" }}
@@ -466,15 +578,21 @@ spec:
             secretKeyRef:
               name: {{ $saSecretName | quote }}
               key: {{ $saExisting.passwordKey | default "ONPREM_SUPERADMIN_PASSWORD" | quote }}
-        {{- else }}
-        {{- $saEmail := $sa.email | default "" }}
-        {{- $saPassword := $sa.password | default "" }}
-        {{- if and $saEmail $saPassword }}
+        {{- else if and ($sa.email | default "") ($sa.password | default "") }}
         - name: ONPREM_SUPERADMIN_EMAIL
-          value: {{ $saEmail | quote }}
+          valueFrom:
+            secretKeyRef:
+              name: control-plane-secrets
+              key: ONPREM_SUPERADMIN_EMAIL
+              {{- /* preserveExistingSecrets installs must pre-create the keys or
+                     use existingSecret; leave the feature off rather than block boot. */}}
+              optional: true
         - name: ONPREM_SUPERADMIN_PASSWORD
-          value: {{ $saPassword | quote }}
-        {{- end }}
+          valueFrom:
+            secretKeyRef:
+              name: control-plane-secrets
+              key: ONPREM_SUPERADMIN_PASSWORD
+              optional: true
         {{- end }}
         - name: NEXTAUTH_URL
           {{- /* Explicit config.nextAuthUrl wins; else resolve to the real ingress

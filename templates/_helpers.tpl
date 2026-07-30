@@ -1016,6 +1016,78 @@ neuraltrust-ingress-tls
 {{- end }}
 {{- end }}
 
+{{/*
+Resolved outbound-email settings, as a YAML dict for `fromYaml`.
+
+The control-plane app builds exactly one transport, chosen by provider
+(resend | ses | smtp). Credentials always arrive through a Secret: either the
+operator's own via global.email.existingSecret.name, or chart-managed
+control-plane-secrets. Legacy controlPlane.secrets.resend* values stay as
+fallbacks so existing Resend installs need no changes.
+
+Args: the root context.
+*/}}
+{{- define "neuraltrust-platform.email.config" -}}
+{{- $email := default dict (default dict .Values.global).email }}
+{{- $existing := default dict $email.existingSecret }}
+{{- $smtp := default dict $email.smtp }}
+{{- $ses := default dict $email.ses }}
+provider: {{ $email.provider | default "resend" | quote }}
+secretName: {{ $existing.name | default "control-plane-secrets" | quote }}
+{{- /* With an operator-supplied Secret the chart cannot guarantee a key exists,
+       so credential refs are optional: a missing SES key then falls through to
+       the pod IAM role rather than blocking startup. */}}
+secretOptional: {{ if $existing.name }}true{{ else }}false{{ end }}
+resendApiKeyKey: {{ $existing.resendApiKeyKey | default "RESEND_API_KEY" | quote }}
+smtpPasswordKey: {{ $existing.smtpPasswordKey | default "SMTP_PASSWORD" | quote }}
+sesAccessKeyIdKey: {{ $existing.sesAccessKeyIdKey | default "SES_ACCESS_KEY_ID" | quote }}
+sesSecretAccessKeyKey: {{ $existing.sesSecretAccessKeyKey | default "SES_SECRET_ACCESS_KEY" | quote }}
+sesRegion: {{ $ses.region | default "" | quote }}
+{{- /* Booleans stay unquoted so `fromYaml` yields real bools for `if` checks.
+       smtpSecure is quoted at the call site when emitted as an env value. */}}
+sesStaticCredentials: {{ if or $ses.accessKeyId $existing.name }}true{{ else }}false{{ end }}
+smtpHost: {{ $smtp.host | default "" | quote }}
+smtpPort: {{ $smtp.port | default 587 | quote }}
+smtpSecure: {{ if kindIs "invalid" $smtp.secure }}true{{ else }}{{ $smtp.secure }}{{ end }}
+smtpUser: {{ $smtp.user | default "" | quote }}
+{{- /* A user means an authenticated relay, so the password ref is emitted
+       whether the password is inline or in the operator's Secret. */}}
+smtpAuth: {{ if and $smtp.user (or $smtp.password $existing.name) }}true{{ else }}false{{ end }}
+{{- end }}
+
+{{/*
+Renders the spec.tls body of an OpenShift Route.
+
+A Route is readable by anyone holding `route/get`, so private key material must
+never be copied into it. When `tls.secretName` is set the Route references the
+Secret through `spec.tls.externalCertificate` (OpenShift 4.17+, GA) instead of
+inlining the PEM. Inline `certificate` / `key` are emitted only when the
+operator supplies them explicitly in values.
+
+Args: dict "tls" <ingress tls config map>
+*/}}
+{{- define "neuraltrust-platform.route.tls" -}}
+{{- $tls := default dict .tls }}
+termination: {{ $tls.termination | default "edge" }}
+{{- if $tls.secretName }}
+externalCertificate:
+  name: {{ $tls.secretName | quote }}
+{{- end }}
+{{- if $tls.certificate }}
+certificate: {{ $tls.certificate | quote }}
+{{- end }}
+{{- if $tls.key }}
+key: {{ $tls.key | quote }}
+{{- end }}
+{{- if $tls.caCertificate }}
+caCertificate: {{ $tls.caCertificate | quote }}
+{{- end }}
+{{- if $tls.destinationCACertificate }}
+destinationCACertificate: {{ $tls.destinationCACertificate | quote }}
+{{- end }}
+insecureEdgeTerminationPolicy: {{ $tls.insecureEdgeTerminationPolicy | default "Redirect" }}
+{{- end }}
+
 {{- define "neuraltrust-platform.ingress.renderTLS" -}}
 {{- $globalIngress := default dict (default dict .global).ingress }}
 {{- $global := default dict .global }}

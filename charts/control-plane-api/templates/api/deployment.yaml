@@ -235,18 +235,6 @@ spec:
               name: {{ $pgSecretName }}
               key: POSTGRES_CONNECTION_TYPE
               optional: true
-        - name: DATABASE_AUTH_MODE
-          valueFrom:
-            secretKeyRef:
-              name: {{ $pgSecretName }}
-              key: DATABASE_AUTH_MODE
-              optional: true
-        - name: DATABASE_IAM_AUTH
-          valueFrom:
-            secretKeyRef:
-              name: {{ $pgSecretName }}
-              key: DATABASE_IAM_AUTH
-              optional: true
         {{- if eq (include "control-plane.postgresql.iam" .) "true" }}
         {{- $awsRegion := include "control-plane.postgresql.awsRegion" . }}
         {{- if $awsRegion }}
