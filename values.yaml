@@ -117,6 +117,44 @@ global:
     # External Secrets. Pin the target of an alias, not the alias itself
     # (AUTH_SECRET, not NEXTAUTH_SECRET) — the chart rejects the latter.
     values: {}
+  # MCP OAuth. The control-plane app acts as the authorization server and
+  # TrustGate as a pre-registered confidential client; the chart gives both sides
+  # the same client secret from `platform-secrets`, so the pair cannot drift.
+  # external mode only — hybrid has no control-plane app (it uses the hosted
+  # platform), so enabling this in hybrid fails at render time rather than wiring
+  # a login that cannot complete.
+  mcpOAuth:
+    # Unset ⇒ on in external as soon as a signing key is available, off until
+    #          then and always off in hybrid. Default-on without an upgrade that
+    #          can break: the feature needs a key the chart cannot generate (see
+    #          signingKey below), so intent alone is not enough to serve logins.
+    # true   ⇒ required. The render fails when no signing key is available.
+    # false  ⇒ never. With no client id the app answers 503 on the OAuth routes.
+    enabled:
+    # Client id TrustGate presents. Both sides must agree.
+    clientId: "trustgate"
+    # Full issuer URL, e.g. "https://app.example.com/api/mcp/oauth".
+    # Empty ⇒ derived from global.domain. Set it explicitly whenever the app is
+    # not served from app.<global.domain>, since the client resolves JWKS through
+    # this URL and a wrong host fails only at request time.
+    issuer: ""
+    # Audience for issued access tokens.
+    audience: "neuraltrust-mcp"
+    # Comma-separated callback origins, e.g. "https://*.mcp.example.com".
+    # Empty ⇒ https://*.mcp.<global.domain>. Do not widen this to bare "https://":
+    # an empty allowlist makes the app accept a callback on ANY https origin.
+    allowedRedirectHosts: ""
+    # RS256 signing key for issued tokens, and the reason `enabled` is not simply
+    # true: the chart cannot generate it. The app parses PKCS#8, and Helm emits
+    # only PKCS#1 for RSA (its one PKCS#8 generator produces ed25519, the wrong
+    # algorithm). Until a key exists every replica mints its own ephemeral one, so
+    # tokens signed by one pod fail JWKS verification against the next.
+    # Create one, base64 so it survives values as a single line:
+    #   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 \
+    #     | openssl base64 -A
+    # then pin it via global.platformSecret.values.MCP_OAUTH_SIGNING_KEY or put it
+    # straight in the platform Secret (see SECRETS.md). MCP OAuth switches itself
+    # on once it resolves.
   # Shared PostgreSQL (v2 hybrid + external control-plane).
   # Hybrid: every service (AgentGateway, TrustGuard, DataAgent, data-plane-api)
   # connects to ONE shared database via envFrom on the `postgresql-secrets`
@@ -548,7 +586,7 @@ control-plane-app:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.115.2"
+          tag: "v1.117.0"
           pullPolicy: IfNotPresent
         config:
           nodeEnv: production
@@ -622,7 +660,7 @@ control-plane-app:
 # stays agentgateway for now; K8s names stay agentgateway-*.
 agentgateway:
   image:
-    tag: "v0.23.0"
+    tag: "v0.24.0"
   database:
     sslMode: "prefer"
     iamAuth: false
@@ -884,7 +922,7 @@ firewall:
       replicas: 2
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-        tag: "v2.15.1"
+        tag: "v2.16.0"
         pullPolicy: IfNotPresent
       resources:
         requests:
@@ -911,7 +949,7 @@ firewall:
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
         # Keep in lockstep with gateway.image.tag.
-        tag: "v2.15.1"
+        tag: "v2.16.0"
         pullPolicy: IfNotPresent
       replicas: 1
       resources:

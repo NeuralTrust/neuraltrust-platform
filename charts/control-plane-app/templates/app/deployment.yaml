@@ -68,7 +68,7 @@ spec:
       initContainers:
       - name: init-db
         {{- $initImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
-        {{- $initImageTag := "v1.115.2" }}
+        {{- $initImageTag := "v1.117.0" }}
         {{- $initPullPolicy := "IfNotPresent" }}
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.image }}
           {{- if .Values.controlPlane.components.app.image.repository }}{{- $initImageRepo = .Values.controlPlane.components.app.image.repository }}{{- end }}
@@ -213,7 +213,7 @@ spec:
       containers:
       - name: app
         {{- $appImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
-        {{- $appImageTag := "v1.115.2" }}
+        {{- $appImageTag := "v1.117.0" }}
         {{- $appPullPolicy := "IfNotPresent" }}
         {{- $appPort := 3000 }}
         {{- $nodeEnv := "production" }}
@@ -548,6 +548,60 @@ spec:
         # Default v2 UI. Opt out: config.forceV2Ui: "false".
         - name: FORCE_V2_UI
           value: "{{ $forceV2Ui }}"
+        {{- end }}
+        {{- /* Encrypts SSO client secrets and SMTP credentials at rest, and is a
+               different key from AUTH_SECRET above, which signs sessions.
+               Optional because the chart only generates it on a fresh install:
+               on upgrade the app stays on its built-in default, since swapping
+               the key would make everything already encrypted with that default
+               undecryptable. */}}
+        {{- if not (has "AUTH_SECRET_KEY" $ownEnv) }}
+        - name: AUTH_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "AUTH_SECRET_KEY" "optional" true) | nindent 14 }}
+        {{- end }}
+        {{- /* MCP OAuth: this app is the authorization server, TrustGate a
+               pre-registered confidential client. Both read one client secret
+               from platform-secrets, under different env names. */}}
+        {{- $mcpOAuth := default dict (default dict .Values.global).mcpOAuth }}
+        {{- if eq (include "neuraltrust-platform.mcpOAuth.enabled" .) "true" }}
+        {{- if not (has "MCP_OAUTH_CLIENT_ID" $ownEnv) }}
+        - name: MCP_OAUTH_CLIENT_ID
+          value: {{ $mcpOAuth.clientId | default "trustgate" | quote }}
+        {{- end }}
+        {{- /* Shared helper rather than this chart's own public URL, so the value
+               is identical to the one TrustGate is given. */}}
+        {{- if not (has "MCP_OAUTH_ISSUER" $ownEnv) }}
+        - name: MCP_OAUTH_ISSUER
+          value: {{ include "neuraltrust-platform.mcpOAuth.issuer" . | quote }}
+        {{- end }}
+        {{- /* Left empty the app accepts a callback on any https origin, so
+               default to the gateway's own MCP wildcard. */}}
+        {{- $redirectHosts := $mcpOAuth.allowedRedirectHosts | default "" }}
+        {{- if not $redirectHosts }}
+        {{- $domain := include "neuraltrust-platform.domain" . }}
+        {{- if $domain }}{{- $redirectHosts = printf "https://*.mcp.%s" $domain }}{{- end }}
+        {{- end }}
+        {{- if and $redirectHosts (not (has "MCP_OAUTH_ALLOWED_REDIRECT_HOSTS" $ownEnv)) }}
+        - name: MCP_OAUTH_ALLOWED_REDIRECT_HOSTS
+          value: {{ $redirectHosts | quote }}
+        {{- end }}
+        {{- if not (has "MCP_OAUTH_CLIENT_SECRET" $ownEnv) }}
+        - name: MCP_OAUTH_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "MCP_OAUTH_CLIENT_SECRET" "optional" true) | nindent 14 }}
+        {{- end }}
+        {{- /* Absent, the app mints an ephemeral RS256 key per replica, so tokens
+               stop validating across replicas and restarts. PKCS#8 only; see
+               SECRETS.md. */}}
+        {{- if not (has "MCP_OAUTH_SIGNING_KEY" $ownEnv) }}
+        - name: MCP_OAUTH_SIGNING_KEY
+          valueFrom:
+            secretKeyRef:
+              {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "MCP_OAUTH_SIGNING_KEY" "optional" true) | nindent 14 }}
+        {{- end }}
         {{- end }}
         # Platform env email wins over per-org TeamAuthConfig.
         # Opt out: config.authEmailForceEnv: "false".
