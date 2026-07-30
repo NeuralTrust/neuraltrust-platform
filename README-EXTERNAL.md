@@ -197,9 +197,16 @@ global:
 ```
 
 Mirror **every** required image, including the ClickHouse and ClickStack
-collector images. The umbrella collector keeps collecting locally, ClickStack
-keeps writing to your ClickHouse, and AlertEngine keeps forwarding to
-destinations reachable from the cluster.
+collector images. With hosted export and observability off, `imageRegistry`
+rewrites the full external image set on its own — verify with
+`helm template ... | grep image:`. If you enable `global.observability`, also
+override `global.observability.collector.image.repository`; that one repository
+is pinned in full and `imageRegistry` does not rewrite it.
+
+Create the pull Secret for your mirror as `gcr-secret`, the name every component
+defaults to. The umbrella collector keeps collecting locally, ClickStack keeps
+writing to your ClickHouse, and AlertEngine keeps forwarding to destinations
+reachable from the cluster.
 
 The hybrid network allowlist in [`docs/hybrid-network.md`](./docs/hybrid-network.md)
 does **not** apply — external needs no outbound path to NeuralTrust.

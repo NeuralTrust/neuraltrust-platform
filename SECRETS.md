@@ -369,7 +369,7 @@ otherwise.
 
 | Kubernetes Secret | Type | Required | Description |
 |---|---|---|---|
-| `gcr-secret` | `docker-registry` | Yes | Credentials for NeuralTrust container images. Create it with `./create-image-pull-secret.sh --namespace <ns>`; the chart never generates it. |
+| `gcr-secret` | `docker-registry` | Yes | Credentials for NeuralTrust container images, built from the registry key NeuralTrust sends you. Create it with `./create-image-pull-secret.sh --namespace <ns>`; the chart never generates it. Mirroring images to your own registry? Name that registry's pull Secret `gcr-secret` too — `global.imagePullSecrets` does **not** override the per-component default. |
 
 ## Secret reference in values
 
