@@ -108,8 +108,10 @@ platform:
 firewall:
   # Empty ⇒ http://firewall.<release-namespace>.svc.cluster.local (stable Service).
   baseURL: ""
+  # Empty ⇒ the shared platform Secret (see global.platformSecret). Set name to
+  # point TrustGuard at a Secret you manage instead.
   existingSecret:
-    name: "firewall-secrets"
+    name: ""
     key: "JWT_SECRET"
 # ---- control-plane (admin API) — full deployments only ----
 controlPlane:

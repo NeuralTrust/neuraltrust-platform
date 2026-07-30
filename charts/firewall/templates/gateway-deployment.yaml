@@ -72,8 +72,7 @@ spec:
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: firewall-secrets
-                  key: JWT_SECRET
+                  {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "JWT_SECRET") | nindent 18 }}
             # Optional: models are bundled in the image at build time, so this
             # is unset for official images. Kept for custom runtime-download builds.
             - name: HUGGINGFACE_TOKEN

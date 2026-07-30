@@ -316,14 +316,16 @@ usageExport:
   enabled: false
   # In-cluster data-plane-api base URL (Service DNS, no public ingress).
   endpoint: "http://data-plane-api-service:80"
+  # Empty ⇒ follow the shared platform Secret, so usage export signs with the
+  # same key the data-plane API verifies. Set these to read your own Secret.
   jwtSecret:
-    existingSecret: data-plane-jwt-secret
-    secretKey: DATA_PLANE_JWT_SECRET
+    existingSecret: ""
+    secretKey: ""
   # In-cluster control-plane-api base URL for automatic Red Teaming target discovery.
   controlPlaneEndpoint: "http://control-plane-api-service:80"
   controlPlaneJwtSecret:
-    existingSecret: control-plane-secrets
-    secretKey: CONTROL_PLANE_JWT_SECRET
+    existingSecret: ""
+    secretKey: ""
   # Automatic per-team target discovery (default true). Set false to export
   # data-plane-only counters without querying control-plane-api.
   targetDiscovery: true
