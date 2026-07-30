@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.4.1] — 2026-07-30
+
 ### Changed
 
 - **`postgresql-secrets` stores one canonical name per fact.** The Secret previously
