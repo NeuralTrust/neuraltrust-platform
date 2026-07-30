@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.5.0] — 2026-07-30
+
 ### Added
 
 - **AgentGateway config-sync gRPC now runs over TLS in external mode.** TrustGate's
