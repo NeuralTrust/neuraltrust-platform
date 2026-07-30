@@ -1,4 +1,4 @@
-# Platform v2 hybrid with GPU Firewall workers.
+# Hybrid with GPU Firewall workers.
 # Layer over a TrustGuard-enabled base (values-required.yaml or
 # values-trustguard.yaml.example) and replace the registry and scheduling
 # labels. Firewall follows TrustGuard automatically.

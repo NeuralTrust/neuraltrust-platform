@@ -57,19 +57,13 @@ spec:
         - secretRef:
             name: {{ include "dataagent.secretName" . | quote }}
         {{- end }}
-        {{- if eq (include "neuraltrust-platform.isHybrid" .) "true" }}
-        # v2 hybrid: DB_* + SENSIBLE_PG_DSN arrive through the shared
-        # `postgresql-secrets` Secret. Listed after the per-service Secret so
-        # the shared credential wins. DATABASE_URL in that Secret is Prisma-
-        # shaped (connection_limit); DataAgent overrides it below for lib/pq.
-        - secretRef:
-            name: {{ include "neuraltrust-platform.v2.hybridPg.secretName" . | quote }}
-            optional: true
-        {{- end }}
         env:
         {{- if eq (include "neuraltrust-platform.isHybrid" .) "true" }}
-        # lib/pq treats unknown query params as Postgres GUCs; Prisma's
-        # connection_limit=15 on DATABASE_URL causes 42704 on every query.
+        {{- /* DATABASE_URL is the only datastore variable DataAgent reads
+               (internal/config/config.go), so it takes just that one key rather
+               than the whole shared Secret. lib/pq treats unknown query params as
+               Postgres GUCs, so it needs the plain DSN: the Prisma URL's
+               connection_limit=15 would raise 42704 on every query. */}}
         - name: DATABASE_URL
           valueFrom:
             secretKeyRef:

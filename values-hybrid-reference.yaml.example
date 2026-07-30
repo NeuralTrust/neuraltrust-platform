@@ -1,4 +1,5 @@
-# Platform v2 hybrid example.
+# Annotated hybrid reference. Most keys are commented out — uncomment only what
+# you need to override.
 # Hosted control planes; data-plane workloads run locally. PostgreSQL and Redis
 # deploy in-cluster by default; no in-cluster ClickHouse. data-plane-api uses
 # PostgreSQL by default.
@@ -32,7 +33,7 @@ global:
   #   sslMode: prefer
   #
   # Shared hybrid Redis. Passwordless in-cluster default on Service `redis`.
-  # See values-v2-hybrid.yaml.example for a fully-configured overlay.
+  # See values-hybrid.yaml.example for a fully-configured overlay.
 
 # data-plane-api read shim. In hybrid it defaults to PostgreSQL (SQL_DATABASE=postgres)
 # and reuses the umbrella-managed `postgresql-secrets`, so nothing below is required.

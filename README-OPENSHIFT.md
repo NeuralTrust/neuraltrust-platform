@@ -1,36 +1,49 @@
 # OpenShift Deployment Guide
 
-This chart (2.x) is v2-only. The default OpenShift path is hybrid mode with
-native Routes.
+The default OpenShift path is hybrid mode with native Routes. This guide covers
+only what differs on OpenShift — follow the
+[hybrid quick start](./README.md#quick-start-hybrid) for the general flow, or
+[README-EXTERNAL.md](./README-EXTERNAL.md) for self-hosted deployments.
 
 ## Prerequisites
 
 - OpenShift 4.10+
-- Helm 3.2+
+- Helm 3.2+ (3.8+ for OCI installs)
 - `oc` access to the target project
 - the NeuralTrust registry pull secret in the release namespace
 - a wildcard domain such as `apps.example.com`
 
 ## Hybrid quick start
 
-```bash
-oc new-project neuraltrust
-
-helm upgrade --install neuraltrust-platform \
-  oci://europe-west1-docker.pkg.dev/neuraltrust-app-prod/helm-charts/neuraltrust-platform \
-  --version <VERSION> \
-  --namespace neuraltrust \
-  -f values-openshift.yaml \
-  --set global.domain=apps.example.com
-```
-
-`values-openshift.yaml` explicitly selects:
+`values-openshift.yaml` is a **platform overlay, not a complete install**. It
+selects the topology only:
 
 ```yaml
 global:
   deploymentMode: "hybrid"
   platform: "openshift"
+  ingress:
+    provider: "openshift"
 ```
+
+Layer it over a values file that selects products and enrolment, otherwise the
+render fails with `v2 hybrid requires at least one product`:
+
+```bash
+oc new-project neuraltrust
+
+# Pre-create the four hybrid Secrets first — see README.md step 3
+helm upgrade --install neuraltrust-platform \
+  oci://europe-west1-docker.pkg.dev/neuraltrust-app-prod/helm-charts/neuraltrust-platform \
+  --version <VERSION> \
+  --namespace neuraltrust \
+  -f values-required.yaml \
+  -f values-openshift.yaml \
+  --set global.domain=apps.example.com
+```
+
+Order matters: `values-openshift.yaml` comes last so its `platform` and
+`ingress.provider` win.
 
 Hybrid product OTLP is mandatory via the DataAgent-co-located egress collector
 (enrolment-backed; no direct ClickStack bearer on apps). Air-gapped or local-only
@@ -54,7 +67,7 @@ trustguard:
 ```
 
 Set `configSync.enabled: false` only for Postgres-managed configuration. See
-[`values-v2-hybrid.yaml.example`](./values-v2-hybrid.yaml.example).
+[`values-hybrid.yaml.example`](./values-hybrid.yaml.example).
 
 DataAgent enrolment (`enrolment.token` or preferred
 `enrolment.existingSecret.name`) is required for hybrid OTLP egress. The JWT
@@ -63,9 +76,14 @@ carries `tenant_id` and `instance_id`.
 ## Routes and Ingress
 
 With `global.platform: openshift`, native Routes are the default for
-AgentGateway (`agentgateway.ingress.resourceType: auto`). Use
-`values-openshift-ingress.yaml.example` when the cluster standardizes on
-Kubernetes Ingress (`resourceType: ingress`).
+AgentGateway (`agentgateway.ingress.resourceType: auto`). When the cluster
+standardizes on Kubernetes Ingress instead, switch the resource type:
+
+```yaml
+agentgateway:
+  ingress:
+    resourceType: "ingress" # auto | route | ingress
+```
 
 Both paths use `global.domain`. Route names remain stable; Ingress hostnames are
 derived from each service's `hostPrefix`.
@@ -117,7 +135,7 @@ Operator prerequisites (not rendered by Helm):
    auto-adds `*.llm.<domain>` / `*.mcp.<domain>` Ingress/Route hosts. Exact
    primary hosts still require the gateway header; wildcard slug hosts do not.
    Explicit `additionalHosts` remain authoritative when set. See
-   [docs/platform-v2.md](./docs/platform-v2.md).
+   [docs/architecture.md](./docs/architecture.md).
 
 ## Self-hosted external mode
 
@@ -127,15 +145,24 @@ Layer the external topology over the OpenShift values:
 helm upgrade --install neuraltrust-platform <chart> \
   --namespace neuraltrust \
   -f values-openshift.yaml \
-  -f values-v2-external.yaml.example \
+  -f values-external.yaml.example \
   --set global.platform=openshift \
   --set global.domain=apps.example.com
 ```
 
+The two files disagree on purpose: `values-openshift.yaml` sets
+`deploymentMode: hybrid` and `values-external.yaml.example` sets
+`platform: kubernetes`. Ordering external last wins the mode, and the explicit
+`--set global.platform=openshift` restores the platform. `global.ingress.provider`
+from the OpenShift file is untouched by either.
+
 External mode runs the product API/app, control and data planes, DataCore,
 AlertEngine, and the ClickStack OTel Collector in the cluster. DataAgent is
-absent. Set `global.observability.hostedExport.enabled: false` for a
-no-egress deployment.
+absent, and no config-sync or enrolment Secrets are needed. Set
+`global.observability.hostedExport.enabled: false` for a no-egress deployment.
+
+Full walkthrough, including the bootstrap admin Secret and ClickHouse sizing:
+[README-EXTERNAL.md](./README-EXTERNAL.md).
 
 ## Security Context Constraints
 
@@ -157,15 +184,18 @@ disconnected clusters, including the external-mode ClickStack image.
 
 ## Validation
 
+Render with the same file list you install with — `values-openshift.yaml` alone
+does not select any product and will fail validation:
+
 ```bash
-helm lint <chart> -f values-openshift.yaml
+helm lint <chart> -f values-required.yaml -f values-openshift.yaml
 helm template neuraltrust-platform <chart> \
   --namespace neuraltrust \
+  -f values-required.yaml \
   -f values-openshift.yaml \
   --api-versions route.openshift.io/v1
 ```
 
-## Legacy v1
+---
 
-v1 (legacy TrustGate/Kafka) is maintained only on the `v1.14.x` release line;
-pin `--version ~1.14.0` to install it. This chart (2.x) is v2-only.
+<sup>**Looking for v1?** The legacy TrustGate/Kafka line ended at [v1.14.16](https://github.com/NeuralTrust/neuraltrust-platform/releases?page=3#release-v1.14.16) — install it with `--version ~1.14.0`.</sup>

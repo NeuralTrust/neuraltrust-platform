@@ -1,43 +1,76 @@
 # Values Files and Scenarios
 
-This chart (2.x) is v2-only.
+Every file listed here exists in this repo. For a
+guided first install see the [hybrid quick start](./README.md#quick-start-hybrid)
+or [README-EXTERNAL.md](./README-EXTERNAL.md).
+
+## How layering works
+
+Most files here are **overlays**, not complete installs. Pick one base that
+selects a topology and its products, then layer overlays on top:
+
+```bash
+helm upgrade --install neuraltrust-platform <chart> \
+  -f <base>.yaml \
+  -f <overlay>.yaml
+```
+
+Two rules cover almost every mistake:
+
+- **Later `-f` wins.** When two files set the same key, the last one on the
+  command line takes effect. Put the file whose opinion should survive last.
+- **An overlay alone will not install.** Platform and product overlays set a few
+  keys each. Without a base that selects `global.products`, the render fails
+  with `hybrid requires at least one product`.
+
+The `.yaml.example` suffix means "copy and edit" — none are applied as-is in
+production. `values-required.yaml` and `values-openshift.yaml` carry no suffix
+because they are usable directly.
 
 ## Core examples
 
-| File | Mode | Purpose |
-|---|---|---|
-| `values-required.yaml` | hybrid | Full-hybrid preset (all three products on) + enrolment / config-sync Secrets |
-| `values-v2.yaml.example` | hybrid | Documented hybrid knobs |
-| `values-v2-hybrid.yaml.example` | hybrid | Hybrid topology overlay |
-| `values-trustgate.yaml.example` | hybrid | Positive TrustGate + DataAgent slice |
-| `values-trustguard.yaml.example` | hybrid | Positive TrustGuard + Firewall + DataAgent slice |
-| `values-red-teaming.yaml.example` | hybrid | Positive data-plane-api-only slice |
-| `values-v2-external.yaml.example` | external | Minimal self-hosted topology |
-| `values-all-deployed.yaml.example` | external | Supported optional components enabled |
-| `values-v2-managed-datastores.yaml.example` | external | Managed PostgreSQL, Redis, and ClickHouse |
+The **Base?** column says whether a file installs on its own. A file marked "no"
+renders an error until you layer it over one marked "yes".
+
+| File | Mode | Base? | Purpose |
+|---|---|:---:|---|
+| [`values-required.yaml`](./values-required.yaml) | hybrid | yes | Full-hybrid preset (all three products on) + enrolment / config-sync Secrets |
+| [`values-hybrid.yaml.example`](./values-hybrid.yaml.example) | hybrid | yes | Hybrid topology with managed datastores |
+| [`values-trustgate.yaml.example`](./values-trustgate.yaml.example) | hybrid | yes | Positive TrustGate + DataAgent slice |
+| [`values-trustguard.yaml.example`](./values-trustguard.yaml.example) | hybrid | yes | Positive TrustGuard + Firewall + DataAgent slice |
+| [`values-red-teaming.yaml.example`](./values-red-teaming.yaml.example) | hybrid | yes | Positive data-plane-api-only slice |
+| [`values-hybrid-reference.yaml.example`](./values-hybrid-reference.yaml.example) | hybrid | no | Annotated reference for every hybrid knob — selects no products |
+| [`values-external.yaml.example`](./values-external.yaml.example) | external | yes | Minimal self-hosted topology |
+| [`values-managed-datastores.yaml.example`](./values-managed-datastores.yaml.example) | external | yes | Managed PostgreSQL, Redis, and ClickHouse |
+
+The three positive slices combine in any order, so
+`-f values-trustgate.yaml.example -f values-trustguard.yaml.example` is a valid
+alternative to `values-required.yaml` when you want only two products.
 
 ## Platform overlays
 
+Layer these over a core example.
+
 | File | Applies to | Notes |
 |---|---|---|
-| `values-openshift.yaml` | hybrid | Native OpenShift Routes |
-| `values-openshift-ingress.yaml.example` | hybrid | Kubernetes Ingress on OpenShift |
-| `values-aws-ipv6.yaml.example` | hybrid | AWS provider and IPv6-safe defaults |
-| `values-dataplane-gpu.yaml.example` | hybrid | GPU Firewall workers |
+| [`values-openshift.yaml`](./values-openshift.yaml) | hybrid | Native OpenShift Routes. Sets `deploymentMode: hybrid`, so for external put it **before** the external file and re-assert `--set global.platform=openshift` |
+| [`values-dataplane-gpu.yaml.example`](./values-dataplane-gpu.yaml.example) | both | GPU Firewall workers |
+
+For Kubernetes Ingress on OpenShift, set
+`agentgateway.ingress.resourceType: ingress` — see
+[README-OPENSHIFT.md](./README-OPENSHIFT.md).
 
 AgentGateway dual discovery (exact host + header, or `*.llm` / `*.mcp` slug
 with no header) is the chart default — no overlay is required. See
-[docs/platform-v2.md](./docs/platform-v2.md).
+[docs/architecture.md](./docs/architecture.md).
 
 ## Observability overlays
 
 | File | Purpose |
 |---|---|
-| `values-minimal-observability.yaml.example` | Watchdog sends redacted telemetry directly to hosted observability |
-| `values-observability-self-hosted.yaml.example` | Umbrella OTel Collector and monitoring resources with hosted export off |
-| `values-self-monitoring.yaml.example` | Curated watchdog checks, dry-run first |
-| `values-watchdog.yaml.example` | Detailed watchdog configuration |
-| `values-watchdog-gmp.yaml.example` | Google Managed Prometheus resources |
+| [`values-observability-self-hosted.yaml.example`](./values-observability-self-hosted.yaml.example) | Umbrella OTel Collector and monitoring resources with hosted export off |
+| [`values-self-monitoring.yaml.example`](./values-self-monitoring.yaml.example) | Curated watchdog checks, dry-run first |
+| [`values-watchdog.yaml.example`](./values-watchdog.yaml.example) | Detailed watchdog configuration |
 
 The umbrella OTel Collector is portable across hybrid and external. The
 ClickStack OTel Collector is a product analytics component and only renders in
@@ -74,7 +107,7 @@ Hybrid product OTLP is mandatory (enrolment-backed egress collector; no
 `global.clickstack.enabled` / `egress.enabled` opt-out). Air-gapped or
 local-only product telemetry requires `global.deploymentMode: external`.
 Config-sync is on by default — overlays set `existingSecret` only (see
-`values-v2-hybrid.yaml.example`). Set `configSync.enabled: false` only for
+`values-hybrid.yaml.example`). Set `configSync.enabled: false` only for
 Postgres-managed configuration.
 
 ## Scenario: self-hosted external
@@ -115,7 +148,7 @@ infrastructure:
 ```
 
 Use existing secrets and generic service endpoints as shown in
-`values-v2-managed-datastores.yaml.example`. Pre-create the PostgreSQL role
+`values-managed-datastores.yaml.example`. Pre-create the PostgreSQL role
 and database — there is no chart-managed database init Job. In external mode,
 runtime services use per-service `*.database` / `*.redis` overlays;
 `global.postgresql` still gates in-cluster PG and feeds control-plane
@@ -123,17 +156,20 @@ runtime services use per-service `*.database` / `*.redis` overlays;
 
 ## Scenario: OpenShift
 
-Use `values-openshift.yaml` for Routes:
+`values-openshift.yaml` selects Routes and the OpenShift platform only, so layer
+it over a file that selects products:
 
 ```bash
 helm upgrade --install neuraltrust-platform <chart> \
   --namespace neuraltrust --create-namespace \
+  -f values-required.yaml \
   -f values-openshift.yaml \
   --set global.domain=apps.example.com
 ```
 
-Use `values-openshift-ingress.yaml.example` when an Ingress controller and
-certificate Secret are managed separately.
+When an Ingress controller and certificate Secret are managed separately, add
+`agentgateway.ingress.resourceType: ingress` to keep Kubernetes Ingress instead
+of Routes.
 
 ## Scenario: GPU Firewall
 
@@ -150,7 +186,6 @@ when CRDs are available, and optional watchdog actions.
 In external mode, the ClickStack collector still writes product telemetry to
 the selected ClickHouse instance; it does not export to the hosted telemetry path.
 
-## Legacy v1
+---
 
-v1 (legacy TrustGate/Kafka) is maintained only on the `v1.14.x` release line;
-pin `--version ~1.14.0` to install it. This chart (2.x) is v2-only.
+<sup>**Looking for v1?** The legacy TrustGate/Kafka line ended at [v1.14.16](https://github.com/NeuralTrust/neuraltrust-platform/releases?page=3#release-v1.14.16) — install it with `--version ~1.14.0`.</sup>
