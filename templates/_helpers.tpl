@@ -1854,12 +1854,64 @@ true
 {{- end }}
 
 {{/*
+Name of the hook-owned Secret holding the generated signing key. Deliberately
+separate from `platform-secrets`: the generator runs as a pre-install hook, before
+Helm has created any manifest, so writing into the chart-owned Secret would
+collide with Helm's ownership metadata on a fresh install.
+*/}}
+{{- define "neuraltrust-platform.mcpOAuth.generatedSecretName" -}}
+mcp-oauth-signing
+{{- end }}
+
+{{/*
+Whether the chart generates the signing key itself, via the pre-install hook in
+templates/mcp-oauth-signing-key.yaml.
+
+On when nothing else provides a key, so a fresh external install gets MCP OAuth
+with no operator action. Off as soon as the operator supplies one, leaving their
+key untouched, and off when they set global.mcpOAuth.generateSigningKey=false to
+own the key themselves.
+
+Must not call mcpOAuth.enabled — that helper calls this one to decide whether a
+key will exist.
+*/}}
+{{- define "neuraltrust-platform.mcpOAuth.generateSigningKey" -}}
+{{- $mcp := default dict (default dict .Values.global).mcpOAuth -}}
+{{- $wanted := true -}}
+{{- if kindIs "bool" $mcp.generateSigningKey -}}{{- $wanted = $mcp.generateSigningKey -}}{{- end -}}
+{{- if and (kindIs "bool" $mcp.enabled) (not $mcp.enabled) -}}{{- $wanted = false -}}{{- end -}}
+{{- if and $wanted
+      (eq (include "neuraltrust-platform.isExternal" .) "true")
+      (ne (include "neuraltrust-platform.mcpOAuth.signingKeyPresent" .) "true") -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/*
+Where the app reads its signing key from. The generated Secret when the chart owns
+the key, otherwise the usual shared-or-legacy resolution.
+
+An operator who later pins their own key moves this reference to
+`platform-secrets` and orphans the generated Secret. That is a key rotation and
+invalidates tokens signed by the old key, which is why nothing does it implicitly.
+*/}}
+{{- define "neuraltrust-platform.mcpOAuth.signingKeyRef" -}}
+{{- if eq (include "neuraltrust-platform.mcpOAuth.generateSigningKey" .) "true" -}}
+name: {{ include "neuraltrust-platform.mcpOAuth.generatedSecretName" . | quote }}
+key: "MCP_OAUTH_SIGNING_KEY"
+optional: true
+{{- else -}}
+{{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "MCP_OAUTH_SIGNING_KEY" "optional" true) -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Whether MCP OAuth is active. Three-state, because the operator's intent and the
 material needed to honour it are separate questions:
 
-  unset  → auto. On in external once a signing key is available, off otherwise.
-           External installs get the feature by default without an upgrade ever
-           breaking on a key the operator has not created yet.
+  unset  → auto. On in external, because the chart generates the signing key when
+           nothing else provides one. Off if the operator disabled the generator
+           and supplied no key of their own.
   true   → required. Fails the render when no signing key is available, rather
            than silently serving logins that fail on half the replicas.
   false  → never.
@@ -1875,8 +1927,11 @@ validate-values with a message about the mode, so this helper stays silent.
 {{- else if ne (include "neuraltrust-platform.isExternal" .) "true" -}}
 {{- else if eq (include "neuraltrust-platform.mcpOAuth.signingKeyPresent" .) "true" -}}
 true
+{{- else if eq (include "neuraltrust-platform.mcpOAuth.generateSigningKey" .) "true" -}}
+{{- /* The pre-install hook writes the key before any pod starts. */ -}}
+true
 {{- else if $explicit -}}
-{{- fail "global.mcpOAuth.enabled=true needs an RS256 signing key: every app replica would otherwise sign with its own ephemeral key and MCP logins would fail JWKS verification. Generate one with `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 | openssl base64 -A` and pass it as global.platformSecret.values.MCP_OAUTH_SIGNING_KEY (see SECRETS.md). Leave global.mcpOAuth.enabled unset to have the feature switch itself on once the key exists." -}}
+{{- fail "global.mcpOAuth.enabled=true needs an RS256 signing key, but global.mcpOAuth.generateSigningKey=false leaves the chart unable to create one: every app replica would sign with its own ephemeral key and MCP logins would fail JWKS verification. Either drop generateSigningKey=false to have the chart generate the key, or supply your own as global.platformSecret.values.MCP_OAUTH_SIGNING_KEY (see SECRETS.md)." -}}
 {{- end -}}
 {{- end }}
 

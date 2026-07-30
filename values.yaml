@@ -124,13 +124,18 @@ global:
   # platform), so enabling this in hybrid fails at render time rather than wiring
   # a login that cannot complete.
   mcpOAuth:
-    # Unset ⇒ on in external as soon as a signing key is available, off until
-    #          then and always off in hybrid. Default-on without an upgrade that
-    #          can break: the feature needs a key the chart cannot generate (see
-    #          signingKey below), so intent alone is not enough to serve logins.
-    # true   ⇒ required. The render fails when no signing key is available.
+    # Unset ⇒ on in external, off in hybrid. A signing key is always available
+    #          because generateSigningKey below creates one when nothing else
+    #          provides it, so the feature needs no operator action.
+    # true   ⇒ required. The render fails when no signing key is available, which
+    #          can only happen with generateSigningKey: false and no key of yours.
     # false  ⇒ never. With no client id the app answers 503 on the OAuth routes.
     enabled:
+    # Generate the RS256 signing key in-cluster on first install, via a hook Job
+    # that reuses the app image this chart already deploys — no extra image to
+    # mirror or scan. Skipped as soon as you supply a key of your own.
+    # Set false to own the key yourself; MCP OAuth then stays off until you do.
+    generateSigningKey: true
     # Client id TrustGate presents. Both sides must agree.
     clientId: "trustgate"
     # Full issuer URL, e.g. "https://app.example.com/api/mcp/oauth".
@@ -144,17 +149,16 @@ global:
     # Empty ⇒ https://*.mcp.<global.domain>. Do not widen this to bare "https://":
     # an empty allowlist makes the app accept a callback on ANY https origin.
     allowedRedirectHosts: ""
-    # RS256 signing key for issued tokens, and the reason `enabled` is not simply
-    # true: the chart cannot generate it. The app parses PKCS#8, and Helm emits
-    # only PKCS#1 for RSA (its one PKCS#8 generator produces ed25519, the wrong
-    # algorithm). Until a key exists every replica mints its own ephemeral one, so
-    # tokens signed by one pod fail JWKS verification against the next.
+    # Supplying your own RS256 signing key is optional — leave it to
+    # generateSigningKey above unless you need to control the material.
+    # It must be PKCS#8, which is why the chart's own templating cannot produce it
+    # (Helm emits PKCS#1 for RSA, and its one PKCS#8 generator produces ed25519).
     # Create one, base64 so it survives values as a single line:
     #   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 \
     #     | openssl base64 -A
     # then pin it via global.platformSecret.values.MCP_OAUTH_SIGNING_KEY or put it
-    # straight in the platform Secret (see SECRETS.md). MCP OAuth switches itself
-    # on once it resolves.
+    # straight in the platform Secret (see SECRETS.md). Yours always wins over a
+    # generated key; swapping one in later invalidates tokens signed by the old.
   # Shared PostgreSQL (v2 hybrid + external control-plane).
   # Hybrid: every service (AgentGateway, TrustGuard, DataAgent, data-plane-api)
   # connects to ONE shared database via envFrom on the `postgresql-secrets`
