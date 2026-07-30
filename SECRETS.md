@@ -438,9 +438,23 @@ Resolution order per key: `global.platformSecret.values` → live `platform-secr
 | `TRUSTLENS_JWT_SECRET` | `trustlens-secrets` / `JWT_SECRET` | generated | `trustlens.enabled` |
 | `ENCRYPTION_KEYSET` | `trustlens-secrets` / `ENCRYPTION_KEYSET` | generated | `trustlens.enabled` |
 | `MODEL_SCANNER_SECRET` | `control-plane-secrets` / `MODEL_SCANNER_SECRET` | adopted only | external |
+| `AUTH_SECRET_KEY` | `control-plane-secrets` / `AUTH_SECRET_KEY` | generated on install only | external |
+| `MCP_OAUTH_CLIENT_SECRET` | `control-plane-secrets` / `MCP_OAUTH_CLIENT_SECRET` | generated | external + a signing key exists |
+| `MCP_OAUTH_SIGNING_KEY` | `control-plane-secrets` / `MCP_OAUTH_SIGNING_KEY` | adopted only | external + a signing key exists |
 
 **Adopted only** means the chart never invents the value — the key is omitted
 until you supply it, because an operator owns it.
+
+**Generated on install only** applies to `AUTH_SECRET_KEY`, which encrypts SSO
+client secrets and SMTP credentials at rest. It is a different key from
+`AUTH_SECRET`, which signs sessions — one value for both signing and encryption
+would be key reuse. The app ships a built-in default, so any install running
+without this key has already encrypted rows with that default; handing it a new
+key on upgrade would make those rows undecryptable. A fresh install therefore gets
+a real key, an upgrade leaves it absent, and you can adopt one deliberately by
+pinning `global.platformSecret.values.AUTH_SECRET_KEY` once the existing
+ciphertext no longer matters (SSO client secrets and SMTP credentials have to be
+re-entered afterwards).
 
 Credentials that only one service reads stay in their own Secret and are **not**
 here — third-party API keys (`OPENAI_API_KEY`), the TrustGuard client credential
@@ -457,6 +471,90 @@ One logical name deliberately differs from both the legacy key and the env var t
 container sees, because the old name collided with another service's:
 `TRUSTLENS_JWT_SECRET` (legacy `trustlens-secrets` / `JWT_SECRET`, still
 `JWT_SECRET` inside the container).
+
+### MCP OAuth (`global.mcpOAuth`)
+
+An MCP consumer normally needs an identity provider of its own before it can log
+in. TrustGate can instead fall back to a built-in provider, with the
+control-plane app acting as the OAuth2 authorization server, so a proof of concept
+needs no external IdP.
+
+**External mode only.** A hybrid install deploys no control-plane app — it talks
+to the hosted platform — so there is no in-cluster issuer to point TrustGate at
+and no client secret the two sides could agree on locally. Enabling it in hybrid
+fails at render time instead of wiring a login that cannot complete.
+
+**On by default in external, once a signing key exists.** `enabled` is
+three-state, because wanting the feature and having the key it needs are separate
+questions:
+
+| `global.mcpOAuth.enabled` | Behaviour |
+| --- | --- |
+| unset (default) | On in external as soon as a signing key resolves; off until then, and always off in hybrid. |
+| `true` | Required. The render **fails** when no signing key is available. |
+| `false` | Never. With no client id the app answers `503` on its MCP OAuth routes. |
+
+The default is deliberately conditional rather than a flat `true`. The chart
+cannot generate the signing key (see below), and without one every app replica
+signs with its own ephemeral key — so a flat default would turn the feature on in
+a state where roughly half of all logins fail JWKS verification. Auto means an
+upgrade never breaks on a key you have not created yet, and the feature switches
+itself on the moment you supply one.
+
+```yaml
+global:
+  mcpOAuth:
+    # enabled: left unset — on once the signing key below is in place.
+    # Optional; only when the app is not served from app.<global.domain>.
+    issuer: "https://app.example.com/api/mcp/oauth"
+    allowedRedirectHosts: "https://*.mcp.example.com"
+```
+
+The two sides must agree on one client secret, so the chart gives both the same
+`MCP_OAUTH_CLIENT_SECRET` from `platform-secrets` — the app reads it under that
+name, TrustGate as `MCP_DEFAULT_IDP_CLIENT_SECRET`. Both also derive the issuer
+from one helper, because a mismatch stays silent until TrustGate tries to fetch
+JWKS from an issuer nobody serves. Only the MCP workload gets this configuration;
+admin and proxy do not broker logins.
+
+`allowedRedirectHosts` matters: left empty the app accepts an OAuth callback on
+**any** https origin. The chart defaults it to `https://*.mcp.<global.domain>`,
+the gateway's own MCP wildcard. Widen it only to origins you control.
+
+`MCP_OAUTH_SIGNING_KEY` is never auto-generated, and it is what gates the feature.
+The app signs with RS256 and loads the key with `importPKCS8`, so it needs an RSA
+key in PKCS#8 form. Helm cannot produce one: `genPrivateKey "rsa"` emits PKCS#1,
+`"ecdsa"` emits SEC1, and the one generator that does emit PKCS#8 (`"ed25519"`) is
+the wrong algorithm. Until you supply a key, each replica mints its own ephemeral
+one and tokens stop validating across replicas and restarts.
+
+Generate one, base64-encoded so it survives a values file as a single line (the
+app accepts raw PEM, `\n`-escaped PEM, or base64):
+
+```bash
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 \
+  | openssl base64 -A > mcp-oauth-signing.b64
+```
+
+Node works too, if you would rather not depend on the local OpenSSL build:
+
+```bash
+node -e "const {generateKeyPairSync}=require('crypto');\
+const {privateKey}=generateKeyPairSync('rsa',{modulusLength:2048});\
+process.stdout.write(Buffer.from(privateKey.export({type:'pkcs8',format:'pem'})).toString('base64'))" \
+  > mcp-oauth-signing.b64
+```
+
+You only need to pass it once. The chart writes it into `platform-secrets`, which
+carries `helm.sh/resource-policy: keep`, and later upgrades adopt it from there —
+so MCP OAuth stays on without the flag or the key on the command line again.
+
+Then pin it (via `--set-file` or a values file kept out of git), or put it in the
+Secret you manage:
+
+```bash
+helm upgrade ... --set-file global.platformSecret.values.MCP_OAUTH_SIGNING_KEY=mcp-oauth-signing.pem
+```
 
 ### Managing it yourself
 

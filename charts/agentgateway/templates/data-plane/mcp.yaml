@@ -65,6 +65,7 @@ spec:
         {{- with .Values.mcp.extraEnv }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+        {{- include "neuraltrust-platform.mcpDefaultIdpEnv" (dict "ctx" . "skip" .Values.mcp.extraEnv) | nindent 8 }}
         {{- include "neuraltrust-platform.trustguardClientEnv" (dict "ctx" . "idVar" "TRUSTGUARD_CLIENT_ID" "secretVar" "TRUSTGUARD_CLIENT_SECRET") | nindent 8 }}
         {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
         {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "go" "ctx" .) | nindent 8 }}

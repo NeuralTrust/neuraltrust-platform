@@ -1718,6 +1718,11 @@ both sides identical.
 legacy Secret it adopts from on upgrade, and to a `generate` policy:
   random  → generated when absent (chart owns the value)
   adopt   → only ever adopted; omitted when no source has it (operator owns it)
+  install → generated on install only, adopted on upgrade. For a key that some
+            existing installs are already using at an application default: a
+            fresh install gets a real credential, while an upgrade leaves the
+            key absent rather than rotating it out from under data already
+            encrypted with that default (AUTH_SECRET_KEY).
 
 `requires` lists the install shapes that consume the key, and a key is emitted
 when any of them is in play:
@@ -1725,6 +1730,12 @@ when any of them is in play:
   trustgate / trustguard / dataPlane → the product claims it in hybrid
   trustlens  → the opt-in subchart is enabled, in either mode. External deploys
                the full stack, so shape alone would not gate an opt-in chart.
+  mcpOAuth   → MCP OAuth resolved as active: external, and a signing key exists.
+               On by default in external, but only once the key the app needs is
+               available — external alone must not conjure credentials for a
+               feature that cannot serve logins yet. External-only, because the
+               authorization server is the control-plane app and hybrid uses the
+               hosted platform instead.
   watchdog   → watchdog usage export is on. It calls the control-plane and
                data-plane APIs, so it needs their keys even in hybrid.
   v1         → the retired v1 console env. `isV2` is always true, so this never
@@ -1743,6 +1754,27 @@ drift this Secret exists to prevent.
 resolved from their target rather than independently, which is what keeps
 documented invariants (TRUSTGATE_JWT_SECRET == SERVER_SECRET_KEY,
 NEXTAUTH_SECRET == AUTH_SECRET) true on a fresh install too.
+
+Notes on the cross-service keys that carry a constraint the row cannot express:
+
+MCP_OAUTH_CLIENT_SECRET — the control-plane app is the MCP OAuth authorization
+server and TrustGate a pre-registered confidential client, so this value has to
+be byte identical on both sides or the token exchange fails. The app compares it
+with a timing-safe equality check; TrustGate reads it as
+MCP_DEFAULT_IDP_CLIENT_SECRET, so the two env names differ while the value does
+not.
+
+MCP_OAUTH_SIGNING_KEY — RS256 key for the tokens that server mints, and
+adopt-only on purpose. The app loads it with `importPKCS8`, while Helm's
+`genPrivateKey "rsa"` emits PKCS#1, so anything the chart generated would fail
+to parse. SECRETS.md carries the `openssl genpkey` command. While it is absent
+the app mints an ephemeral key per replica, which only works with one replica.
+
+AUTH_SECRET_KEY — encrypts SSO client secrets and SMTP credentials at rest
+(scrypt into AES-256-GCM). Deliberately independent of AUTH_SECRET, which signs
+sessions: one value for both signing and encryption is key reuse. Uses the
+`install` policy because the app has a committed default, and replacing that
+default on a live install would make every already-encrypted row undecryptable.
 */}}
 {{- define "neuraltrust-platform.platformSecret.registry" -}}
 SERVER_SECRET_KEY: {legacyName: agentgateway-secrets, legacyKey: SERVER_SECRET_KEY, generate: random, length: 64, requires: external trustgate}
@@ -1761,6 +1793,154 @@ AUTH_SECRET: {legacyName: control-plane-secrets, legacyKey: AUTH_SECRET, generat
 NEXTAUTH_SECRET: {legacyName: control-plane-secrets, legacyKey: NEXTAUTH_SECRET, aliasOf: AUTH_SECRET, requires: external}
 MODEL_SCANNER_SECRET: {legacyName: control-plane-secrets, legacyKey: MODEL_SCANNER_SECRET, generate: adopt, requires: external}
 TRUSTGATE_JWT_SECRET: {legacyName: control-plane-secrets, legacyKey: TRUSTGATE_JWT_SECRET, aliasOf: SERVER_SECRET_KEY, requires: v1}
+MCP_OAUTH_CLIENT_SECRET: {legacyName: control-plane-secrets, legacyKey: MCP_OAUTH_CLIENT_SECRET, generate: random, length: 64, requires: mcpOAuth}
+MCP_OAUTH_SIGNING_KEY: {legacyName: control-plane-secrets, legacyKey: MCP_OAUTH_SIGNING_KEY, generate: adopt, requires: mcpOAuth}
+AUTH_SECRET_KEY: {legacyName: control-plane-secrets, legacyKey: AUTH_SECRET_KEY, generate: install, length: 64, requires: external}
+{{- end }}
+
+{{/*
+MCP OAuth issuer, shared by the authorization server (the control-plane app) and
+by TrustGate as its client. Both sides derive it from the same helper because a
+mismatch is silent until TrustGate tries to fetch JWKS from an issuer nobody
+serves. Derived from `global` alone, since a subchart cannot read a sibling's
+values — so an install that moves the app off the default host has to set
+global.mcpOAuth.issuer explicitly (full URL, including the path).
+*/}}
+{{- define "neuraltrust-platform.mcpOAuth.issuer" -}}
+{{- $mcp := default dict (default dict .Values.global).mcpOAuth -}}
+{{- $explicit := $mcp.issuer | default "" -}}
+{{- if $explicit -}}
+{{- trimSuffix "/" $explicit -}}
+{{- else -}}
+{{- $domain := include "neuraltrust-platform.domain" . -}}
+{{- if not $domain -}}
+{{- fail "global.mcpOAuth.enabled needs global.domain to build the issuer URL, or an explicit global.mcpOAuth.issuer" -}}
+{{- end -}}
+{{- $host := printf "app.%s" $domain -}}
+{{- if eq (include "neuraltrust-platform.isOpenshift" .) "true" -}}
+{{- $host = printf "control-plane-app.%s" $domain -}}
+{{- end -}}
+{{- printf "https://%s/api/mcp/oauth" $host -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Whether a stable MCP OAuth signing key is available to this install, checked
+against the same sources the shared Secret resolves from: an explicit pin, the
+live `platform-secrets`, an operator-owned Secret, and the legacy Secret the key
+used to live in.
+
+The app mints an ephemeral key per replica when the key is unset, so tokens one
+replica signs fail JWKS verification against another. That makes "is a key
+available" the real precondition for the feature, not the operator's intent.
+*/}}
+{{- define "neuraltrust-platform.mcpOAuth.signingKeyPresent" -}}
+{{- $ps := default dict (default dict .Values.global).platformSecret -}}
+{{- $pinned := index (default dict $ps.values) "MCP_OAUTH_SIGNING_KEY" | default "" -}}
+{{- if and $pinned (not (kindIs "map" $pinned)) (not (kindIs "slice" $pinned)) -}}
+true
+{{- else -}}
+{{- $found := "" -}}
+{{- range $name := (list "platform-secrets" ((default dict $ps.existingSecret).name | default "") "control-plane-secrets") -}}
+{{- if and $name (not $found) -}}
+{{- $live := lookup "v1" "Secret" $.Release.Namespace $name -}}
+{{- if and $live $live.data (index $live.data "MCP_OAUTH_SIGNING_KEY") -}}
+{{- $found = "true" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $found -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Whether MCP OAuth is active. Three-state, because the operator's intent and the
+material needed to honour it are separate questions:
+
+  unset  → auto. On in external once a signing key is available, off otherwise.
+           External installs get the feature by default without an upgrade ever
+           breaking on a key the operator has not created yet.
+  true   → required. Fails the render when no signing key is available, rather
+           than silently serving logins that fail on half the replicas.
+  false  → never.
+
+Always off in hybrid: the authorization server is the control-plane app, which a
+hybrid install does not deploy. An explicit `true` there is rejected by
+validate-values with a message about the mode, so this helper stays silent.
+*/}}
+{{- define "neuraltrust-platform.mcpOAuth.enabled" -}}
+{{- $mcp := default dict (default dict .Values.global).mcpOAuth -}}
+{{- $explicit := kindIs "bool" $mcp.enabled -}}
+{{- if and $explicit (not $mcp.enabled) -}}
+{{- else if ne (include "neuraltrust-platform.isExternal" .) "true" -}}
+{{- else if eq (include "neuraltrust-platform.mcpOAuth.signingKeyPresent" .) "true" -}}
+true
+{{- else if $explicit -}}
+{{- fail "global.mcpOAuth.enabled=true needs an RS256 signing key: every app replica would otherwise sign with its own ephemeral key and MCP logins would fail JWKS verification. Generate one with `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 | openssl base64 -A` and pass it as global.platformSecret.values.MCP_OAUTH_SIGNING_KEY (see SECRETS.md). Leave global.mcpOAuth.enabled unset to have the feature switch itself on once the key exists." -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+TrustGate's built-in default identity provider for MCP consumers, with the
+control-plane app as the OAuth2 authorization server. Lets an MCP consumer log in
+without the operator standing up an identity provider first.
+
+External only. A hybrid install has no control-plane app — it talks to the hosted
+platform — so there is no in-cluster issuer to point at and no client secret the
+two sides could agree on locally.
+
+Only the MCP plane brokers these logins, so this stays an explicit env block on
+that workload rather than joining the ConfigMap every agentgateway pod reads —
+otherwise admin and proxy would advertise an IdP they hold no client secret for.
+
+AUTHORIZE_URL / TOKEN_URL / JWKS_URL are deliberately left unset: TrustGate
+derives them as {issuer}/authorize, /token and /jwks, which is what the app
+serves.
+
+Usage:
+  {{- include "neuraltrust-platform.mcpDefaultIdpEnv" (dict "ctx" . "skip" .Values.mcp.extraEnv) | nindent 8 }}
+*/}}
+{{- define "neuraltrust-platform.mcpDefaultIdpEnv" -}}
+{{- $ctx := .ctx -}}
+{{- $skip := list -}}
+{{- range (default list .skip) }}
+  {{- if .name }}{{- $skip = append $skip .name }}{{- end }}
+{{- end }}
+{{- $mcp := default dict (default dict $ctx.Values.global).mcpOAuth -}}
+{{- /* External only, and only once a signing key exists: in hybrid the
+       authorization server is the hosted platform, not an app this chart deploys,
+       so there is nothing in-cluster to point at and no shared client secret to
+       agree on. */ -}}
+{{- if eq (include "neuraltrust-platform.mcpOAuth.enabled" $ctx) "true" }}
+{{- if not (has "MCP_DEFAULT_IDP_ISSUER" $skip) }}
+- name: MCP_DEFAULT_IDP_ISSUER
+  value: {{ include "neuraltrust-platform.mcpOAuth.issuer" $ctx | quote }}
+{{- end }}
+{{- if not (has "MCP_DEFAULT_IDP_CLIENT_ID" $skip) }}
+- name: MCP_DEFAULT_IDP_CLIENT_ID
+  value: {{ $mcp.clientId | default "trustgate" | quote }}
+{{- end }}
+{{- with $mcp.audience }}
+{{- if not (has "MCP_DEFAULT_IDP_AUDIENCE" $skip) }}
+- name: MCP_DEFAULT_IDP_AUDIENCE
+  value: {{ . | quote }}
+{{- end }}
+{{- end }}
+{{- with $mcp.scopes }}
+{{- if not (has "MCP_DEFAULT_IDP_SCOPES" $skip) }}
+- name: MCP_DEFAULT_IDP_SCOPES
+  value: {{ . | quote }}
+{{- end }}
+{{- end }}
+{{- /* Same value the app reads as MCP_OAUTH_CLIENT_SECRET. Optional so the pod
+       still starts while an operator is mid-migration on the Secret. */}}
+{{- if not (has "MCP_DEFAULT_IDP_CLIENT_SECRET" $skip) }}
+- name: MCP_DEFAULT_IDP_CLIENT_SECRET
+  valueFrom:
+    secretKeyRef:
+      {{- include "neuraltrust-platform.secretRef" (dict "ctx" $ctx "logical" "MCP_OAUTH_CLIENT_SECRET" "optional" true) | nindent 6 }}
+{{- end }}
+{{- end }}
 {{- end }}
 
 {{/*

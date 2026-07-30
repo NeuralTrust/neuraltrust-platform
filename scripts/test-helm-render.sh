@@ -1442,6 +1442,135 @@ render_default "$out12map" --set global.deploymentMode=external \
 assert_platform_key "$out12map" absent MODEL_SCANNER_SECRET \
   "a map-shaped credential is ignored rather than aborting the render"
 
+# AUTH_SECRET_KEY encrypts SSO client secrets and SMTP credentials at rest. The
+# app has a committed default, so an install already running on that default has
+# ciphertext bound to it: generating a new key on upgrade would make those rows
+# undecryptable. Fresh install gets one, upgrade does not.
+blue "==> Scenario 12f: AUTH_SECRET_KEY is generated on install only"
+assert_platform_key "$out12ext" present AUTH_SECRET_KEY \
+  "external install: platform-secrets carries AUTH_SECRET_KEY"
+out12askup="$TMP/scenario-shared-secret-authsecretkey-upgrade.yaml"
+render_default "$out12askup" --set global.deploymentMode=external --is-upgrade
+assert_platform_key "$out12askup" absent AUTH_SECRET_KEY \
+  "external upgrade: AUTH_SECRET_KEY is not generated, so nothing already encrypted breaks"
+out12askpin="$TMP/scenario-shared-secret-authsecretkey-pinned.yaml"
+render_default "$out12askpin" --set global.deploymentMode=external --is-upgrade \
+  --set global.platformSecret.values.AUTH_SECRET_KEY=operator-adopted
+assert_platform_key "$out12askpin" present AUTH_SECRET_KEY \
+  "external upgrade: an operator can still adopt AUTH_SECRET_KEY deliberately"
+# It signs nothing — AUTH_SECRET does. Sharing one value would be key reuse.
+ruby -ryaml -e '
+  docs = YAML.load_stream(File.read(ARGV.fetch(0))).compact
+  d = docs.find { |x| x["kind"] == "Secret" && x.dig("metadata", "name") == "platform-secrets" }
+  data = d["data"] || {}
+  abort "AUTH_SECRET or AUTH_SECRET_KEY missing" unless data["AUTH_SECRET"] && data["AUTH_SECRET_KEY"]
+  abort "AUTH_SECRET_KEY reuses the session signing key" if data["AUTH_SECRET"] == data["AUTH_SECRET_KEY"]
+' "$out12ext" || { red "FAIL: AUTH_SECRET_KEY must not equal AUTH_SECRET"; exit 1; }
+green "ok  - external: AUTH_SECRET_KEY is a distinct key from AUTH_SECRET"
+
+# MCP OAuth is on by default in external, but only once a signing key exists: the
+# chart cannot generate one (Helm emits PKCS#1, the app parses PKCS#8) and without
+# it each replica signs with its own ephemeral key. So the gate is three-state —
+# unset means auto, true means required, false means never.
+blue "==> Scenario 12g: MCP OAuth follows the signing key, not intent alone"
+# The signing key is opaque to the chart; only the app parses it, so a placeholder
+# is enough to prove the gate and the wiring.
+mcpkey="pem-placeholder"
+for key in MCP_OAUTH_CLIENT_SECRET MCP_OAUTH_SIGNING_KEY; do
+  assert_platform_key "$out12ext" absent "${key}" \
+    "auto with no signing key: platform-secrets omits ${key}"
+done
+assert_not_contains "$out12ext" 'MCP_DEFAULT_IDP_|name: MCP_OAUTH_' \
+  "auto with no signing key: no workload carries MCP OAuth env"
+# Default-on: external plus a key, and nobody had to set the flag.
+out12mcp="$TMP/scenario-mcp-oauth-on.yaml"
+render_default "$out12mcp" --set global.deploymentMode=external \
+  --set global.platformSecret.values.MCP_OAUTH_SIGNING_KEY="$mcpkey"
+assert_platform_key "$out12mcp" present MCP_OAUTH_CLIENT_SECRET \
+  "auto with a signing key: MCP OAuth switches on without global.mcpOAuth.enabled"
+assert_platform_key "$out12mcp" present MCP_OAUTH_SIGNING_KEY \
+  "auto with a signing key: the operator-supplied key is emitted"
+# Adopted verbatim, never regenerated: a chart-invented value would not parse.
+ruby -ryaml -rbase64 -e '
+  docs = YAML.load_stream(File.read(ARGV.fetch(0))).compact
+  s = docs.find { |d| d["kind"] == "Secret" && d.dig("metadata", "name") == "platform-secrets" }
+  abort "platform-secrets not rendered" if s.nil?
+  got = Base64.decode64(s.fetch("data").fetch("MCP_OAUTH_SIGNING_KEY"))
+  abort "signing key was not adopted verbatim: #{got.inspect}" unless got == ARGV.fetch(1)
+' "$out12mcp" "$mcpkey" || { red "FAIL: the signing key must be adopted, not generated"; exit 1; }
+green "ok  - the signing key is adopted verbatim, never generated"
+# Intent without the material is a misconfiguration, not a silent no-op: half the
+# logins would fail JWKS verification across replicas.
+assert_render_fails "mcpOAuth=true without a signing key fails loudly" \
+  --set global.deploymentMode=external \
+  --set global.mcpOAuth.enabled=true
+# An explicit false still wins over an available key.
+out12mcpoff="$TMP/scenario-mcp-oauth-forced-off.yaml"
+render_default "$out12mcpoff" --set global.deploymentMode=external \
+  --set global.mcpOAuth.enabled=false \
+  --set global.platformSecret.values.MCP_OAUTH_SIGNING_KEY="$mcpkey"
+assert_not_contains "$out12mcpoff" 'MCP_DEFAULT_IDP_|name: MCP_OAUTH_CLIENT_ID' \
+  "explicit false with a key present: MCP OAuth stays off"
+assert_platform_key "$out12mcpoff" absent MCP_OAUTH_CLIENT_SECRET \
+  "explicit false with a key present: no client secret is generated"
+assert_shared_secret_wiring "$out12mcp" \
+  "mcpOAuth on: every ref still resolves to an emitted key"
+# One value, two env names, and one issuer both sides resolve identically: a
+# mismatch on either would surface only as a failed login at request time.
+ruby -ryaml -e '
+  docs = YAML.load_stream(File.read(ARGV.fetch(0))).compact
+  def env_of(docs, name)
+    d = docs.find { |x| x["kind"] == "Deployment" && x.dig("metadata", "name") == name }
+    abort "#{name} not rendered" if d.nil?
+    (d.dig("spec", "template", "spec", "containers") || []).flat_map { |c| c["env"] || [] }
+  end
+  app = env_of(docs, "control-plane-app")
+  mcp = env_of(docs, "agentgateway-mcp")
+  app_ref = app.find { |e| e["name"] == "MCP_OAUTH_CLIENT_SECRET" }
+  mcp_ref = mcp.find { |e| e["name"] == "MCP_DEFAULT_IDP_CLIENT_SECRET" }
+  abort "client secret not wired on both sides" if app_ref.nil? || mcp_ref.nil?
+  a = app_ref.dig("valueFrom", "secretKeyRef")
+  b = mcp_ref.dig("valueFrom", "secretKeyRef")
+  unless a && b && a["name"] == b["name"] && a["key"] == b["key"]
+    abort "client secret sources differ: #{a.inspect} vs #{b.inspect}"
+  end
+  app_iss = app.find { |e| e["name"] == "MCP_OAUTH_ISSUER" }&.fetch("value", nil)
+  mcp_iss = mcp.find { |e| e["name"] == "MCP_DEFAULT_IDP_ISSUER" }&.fetch("value", nil)
+  abort "issuer missing on one side: #{app_iss.inspect} vs #{mcp_iss.inspect}" if app_iss.nil? || mcp_iss.nil?
+  abort "issuers differ: #{app_iss} vs #{mcp_iss}" unless app_iss == mcp_iss
+  # Only the MCP plane brokers logins; the others must not advertise an IdP.
+  %w[agentgateway-admin agentgateway-proxy].each do |name|
+    leaked = env_of(docs, name).map { |e| e["name"] }.grep(/^MCP_DEFAULT_IDP/)
+    abort "#{name} carries #{leaked.join(", ")}" unless leaked.empty?
+  end
+' "$out12mcp" || { red "FAIL: MCP OAuth wiring is not consistent across services"; exit 1; }
+green "ok  - mcpOAuth on: app and TrustGate share one client secret and one issuer"
+# Empty allowlist means the app accepts a callback on any https origin.
+assert_contains "$out12mcp" 'name: MCP_OAUTH_ALLOWED_REDIRECT_HOSTS' \
+  "mcpOAuth on: the redirect-host allowlist is always set"
+assert_render_fails "mcpOAuth without a resolvable issuer fails loudly" \
+  --set global.deploymentMode=external \
+  --set global.platformSecret.values.MCP_OAUTH_SIGNING_KEY="$mcpkey" \
+  --set global.domain=
+# Hybrid deploys no control-plane app, so there is no authorization server to
+# point at. Refuse rather than hand TrustGate an issuer nobody serves.
+assert_render_fails "mcpOAuth is rejected in hybrid, where the app is the hosted platform" \
+  --set global.deploymentMode=hybrid \
+  --set global.mcpOAuth.enabled=true
+assert_platform_key "$out12hyb" absent MCP_OAUTH_CLIENT_SECRET \
+  "hybrid: platform-secrets omits the MCP OAuth client secret"
+assert_not_contains "$out12hyb" 'MCP_DEFAULT_IDP_' \
+  "hybrid: agentgateway carries no MCP default IdP env"
+# Auto must not fire in hybrid just because a key happens to be present: the
+# authorization server is the hosted platform, which never saw this client secret.
+out12hybkey="$TMP/scenario-mcp-oauth-hybrid-key.yaml"
+render_default "$out12hybkey" --set global.deploymentMode=hybrid \
+  --set global.platformSecret.values.MCP_OAUTH_SIGNING_KEY="$mcpkey"
+assert_not_contains "$out12hybkey" 'MCP_DEFAULT_IDP_|name: MCP_OAUTH_CLIENT_ID' \
+  "hybrid with a signing key present: auto still leaves MCP OAuth off"
+assert_platform_key "$out12hybkey" absent MCP_OAUTH_CLIENT_SECRET \
+  "hybrid with a signing key present: no client secret is generated"
+
 blue "==> Scenario 12b: control-plane-app no longer couples to backend Secrets"
 for legacy in agentgateway-secrets trustguard-secrets datacore-secrets alertengine-secrets trustlens-secrets; do
   ruby -ryaml -e '
