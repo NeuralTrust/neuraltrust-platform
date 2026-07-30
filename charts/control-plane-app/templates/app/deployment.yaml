@@ -576,13 +576,10 @@ spec:
         - name: MCP_OAUTH_ISSUER
           value: {{ include "neuraltrust-platform.mcpOAuth.issuer" . | quote }}
         {{- end }}
-        {{- /* Left empty the app accepts a callback on any https origin, so
-               default to the gateway's own MCP wildcard. */}}
-        {{- $redirectHosts := $mcpOAuth.allowedRedirectHosts | default "" }}
-        {{- if not $redirectHosts }}
-        {{- $domain := include "neuraltrust-platform.domain" . }}
-        {{- if $domain }}{{- $redirectHosts = printf "https://*.mcp.%s" $domain }}{{- end }}
-        {{- end }}
+        {{- /* Left empty the app accepts a callback on any https origin, so this
+               defaults to the gateway's own MCP wildcard. Shared with
+               validate-values, which refuses to enable the feature without one. */}}
+        {{- $redirectHosts := include "neuraltrust-platform.mcpOAuth.allowedRedirectHosts" . }}
         {{- if and $redirectHosts (not (has "MCP_OAUTH_ALLOWED_REDIRECT_HOSTS" $ownEnv)) }}
         - name: MCP_OAUTH_ALLOWED_REDIRECT_HOSTS
           value: {{ $redirectHosts | quote }}
