@@ -1,8 +1,13 @@
 # Deployment Guide
 
-This chart (2.x) is v2-only. This guide covers the default deployment paths.
-Install a released OCI chart whenever possible; replace `<chart>` below with
+This guide covers the default deployment paths. Install a released OCI chart
+whenever possible; replace `<chart>` below with
 the OCI URL, a release archive, or `.` when testing the source tree.
+
+For a copy-pasteable first install, start with the
+[hybrid quick start](./README.md#quick-start-hybrid) or
+[README-EXTERNAL.md](./README-EXTERNAL.md); this guide is the reference for
+each decision those quick starts make.
 
 ## 1. Choose a topology
 
@@ -22,8 +27,13 @@ Hybrid config-sync is on by default. Point each runtime at a Secret holding
 `CONFIG_SYNC_TOKEN` and `CONFIG_SYNC_LKG_KEY` via `existingSecret` (do not
 restate `enabled: true`). Set `configSync.enabled: false` only for
 Postgres-managed configuration. Full contract:
-[`docs/platform-v2.md`](./docs/platform-v2.md) and
-[`values-v2-hybrid.yaml.example`](./values-v2-hybrid.yaml.example).
+[`docs/architecture.md`](./docs/architecture.md) and
+[`values-hybrid.yaml.example`](./values-hybrid.yaml.example).
+
+Create the config-sync and DataAgent enrolment Secrets **before** installing —
+the chart validates them and fails the render rather than starting a runtime
+that cannot authenticate. Commands:
+[README.md step 3](./README.md#3-create-the-four-operator-supplied-secrets).
 
 ```bash
 helm upgrade --install neuraltrust-platform <chart> \
@@ -59,7 +69,7 @@ analytics stack in the cluster:
 ```bash
 helm upgrade --install neuraltrust-platform <chart> \
   --namespace neuraltrust --create-namespace \
-  -f values-v2-external.yaml.example
+  -f values-external.yaml.example
 ```
 
 The external-only analytics path is:
@@ -136,7 +146,7 @@ infrastructure:
 
 Then provide the host/user/password (or `existingSecret`) for each. Reference
 existing Kubernetes Secrets for passwords. The full pattern is in
-[`values-v2-managed-datastores.yaml.example`](./values-v2-managed-datastores.yaml.example).
+[`values-managed-datastores.yaml.example`](./values-managed-datastores.yaml.example).
 
 There is no chart-managed database init Job. When external PostgreSQL is
 selected, pre-create the role and database before installing; application
@@ -144,7 +154,7 @@ migrations own their own tables.
 
 ## 6. Configure observability
 
-The umbrella OTel Collector is available in both v2 modes. It is separate from
+The umbrella OTel Collector is available in both modes. It is separate from
 the external-only ClickStack collector:
 
 - umbrella collector: cluster metrics, events, traces, optional hosted export
@@ -190,6 +200,9 @@ as the complete overlay.
 
 ## 8. Validate before rollout
 
+Render locally first. The chart's validation runs at template time, so most
+misconfigurations surface here rather than as a half-installed release:
+
 ```bash
 helm lint <chart> -f <values-file>
 helm template neuraltrust-platform <chart> \
@@ -197,11 +210,23 @@ helm template neuraltrust-platform <chart> \
   -f <values-file> > /tmp/neuraltrust-rendered.yaml
 ```
 
+A render catches everything that is wrong in your **values**: an unselected
+product, a config-sync or enrolment reference you forgot to set, a mode and
+platform that contradict each other.
+
+It cannot see your **cluster**, so a clean render still says nothing about
+whether the Secrets you referenced actually exist, whether `gcr-secret` is
+present, or whether your ingress class is installed. Those surface as pod
+failures after install — confirm pods reach `Ready`, then check
+[Install fails? Common causes](./README.md#install-fails-common-causes) in the
+README.
+
 ## OpenShift
 
-Use `values-openshift.yaml` for Routes or
-`values-openshift-ingress.yaml.example` for Ingress. Both select hybrid mode.
-See [README-OPENSHIFT.md](./README-OPENSHIFT.md).
+Layer `values-openshift.yaml` over a values file that selects products — on its
+own it sets only the topology and fails product validation. Native Routes are
+the default; set `agentgateway.ingress.resourceType: ingress` to keep Kubernetes
+Ingress. See [README-OPENSHIFT.md](./README-OPENSHIFT.md).
 
 ## Upgrades and secrets
 
@@ -212,7 +237,6 @@ pre-create secrets and set `global.preserveExistingSecrets: true`.
 Persistent volume claims are retained by default. Review release notes before
 each upgrade.
 
-## Legacy v1
+---
 
-v1 (legacy TrustGate/Kafka) is maintained only on the `v1.14.x` release line;
-pin `--version ~1.14.0` to install it. This chart (2.x) is v2-only.
+<sup>**Looking for v1?** The legacy TrustGate/Kafka line ended at [v1.14.16](https://github.com/NeuralTrust/neuraltrust-platform/releases?page=3#release-v1.14.16) — install it with `--version ~1.14.0`.</sup>

@@ -1,6 +1,12 @@
-# Platform v2
+# Architecture
 
-This chart (2.x) is v2-only. One global value selects the topology:
+This is the topology contract: what each mode deploys, how the pieces talk to
+each other, and which values govern them. It assumes you have already installed
+the chart — for a first install, start with the
+[hybrid quick start](../README.md#quick-start-hybrid) or
+[README-EXTERNAL.md](../README-EXTERNAL.md).
+
+One global value selects the topology:
 
 ```yaml
 global:
@@ -21,7 +27,8 @@ customer cluster:
 Hybrid does **not** deploy an in-cluster ClickHouse: analytics use the hosted
 path. AgentGateway and TrustGuard **always dual-write** product data over OTLP
 via a local `clickstack-egress-collector` (enrolment-backed; see
-[hybrid ClickStack OTLP](#hybrid-clickstack-otlp-mandatory)) while ALSO
+[hybrid ClickStack OTLP](#hybrid-clickstack-otlp-mandatory-when-trustgatetrustguard-on))
+while ALSO
 persisting raw payloads to the local PostgreSQL for DataAgent. `data-plane-api`
 renders **by default** in hybrid and reads from the umbrella-managed
 **PostgreSQL** (`SQL_DATABASE=postgres`), so no ClickHouse is required. Its
@@ -53,9 +60,9 @@ initiated by the customer cluster over TLS:
 Firewall / security-group allowlist (hostnames, IPs, and the NeuralTrust
 inbound source IP): [hybrid-network.md](./hybrid-network.md).
 
-There is no in-cluster `clickstack-otel-collector` product collector in hybrid
-(that subchart is external-mode only). The hybrid egress sidecar is co-located
-with DataAgent and is not an operator-facing collector.
+There is no in-cluster `clickstack-collector` product collector in hybrid — the
+`clickstack-otel-collector` subchart is external-mode only. The hybrid egress
+sidecar is co-located with DataAgent and is not an operator-facing collector.
 
 Hybrid config-sync is **on by default** (mode-derived; subchart
 `configSync.enabled: null`). Pre-create the two named Secrets below with
@@ -192,13 +199,16 @@ hosted telemetry egress.
 
 ## Components
 
+In hybrid, "opt-in" means the product flag is `false` by default and you must set
+it. External ignores the flags and deploys everything.
+
 | Component | Hybrid | External | Purpose |
 |---|:---:|:---:|---|
-| TrustGate proxy/MCP (`agentgateway:`; product `global.products.trustgate`; K8s `agentgateway-*`) | opt-in (default on) | yes | AI gateway data path |
+| TrustGate proxy/MCP (`agentgateway:`; product `global.products.trustgate`; K8s `agentgateway-*`) | opt-in | yes | AI gateway data path |
 | TrustGate admin | hosted | yes | Gateway administration |
-| TrustGuard data plane | opt-in (default on) | yes | Runtime safety evaluation |
+| TrustGuard data plane | opt-in | yes | Runtime safety evaluation |
 | TrustGuard control plane | hosted | yes | Policy administration |
-| data-plane API | opt-in (default on; PostgreSQL) | yes (ClickHouse) | Analytics / evaluation API — PostgreSQL by default in hybrid, ClickHouse in external |
+| data-plane API | opt-in (PostgreSQL) | yes (ClickHouse) | Analytics / evaluation API — PostgreSQL by default in hybrid, ClickHouse in external |
 | DataAgent | one per enabled TrustGate/TrustGuard | no | Outbound entitled-query bridge; primary also powers ClickStack egress |
 | ClickStack OTel Collector | no | yes | OTLP to ClickHouse |
 | DataCore | no | yes | Residency query API (ClickHouse + Postgres metadata) |
@@ -243,16 +253,34 @@ global:
       name: ""
 ```
 
-The chart renders two shared Kubernetes Secrets:
+The chart renders two shared Kubernetes Secrets. Each stores **one canonical name
+per fact** — no aliases:
 
-- `postgresql-secrets` — POSTGRES_* keys **plus** `DB_HOST`, `DB_PORT`, `DB_USER`,
-  `DB_PASSWORD`, `DB_NAME`, `DB_SSL_MODE`, `DATABASE_URL`, `SENSIBLE_PG_DSN`.
+- `postgresql-secrets` — `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`,
+  `POSTGRES_PASSWORD`, `POSTGRES_DB`, `POSTGRES_SSLMODE`, `POSTGRES_LOGIN`,
+  `POSTGRES_AUTH_MODE`, `POSTGRES_CONNECTION_TYPE`, and `SENSIBLE_PG_DSN`.
+  External mode adds `POSTGRES_PRISMA_URL`.
 - `redis-secrets` — `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_USERNAME`,
   `REDIS_TLS`.
 
-Every hybrid workload (AgentGateway, TrustGuard, DataAgent, `data-plane-api`)
-`envFrom`'s these Secrets, so all four connect as the single `neuraltrust` role
-to the shared `neuraltrust` database. There is **no** chart-managed schema/role
+Stored key names and the environment variables a container sees are deliberately
+different. Workloads take `redis-secrets` wholesale with `envFrom`, but read
+PostgreSQL through explicit `env` entries so each pod receives only the variables
+it uses under the names its binary expects: the Go services get `DB_*`, and
+DataAgent gets `DATABASE_URL` from `SENSIBLE_PG_DSN`. Effective values are
+identical either way — all hybrid workloads connect as the single `neuraltrust`
+role to the shared `neuraltrust` database. Do not expect `DB_*` or `DATABASE_URL`
+to exist as keys inside the chart-managed Secret.
+
+> **Supplying your own PostgreSQL Secret changes the contract.** Renaming is only
+> safe for a Secret the chart writes. Set `global.postgresql.existingSecret.name`
+> or `global.preserveExistingSecrets: true` and workloads fall back to `envFrom`
+> on your Secret, injecting its keys verbatim as environment variables. Your keys
+> must then be the names the applications read — `DB_HOST`, `DB_PORT`, `DB_USER`,
+> `DB_PASSWORD`, `DB_NAME`, `DB_SSL_MODE`, and `SENSIBLE_PG_DSN` — not the
+> `POSTGRES_*` family. This is the one case where `DB_*` keys are correct.
+
+There is **no** chart-managed schema/role
 init Job in hybrid — application migrations (already namespaced:
 `trustgate_migration_versions`, `trustguard_migration_versions`) own their tables
 directly. For an external / managed PostgreSQL, the DBA (or Terraform)
@@ -300,7 +328,7 @@ infrastructure:
     deploy: false
 ```
 
-See `values-v2-managed-datastores.yaml.example`. External PostgreSQL roles and
+See `values-managed-datastores.yaml.example`. External PostgreSQL roles and
 databases must be pre-created.
 
 ## Observability collectors
@@ -353,16 +381,20 @@ settings remain operator prerequisites:
 
 Admin stays exact-host only (no wildcards).
 
-## Legacy v1
-
-v1 (legacy TrustGate/Kafka) is maintained only on the `v1.14.x` release line;
-pin `--version ~1.14.0` to install it. This chart (2.x) is v2-only.
+---
 
 ## Operator examples
 
-- `values-required.yaml`: minimal hybrid
-- `values-v2.yaml.example`: documented hybrid
-- `values-v2-hybrid.yaml.example`: hybrid topology overlay
-- `values-v2-external.yaml.example`: minimal external
-- `values-all-deployed.yaml.example`: external plus supported optional components
-- `values-v2-managed-datastores.yaml.example`: external managed datastores
+| File | Purpose |
+|---|---|
+| [`values-required.yaml`](../values-required.yaml) | Full-hybrid preset used by the README quick start |
+| [`values-hybrid-reference.yaml.example`](../values-hybrid-reference.yaml.example) | Annotated reference for every hybrid knob |
+| [`values-hybrid.yaml.example`](../values-hybrid.yaml.example) | Hybrid overlay with managed datastores |
+| [`values-external.yaml.example`](../values-external.yaml.example) | Minimal self-hosted external |
+| [`values-managed-datastores.yaml.example`](../values-managed-datastores.yaml.example) | External with managed PostgreSQL, Redis, and ClickHouse |
+
+Scenario walkthroughs: [VALUES_SCENARIOS.md](../VALUES_SCENARIOS.md).
+
+---
+
+<sup>**Looking for v1?** The legacy TrustGate/Kafka line ended at [v1.14.16](https://github.com/NeuralTrust/neuraltrust-platform/releases?page=3#release-v1.14.16) — install it with `--version ~1.14.0`.</sup>

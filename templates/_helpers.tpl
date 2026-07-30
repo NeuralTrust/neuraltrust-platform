@@ -362,10 +362,69 @@ its own `postgresql-secrets` — every consumer envFrom's that Secret directly.
 {{- end }}
 
 {{- define "neuraltrust-platform.v2.hybridPg.chartManagedSecret" -}}
-{{- $pg := default dict (default dict .Values.global).postgresql -}}
+{{- $global := default dict .Values.global -}}
+{{- $pg := default dict $global.postgresql -}}
 {{- $existing := default dict $pg.existingSecret -}}
-{{- if not ($existing.name | default "") -}}true{{- end -}}
+{{- /* preserveExistingSecrets skips both postgresql-secrets emitters, so the
+       live Secret is whatever an earlier release wrote — under the old key
+       names. Renaming from POSTGRES_* would resolve nothing, and because these
+       refs are optional the loss would be silent: DB_SSL_MODE would vanish and
+       the gateways would fall back to their built-in "disable", turning an
+       install configured for opportunistic TLS into a plaintext one. Treat the
+       Secret as operator-owned instead and keep the envFrom passthrough. */}}
+{{- if and (not ($existing.name | default "")) (not $global.preserveExistingSecrets) -}}true{{- end -}}
 {{- end }}
+
+{{/*
+Explicit Postgres env for one consumer, renamed to the names that consumer reads.
+
+`postgresql-secrets` stores a single canonical POSTGRES_* family. The Go services
+read DB_*, TrustLens reads DATABASE_*, so that translation happens here instead of
+storing every alias in the Secret and injecting the whole set with envFrom — which
+handed each pod eighteen datastore variables to read six, with no manifest showing
+which ones it used.
+
+Only valid for the chart-managed Secret. When an operator supplies
+global.postgresql.existingSecret the key names in it are theirs, so callers keep
+the envFrom passthrough for that case.
+
+TrustLens reads DATABASE_* but is deliberately not handled here: it owns a separate
+database identity (its own user, database and password), so pointing it at the
+shared credential would change which database it connects to.
+
+Usage: (dict "ctx" $ "dsn" true "skip" .Values.dataPlane.extraEnv)
+  dsn     also emit SENSIBLE_PG_DSN, read by the TrustGate and TrustGuard
+          telemetry exporters
+  skip    env entries that already define these names, so an operator override in
+          extraEnv is not duplicated; duplicate env names fail the upgrade patch
+*/}}
+{{- define "neuraltrust-platform.postgresEnv" -}}
+{{- $ctx := .ctx -}}
+{{- $secret := include "neuraltrust-platform.v2.hybridPg.secretName" $ctx -}}
+{{- $map := dict "DB_HOST" "POSTGRES_HOST" "DB_PORT" "POSTGRES_PORT" "DB_USER" "POSTGRES_USER" "DB_PASSWORD" "POSTGRES_PASSWORD" "DB_NAME" "POSTGRES_DB" "DB_SSL_MODE" "POSTGRES_SSLMODE" -}}
+{{- /* POSTGRES_LOGIN is the only IAM switch these services read, and hybrid never
+       delivered it: the gateways got it solely from their own subchart flag, so a
+       hybrid install against an IAM-authenticated Postgres quietly attempted
+       password auth. It resolves to "default" for password installs. */}}
+{{- $_ := set $map "POSTGRES_LOGIN" "POSTGRES_LOGIN" -}}
+{{- if .dsn -}}{{- $_ := set $map "SENSIBLE_PG_DSN" "SENSIBLE_PG_DSN" -}}{{- end -}}
+{{- $skip := list -}}
+{{- range $e := (default list .skip) -}}{{- $skip = append $skip $e.name -}}{{- end -}}
+{{- range $envName, $key := $map }}
+{{- if not (has $envName $skip) }}
+- name: {{ $envName }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ $secret | quote }}
+      key: {{ $key | quote }}
+      {{- /* The envFrom this replaces was optional, and installs that deploy a
+             gateway without a rendered postgresql-secrets rely on that: a required
+             ref would turn a service that fails its own config validation into a
+             pod that never starts. */}}
+      optional: true
+{{- end }}
+{{- end }}
+{{- end -}}
 
 {{/*
 Effective DB_USER for a v2 telemetry writer (AgentGateway / TrustGuard).

@@ -1,4 +1,4 @@
-# Curated Platform v2 self-monitoring overlay (hybrid).
+# Curated self-monitoring overlay (hybrid).
 # Layer over values-required.yaml (DataAgent enrolment + config-sync Secrets).
 # Hybrid has no in-cluster ClickHouse — omit that check id.
 

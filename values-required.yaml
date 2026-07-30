@@ -1,4 +1,4 @@
-# Full Platform v2 hybrid starting point (all three products selected).
+# Full hybrid starting point (all three products selected).
 # Hybrid always exports product OTLP via the DataAgent-co-located egress
 # collector, and enables config-sync by default. Pre-create the Secrets below
 # before install (preferred). Enrolment JWTs carry tenant_id and instance_id

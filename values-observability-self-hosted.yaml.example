@@ -1,5 +1,5 @@
-# Platform v2 external with local-only observability.
-# Layer over values-v2-external.yaml.example (or any external base). The umbrella
+# External with local-only observability.
+# Layer over values-external.yaml.example (or any external base). The umbrella
 # OTel Collector stays local. The external-only ClickStack collector writes
 # product telemetry to ClickHouse.
 

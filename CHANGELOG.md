@@ -4,6 +4,211 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Changed
+
+- **`postgresql-secrets` stores one canonical name per fact.** The Secret previously
+  carried `DB_*` copies of `POSTGRES_HOST`/`_PORT`/`_USER`/`_PASSWORD`/`_DB`/`sslMode`,
+  plus `DATABASE_URL` (a byte-identical copy of `POSTGRES_PRISMA_URL`) and the
+  `DATABASE_AUTH_MODE` / `DATABASE_IAM_AUTH` flags, which had no reader in any service
+  the chart deploys. Those keys are no longer written; the canonical family is
+  `POSTGRES_*` plus `POSTGRES_SSLMODE`, `POSTGRES_LOGIN`, `SENSIBLE_PG_DSN`, and
+  `POSTGRES_PRISMA_URL` (external only — hybrid has no Prisma reader). This supersedes
+  the "`postgresql-secrets` carries DB_* aliases alongside `POSTGRES_*`" contract
+  described under v2.2.0.
+- **Hybrid workloads receive only the datastore variables they read.** AgentGateway
+  (proxy + MCP), TrustGuard's data plane and DataAgent took `postgresql-secrets`
+  wholesale via `envFrom`, so a pod got eighteen datastore variables to read six and
+  no manifest showed which. They now map explicit `env` entries through the new
+  `neuraltrust-platform.postgresEnv` helper, which renames the canonical keys to the
+  `DB_*` names the Go services read. DataAgent gets only `DATABASE_URL`, from
+  `SENSIBLE_PG_DSN`. Effective values are unchanged, and external mode is untouched.
+- **Hybrid honours `global.postgresql.authMode: iam`.** `POSTGRES_LOGIN`, the only IAM
+  switch TrustGate and TrustGuard read, was emitted solely from the external branch of
+  the per-service ConfigMaps, so a hybrid install against an IAM-authenticated Postgres
+  silently attempted password authentication regardless of any flag. It now comes from
+  the shared Secret, driven by the global auth mode. External mode still takes it from
+  the per-service `database.iamAuth` flag; reconciling those two sources is tracked
+  separately.
+- **Removed dead IAM variables** `DB_IAM_AUTH` and `DB_AUTH_MODE` from the AgentGateway
+  and TrustGuard ConfigMaps. Neither binary reads them — `DB_AUTH_MODE` is read by
+  AlertEngine, a different service.
+- **`preserveExistingSecrets: true` keeps the Postgres `envFrom` passthrough.** Renaming
+  is only safe for a Secret the chart writes. That mode skips both `postgresql-secrets`
+  emitters, so the live Secret is whatever an earlier release wrote — under the old key
+  names — and referencing `POSTGRES_SSLMODE` there would have resolved nothing. Because
+  the references are optional the loss would have been silent: `DB_SSL_MODE` would have
+  disappeared and the gateways would have fallen back to their built-in `disable`,
+  turning an install configured for opportunistic TLS into a plaintext one. An
+  operator-supplied `global.postgresql.existingSecret.name` already took the passthrough
+  path and is unaffected.
+
+### Removed
+
+- `global.postgresql.existingSecret.keys` — an unused map whose defaults described the
+  retired `DB_*` layout. Naming an `existingSecret` injects it with `envFrom`, so its
+  keys are used under your own names and were never remapped.
+
+Keys left over in an existing `postgresql-secrets` are inert (nothing references them)
+and are removed on the next upgrade that rewrites the Secret.
+
+### Documentation
+
+- **Dropped the `v2-` qualifier from packaged example filenames.** v2 is the only
+  topology this chart ships, so the qualifier carried no information. Files were
+  renamed with `git mv`: `values-v2-external.yaml.example` →
+  `values-external.yaml.example`, `values-v2-hybrid.yaml.example` →
+  `values-hybrid.yaml.example`, `values-v2.yaml.example` →
+  `values-hybrid-reference.yaml.example`, `values-v2-managed-datastores.yaml.example`
+  → `values-managed-datastores.yaml.example`, and `docs/platform-v2.md` →
+  `docs/architecture.md`. Pipelines or overlays that pass the old names with `-f`
+  must be updated. The seven duplicated "Legacy v1" sections collapse into a
+  one-line footnote linking the final v1.14.x release.
+- **Added `README-EXTERNAL.md` and rewrote `README.md` around a working hybrid
+  quick start.** The previous quick start omitted the config-sync Secrets, so an
+  operator who copied its values block hit
+  `agentgateway config-sync requires CONFIG_SYNC_TOKEN and CONFIG_SYNC_LKG_KEY`
+  at install. The README now walks through the four operator-supplied Secrets,
+  the rendered hostnames, and the validation errors each missing value produces.
+  `README-EXTERNAL.md` covers the self-hosted path end to end: bootstrap admin
+  Secret, component inventory, ClickHouse sizing, and air-gap requirements.
+- **Fixed dangling references to five example files that do not exist.**
+  `values-all-deployed.yaml.example`, `values-openshift-ingress.yaml.example`,
+  `values-aws-ipv6.yaml.example`, `values-minimal-observability.yaml.example`,
+  and `values-watchdog-gmp.yaml.example` were cited across the README, OpenShift
+  guide, `DEPLOYMENT.md`, `VALUES_SCENARIOS.md`, and `docs/observability.md`.
+  Each is replaced with the inline values it would have contained.
+- **Corrected the OpenShift quick start.** `values-openshift.yaml` selects only
+  the platform and topology, so installing with it alone fails on
+  `v2 hybrid requires at least one product`. Documented commands now layer it
+  over `values-required.yaml`.
+- **Documented what `create-secrets.sh` no longer covers.** It does not create
+  `platform-secrets`, and the `postgresql-secrets` it writes omits `SENSIBLE_PG_DSN`,
+  `POSTGRES_SSLMODE`, `POSTGRES_LOGIN` and the mode flags while still writing the
+  retired `DATABASE_URL`. This only affects installs where the chart does not manage
+  those Secrets (`preserveExistingSecrets`, `autoGenerateSecrets: false`, or an
+  `existingSecret`), since otherwise the chart writes the full canonical family.
+- **Documented two on-premise traps in `control-plane-app`.** The login CAPTCHA can
+  lock a user out after three failed attempts: published images bake in a Turnstile
+  site key, while the matching `TURNSTILE_SECRET_KEY` is a runtime value the chart never
+  sets, so the verification route returns 500 and the client refuses the login.
+  `SECRETS.md` gives the `extraEnv` workaround and notes that verification needs egress
+  to Cloudflare. Separately, `NEXT_PUBLIC_*` variables are inlined at image build time
+  and cannot be set from Helm at all, so the SCIM tenant URL and SCIM `meta.location`
+  fall back to the hosted default on a self-hosted install — with the surfaces that are
+  *not* affected spelled out, since most SSO setup screens derive their origin from the
+  browser and are correct.
+- **Propagated the `postgresql-secrets` key change to the remaining docs.**
+  `docs/architecture.md` and the "Platform v2 secrets" table in `SECRETS.md` still
+  described the retired `DB_*` aliases and claimed every hybrid workload `envFrom`'s
+  the Secret, contradicting the corrected PostgreSQL section a few hundred lines
+  above. Both now describe the canonical `POSTGRES_*` family and distinguish stored
+  key names from the environment variables a container receives.
+- **`SECRETS.md` leads with the Secrets the chart will not create.** Its quick start
+  opened with "No action required", which is false for any hybrid install running
+  TrustGate or TrustGuard. A new "Secrets you must create" section lists them per mode
+  before any reference material. The duplicated "Firewall integration" section was
+  merged into the Firewall reference, and `clickhouse-secrets` — rendered in external
+  mode but previously undocumented — was added.
+- **Documented values-file layering.** `VALUES_SCENARIOS.md` now states that later
+  `-f` wins, that overlays do not install on their own, and marks per file whether it
+  works as a base. `values-hybrid-reference.yaml.example` selects no products and was
+  listed alongside files that do.
+- **Corrected the public docs site.** `overview.mdx` and `deployment-models.mdx`
+  described DataAgent as optional in Hybrid, though the mandatory OTLP path runs
+  through its co-located egress collector. `secrets.mdx` documented a retired
+  interface (`dataagent.tenantId`, `dataagent.enrolmentTokenExistingSecret`,
+  `global.clickstack.existingSecret`) and now shows the per-product
+  `configSync.existingSecret` and `dataagent.enrolment.existingSecret` keys the chart
+  actually reads.
+- **Fixed the product-flag defaults in `docs/architecture.md`.** The component table
+  read "opt-in (default on)" for TrustGate, TrustGuard, and the data-plane API, while
+  the same document correctly stated that chart defaults are all `false`.
+- **Documented the operator-supplied PostgreSQL Secret passthrough.** Key renaming is
+  only possible for a Secret the chart writes. Under
+  `global.postgresql.existingSecret.name` or `preserveExistingSecrets: true`, workloads
+  fall back to `envFrom` and the Secret's keys become environment variables verbatim —
+  so an operator-supplied Secret must use the `DB_*` names the applications read, the
+  opposite of the canonical `POSTGRES_*` layout. No document stated this, which made
+  the new "never use `DB_*`" guidance actively wrong for that path.
+
+## [v2.4.0] — 2026-07-30
+
+### Added
+
+- **Cross-service credentials the chart never set.** Three credentials had
+  to match on two sides but were absent from the chart, so operators set them by hand
+  or the services fell back to built-in defaults. `platform-secrets` now carries
+  `MCP_OAUTH_CLIENT_SECRET` (the app is the authorization server, TrustGate the
+  pre-registered client, and the value must be identical), `MCP_OAUTH_SIGNING_KEY`, and
+  `AUTH_SECRET_KEY`.
+- **MCP OAuth is on by default in external installs.** `global.mcpOAuth.enabled` is a
+  three-state gate: unset auto-enables where the chart can deliver both halves,
+  `true` demands it and fails the render with the reason when it cannot, `false` never
+  enables it. It stays off in hybrid, which has no in-cluster app. A pre-install hook
+  Job generates the RSA signing key in-cluster (PKCS#8, which Helm cannot produce)
+  using the app image, so a fresh install needs no `openssl` step; the key lands in its
+  own `mcp-oauth-signing` Secret and is never replaced once present. Supplying your own
+  key still works and is adopted as-is.
+- **`generate: install` policy** for keys that encrypt data at rest. `AUTH_SECRET_KEY`
+  is generated only on a fresh install and adopted on upgrade — handing an existing
+  release a new value would make already-encrypted SSO client secrets and SMTP
+  credentials undecryptable.
+
+### Migration notes
+
+- Nothing rotates. Every new key resolves from `global.platformSecret.values`, then the
+  live Secret, then the legacy per-service Secret, before generating.
+- `AUTH_SECRET_KEY` stays **absent** on upgrades by design; adopt one deliberately by
+  pinning it once existing ciphertext no longer matters.
+- Do not `kubectl apply` the output of `helm template` against a live release: Helm
+  renders every template as an install, so the output carries freshly generated
+  credentials.
+
+## [v2.3.10] — 2026-07-30
+
+### Added
+
+- **Shared `platform-secrets` Secret.** Credentials read by two or more
+  services — a signing key on one side and its validator on the other — were generated
+  independently by each subchart, so the two copies could hold different values and
+  produce silent `401`s. One `platformSecret.registry` now resolves each logical key
+  once and every consumer references it through `neuraltrust-platform.secretRef`.
+  `requires` shapes keep an install down to the keys its services actually read, so a
+  hybrid install carries far fewer keys than an external one.
+
+### Migration notes
+
+- **Nothing rotates on upgrade.** Each key is adopted from whatever the live
+  per-service Secret already holds.
+- **The legacy per-service Secrets keep being written for one release**, so a rollback
+  still finds the values it expects. They will be dropped in a later release; until
+  then both copies exist and agree.
+- Two keys that must match are emitted from one resolved value via `aliasOf`
+  (`AUTH_SECRET`/`NEXTAUTH_SECRET`, `SERVER_SECRET_KEY`/`TRUSTGATE_JWT_SECRET`), so they
+  can no longer drift.
+- Opt out entirely with `global.platformSecret.enabled: false`;
+  `global.preserveExistingSecrets: true` implies it. In both cases references fall back
+  to the legacy Secrets rather than dangling.
+
+## [v2.3.9] — 2026-07-30
+
+### Fixed
+
+- **Bootstrap superadmin password exposed as a plain env value.** `control-plane-app`
+  received `ONPREM_SUPERADMIN_PASSWORD` inline, where `kubectl describe pod` shows it.
+  It is now always injected through `secretKeyRef`. Prefer
+  `global.superadmin.existingSecret.name` over the inline
+  `global.superadmin.email`/`password`, which still enter Helm release history.
+
+### Added
+
+- **Selectable email provider.** `control-plane-app` is the only sender; the transport
+  is chosen by `global.email.provider` (`resend` | `ses` | `smtp`) and a misconfigured
+  provider fails at render time instead of silently dropping mail. Static SES keys are
+  emitted only when supplied, so the pod IAM role (IRSA) keeps working by default. The
+  chart skips any name an operator already set through `extraEnv`, because emitting the
+  same env name twice makes Kubernetes reject the strategic-merge patch.
+
 ## [v2.3.6] — 2026-07-29
 
 ### Changed

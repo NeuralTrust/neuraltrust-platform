@@ -44,7 +44,7 @@ Defaults are intentionally conservative and portable. Common adjustments:
 - **Right-size** Firewall workers if you run a subset of detectors, or move
   heavy workers to GPU.
 - **Use managed PostgreSQL and Redis** so datastore capacity is independent of
-  the Kubernetes node pool ([`values-v2-managed-datastores.yaml.example`](../values-v2-managed-datastores.yaml.example)).
+  the Kubernetes node pool ([`values-managed-datastores.yaml.example`](../values-managed-datastores.yaml.example)).
 - **Pin workloads** to a dedicated pool with `global.nodeSelector` /
   `global.tolerations`.
 
@@ -54,6 +54,6 @@ workload, then tune.
 ## Related
 
 - [DEPLOYMENT.md](../DEPLOYMENT.md) — install paths
-- [docs/platform-v2.md](./platform-v2.md) — topology contract
+- [docs/architecture.md](./architecture.md) — topology contract
 - Managed store minimums are documented alongside production datastore guidance
   in the public NeuralTrust deployment docs.

@@ -131,6 +131,110 @@ assert_occurrences() {
   green "ok  - $msg"
 }
 
+# Asserts the exact set of datastore env names a container ends up with, expanding
+# envFrom against the Secrets and ConfigMaps in the same render. Comparing the
+# effective set is what makes the canonical-family collapse testable: a plain grep
+# cannot tell that a pod stopped receiving eleven keys it never read, and would not
+# notice an envFrom creeping back in. Expected names may be separated by spaces or
+# commas and given in any order.
+assert_datastore_env() {
+  local file="$1" workload="$2" container="$3" expected="$4" msg="$5" actual
+  expected="$(printf '%s' "$expected" | tr ', ' '\n\n' | sed '/^$/d' | sort -u | paste -sd, -)"
+  actual="$(ruby -ryaml -e '
+    docs = []
+    YAML.load_stream(File.read(ARGV.fetch(0), encoding: "UTF-8")) { |d| docs << d if d.is_a?(Hash) }
+    src = {}
+    docs.each do |d|
+      next unless %w[Secret ConfigMap].include?(d["kind"])
+      src[[d["kind"], d.dig("metadata", "name")]] = ((d["data"] || {}).keys + (d["stringData"] || {}).keys).uniq
+    end
+    want_w, want_c = ARGV.fetch(1), ARGV.fetch(2)
+    names = nil
+    docs.each do |d|
+      spec = d.dig("spec", "template", "spec") || d.dig("spec", "jobTemplate", "spec", "template", "spec")
+      next unless spec && d.dig("metadata", "name") == want_w
+      ((spec["containers"] || []) + (spec["initContainers"] || [])).each do |c|
+        next unless c["name"] == want_c
+        names = (c["env"] || []).map { |e| e["name"] }
+        (c["envFrom"] || []).each do |f|
+          if (r = f["secretRef"]) then names.concat(src[["Secret", r["name"]]] || [])
+          elsif (r = f["configMapRef"]) then names.concat(src[["ConfigMap", r["name"]]] || [])
+          end
+        end
+      end
+    end
+    abort "container not found" if names.nil?
+    puts names.uniq.grep(/\A(DB_|POSTGRES_|DATABASE_|SENSIBLE_)/).sort.join(",")
+  ' "$file" "$workload" "$container")"
+  if [[ "$actual" != "$expected" ]]; then
+    red "FAIL: $msg"
+    red "  expected datastore env: $expected"
+    red "  actual datastore env:   $actual"
+    exit 1
+  fi
+  green "ok  - $msg"
+}
+
+# Asserts no container injects a Secret wholesale via envFrom. Checked structurally
+# rather than by grep: an embedded newline in a grep -E pattern is alternation, not a
+# sequence, so a textual version of this passes on unrelated lines.
+assert_no_envfrom_secret() {
+  local file="$1" secret="$2" msg="$3" hits
+  hits="$(ruby -ryaml -e '
+    docs = []
+    YAML.load_stream(File.read(ARGV.fetch(0), encoding: "UTF-8")) { |d| docs << d if d.is_a?(Hash) }
+    want = ARGV.fetch(1)
+    out = []
+    docs.each do |d|
+      spec = d.dig("spec", "template", "spec") || d.dig("spec", "jobTemplate", "spec", "template", "spec")
+      next unless spec
+      ((spec["containers"] || []) + (spec["initContainers"] || [])).each do |c|
+        (c["envFrom"] || []).each do |f|
+          out << "#{d["kind"]}/#{d.dig("metadata", "name")}:#{c["name"]}" if f.dig("secretRef", "name") == want
+        end
+      end
+    end
+    puts out.join(" ")
+  ' "$file" "$secret")"
+  if [[ -n "$hits" ]]; then
+    red "FAIL: $msg"
+    red "  $secret injected wholesale into: $hits"
+    exit 1
+  fi
+  green "ok  - $msg"
+}
+
+# Asserts a key is present/absent in a specific Secret. Scoped to one document so
+# an unrelated Secret carrying the same key cannot mask a regression.
+assert_secret_key() {
+  local file="$1" secret="$2" mode="$3" key="$4" label="$5" found
+  if ! found=$(ruby -ryaml -e '
+    docs = []
+    YAML.load_stream(File.read(ARGV.fetch(0), encoding: "UTF-8")) { |d| docs << d if d.is_a?(Hash) }
+    d = docs.find { |x| x["kind"] == "Secret" && x.dig("metadata", "name") == ARGV.fetch(1) }
+    abort "#{ARGV.fetch(1)} not rendered" if d.nil?
+    puts((d["data"] || {}).key?(ARGV.fetch(2)) ? "yes" : "no")
+  ' "$file" "$secret" "$key"); then
+    red "FAIL: $label"
+    exit 1
+  fi
+  if [ "$mode" = present ] && [ "$found" != yes ]; then
+    red "FAIL: $label"
+    red "  $secret does not carry $key"
+    exit 1
+  fi
+  if [ "$mode" = absent ] && [ "$found" != no ]; then
+    red "FAIL: $label"
+    red "  $secret unexpectedly carries $key"
+    exit 1
+  fi
+  green "ok  - $label"
+}
+
+assert_platform_key() {
+  assert_secret_key "$1" platform-secrets "$2" "$3" "$4"
+}
+
 assert_resource_count() {
   local file="$1" kind="$2" name="$3" expected="$4" msg="$5" count
   count="$(ruby -ryaml -e 'puts YAML.load_stream(File.read(ARGV.fetch(0))).count { |doc| doc.is_a?(Hash) && doc["kind"] == ARGV.fetch(1) && doc.dig("metadata", "name") == ARGV.fetch(2) }' "$file" "$kind" "$name")"
@@ -160,6 +264,62 @@ assert_contains "$out1" 'runAsNonRoot: true'$'\n''      imagePullSecrets:'$'\n''
   "hybrid: postgresql Deployment defaults imagePullSecrets to gcr-secret"
 assert_contains "$out1" 'name: postgresql-secrets' \
   "hybrid: postgresql-secrets rendered"
+# postgresql-secrets stores ONE canonical family. The DB_* and DATABASE_* aliases it
+# used to store are renamed at each consumption site instead, so storage cannot
+# drift from what any single service reads.
+for canonical in POSTGRES_HOST POSTGRES_PORT POSTGRES_USER POSTGRES_PASSWORD \
+  POSTGRES_DB POSTGRES_SSLMODE POSTGRES_LOGIN POSTGRES_AUTH_MODE \
+  POSTGRES_CONNECTION_TYPE SENSIBLE_PG_DSN; do
+  assert_secret_key "$out1" postgresql-secrets present "$canonical" \
+    "hybrid: postgresql-secrets stores canonical ${canonical}"
+done
+for retired in DB_HOST DB_PORT DB_USER DB_PASSWORD DB_NAME DB_SSL_MODE \
+  DATABASE_AUTH_MODE DATABASE_IAM_AUTH DATABASE_URL; do
+  assert_secret_key "$out1" postgresql-secrets absent "$retired" \
+    "hybrid: postgresql-secrets no longer stores ${retired}"
+done
+# Prisma is the control-plane app's reader and hybrid does not deploy it.
+assert_secret_key "$out1" postgresql-secrets absent POSTGRES_PRISMA_URL \
+  "hybrid: postgresql-secrets omits the Prisma URL it has no reader for"
+# The three Go services read DB_*; POSTGRES_LOGIN is the IAM switch. Nothing else.
+for wl in agentgateway-proxy:proxy agentgateway-mcp:mcp trustguard-data-plane:data-plane; do
+  assert_datastore_env "$out1" "${wl%%:*}" "${wl##*:}" \
+    'DB_HOST,DB_NAME,DB_PASSWORD,DB_PORT,DB_SSL_MODE,DB_USER,POSTGRES_LOGIN,SENSIBLE_PG_DSN' \
+    "hybrid: ${wl%%:*} receives only the datastore keys it reads"
+done
+# DataAgent reads DATABASE_URL and nothing else, so it takes one key rather than
+# the whole Secret it used to receive via envFrom.
+assert_datastore_env "$out1" dataagent dataagent 'DATABASE_URL' \
+  "hybrid: DataAgent receives only DATABASE_URL"
+assert_datastore_env "$out1" dataagent-trustguard dataagent 'DATABASE_URL' \
+  "hybrid: TrustGuard DataAgent receives only DATABASE_URL"
+# A wholesale Postgres envFrom creeping back would silently undo the collapse.
+assert_no_envfrom_secret "$out1" postgresql-secrets \
+  "hybrid: no workload injects postgresql-secrets wholesale"
+
+# Renaming is only safe for a Secret the chart writes. Two modes hand it to the
+# operator instead, and both must keep the envFrom passthrough: the chart cannot
+# rename keys it does not control, and because these refs are optional a mismatch
+# would be silent — DB_SSL_MODE would simply vanish and the gateways would fall
+# back to their built-in "disable", turning opportunistic TLS into plaintext.
+out1_pg_existing="$TMP/scenario-hybrid-pg-existing.yaml"
+render_default "$out1_pg_existing" --set global.postgresql.existingSecret.name=my-pg
+assert_not_contains "$out1_pg_existing" 'key: "POSTGRES_SSLMODE"' \
+  "hybrid with an operator existingSecret: chart does not rename keys it does not own"
+assert_contains "$out1_pg_existing" '- secretRef:'$'\n''            name: "my-pg"' \
+  "hybrid with an operator existingSecret: Postgres envFrom passthrough is kept"
+
+# preserveExistingSecrets skips both postgresql-secrets emitters, so the same
+# passthrough applies. DataAgent needs its own pre-created Secret in that mode.
+out1_pg_preserve="$TMP/scenario-hybrid-pg-preserve.yaml"
+render_default "$out1_pg_preserve" \
+  --set global.preserveExistingSecrets=true \
+  --set agentgateway.dataagent.existingSecret.name=my-da \
+  --set trustguard.dataagent.existingSecret.name=my-da2
+assert_not_contains "$out1_pg_preserve" 'key: "POSTGRES_SSLMODE"' \
+  "hybrid with preserveExistingSecrets: chart does not rename keys it does not own"
+assert_contains "$out1_pg_preserve" '- secretRef:'$'\n''            name: "postgresql-secrets"' \
+  "hybrid with preserveExistingSecrets: Postgres envFrom passthrough is kept"
 assert_contains "$out1" 'name: POSTGRES_SCHEMA'$'\n''          value: "public"' \
   "data-plane PostgreSQL: default schema reaches the runtime"
 assert_contains "$out1" 'SET search_path TO public;' \
@@ -409,6 +569,26 @@ assert_contains "$out3" 'POSTGRES_USER: "datacore"' \
   "external: DataCore POSTGRES_USER defaults to datacore"
 assert_contains "$out3" 'POSTGRES_PASSWORD:' \
   "external: datacore-secrets carries POSTGRES_PASSWORD"
+
+# Same canonical Postgres family as hybrid, plus the Prisma URL the app needs.
+for canonical in POSTGRES_HOST POSTGRES_PORT POSTGRES_DB POSTGRES_USER \
+  POSTGRES_PASSWORD POSTGRES_SSLMODE POSTGRES_LOGIN POSTGRES_AUTH_MODE \
+  POSTGRES_CONNECTION_TYPE SENSIBLE_PG_DSN POSTGRES_PRISMA_URL; do
+  assert_secret_key "$out3" postgresql-secrets present "$canonical" \
+    "external: postgresql-secrets stores canonical ${canonical}"
+done
+for retired in DB_HOST DB_PORT DB_NAME DB_USER DB_PASSWORD DB_SSL_MODE \
+  DATABASE_URL DATABASE_AUTH_MODE DATABASE_IAM_AUTH; do
+  assert_secret_key "$out3" postgresql-secrets absent "$retired" \
+    "external: postgresql-secrets no longer stores ${retired}"
+done
+# The app reads POSTGRES_DATABASE and DATABASE_URL; both are renames of canonical
+# keys (POSTGRES_DB, POSTGRES_PRISMA_URL) rather than separately stored duplicates.
+assert_datastore_env "$out3" control-plane-app app \
+  'DATABASE_URL POSTGRES_AUTH_MODE POSTGRES_DATABASE POSTGRES_HOST POSTGRES_PASSWORD POSTGRES_PORT POSTGRES_PRISMA_URL POSTGRES_USER' \
+  "external: control-plane-app renames POSTGRES_DB/POSTGRES_PRISMA_URL at the consumption site"
+assert_no_envfrom_secret "$out3" postgresql-secrets \
+  "external: no workload injects postgresql-secrets wholesale"
 
 blue "==> Scenario 3-superadmin: ONPREM_SUPERADMIN_* when global.superadmin set"
 out3sa="$TMP/scenario-external-superadmin.yaml"
@@ -1191,7 +1371,7 @@ assert_occurrences "$out11d4" '^  name: clickstack-egress-collector$' 1 \
 blue "==> Scenario 11e: external overlay without global.products still full stack"
 out11e="$TMP/scenario-external-no-products.yaml"
 helm template test "$CHART_DIR" --namespace default \
-  -f "$CHART_DIR/values-v2-external.yaml.example" > "$out11e"
+  -f "$CHART_DIR/values-external.yaml.example" > "$out11e"
 validate_yaml "$out11e"
 assert_contains "$out11e" 'name: agentgateway-admin' \
   "external no-products: AgentGateway admin renders"
@@ -1289,30 +1469,6 @@ assert_shared_secret_wiring() {
 # Key presence inside the platform-secrets document specifically. A plain grep
 # also matches the legacy Secrets, which keep dual-emitting migrated keys for
 # one release, so it cannot tell the two sources apart.
-assert_platform_key() {
-  local file="$1" mode="$2" key="$3" label="$4" found
-  if ! found=$(ruby -ryaml -e '
-    docs = YAML.load_stream(File.read(ARGV.fetch(0))).compact
-    d = docs.find { |x| x["kind"] == "Secret" && x.dig("metadata", "name") == "platform-secrets" }
-    abort "platform-secrets not rendered" if d.nil?
-    puts((d["data"] || {}).key?(ARGV.fetch(1)) ? "yes" : "no")
-  ' "$file" "$key"); then
-    red "FAIL: $label"
-    exit 1
-  fi
-  if [ "$mode" = present ] && [ "$found" != yes ]; then
-    red "FAIL: $label"
-    red "  platform-secrets does not carry $key"
-    exit 1
-  fi
-  if [ "$mode" = absent ] && [ "$found" != no ]; then
-    red "FAIL: $label"
-    red "  platform-secrets unexpectedly carries $key"
-    exit 1
-  fi
-  green "ok  - $label"
-}
-
 blue "==> Scenario 12: shared platform Secret"
 out12ext="$TMP/scenario-shared-secret-external.yaml"
 render_default "$out12ext" --set global.deploymentMode=external
