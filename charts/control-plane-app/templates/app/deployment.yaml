@@ -594,13 +594,14 @@ spec:
               {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "MCP_OAUTH_CLIENT_SECRET" "optional" true) | nindent 14 }}
         {{- end }}
         {{- /* Absent, the app mints an ephemeral RS256 key per replica, so tokens
-               stop validating across replicas and restarts. PKCS#8 only; see
-               SECRETS.md. */}}
+               stop validating across replicas and restarts. PKCS#8 only. Resolves
+               to the chart-generated Secret unless the operator supplied a key;
+               see SECRETS.md. */}}
         {{- if not (has "MCP_OAUTH_SIGNING_KEY" $ownEnv) }}
         - name: MCP_OAUTH_SIGNING_KEY
           valueFrom:
             secretKeyRef:
-              {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "MCP_OAUTH_SIGNING_KEY" "optional" true) | nindent 14 }}
+              {{- include "neuraltrust-platform.mcpOAuth.signingKeyRef" . | nindent 14 }}
         {{- end }}
         {{- end }}
         # Platform env email wins over per-org TeamAuthConfig.
