@@ -214,9 +214,6 @@ spec:
           - name: tmp
             mountPath: /tmp
           {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 10 }}
-          {{- if eq $dpRedisBackend "kafka" }}
-          {{- include "neuraltrust-platform.kafka.tlsVolumeMount" . | nindent 10 }}
-          {{- end }}
         {{- end }}
         {{- if $renderPgInit }}
         - name: postgres-migrations
@@ -352,9 +349,6 @@ spec:
                 name: {{ if and .Values.dataPlane .Values.dataPlane.secrets .Values.dataPlane.secrets.resendApiKeySecretName }}{{ .Values.dataPlane.secrets.resendApiKeySecretName }}{{ else }}resend-secrets{{ end }}
                 key: RESEND_API_KEY
                 optional: true
-          {{- if eq $dpRedisBackend "kafka" }}
-          {{- include "neuraltrust-platform.kafka.clientEnv" . | nindent 10 }}
-          {{- end }}
           - name: EVALUATION_PROGRESS_BACKEND
             value: {{ $dpRedisBackend | quote }}
           {{- if eq $dpRedisBackend "redis" }}
@@ -451,7 +445,7 @@ spec:
             value: {{ $jobPullSecret | quote }}
           {{- end }}
           {{- with $jobsCfg.ttlSecondsAfterFinished }}
-          - name: K8S_JOB_TTL_SECONDS_AFTER_FINISHED
+          - name: K8S_JOB_TTL_SECONDS
             value: {{ . | quote }}
           {{- end }}
           {{- with $jobsCfg.backoffLimit }}
@@ -459,7 +453,7 @@ spec:
             value: {{ . | quote }}
           {{- end }}
           {{- with $jobsCfg.maxConcurrentJobs }}
-          - name: K8S_JOBS_MAX_CONCURRENT
+          - name: K8S_MAX_CONCURRENT_JOBS
             value: {{ . | quote }}
           {{- end }}
           {{- with $jobsCfg.waitTimeoutSeconds }}
@@ -502,9 +496,6 @@ spec:
           - name: tmp
             mountPath: /tmp
           {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 10 }}
-          {{- if eq $dpRedisBackend "kafka" }}
-          {{- include "neuraltrust-platform.kafka.tlsVolumeMount" . | nindent 10 }}
-          {{- end }}
         {{- with .Values.dataPlane.components.api.extraVolumeMounts }}
         {{- include "neuraltrust-platform.extraVolumeMounts" (dict "items" .) | nindent 10 }}
         {{- end }}
@@ -559,9 +550,6 @@ spec:
       - name: tmp
         emptyDir: {}
       {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 6 }}
-      {{- if eq $dpRedisBackend "kafka" }}
-      {{- include "neuraltrust-platform.kafka.tlsVolume" . | nindent 6 }}
-      {{- end }}
       {{- with .Values.dataPlane.components.api.extraVolumes }}
       {{- include "neuraltrust-platform.extraVolumes" (dict "items" .) | nindent 6 }}
       {{- end }}

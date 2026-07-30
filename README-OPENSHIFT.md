@@ -70,6 +70,29 @@ Kubernetes Ingress (`resourceType: ingress`).
 Both paths use `global.domain`. Route names remain stable; Ingress hostnames are
 derived from each service's `hostPrefix`.
 
+### Route TLS certificates
+
+A Route is readable by anyone holding `route/get`, so the chart never copies
+private key material into one. Setting an ingress `tls.secretName` renders
+`spec.tls.externalCertificate`, which points the router at the Secret:
+
+```yaml
+control-plane-app:
+  controlPlane:
+    components:
+      app:
+        ingress:
+          tls:
+            secretName: control-plane-app-tls   # cert-manager, etc.
+```
+
+This requires OpenShift 4.17+ (`externalCertificate` is GA there) and the router
+service account needs read access to the Secret in the release namespace. On
+older clusters either rely on the router's default wildcard certificate (omit
+`secretName`) or supply `tls.certificate` / `tls.key` inline — inline values are
+emitted verbatim and therefore land in Helm release history, so prefer
+`secretName`.
+
 ### Wildcard gateway / MCP Routes
 
 Dynamic gateway subdomains (`*.llm.<domain>`, `*.mcp.<domain>`) render as
