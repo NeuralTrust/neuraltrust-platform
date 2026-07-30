@@ -612,6 +612,12 @@ control-plane-app:
           agentgatewayUrl: ""
           agentgatewayProxyUrl: ""
           trustguardUrl: ""
+          # Customer-facing TrustGuard origin used in collector, WAF and SDK
+          # setup snippets. The console refuses to print in-cluster hosts there,
+          # so trustguardUrl cannot serve this purpose. Empty => derived as
+          # https://trustguard.<global.domain>, matching the trustguard chart's
+          # data-plane ingress; set explicitly when that host differs.
+          trustguardPublicUrl: ""
           datacoreUrl: ""
           datacoreMetricsEnabled: "true"
           alertEngineApiUrl: ""
