@@ -56,35 +56,13 @@ worker:
 Disabling hosted observability export does not disable AlertEngine or the
 ClickStack-to-ClickHouse pipeline.
 
-## Watchdog
-
-`watchdog` (stable Kubernetes name `neuraltrust-watchdog`) provides direct
-probes and optional healing actions. Start with every action in dry-run:
-
-```yaml
-watchdog:
-  enabled: true
-  actions:
-    dryRun: true
-```
-
-Use checks that target rendered or shared resources, such as ClickHouse, the
-data-plane API shim, Firewall, pod health, deployment health, certificate
-renewal, and the umbrella collector.
-
-Promote healing actions one check at a time after observing alert parity.
-Mutating actions require both `actions.dryRun: false` and the corresponding
-RBAC action permission.
-
 ## Common overlays
 
 - `values-observability-self-hosted.yaml.example`: umbrella collector and
   Prometheus Operator resources, hosted export off
-- `values-self-monitoring.yaml.example`: curated check identifiers
-- `values-watchdog.yaml.example`: detailed dry-run-first configuration
 
-To send watchdog telemetry straight to hosted observability without running the
-umbrella collector, leave `global.observability.enabled: false` and keep
+To export straight to hosted observability without running the umbrella
+collector, leave `global.observability.enabled: false` and keep
 `global.observability.hostedExport.enabled: true`.
 
 ## Air-gapped external deployment

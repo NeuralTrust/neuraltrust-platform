@@ -69,8 +69,6 @@ with no header) is the chart default — no overlay is required. See
 | File | Purpose |
 |---|---|
 | [`values-observability-self-hosted.yaml.example`](./values-observability-self-hosted.yaml.example) | Umbrella OTel Collector and monitoring resources with hosted export off |
-| [`values-self-monitoring.yaml.example`](./values-self-monitoring.yaml.example) | Curated watchdog checks, dry-run first |
-| [`values-watchdog.yaml.example`](./values-watchdog.yaml.example) | Detailed watchdog configuration |
 
 The umbrella OTel Collector is portable across hybrid and external. The
 ClickStack OTel Collector is a product analytics component and only renders in
@@ -180,8 +178,8 @@ The gateway remains CPU-only; workers request GPUs.
 ## Scenario: no hosted telemetry egress
 
 Layer `values-observability-self-hosted.yaml.example`. This disables hosted
-export while retaining the umbrella collector, Prometheus Operator resources
-when CRDs are available, and optional watchdog actions.
+export while retaining the umbrella collector and Prometheus Operator resources
+when CRDs are available.
 
 In external mode, the ClickStack collector still writes product telemetry to
 the selected ClickHouse instance; it does not export to the hosted telemetry path.
