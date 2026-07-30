@@ -1,6 +1,6 @@
 # Observability and self-healing
 
-This chart (2.x) is v2-only. It has two distinct OpenTelemetry collector roles.
+The chart has two distinct OpenTelemetry collector roles.
 
 ## Umbrella OTel Collector
 
@@ -78,13 +78,14 @@ RBAC action permission.
 
 ## Common overlays
 
-- `values-minimal-observability.yaml.example`: watchdog sends redacted telemetry
-  directly to hosted observability; umbrella collector stays off
 - `values-observability-self-hosted.yaml.example`: umbrella collector and
   Prometheus Operator resources, hosted export off
 - `values-self-monitoring.yaml.example`: curated check identifiers
 - `values-watchdog.yaml.example`: detailed dry-run-first configuration
-- `values-watchdog-gmp.yaml.example`: Google Managed Prometheus resources
+
+To send watchdog telemetry straight to hosted observability without running the
+umbrella collector, leave `global.observability.enabled: false` and keep
+`global.observability.hostedExport.enabled: true`.
 
 ## Air-gapped external deployment
 
@@ -103,7 +104,6 @@ The umbrella collector remains local. ClickStack continues writing to the
 configured local or managed ClickHouse. AlertEngine continues evaluating and
 forwarding to destinations reachable from the cluster.
 
-## Legacy v1
+---
 
-v1 (legacy TrustGate/Kafka) is maintained only on the `v1.14.x` release line;
-pin `--version ~1.14.0` to install it. This chart (2.x) is v2-only.
+<sup>**Looking for v1?** The legacy TrustGate/Kafka line ended at [v1.14.16](https://github.com/NeuralTrust/neuraltrust-platform/releases?page=3#release-v1.14.16) — install it with `--version ~1.14.0`.</sup>

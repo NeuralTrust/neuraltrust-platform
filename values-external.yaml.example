@@ -1,5 +1,10 @@
-# Platform v2 external: self-hosted control/data planes and analytics.
+# External: self-hosted control/data planes and analytics.
 # ClickStack OTel Collector, DataCore, and AlertEngine render only in this mode.
+# DataAgent never renders here, and global.products is ignored — external always
+# deploys the full stack.
+#
+# Before install, create gcr-secret and (recommended) a bootstrap admin Secret
+# named onprem-superadmin. Walkthrough: README-EXTERNAL.md.
 
 global:
   deploymentMode: "external"
