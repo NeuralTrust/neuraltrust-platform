@@ -94,6 +94,29 @@ global:
   imagePullSecrets: [] # Optional global pull-secret list applied to platform workloads
   autoGenerateSecrets: true
   preserveExistingSecrets: false
+  # Shared platform Secret (`platform-secrets`) — one home for every
+  # cross-service application credential (service-to-service JWT secrets, the
+  # app auth secret, encryption keys). Replaces the hand-duplicated per-service
+  # copies that used to drift apart and cause silent auth failures.
+  #
+  # Upgrades adopt the live per-service values, so nothing rotates. The legacy
+  # per-service Secrets keep being written for one release so a rollback still
+  # finds them; see SECRETS.md for the key-by-key mapping.
+  platformSecret:
+    # false ⇒ every consumer keeps referencing its legacy per-service Secret.
+    # Also implied by preserveExistingSecrets, where the operator owns them.
+    enabled: true
+    # Point consumers at a Secret you manage instead. Must carry the logical key
+    # names listed in SECRETS.md.
+    existingSecret:
+      name: ""
+    # Pin individual credentials, keyed by logical name. Highest precedence.
+    # e.g. values: { CONTROL_PLANE_JWT_SECRET: "..." }
+    # Supply these via --set or a values file kept out of git; never commit real
+    # credentials. For committed config use existingSecret.name above, or
+    # External Secrets. Pin the target of an alias, not the alias itself
+    # (AUTH_SECRET, not NEXTAUTH_SECRET) — the chart rejects the latter.
+    values: {}
   # Shared PostgreSQL (v2 hybrid + external control-plane).
   # Hybrid: every service (AgentGateway, TrustGuard, DataAgent, data-plane-api)
   # connects to ONE shared database via envFrom on the `postgresql-secrets`
@@ -717,7 +740,9 @@ data-plane-api:
       googleApiKey: ""
       resendApiKeySecretName: "resend-secrets"
       resendApiKey: ""
-      dataPlaneJWTSecretName: "data-plane-jwt-secret"
+      # Empty ⇒ the shared platform Secret (see global.platformSecret). Set this
+      # to read the data-plane JWT from a Secret you manage instead.
+      dataPlaneJWTSecretName: ""
       dataPlaneJWTSecret: ""
       huggingFaceTokenSecretName: "huggingface-secrets"
       huggingFaceToken: ""

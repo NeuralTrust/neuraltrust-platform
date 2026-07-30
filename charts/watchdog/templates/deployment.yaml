@@ -151,18 +151,30 @@ spec:
             {{- if .Values.usageExport.enabled }}
             - name: DATA_PLANE_API_URL
               value: {{ .Values.usageExport.endpoint | quote }}
+            {{- /* Usage export authenticates against the data-plane and
+                   control-plane APIs, so it has to read the same signing keys
+                   they verify with. An operator override still wins; otherwise
+                   this follows whatever those services use. */}}
             - name: DATA_PLANE_JWT_SECRET
               valueFrom:
                 secretKeyRef:
+                  {{- if or .Values.usageExport.jwtSecret.existingSecret .Values.usageExport.jwtSecret.secretKey }}
                   name: {{ .Values.usageExport.jwtSecret.existingSecret | default "data-plane-jwt-secret" }}
                   key: {{ .Values.usageExport.jwtSecret.secretKey | default "DATA_PLANE_JWT_SECRET" }}
+                  {{- else }}
+                  {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "DATA_PLANE_JWT_SECRET") | nindent 18 }}
+                  {{- end }}
             - name: CONTROL_PLANE_API_URL
               value: {{ .Values.usageExport.controlPlaneEndpoint | quote }}
             - name: CONTROL_PLANE_JWT_SECRET
               valueFrom:
                 secretKeyRef:
+                  {{- if or .Values.usageExport.controlPlaneJwtSecret.existingSecret .Values.usageExport.controlPlaneJwtSecret.secretKey }}
                   name: {{ .Values.usageExport.controlPlaneJwtSecret.existingSecret | default "control-plane-secrets" }}
                   key: {{ .Values.usageExport.controlPlaneJwtSecret.secretKey | default "CONTROL_PLANE_JWT_SECRET" }}
+                  {{- else }}
+                  {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "CONTROL_PLANE_JWT_SECRET") | nindent 18 }}
+                  {{- end }}
             {{- end }}
             {{- if or .Values.desiredState.enabled .Values.platformState.enabled }}
             {{- /* deploy-api control-plane wiring, shared by the desired-state

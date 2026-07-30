@@ -68,6 +68,9 @@ spec:
             optional: true
         {{- end }}
         env:
+        {{- /* Shared credentials come from platform-secrets; an explicit env
+               entry outranks the legacy copy still arriving via envFrom. */}}
+        {{- include "neuraltrust-platform.platformSecretEnv" (dict "ctx" . "keys" (dict "ADMIN_JWT_SECRET" "ADMIN_JWT_SECRET" "TRUSTGUARD_TOKEN_SIGNING_SECRET" "TRUSTGUARD_TOKEN_SIGNING_SECRET" "REDIS_EVENTS_SECRET" "REDIS_EVENTS_SECRET") "skip" .Values.dataPlane.extraEnv) | nindent 8 }}
         {{- with .Values.dataPlane.extraEnv }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -89,8 +92,12 @@ spec:
         - name: NEURAL_TRUST_FIREWALL_SECRET_KEY
           valueFrom:
             secretKeyRef:
-              name: {{ $fwSecret.name | default "firewall-secrets" | quote }}
+              {{- if $fwSecret.name }}
+              name: {{ $fwSecret.name | quote }}
               key: {{ $fwSecret.key | default "JWT_SECRET" | quote }}
+              {{- else }}
+              {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "JWT_SECRET") | nindent 14 }}
+              {{- end }}
         {{- if .Values.securityHardening }}
         securityContext:
           allowPrivilegeEscalation: false
