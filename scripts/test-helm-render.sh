@@ -204,6 +204,42 @@ assert_no_envfrom_secret() {
   green "ok  - $msg"
 }
 
+# Asserts a container's literal env value, or that the variable is absent.
+# Scoped to one container so a sibling workload cannot satisfy the assertion.
+# Pass the expected value, or the word ABSENT.
+assert_env_value() {
+  local file="$1" workload="$2" container="$3" name="$4" expected="$5" msg="$6" actual
+  if ! actual="$(ruby -ryaml -e '
+    docs = []
+    YAML.load_stream(File.read(ARGV.fetch(0), encoding: "UTF-8")) { |d| docs << d if d.is_a?(Hash) }
+    want_w, want_c, want_n = ARGV.fetch(1), ARGV.fetch(2), ARGV.fetch(3)
+    found = nil
+    seen = false
+    docs.each do |d|
+      spec = d.dig("spec", "template", "spec")
+      next unless spec && d.dig("metadata", "name") == want_w
+      (spec["containers"] || []).each do |c|
+        next unless c["name"] == want_c
+        seen = true
+        e = (c["env"] || []).find { |x| x["name"] == want_n }
+        found = e["value"].to_s if e && e.key?("value")
+      end
+    end
+    abort "container #{want_w}/#{want_c} not found" unless seen
+    puts(found.nil? ? "ABSENT" : found)
+  ' "$file" "$workload" "$container" "$name")"; then
+    red "FAIL: $msg"
+    exit 1
+  fi
+  if [[ "$actual" != "$expected" ]]; then
+    red "FAIL: $msg"
+    red "  $workload/$container $name expected: $expected"
+    red "  actual:   $actual"
+    exit 1
+  fi
+  green "ok  - $msg"
+}
+
 # Asserts a key is present/absent in a specific Secret. Scoped to one document so
 # an unrelated Secret carrying the same key cannot mask a regression.
 assert_secret_key() {
@@ -1984,6 +2020,199 @@ ruby -ryaml -rbase64 -e '
   abort "expected pinned value, got #{got}" unless got == "pinned-value-abc"
 ' "$out12pin" || { red "FAIL: pinned value not honored"; exit 1; }
 green "ok  - global.platformSecret.values pins a credential verbatim"
+
+# The gateway binaries refuse cleartext config-sync once APP_ENV is deployed:
+# the control plane will not build its listener without a keypair, and the data
+# plane rejects CONFIG_SYNC_TLS_INSECURE=true. Both halves must arrive together.
+blue "==> Scenario 13: config-sync gRPC TLS on both gateways"
+AGW_TLS_MOUNT="/etc/agentgateway/configsync-tls"
+CS_ON=(--set agentgateway.configSync.enabled=true --set agentgateway.configSync.token=tok)
+
+out13="$TMP/scenario-configsync-tls-external.yaml"
+render_default "$out13" --set global.deploymentMode=external "${CS_ON[@]}"
+
+for k in tls.crt tls.key ca.crt; do
+  assert_secret_key "$out13" agentgateway-configsync-tls present "$k" \
+    "external: agentgateway config-sync TLS Secret carries $k"
+done
+assert_contains "$out13" 'name: agentgateway-configsync-tls' \
+  "external: the generated Secret is named after the chart, not TrustGuard's"
+
+assert_env_value "$out13" agentgateway-admin admin CONFIG_SYNC_GRPC_TLS_CERT \
+  "$AGW_TLS_MOUNT/tls.crt" "external: the admin plane serves the generated cert"
+assert_env_value "$out13" agentgateway-admin admin CONFIG_SYNC_GRPC_TLS_KEY \
+  "$AGW_TLS_MOUNT/tls.key" "external: the admin plane serves the generated key"
+
+# Both data planes dial the listener, so both must verify it.
+for wl in agentgateway-proxy agentgateway-mcp; do
+  c=proxy; [ "$wl" = agentgateway-mcp ] && c=mcp
+  assert_env_value "$out13" "$wl" "$c" CONFIG_SYNC_TLS_INSECURE false \
+    "external: $wl verifies the config-sync listener instead of dialing cleartext"
+  assert_env_value "$out13" "$wl" "$c" CONFIG_SYNC_TLS_CA "$AGW_TLS_MOUNT/ca.crt" \
+    "external: $wl trusts the generated CA"
+  assert_env_value "$out13" "$wl" "$c" CONFIG_SYNC_TLS_SERVER_NAME \
+    "agentgateway-admin.default.svc.cluster.local" \
+    "external: $wl verifies the listener's SAN"
+done
+
+assert_contains "$out13" 'APP_ENV: "production"' \
+  "external: agentgateway declares a deployed APP_ENV"
+
+# A non-deployed APP_ENV keeps the old permissive behaviour, so an operator who
+# needs cleartext has a way out that does not involve editing templates.
+out13dev="$TMP/scenario-configsync-tls-dev.yaml"
+render_default "$out13dev" --set global.deploymentMode=external "${CS_ON[@]}" \
+  --set agentgateway.config.appEnv=dev
+assert_not_contains "$out13dev" 'agentgateway-configsync-tls' \
+  "non-deployed APP_ENV: no keypair is generated"
+assert_env_value "$out13dev" agentgateway-proxy proxy CONFIG_SYNC_TLS_INSECURE true \
+  "non-deployed APP_ENV: the permissive dial is still available"
+
+# Hybrid has no control plane to secure and dials SaaS over public TLS.
+out13hy="$TMP/scenario-configsync-tls-hybrid.yaml"
+render_default "$out13hy"
+assert_not_contains "$out13hy" 'agentgateway-configsync-tls' \
+  "hybrid: no config-sync keypair is generated"
+assert_env_value "$out13hy" agentgateway-proxy proxy CONFIG_SYNC_TLS_INSECURE false \
+  "hybrid: the SaaS dial stays verified under a deployed APP_ENV"
+
+# Operator-owned keypair: the chart must not mint a competing one.
+out13own="$TMP/scenario-configsync-tls-existing.yaml"
+render_default "$out13own" --set global.deploymentMode=external "${CS_ON[@]}" \
+  --set agentgateway.configSync.grpcTls.existingSecret=my-configsync-tls
+assert_not_contains "$out13own" 'name: agentgateway-configsync-tls' \
+  "existingSecret: the chart renders no keypair of its own"
+assert_contains "$out13own" 'secretName: my-configsync-tls' \
+  "existingSecret: the control plane mounts the operator Secret"
+
+# Pre-provisioned installs own every Secret themselves.
+out13pre="$TMP/scenario-configsync-tls-preserve.yaml"
+render_default "$out13pre" --set global.deploymentMode=external "${CS_ON[@]}" \
+  --set global.preserveExistingSecrets=true \
+  --set agentgateway.configSync.existingSecret.name=agw-cs \
+  --set trustguard.configSync.existingSecret.name=tg-cs
+assert_not_contains "$out13pre" 'name: agentgateway-configsync-tls' \
+  "preserveExistingSecrets: the chart generates no keypair"
+
+# Turning generation off without supplying a Secret yields a control plane that
+# cannot start. sprig reads an explicit false back as true through `default`, so
+# this guard only works via hasKey - these cases would silently pass otherwise.
+assert_render_fails "autoGenerate=false without existingSecret is rejected" \
+  --set global.deploymentMode=external \
+  --set agentgateway.configSync.grpcTls.autoGenerate=false
+assert_render_fails "the same guard covers trustguard" \
+  --set global.deploymentMode=external \
+  --set trustguard.configSync.grpcTls.autoGenerate=false
+
+# The console rejects in-cluster hosts in customer-facing snippets, so a
+# TRUSTGUARD_PUBLIC_URL that does not resolve publicly is the same as none.
+blue "==> Scenario 14: customer-facing TrustGuard origin"
+out14="$TMP/scenario-trustguard-public-url.yaml"
+render_default "$out14" --set global.deploymentMode=external --set global.domain=example.com
+assert_env_value "$out14" control-plane-app app TRUSTGUARD_PUBLIC_URL \
+  "https://trustguard.example.com" "external: the console gets a public TrustGuard origin"
+ruby -ryaml -e '
+  docs = []
+  YAML.load_stream(File.read(ARGV.fetch(0), encoding: "UTF-8")) { |d| docs << d if d.is_a?(Hash) }
+  hosts = docs.select { |d| d["kind"] == "Ingress" }
+              .flat_map { |d| (d.dig("spec", "rules") || []).map { |r| r["host"] } }.compact
+  app = docs.find { |d| d["kind"] == "Deployment" && d.dig("metadata", "name") == "control-plane-app" }
+  env = (app.dig("spec", "template", "spec", "containers") || []).flat_map { |c| c["env"] || [] }
+  url = env.find { |e| e["name"] == "TRUSTGUARD_PUBLIC_URL" }&.fetch("value")
+  abort "TRUSTGUARD_PUBLIC_URL not set" if url.nil?
+  host = url.sub(%r{\Ahttps?://}, "")
+  abort "#{host} is not a rendered ingress host (have: #{hosts.inspect})" unless hosts.include?(host)
+' "$out14" || { red "FAIL: the advertised origin is not a host the chart actually serves"; exit 1; }
+green "ok  - the advertised origin matches a rendered TrustGuard ingress host"
+
+out14ov="$TMP/scenario-trustguard-public-url-override.yaml"
+render_default "$out14ov" --set global.deploymentMode=external --set global.domain=example.com \
+  --set 'control-plane-app.controlPlane.components.app.config.trustguardPublicUrl=https://guard.corp.example'
+assert_env_value "$out14ov" control-plane-app app TRUSTGUARD_PUBLIC_URL \
+  "https://guard.corp.example" "an explicit origin wins over the derived one"
+
+# TrustGate reads REDIS_TLS_ENABLED; TrustGuard reads REDIS_TLS. The shared
+# hybrid Secret stores the latter, so without a rename AgentGateway connects in
+# plaintext to a TLS-only Redis and nothing in the manifest says so.
+blue "==> Scenario 15: hybrid Redis TLS reaches both naming conventions"
+out15="$TMP/scenario-redis-tls-hybrid.yaml"
+render_default "$out15" --set global.redis.tls=true
+assert_secret_key "$out15" redis-secrets present REDIS_TLS \
+  "hybrid: the shared Secret stores the canonical REDIS_TLS"
+for wl in agentgateway-proxy agentgateway-mcp; do
+  c=proxy; [ "$wl" = agentgateway-mcp ] && c=mcp
+  assert_contains "$out15" 'name: REDIS_TLS_ENABLED' \
+    "hybrid: $wl is given the name TrustGate actually reads"
+done
+ruby -ryaml -rbase64 -e '
+  docs = []
+  YAML.load_stream(File.read(ARGV.fetch(0), encoding: "UTF-8")) { |d| docs << d if d.is_a?(Hash) }
+  s = docs.find { |d| d["kind"] == "Secret" && d.dig("metadata", "name") == "redis-secrets" }
+  val = Base64.decode64(s.fetch("data").fetch("REDIS_TLS"))
+  abort "expected REDIS_TLS=true, got #{val.inspect}" unless val == "true"
+  %w[agentgateway-proxy agentgateway-mcp].each do |w|
+    d = docs.find { |x| x["kind"] == "Deployment" && x.dig("metadata", "name") == w }
+    c = d.dig("spec", "template", "spec", "containers").first
+    e = (c["env"] || []).find { |x| x["name"] == "REDIS_TLS_ENABLED" }
+    abort "#{w} missing REDIS_TLS_ENABLED" if e.nil?
+    ref = e.dig("valueFrom", "secretKeyRef")
+    abort "#{w} REDIS_TLS_ENABLED not sourced from redis-secrets/REDIS_TLS" unless
+      ref && ref["name"] == "redis-secrets" && ref["key"] == "REDIS_TLS"
+  end
+  # TrustGuard reads REDIS_TLS directly, so a rename there would be noise.
+  tg = docs.find { |x| x["kind"] == "Deployment" && x.dig("metadata", "name") == "trustguard-data-plane" }
+  if tg
+    c = tg.dig("spec", "template", "spec", "containers").first
+    abort "trustguard should not get the TrustGate-only name" if
+      (c["env"] || []).any? { |x| x["name"] == "REDIS_TLS_ENABLED" }
+  end
+' "$out15" || { red "FAIL: hybrid Redis TLS is not delivered under both names"; exit 1; }
+green "ok  - the flag resolves to true for TrustGate without renaming it for TrustGuard"
+
+# A boolean here used to reach b64enc unconverted and abort the whole render.
+render_default "$TMP/scenario-redis-tls-bool.yaml" --set global.redis.tls=true >/dev/null
+green "ok  - a boolean global.redis.tls renders instead of aborting"
+
+out15off="$TMP/scenario-redis-tls-unset.yaml"
+render_default "$out15off"
+assert_not_contains "$out15off" 'name: REDIS_TLS_ENABLED' \
+  "hybrid: no TLS flag is invented when global.redis.tls is unset"
+
+# IRSA supplies a role and a token file, not a region, and the SDK fails the
+# token request without one.
+blue "==> Scenario 16: AWS region for RDS IAM on the Go gateways"
+out16="$TMP/scenario-aws-region.yaml"
+render_default "$out16" --set global.deploymentMode=external \
+  --set global.postgresql.awsRegion=eu-west-1 \
+  --set agentgateway.database.iamAuth=true --set trustguard.database.iamAuth=true
+assert_contains "$out16" 'AWS_REGION: "eu-west-1"' \
+  "external: the IAM gateways are told which region to sign for"
+ruby -ryaml -e '
+  docs = []
+  YAML.load_stream(File.read(ARGV.fetch(0), encoding: "UTF-8")) { |d| docs << d if d.is_a?(Hash) }
+  %w[agentgateway-env-vars trustguard-env-vars].each do |name|
+    cm = docs.find { |d| d["kind"] == "ConfigMap" && d.dig("metadata", "name") == name }
+    abort "#{name} not rendered" if cm.nil?
+    got = cm.fetch("data")["AWS_REGION"]
+    abort "#{name} has no AWS_REGION (IAM token minting will fail)" if got.nil?
+    abort "#{name} AWS_REGION=#{got.inspect}" unless got == "eu-west-1"
+  end
+' "$out16" || { red "FAIL: an IAM gateway was left without a region"; exit 1; }
+green "ok  - both Go gateways carry the region their SigV4 signer needs"
+
+out16sub="$TMP/scenario-aws-region-subchart.yaml"
+render_default "$out16sub" --set global.deploymentMode=external \
+  --set global.postgresql.awsRegion=eu-west-1 \
+  --set agentgateway.database.iamAuth=true \
+  --set agentgateway.database.awsRegion=us-east-2
+assert_contains "$out16sub" 'AWS_REGION: "us-east-2"' \
+  "a per-chart region overrides the global one"
+
+out16off="$TMP/scenario-aws-region-noniam.yaml"
+render_default "$out16off" --set global.deploymentMode=external \
+  --set global.postgresql.awsRegion=eu-west-1
+assert_not_contains "$out16off" 'agentgateway[\s\S]{0,200}AWS_REGION' \
+  "no region is emitted for the gateways when IAM is off"
 
 green ""
 green "All v2 render scenarios passed."

@@ -267,3 +267,63 @@ Stable OpenShift Route metadata.name from a host string (wildcard-safe).
 {{- $suffix := $host | trimPrefix "*." | replace "." "-" | trunc 40 | trimSuffix "-" -}}
 {{- printf "%s-%s" $prefix $suffix | trunc 63 | trimSuffix "-" -}}
 {{- end }}
+
+{{/*
+AWS region for RDS IAM token minting. Subchart value wins, else the umbrella's
+global.postgresql.awsRegion, so one setting covers every IAM-authenticated
+service instead of being repeated per chart.
+*/}}
+{{- define "agentgateway.awsRegion" -}}
+{{- $global := default dict (default dict .Values.global).postgresql -}}
+{{- (default dict .Values.database).awsRegion | default $global.awsRegion | default "" -}}
+{{- end }}
+
+{{/*
+config-sync gRPC TLS: fixed secret name, mount path and verified server name.
+The control plane's config-sync gRPC listener REQUIRES TLS (cert+key) whenever
+APP_ENV is a deployed environment (prod/production/staging/stage); the data plane
+verifies the listener against the generated CA using this DNS server name.
+Mirrors the TrustGuard implementation so both gateways behave identically.
+*/}}
+{{- define "agentgateway.configSyncTls.secretName" -}}
+{{- $tls := (default dict .Values.configSync).grpcTls | default dict -}}
+{{- $tls.existingSecret | default "agentgateway-configsync-tls" -}}
+{{- end }}
+
+{{- define "agentgateway.configSyncTls.mountPath" -}}/etc/agentgateway/configsync-tls{{- end }}
+
+{{- define "agentgateway.configSyncTls.serverName" -}}
+{{- printf "%s.%s.svc.cluster.local" .Values.controlPlane.name .Release.Namespace -}}
+{{- end }}
+
+{{/*
+Whether the chart generates the keypair. Resolved through hasKey because sprig's
+`default` treats boolean false as empty, so `autoGenerate | default true` would
+read an explicit false back as true.
+*/}}
+{{- define "agentgateway.configSyncTls.autoGenerate" -}}
+{{- $tls := (default dict .Values.configSync).grpcTls | default dict -}}
+{{- if hasKey $tls "autoGenerate" -}}
+{{- if $tls.autoGenerate }}true{{- end -}}
+{{- else -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/*
+Returns "true" (non-empty) when the config-sync gRPC listener must run with TLS:
+external/full + a deployed APP_ENV. In that case the chart provisions a server
+cert/key (auto-generated CA, or an operator-provided existingSecret).
+
+TrustGate enforces both halves of this: the control plane refuses to build its
+listener without cert+key, and the data plane refuses to start with
+CONFIG_SYNC_TLS_INSECURE=true, once APP_ENV is deployed.
+*/}}
+{{- define "agentgateway.configSyncTls.active" -}}
+{{- $isFull := eq (include "neuraltrust-platform.isFull" .) "true" -}}
+{{- $appEnv := lower (trim (.Values.config.appEnv | default "")) -}}
+{{- $deployed := has $appEnv (list "prod" "production" "staging" "stage") -}}
+{{- $tls := (default dict .Values.configSync).grpcTls | default dict -}}
+{{- $provisioned := or ($tls.existingSecret | default "") (eq (include "agentgateway.configSyncTls.autoGenerate" .) "true") -}}
+{{- if and $isFull $deployed $provisioned }}true{{- end -}}
+{{- end }}

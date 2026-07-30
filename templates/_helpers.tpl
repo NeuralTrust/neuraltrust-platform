@@ -484,6 +484,28 @@ v2 Redis connection scalars.
 {{- end }}
 
 {{/*
+Renames the shared Redis TLS flag for TrustGate, which reads REDIS_TLS_ENABLED
+while TrustGuard reads REDIS_TLS. `redis-secrets` stores the canonical
+REDIS_TLS, so without this the AgentGateway data planes never see the flag and
+connect in plaintext to a TLS-only Redis. Emitted only when global.redis.tls is
+set, so a subchart-level redis.tls arriving through the ConfigMap still wins
+where the global is unset.
+
+Usage: {{- include "neuraltrust-platform.hybridRedisTlsEnv" . | nindent 8 }}
+*/}}
+{{- define "neuraltrust-platform.hybridRedisTlsEnv" -}}
+{{- $redis := default dict (default dict .Values.global).redis -}}
+{{- if and (eq (include "neuraltrust-platform.isHybrid" .) "true") ($redis.tls | default "" | toString) -}}
+- name: REDIS_TLS_ENABLED
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "neuraltrust-platform.v2.hybridRedis.secretName" . | quote }}
+      key: REDIS_TLS
+      optional: true
+{{- end -}}
+{{- end }}
+
+{{/*
 Shared TrustGuard client credential Secret name.
 */}}
 {{- define "neuraltrust-platform.trustguardClientSecretName" -}}
