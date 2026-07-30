@@ -55,6 +55,19 @@ and are removed on the next upgrade that rewrites the Secret.
 
 ### Documentation
 
+- **Documented both image-pull paths, and the two places mirroring silently
+  breaks.** Operators receive a registry key from NeuralTrust and can either pull
+  directly or mirror into their own registry, but the docs only described
+  mirroring. Two rendering facts were verified and are now written down:
+  `global.imageRegistry` does **not** rewrite the OTel collector repositories
+  (`global.clickstack.egress.image.repository` on hybrid,
+  `global.observability.collector.image.repository` when observability is on),
+  so an air-gapped hybrid install leaves the DataAgent egress sidecar pulling
+  from the NeuralTrust registry; and `global.imagePullSecrets` only reaches the
+  chart's own PostgreSQL and Redis, leaving the twelve product workloads on the
+  `gcr-secret` default. `global.imagePullSecrets: ["none"]` is documented as
+  unsupported — it does not clear the product references and renders a Redis
+  pull secret literally named `none`.
 - **Dropped the `v2-` qualifier from packaged example filenames.** v2 is the only
   topology this chart ships, so the qualifier carried no information. Files were
   renamed with `git mv`: `values-v2-external.yaml.example` →
