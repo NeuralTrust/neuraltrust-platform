@@ -529,26 +529,22 @@ spec:
         - name: CONTROL_PLANE_JWT_SECRET
           valueFrom:
             secretKeyRef:
-              name: control-plane-secrets
-              key: CONTROL_PLANE_JWT_SECRET
+              {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "CONTROL_PLANE_JWT_SECRET") | nindent 14 }}
         - name: DATA_PLANE_API_URL
           value: "{{ $dataPlaneApiUrl }}"
         - name: DATA_PLANE_JWT_SECRET
           valueFrom:
             secretKeyRef:
-              name: data-plane-jwt-secret
-              key: DATA_PLANE_JWT_SECRET
+              {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "DATA_PLANE_JWT_SECRET") | nindent 14 }}
         {{- if eq (include "neuraltrust-platform.isV2" .) "true" }}
         - name: AUTH_SECRET
           valueFrom:
             secretKeyRef:
-              name: control-plane-secrets
-              key: AUTH_SECRET
+              {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "AUTH_SECRET") | nindent 14 }}
         - name: NEXTAUTH_SECRET
           valueFrom:
             secretKeyRef:
-              name: control-plane-secrets
-              key: NEXTAUTH_SECRET
+              {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "NEXTAUTH_SECRET") | nindent 14 }}
         # Default v2 UI. Opt out: config.forceV2Ui: "false".
         - name: FORCE_V2_UI
           value: "{{ $forceV2Ui }}"
@@ -610,9 +606,7 @@ spec:
         - name: TRUSTGATE_JWT_SECRET
           valueFrom:
             secretKeyRef:
-              name: control-plane-secrets
-              key: TRUSTGATE_JWT_SECRET
-              optional: true
+              {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "TRUSTGATE_JWT_SECRET" "optional" true) | nindent 14 }}
         {{- end }}
         - name: FIREWALL_API_URL
           # Resolved by the parent chart (templates/platform-secrets.yaml):
@@ -636,17 +630,14 @@ spec:
           # Use data plane JWT secret as fallback if firewall JWT secret is not present
           valueFrom:
             secretKeyRef:
-              name: data-plane-jwt-secret
-              key: DATA_PLANE_JWT_SECRET
+              {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "DATA_PLANE_JWT_SECRET") | nindent 14 }}
           {{- end }}
         - name: MODEL_SCANNER_API_URL
           value: "{{ $modelScannerApiUrl }}"
         - name: MODEL_SCANNER_SECRET
           valueFrom:
             secretKeyRef:
-              name: control-plane-secrets
-              key: MODEL_SCANNER_SECRET
-              optional: true
+              {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "MODEL_SCANNER_SECRET" "optional" true) | nindent 14 }}
         {{- /* v2 backend services the console (BFF) calls. Core backend
                credentials are required so the app fails closed on an incomplete
                external install. AlertEngine and TrustLens remain optional. */}}
@@ -657,15 +648,13 @@ spec:
         - name: AGENTGATEWAY_JWT_SECRET
           valueFrom:
             secretKeyRef:
-              name: agentgateway-secrets
-              key: SERVER_SECRET_KEY
+              {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "SERVER_SECRET_KEY") | nindent 14 }}
         - name: TRUSTGUARD_URL
           value: "{{ $trustguardUrl }}"
         - name: TRUSTGUARD_JWT_SECRET
           valueFrom:
             secretKeyRef:
-              name: trustguard-secrets
-              key: ADMIN_JWT_SECRET
+              {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "ADMIN_JWT_SECRET") | nindent 14 }}
         - name: DATACORE_URL
           value: "{{ $datacoreUrl }}"
         - name: DATACORE_METRICS_ENABLED
@@ -677,20 +666,15 @@ spec:
         - name: DATACORE_JWT_SECRET
           valueFrom:
             secretKeyRef:
-              name: datacore-secrets
-              key: AUTH_JWT_HS256_SECRET
+              {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "AUTH_JWT_HS256_SECRET") | nindent 14 }}
         - name: ALERT_ENGINE_JWT_SECRET
           valueFrom:
             secretKeyRef:
-              name: alertengine-secrets
-              key: AUTH_JWT_SECRET
-              optional: true
+              {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "AUTH_JWT_SECRET" "optional" true) | nindent 14 }}
         - name: TRUSTLENS_JWT_SECRET
           valueFrom:
             secretKeyRef:
-              name: trustlens-secrets
-              key: JWT_SECRET
-              optional: true
+              {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "TRUSTLENS_JWT_SECRET" "optional" true) | nindent 14 }}
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.extraEnv }}
         {{- toYaml .Values.controlPlane.components.app.extraEnv | nindent 8 }}
         {{- end }}

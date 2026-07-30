@@ -1697,3 +1697,160 @@ Config-map/Secret checksum annotations for Deployment restart-on-change.
 checksum/{{ . | base | replace ".yaml" "" }}: {{ include (print $ctx.Template.BasePath .) $ctx | sha256sum }}
 {{ end -}}
 {{- end -}}
+
+{{/*
+================================================================================
+Shared platform Secret (`platform-secrets`)
+================================================================================
+One Secret holds every cross-service application credential, replacing the
+hand-duplicated per-service Secrets that silently drifted apart.
+
+`platform-secrets` is the sole *generator* of these values. Legacy per-service
+Secrets keep emitting them for one release so a rollback still finds them, but
+no workload reads a legacy copy for a migrated key: consumers reference
+`platform-secrets` through `neuraltrust-platform.secretRef`, and Kubernetes
+gives an explicit `env` entry precedence over `envFrom`. Two independent
+`resolveSecret` calls cannot agree on a freshly generated value (`lookup`
+returns nothing during install), so a single generator is the only way to keep
+both sides identical.
+
+`neuraltrust-platform.platformSecret.registry` maps each logical key to the
+legacy Secret it adopts from on upgrade, and to a `generate` policy:
+  random  → generated when absent (chart owns the value)
+  adopt   → only ever adopted; omitted when no source has it (operator owns it)
+
+`requires` lists the install shapes that consume the key, and a key is emitted
+when any of them is in play:
+  external   → the full stack
+  trustgate / trustguard / dataPlane → the product claims it in hybrid
+  trustlens  → the opt-in subchart is enabled, in either mode. External deploys
+               the full stack, so shape alone would not gate an opt-in chart.
+  watchdog   → watchdog usage export is on. It calls the control-plane and
+               data-plane APIs, so it needs their keys even in hybrid.
+  v1         → the retired v1 console env. `isV2` is always true, so this never
+               matches on a new install; the key survives only where a live
+               Secret already holds it.
+A hybrid install therefore carries only the credentials its in-cluster services
+actually read. Keys already present in a live `platform-secrets` are always
+kept, so an upgrade never drops one an existing install may depend on.
+
+Only credentials with a real consumer on this Secret belong here. An
+operator-owned key that keeps its own dedicated Secret (third-party API keys,
+client credential pairs) would just become a second copy nobody reads — the
+drift this Secret exists to prevent.
+
+`aliasOf` marks a key that must hold the same value as another key. Aliases are
+resolved from their target rather than independently, which is what keeps
+documented invariants (TRUSTGATE_JWT_SECRET == SERVER_SECRET_KEY,
+NEXTAUTH_SECRET == AUTH_SECRET) true on a fresh install too.
+*/}}
+{{- define "neuraltrust-platform.platformSecret.registry" -}}
+SERVER_SECRET_KEY: {legacyName: agentgateway-secrets, legacyKey: SERVER_SECRET_KEY, generate: random, length: 64, requires: external trustgate}
+ADMIN_JWT_SECRET: {legacyName: trustguard-secrets, legacyKey: ADMIN_JWT_SECRET, generate: random, length: 64, requires: external trustguard}
+TRUSTGUARD_TOKEN_SIGNING_SECRET: {legacyName: trustguard-secrets, legacyKey: TRUSTGUARD_TOKEN_SIGNING_SECRET, generate: random, length: 64, requires: external trustguard}
+REDIS_EVENTS_SECRET: {legacyName: trustguard-secrets, legacyKey: REDIS_EVENTS_SECRET, generate: random, length: 64, requires: external trustguard}
+AUTH_JWT_HS256_SECRET: {legacyName: datacore-secrets, legacyKey: AUTH_JWT_HS256_SECRET, generate: random, length: 64, requires: external}
+AUTH_JWT_SECRET: {legacyName: alertengine-secrets, legacyKey: AUTH_JWT_SECRET, generate: random, length: 64, requires: external}
+APP_ENCRYPTION_KEY: {legacyName: alertengine-secrets, legacyKey: APP_ENCRYPTION_KEY, generate: random, length: 32, requires: external}
+TRUSTLENS_JWT_SECRET: {legacyName: trustlens-secrets, legacyKey: JWT_SECRET, generate: random, length: 64, requires: trustlens}
+ENCRYPTION_KEYSET: {legacyName: trustlens-secrets, legacyKey: ENCRYPTION_KEYSET, generate: random, length: 64, requires: trustlens}
+JWT_SECRET: {legacyName: firewall-secrets, legacyKey: JWT_SECRET, generate: random, length: 64, requires: external trustguard}
+DATA_PLANE_JWT_SECRET: {legacyName: data-plane-jwt-secret, legacyKey: DATA_PLANE_JWT_SECRET, generate: random, length: 64, requires: external dataPlane watchdog}
+CONTROL_PLANE_JWT_SECRET: {legacyName: control-plane-secrets, legacyKey: CONTROL_PLANE_JWT_SECRET, generate: random, length: 64, requires: external watchdog}
+AUTH_SECRET: {legacyName: control-plane-secrets, legacyKey: AUTH_SECRET, generate: random, length: 64, requires: external}
+NEXTAUTH_SECRET: {legacyName: control-plane-secrets, legacyKey: NEXTAUTH_SECRET, aliasOf: AUTH_SECRET, requires: external}
+MODEL_SCANNER_SECRET: {legacyName: control-plane-secrets, legacyKey: MODEL_SCANNER_SECRET, generate: adopt, requires: external}
+TRUSTGATE_JWT_SECRET: {legacyName: control-plane-secrets, legacyKey: TRUSTGATE_JWT_SECRET, aliasOf: SERVER_SECRET_KEY, requires: v1}
+{{- end }}
+
+{{/*
+Name of the Secret that holds the shared platform credentials.
+Empty when the shared Secret is not in play, which tells `secretRef` to fall
+back to the legacy per-service Secret.
+*/}}
+{{- define "neuraltrust-platform.platformSecret.name" -}}
+{{- $global := default dict .Values.global -}}
+{{- $shared := default dict $global.platformSecret -}}
+{{- $existing := default dict $shared.existingSecret -}}
+{{- $enabled := true -}}
+{{- if hasKey $shared "enabled" }}{{- $enabled = $shared.enabled }}{{- end }}
+{{- /* With preserveExistingSecrets the operator pre-creates the per-service
+       Secrets, so redirecting consumers would point them at a Secret nobody
+       created. Keep the legacy contract for those installs. */}}
+{{- if $global.preserveExistingSecrets }}{{- $enabled = false }}{{- end }}
+{{- /* Same reasoning for autoGenerateSecrets=false: the chart mints nothing, so
+       there is no `platform-secrets` to point at. An operator-supplied Secret is
+       exempt — they created it themselves, so it exists either way. */}}
+{{- if and (not $existing.name) (ne (include "neuraltrust-platform.autoGenerateSecrets" .) "true") }}
+  {{- $enabled = false }}
+{{- end }}
+{{- if not $enabled }}
+{{- else if $existing.name }}{{- $existing.name -}}
+{{- else -}}platform-secrets{{- end }}
+{{- end }}
+
+{{/*
+Resolve a logical shared-secret key to the `name`/`key` pair a `secretKeyRef`
+needs. Returns the shared Secret when it is in play, else the legacy
+per-service Secret, so the same call site works before and after migration.
+
+Usage:
+  valueFrom:
+    secretKeyRef:
+      {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "SERVER_SECRET_KEY") | nindent 6 }}
+*/}}
+{{- define "neuraltrust-platform.secretRef" -}}
+{{- $ctx := .ctx -}}
+{{- $logical := .logical -}}
+{{- $registry := fromYaml (include "neuraltrust-platform.platformSecret.registry" $ctx) -}}
+{{- $entry := index $registry $logical -}}
+{{- if not $entry }}{{- fail (printf "neuraltrust-platform.secretRef: unknown logical secret %q" $logical) }}{{- end }}
+{{- $shared := include "neuraltrust-platform.platformSecret.name" $ctx -}}
+{{- if $shared -}}
+name: {{ $shared | quote }}
+key: {{ $logical | quote }}
+{{- else -}}
+name: {{ $entry.legacyName | quote }}
+key: {{ $entry.legacyKey | quote }}
+{{- end }}
+{{- if .optional }}
+optional: true
+{{- end }}
+{{- end }}
+
+{{/*
+Emit `env` entries sourcing shared credentials from `platform-secrets`.
+
+Services whose Deployment `envFrom`s a legacy per-service Secret still receive
+the legacy copy of a migrated key. An explicit `env` entry takes precedence over
+`envFrom` in Kubernetes, so adding one here makes `platform-secrets` the value
+the container actually sees, while the legacy Secret stays in place for rollback.
+
+Emits nothing when the shared Secret is not in play, leaving those installs on
+the legacy contract unchanged.
+
+Usage:
+  {{- include "neuraltrust-platform.platformSecretEnv" (dict "ctx" . "keys" (dict "JWT_SECRET" "TRUSTLENS_JWT_SECRET") "skip" .Values.extraEnv) | nindent 8 }}
+
+  keys: envVarName → logical shared key
+  skip: optional list of `{name: ...}` env entries (e.g. an operator's extraEnv)
+        whose names must not be emitted, so an operator override still wins and
+        the Deployment never carries a duplicate env name.
+*/}}
+{{- define "neuraltrust-platform.platformSecretEnv" -}}
+{{- $ctx := .ctx -}}
+{{- $skip := list -}}
+{{- range (default list .skip) }}
+  {{- if .name }}{{- $skip = append $skip .name }}{{- end }}
+{{- end }}
+{{- if include "neuraltrust-platform.platformSecret.name" $ctx }}
+{{- range $envName, $logical := .keys }}
+{{- if not (has $envName $skip) }}
+- name: {{ $envName }}
+  valueFrom:
+    secretKeyRef:
+      {{- include "neuraltrust-platform.secretRef" (dict "ctx" $ctx "logical" $logical) | nindent 6 }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

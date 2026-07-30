@@ -1202,5 +1202,295 @@ assert_contains "$out11e" 'name: data-plane-api' \
 assert_contains "$out11e" 'name: firewall$' \
   "external no-products: Firewall renders"
 
+# ---------------------------------------------------------------------------
+# Shared platform Secret (`platform-secrets`)
+#
+# The chart used to duplicate cross-service credentials by hand, and two
+# independent resolveSecret calls cannot agree on a freshly generated value
+# (lookup is empty during install). So the invariant under test is that every
+# migrated key has exactly ONE source: no workload may still read a migrated
+# key from its legacy per-service Secret, and every platform-secrets reference
+# must resolve to a key the Secret actually carries.
+# ---------------------------------------------------------------------------
+assert_shared_secret_wiring() {
+  local file="$1" label="$2"
+  if ! ruby -ryaml -rbase64 -e '
+    docs = YAML.load_stream(File.read(ARGV.fetch(0))).compact
+    # logical key => [legacy Secret name, legacy key]
+    reg = {
+      "SERVER_SECRET_KEY" => ["agentgateway-secrets", "SERVER_SECRET_KEY"],
+      "ADMIN_JWT_SECRET" => ["trustguard-secrets", "ADMIN_JWT_SECRET"],
+      "TRUSTGUARD_TOKEN_SIGNING_SECRET" => ["trustguard-secrets", "TRUSTGUARD_TOKEN_SIGNING_SECRET"],
+      "REDIS_EVENTS_SECRET" => ["trustguard-secrets", "REDIS_EVENTS_SECRET"],
+      "AUTH_JWT_HS256_SECRET" => ["datacore-secrets", "AUTH_JWT_HS256_SECRET"],
+      "AUTH_JWT_SECRET" => ["alertengine-secrets", "AUTH_JWT_SECRET"],
+      "APP_ENCRYPTION_KEY" => ["alertengine-secrets", "APP_ENCRYPTION_KEY"],
+      "TRUSTLENS_JWT_SECRET" => ["trustlens-secrets", "JWT_SECRET"],
+      "ENCRYPTION_KEYSET" => ["trustlens-secrets", "ENCRYPTION_KEYSET"],
+      "JWT_SECRET" => ["firewall-secrets", "JWT_SECRET"],
+      "DATA_PLANE_JWT_SECRET" => ["data-plane-jwt-secret", "DATA_PLANE_JWT_SECRET"],
+      "CONTROL_PLANE_JWT_SECRET" => ["control-plane-secrets", "CONTROL_PLANE_JWT_SECRET"],
+      "AUTH_SECRET" => ["control-plane-secrets", "AUTH_SECRET"],
+      "MODEL_SCANNER_SECRET" => ["control-plane-secrets", "MODEL_SCANNER_SECRET"],
+    }
+    shared = docs.find { |d| d["kind"] == "Secret" && d.dig("metadata", "name") == "platform-secrets" }
+    abort "platform-secrets not rendered" if shared.nil?
+    data = shared["data"] || {}
+    errors = []
+    refs = 0
+    docs.each do |d|
+      next unless %w[Deployment StatefulSet DaemonSet].include?(d["kind"])
+      name = d.dig("metadata", "name")
+      pod = d.dig("spec", "template", "spec") || {}
+      ((pod["containers"] || []) + (pod["initContainers"] || [])).each do |c|
+        seen = Hash.new(0)
+        (c["env"] || []).each do |e|
+          seen[e["name"]] += 1
+          skr = e.dig("valueFrom", "secretKeyRef")
+          next if skr.nil?
+          if skr["name"] == "platform-secrets"
+            refs += 1
+            # An optional ref to an absent key is how an unconfigured
+            # integration is expressed, so only required refs must resolve.
+            unless data.key?(skr["key"]) || skr["optional"]
+              errors << "#{name}/#{c["name"]} #{e["name"]} -> platform-secrets/#{skr["key"]} which is absent"
+            end
+          else
+            reg.each do |logical, (ln, lk)|
+              if skr["name"] == ln && skr["key"] == lk
+                errors << "#{name}/#{c["name"]} #{e["name"]} still reads migrated #{logical} from #{ln}"
+              end
+            end
+          end
+        end
+        seen.each { |k, v| errors << "#{name}/#{c["name"]} duplicate env #{k} (x#{v})" if v > 1 }
+      end
+    end
+    # Documented invariants that must survive a fresh install, where each key
+    # would otherwise be generated independently.
+    # An alias is only present when the install shape needs it, so compare the
+    # pair only when both were emitted.
+    [["AUTH_SECRET", "NEXTAUTH_SECRET"], ["SERVER_SECRET_KEY", "TRUSTGATE_JWT_SECRET"]].each do |a, b|
+      next unless data.key?(a) && data.key?(b)
+      errors << "#{a} != #{b}" if data[a] != data[b]
+    end
+    errors << "no workload references platform-secrets" if refs.zero?
+    unless errors.empty?
+      warn errors.join("\n  ")
+      abort
+    end
+  ' "$file"; then
+    red "FAIL: $label"
+    exit 1
+  fi
+  green "ok  - $label"
+}
+
+# Key presence inside the platform-secrets document specifically. A plain grep
+# also matches the legacy Secrets, which keep dual-emitting migrated keys for
+# one release, so it cannot tell the two sources apart.
+assert_platform_key() {
+  local file="$1" mode="$2" key="$3" label="$4" found
+  if ! found=$(ruby -ryaml -e '
+    docs = YAML.load_stream(File.read(ARGV.fetch(0))).compact
+    d = docs.find { |x| x["kind"] == "Secret" && x.dig("metadata", "name") == "platform-secrets" }
+    abort "platform-secrets not rendered" if d.nil?
+    puts((d["data"] || {}).key?(ARGV.fetch(1)) ? "yes" : "no")
+  ' "$file" "$key"); then
+    red "FAIL: $label"
+    exit 1
+  fi
+  if [ "$mode" = present ] && [ "$found" != yes ]; then
+    red "FAIL: $label"
+    red "  platform-secrets does not carry $key"
+    exit 1
+  fi
+  if [ "$mode" = absent ] && [ "$found" != no ]; then
+    red "FAIL: $label"
+    red "  platform-secrets unexpectedly carries $key"
+    exit 1
+  fi
+  green "ok  - $label"
+}
+
+blue "==> Scenario 12: shared platform Secret"
+out12ext="$TMP/scenario-shared-secret-external.yaml"
+render_default "$out12ext" --set global.deploymentMode=external
+assert_contains "$out12ext" '^  name: platform-secrets$' \
+  "external: platform-secrets renders"
+assert_shared_secret_wiring "$out12ext" \
+  "external: every migrated key has a single source in platform-secrets"
+
+out12hyb="$TMP/scenario-shared-secret-hybrid.yaml"
+render_default "$out12hyb" --set global.deploymentMode=hybrid
+assert_contains "$out12hyb" '^  name: platform-secrets$' \
+  "hybrid: platform-secrets renders"
+assert_shared_secret_wiring "$out12hyb" \
+  "hybrid: every migrated key has a single source in platform-secrets"
+
+# control-plane-app used to reach into seven Secrets to build its env.
+# A hybrid install must not carry credentials only the hosted control plane
+# reads. Keys already present in a live Secret are preserved by a `lookup` that
+# render tests cannot exercise, so only the gating is asserted here.
+blue "==> Scenario 12a: keys are gated to the install shape"
+for key in CONTROL_PLANE_JWT_SECRET AUTH_SECRET NEXTAUTH_SECRET \
+           AUTH_JWT_HS256_SECRET AUTH_JWT_SECRET APP_ENCRYPTION_KEY; do
+  assert_platform_key "$out12hyb" absent "${key}" \
+    "hybrid: platform-secrets omits control-plane-only key ${key}"
+  assert_platform_key "$out12ext" present "${key}" \
+    "external: platform-secrets carries ${key}"
+done
+
+# An opt-in subchart and a retired code path must not mint credentials nobody
+# reads, in either mode. External deploys the full stack, so the install shape
+# alone cannot gate these.
+for key in TRUSTLENS_JWT_SECRET ENCRYPTION_KEYSET TRUSTGATE_JWT_SECRET; do
+  assert_platform_key "$out12ext" absent "${key}" \
+    "external: platform-secrets omits unused ${key}"
+  assert_platform_key "$out12hyb" absent "${key}" \
+    "hybrid: platform-secrets omits unused ${key}"
+done
+
+# Enabling TrustLens is what brings its credentials in, not the deployment mode.
+out12tl="$TMP/scenario-shared-secret-trustlens-on.yaml"
+render_default "$out12tl" --set global.deploymentMode=hybrid \
+  --set trustlens.enabled=true --set trustlens.image.tag=v0.1.1
+for key in TRUSTLENS_JWT_SECRET ENCRYPTION_KEYSET; do
+  assert_platform_key "$out12tl" present "${key}" \
+    "trustlens enabled: platform-secrets carries ${key}"
+done
+assert_shared_secret_wiring "$out12tl" \
+  "trustlens enabled: every migrated key has a single source in platform-secrets"
+
+# MODEL_SCANNER_SECRET is adopt-only: an empty legacy value must stay empty
+# rather than becoming a generated credential for a peer that is not deployed.
+assert_platform_key "$out12ext" absent MODEL_SCANNER_SECRET \
+  "external: platform-secrets does not invent MODEL_SCANNER_SECRET"
+out12ms="$TMP/scenario-shared-secret-model-scanner.yaml"
+render_default "$out12ms" --set global.deploymentMode=external \
+  --set global.platformSecret.values.MODEL_SCANNER_SECRET=ms-pinned
+assert_platform_key "$out12ms" present MODEL_SCANNER_SECRET \
+  "external: an operator-supplied MODEL_SCANNER_SECRET is still emitted"
+assert_contains "$out12ms" 'bXMtcGlubmVk' \
+  "external: the pinned MODEL_SCANNER_SECRET value reaches platform-secrets"
+# Disabling a product drops the credentials only that product reads.
+out12tgoff="$TMP/scenario-shared-secret-trustguard-off.yaml"
+render_default "$out12tgoff" --set global.deploymentMode=hybrid --set global.products.trustguard=false
+for key in ADMIN_JWT_SECRET TRUSTGUARD_TOKEN_SIGNING_SECRET REDIS_EVENTS_SECRET JWT_SECRET; do
+  assert_platform_key "$out12tgoff" absent "${key}" \
+    "hybrid without TrustGuard: platform-secrets omits ${key}"
+done
+assert_platform_key "$out12tgoff" present SERVER_SECRET_KEY \
+  "hybrid without TrustGuard: TrustGate credentials still present"
+# Gating a product off must not leave a consumer pointing at a key nobody emits.
+assert_shared_secret_wiring "$out12tgoff" \
+  "hybrid without TrustGuard: every migrated key has a single source in platform-secrets"
+
+# autoGenerateSecrets=false means the chart mints nothing. Consumers must fall
+# back to the legacy Secrets rather than reference a Secret that is never created.
+out12nogen="$TMP/scenario-shared-secret-nogen.yaml"
+render_default "$out12nogen" --set global.deploymentMode=external --set global.autoGenerateSecrets=false
+assert_not_contains "$out12nogen" '^  name: platform-secrets$' \
+  "autoGenerateSecrets=false: shared Secret not rendered"
+assert_not_contains "$out12nogen" 'name: "platform-secrets"' \
+  "autoGenerateSecrets=false: no workload references the shared Secret"
+assert_contains "$out12nogen" 'name: "control-plane-secrets"' \
+  "autoGenerateSecrets=false: refs fall back to the legacy Secret"
+
+# An operator override through extraEnv must win without producing a duplicate
+# env name, which would break the strategic merge patch on the next upgrade.
+out12dup="$TMP/scenario-shared-secret-extraenv-override.yaml"
+render_default "$out12dup" --set global.deploymentMode=external \
+  --set 'trustguard.dataPlane.extraEnv[0].name=ADMIN_JWT_SECRET' \
+  --set 'trustguard.dataPlane.extraEnv[0].value=operator-wins' \
+  --set 'agentgateway.controlPlane.extraEnv[0].name=SERVER_SECRET_KEY' \
+  --set 'agentgateway.controlPlane.extraEnv[0].value=operator-wins'
+assert_shared_secret_wiring "$out12dup" \
+  "extraEnv override: no duplicate env names and every ref still resolves"
+assert_contains "$out12dup" 'value: operator-wins' \
+  "extraEnv override: the operator value reaches the container"
+
+# Watchdog usage export authenticates against both APIs, so it must read the
+# same signing keys they verify with — including in hybrid, where the shared
+# Secret would not otherwise carry the control-plane key.
+out12wd="$TMP/scenario-shared-secret-watchdog.yaml"
+render_default "$out12wd" --set watchdog.enabled=true --set watchdog.usageExport.enabled=true
+assert_shared_secret_wiring "$out12wd" \
+  "hybrid + watchdog usage export: every ref resolves to an emitted key"
+for key in CONTROL_PLANE_JWT_SECRET DATA_PLANE_JWT_SECRET; do
+  assert_platform_key "$out12wd" present "${key}" \
+    "hybrid + watchdog usage export: platform-secrets carries ${key}"
+done
+out12wdoff="$TMP/scenario-shared-secret-watchdog-override.yaml"
+render_default "$out12wdoff" --set watchdog.enabled=true --set watchdog.usageExport.enabled=true \
+  --set watchdog.usageExport.jwtSecret.existingSecret=my-watchdog-secret
+assert_contains "$out12wdoff" 'name: my-watchdog-secret' \
+  "watchdog: an operator-supplied Secret still overrides the shared one"
+
+# An alias key exists because two names must hold one value. Pinning the alias
+# instead of its target cannot be honoured, so it must fail loudly rather than
+# be silently overwritten by the mirror.
+assert_render_fails "pinning an alias key is rejected with a pointer to its target" \
+  --set global.deploymentMode=external \
+  --set global.platformSecret.values.NEXTAUTH_SECRET=pinned-alias
+
+# A credential path that accepts either a string or a {secretName, secretKey}
+# map must not reach b64enc as a map, which would abort the whole render.
+out12map="$TMP/scenario-shared-secret-map-value.yaml"
+render_default "$out12map" --set global.deploymentMode=external \
+  --set-json 'global.platformSecret.values.MODEL_SCANNER_SECRET={"secretName":"ms","secretKey":"k"}'
+assert_platform_key "$out12map" absent MODEL_SCANNER_SECRET \
+  "a map-shaped credential is ignored rather than aborting the render"
+
+blue "==> Scenario 12b: control-plane-app no longer couples to backend Secrets"
+for legacy in agentgateway-secrets trustguard-secrets datacore-secrets alertengine-secrets trustlens-secrets; do
+  ruby -ryaml -e '
+    docs = YAML.load_stream(File.read(ARGV.fetch(0))).compact
+    app = docs.find { |d| d["kind"] == "Deployment" && d.dig("metadata", "name") == "control-plane-app" }
+    abort "control-plane-app not rendered" if app.nil?
+    pod = app.dig("spec", "template", "spec")
+    hits = ((pod["containers"] || []) + (pod["initContainers"] || [])).flat_map { |c|
+      (c["env"] || []).select { |e| e.dig("valueFrom", "secretKeyRef", "name") == ARGV.fetch(1) }.map { |e| e["name"] }
+    }
+    abort "control-plane-app still reads #{ARGV.fetch(1)}: #{hits.join(", ")}" unless hits.empty?
+  ' "$out12ext" "$legacy" || { red "FAIL: control-plane-app still couples to $legacy"; exit 1; }
+done
+green "ok  - control-plane-app reads no backend service Secret directly"
+
+# Opt-outs must leave existing installs on the legacy contract untouched.
+blue "==> Scenario 12c: shared Secret opt-outs (external, where the coupling lived)"
+out12off="$TMP/scenario-shared-secret-disabled.yaml"
+render_default "$out12off" --set global.deploymentMode=external --set global.platformSecret.enabled=false
+assert_not_contains "$out12off" '^  name: platform-secrets$' \
+  "platformSecret.enabled=false: Secret not rendered"
+assert_not_contains "$out12off" 'name: "platform-secrets"' \
+  "platformSecret.enabled=false: no workload references it"
+assert_contains "$out12off" 'name: "control-plane-secrets"' \
+  "platformSecret.enabled=false: refs fall back to the legacy Secret"
+
+out12own="$TMP/scenario-shared-secret-operator-owned.yaml"
+render_default "$out12own" --set global.deploymentMode=external --set global.platformSecret.existingSecret.name=my-platform-secrets
+assert_not_contains "$out12own" '^  name: platform-secrets$' \
+  "existingSecret.name: chart does not render its own Secret"
+assert_contains "$out12own" 'name: "my-platform-secrets"' \
+  "existingSecret.name: refs point at the operator Secret"
+
+out12pres="$TMP/scenario-shared-secret-preserve.yaml"
+render_default "$out12pres" --set global.deploymentMode=external --set global.preserveExistingSecrets=true
+assert_not_contains "$out12pres" 'name: "platform-secrets"' \
+  "preserveExistingSecrets: refs stay on the legacy per-service Secrets"
+
+# A pinned value must reach the Secret verbatim.
+blue "==> Scenario 12d: pinned credential"
+out12pin="$TMP/scenario-shared-secret-pinned.yaml"
+render_default "$out12pin" --set global.deploymentMode=external --set global.platformSecret.values.CONTROL_PLANE_JWT_SECRET=pinned-value-abc
+ruby -ryaml -rbase64 -e '
+  docs = YAML.load_stream(File.read(ARGV.fetch(0))).compact
+  s = docs.find { |d| d["kind"] == "Secret" && d.dig("metadata", "name") == "platform-secrets" }
+  got = Base64.decode64(s["data"].fetch("CONTROL_PLANE_JWT_SECRET"))
+  abort "expected pinned value, got #{got}" unless got == "pinned-value-abc"
+' "$out12pin" || { red "FAIL: pinned value not honored"; exit 1; }
+green "ok  - global.platformSecret.values pins a credential verbatim"
+
 green ""
 green "All v2 render scenarios passed."

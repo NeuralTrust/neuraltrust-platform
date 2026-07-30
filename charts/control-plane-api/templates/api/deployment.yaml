@@ -251,13 +251,11 @@ spec:
         - name: CONTROL_PLANE_JWT_SECRET
           valueFrom:
             secretKeyRef:
-              name: control-plane-secrets
-              key: CONTROL_PLANE_JWT_SECRET
+              {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "CONTROL_PLANE_JWT_SECRET") | nindent 14 }}
         - name: DEFAULT_DATA_PLANE_JWT_SECRET
           valueFrom:
             secretKeyRef:
-              name: data-plane-jwt-secret
-              key: DATA_PLANE_JWT_SECRET
+              {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "DATA_PLANE_JWT_SECRET") | nindent 14 }}
         - name: OPENAI_API_KEY
           valueFrom:
             secretKeyRef:

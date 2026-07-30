@@ -406,6 +406,82 @@ install, missing Secrets/keys are created; later upgrades reuse them with `looku
   each product's `dataagent.existingSecret.name` to a Secret containing
   `DATABASE_URL` and `DB_PASSWORD`.
 
+## Shared platform Secret (`platform-secrets`)
+
+Several credentials above are read by more than one service — a signing key on one
+side and a validator on the other. Each subchart used to generate its own copy, so
+the copies could hold different values and produce silent `401`s.
+
+`platform-secrets` is the single generator for all of them. Consumers reference it
+instead of the per-service Secret, and the per-service Secrets in the table above
+**keep being written for one release** so a rollback still finds the values.
+
+Upgrades adopt whatever the live per-service Secret holds, so **nothing rotates**.
+Resolution order per key: `global.platformSecret.values` → live `platform-secrets`
+→ the legacy Secret below → generate (only where the chart owns the value).
+
+| Logical key | Adopted from | Value | Emitted when |
+|---|---|---|---|
+| `SERVER_SECRET_KEY` | `agentgateway-secrets` / `SERVER_SECRET_KEY` | generated | external, TrustGate |
+| `TRUSTGATE_JWT_SECRET` | `control-plane-secrets` / `TRUSTGATE_JWT_SECRET` | **= `SERVER_SECRET_KEY`** | v1 only (see below) |
+| `ADMIN_JWT_SECRET` | `trustguard-secrets` / `ADMIN_JWT_SECRET` | generated | external, TrustGuard |
+| `TRUSTGUARD_TOKEN_SIGNING_SECRET` | `trustguard-secrets` / `TRUSTGUARD_TOKEN_SIGNING_SECRET` | generated | external, TrustGuard |
+| `REDIS_EVENTS_SECRET` | `trustguard-secrets` / `REDIS_EVENTS_SECRET` | generated | external, TrustGuard |
+| `JWT_SECRET` | `firewall-secrets` / `JWT_SECRET` | generated | external, TrustGuard |
+| `DATA_PLANE_JWT_SECRET` | `data-plane-jwt-secret` / `DATA_PLANE_JWT_SECRET` | generated | external, data plane, watchdog usage export |
+| `CONTROL_PLANE_JWT_SECRET` | `control-plane-secrets` / `CONTROL_PLANE_JWT_SECRET` | generated | external, watchdog usage export |
+| `AUTH_SECRET` | `control-plane-secrets` / `AUTH_SECRET` | generated | external |
+| `NEXTAUTH_SECRET` | `control-plane-secrets` / `NEXTAUTH_SECRET` | **= `AUTH_SECRET`** | external |
+| `AUTH_JWT_HS256_SECRET` | `datacore-secrets` / `AUTH_JWT_HS256_SECRET` | generated | external |
+| `AUTH_JWT_SECRET` | `alertengine-secrets` / `AUTH_JWT_SECRET` | generated | external |
+| `APP_ENCRYPTION_KEY` | `alertengine-secrets` / `APP_ENCRYPTION_KEY` | generated | external |
+| `TRUSTLENS_JWT_SECRET` | `trustlens-secrets` / `JWT_SECRET` | generated | `trustlens.enabled` |
+| `ENCRYPTION_KEYSET` | `trustlens-secrets` / `ENCRYPTION_KEYSET` | generated | `trustlens.enabled` |
+| `MODEL_SCANNER_SECRET` | `control-plane-secrets` / `MODEL_SCANNER_SECRET` | adopted only | external |
+
+**Adopted only** means the chart never invents the value — the key is omitted
+until you supply it, because an operator owns it.
+
+Credentials that only one service reads stay in their own Secret and are **not**
+here — third-party API keys (`OPENAI_API_KEY`), the TrustGuard client credential
+pair, and every per-service database password. Copying those in would create a
+second copy nobody reads, which is the drift this Secret exists to prevent.
+
+**Emitted when** keeps an install down to the credentials its services actually
+read, so a hybrid install carries far fewer keys than an external one. A key
+already present in a live `platform-secrets` is always kept, so an upgrade never
+drops one. `TRUSTGATE_JWT_SECRET` belongs to the retired v1 console and is never
+emitted on a new install; it survives only where a live Secret already holds it.
+
+One logical name deliberately differs from both the legacy key and the env var the
+container sees, because the old name collided with another service's:
+`TRUSTLENS_JWT_SECRET` (legacy `trustlens-secrets` / `JWT_SECRET`, still
+`JWT_SECRET` inside the container).
+
+### Managing it yourself
+
+```yaml
+global:
+  platformSecret:
+    # Point consumers at your own Secret. It must use the LOGICAL key names
+    # from the table above, not the legacy per-service key names.
+    existingSecret:
+      name: my-platform-secrets
+```
+
+Pin individual credentials without owning the whole Secret:
+
+```yaml
+global:
+  platformSecret:
+    values:
+      CONTROL_PLANE_JWT_SECRET: "<value>"
+```
+
+To stay entirely on the legacy per-service Secrets, set
+`global.platformSecret.enabled: false`. `global.preserveExistingSecrets: true`
+implies it, since there the operator already owns every per-service Secret.
+
 ## Using external secret management
 
 Example with External Secrets Operator:
