@@ -240,6 +240,12 @@ spec:
         {{- $agentgatewayUrl := "http://agentgateway-admin" }}
         {{- $agentgatewayProxyUrl := "http://agentgateway-proxy" }}
         {{- $trustguardUrl := "http://trustguard-control-plane" }}
+        {{- /* Customer-facing TrustGuard origin for collector/WAF/SDK snippets.
+               The console rejects in-cluster hosts here, so TRUSTGUARD_URL
+               cannot stand in for it: left empty the snippets render without an
+               evaluate URL. Default matches the trustguard chart's data-plane
+               ingress (trustguard.<domain>); override when that host differs. */}}
+        {{- $trustguardPublicUrl := "" }}
         {{- $datacoreUrl := "http://datacore" }}
         {{- $datacoreMetricsEnabled := "true" }}
         {{- $forceV2Ui := "true" }}
@@ -265,6 +271,7 @@ spec:
           {{- if .Values.controlPlane.components.app.config.agentgatewayUrl }}{{- $agentgatewayUrl = .Values.controlPlane.components.app.config.agentgatewayUrl }}{{- end }}
           {{- if .Values.controlPlane.components.app.config.agentgatewayProxyUrl }}{{- $agentgatewayProxyUrl = .Values.controlPlane.components.app.config.agentgatewayProxyUrl }}{{- end }}
           {{- if .Values.controlPlane.components.app.config.trustguardUrl }}{{- $trustguardUrl = .Values.controlPlane.components.app.config.trustguardUrl }}{{- end }}
+          {{- if .Values.controlPlane.components.app.config.trustguardPublicUrl }}{{- $trustguardPublicUrl = .Values.controlPlane.components.app.config.trustguardPublicUrl }}{{- end }}
           {{- if .Values.controlPlane.components.app.config.datacoreUrl }}{{- $datacoreUrl = .Values.controlPlane.components.app.config.datacoreUrl }}{{- end }}
           {{- if hasKey .Values.controlPlane.components.app.config "datacoreMetricsEnabled" }}{{- $datacoreMetricsEnabled = .Values.controlPlane.components.app.config.datacoreMetricsEnabled | toString }}{{- end }}
           {{- if hasKey .Values.controlPlane.components.app.config "forceV2Ui" }}{{- $forceV2Ui = .Values.controlPlane.components.app.config.forceV2Ui | toString }}{{- end }}
@@ -290,6 +297,12 @@ spec:
         {{- end }}
         {{- if not $trustgateActionsUrl }}
           {{- $trustgateActionsUrl = "http://trustgate-actions:80" }}
+        {{- end }}
+        {{- if not $trustguardPublicUrl }}
+          {{- $tgDomain := include "neuraltrust-platform.domain" . }}
+          {{- if $tgDomain }}
+            {{- $trustguardPublicUrl = printf "https://trustguard.%s" $tgDomain }}
+          {{- end }}
         {{- end }}
         image: {{ include "control-plane.image" (dict "repository" $appImageRepo "tag" $appImageTag "global" .Values.global) | quote }}
         imagePullPolicy: "{{ $appPullPolicy }}"
@@ -708,6 +721,10 @@ spec:
               {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "SERVER_SECRET_KEY") | nindent 14 }}
         - name: TRUSTGUARD_URL
           value: "{{ $trustguardUrl }}"
+        {{- with $trustguardPublicUrl }}
+        - name: TRUSTGUARD_PUBLIC_URL
+          value: {{ . | quote }}
+        {{- end }}
         - name: TRUSTGUARD_JWT_SECRET
           valueFrom:
             secretKeyRef:

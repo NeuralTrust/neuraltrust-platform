@@ -35,6 +35,11 @@ spec:
         configMap:
           name: agentgateway-telemetry
           optional: true
+      {{- if eq (include "agentgateway.configSyncTls.active" .) "true" }}
+      - name: configsync-tls
+        secret:
+          secretName: {{ include "agentgateway.configSyncTls.secretName" . }}
+      {{- end }}
       {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 6 }}
       containers:
       - name: admin
@@ -52,6 +57,12 @@ spec:
         {{- include "neuraltrust-platform.platformSecretEnv" (dict "ctx" . "keys" (dict "SERVER_SECRET_KEY" "SERVER_SECRET_KEY") "skip" .Values.controlPlane.extraEnv) | nindent 8 }}
         {{- with .Values.controlPlane.extraEnv }}
         {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- if eq (include "agentgateway.configSyncTls.active" .) "true" }}
+        - name: CONFIG_SYNC_GRPC_TLS_CERT
+          value: {{ printf "%s/tls.crt" (include "agentgateway.configSyncTls.mountPath" .) | quote }}
+        - name: CONFIG_SYNC_GRPC_TLS_KEY
+          value: {{ printf "%s/tls.key" (include "agentgateway.configSyncTls.mountPath" .) | quote }}
         {{- end }}
         {{- include "neuraltrust-platform.trustguardClientEnv" (dict "ctx" . "idVar" "TRUSTGUARD_CLIENT_ID" "secretVar" "TRUSTGUARD_CLIENT_SECRET") | nindent 8 }}
         {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
@@ -81,6 +92,11 @@ spec:
         - name: telemetry
           mountPath: /etc/telemetry
           readOnly: true
+        {{- if eq (include "agentgateway.configSyncTls.active" .) "true" }}
+        - name: configsync-tls
+          mountPath: {{ include "agentgateway.configSyncTls.mountPath" . | quote }}
+          readOnly: true
+        {{- end }}
         {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 8 }}
         resources:
           {{- toYaml .Values.controlPlane.resources | nindent 10 }}

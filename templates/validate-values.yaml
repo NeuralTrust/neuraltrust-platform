@@ -187,3 +187,26 @@ no Kubernetes resource when validation succeeds.
     {{- fail "data-plane-api.dataPlane.components.api.database.backend=clickhouse in v2 hybrid requires an external ClickHouse: set data-plane-api.dataPlane.components.clickhouse.host to a dotted (external) endpoint, or use the default PostgreSQL backend." -}}
   {{- end -}}
 {{- end -}}
+
+{{- /*
+Config-sync gRPC TLS must be obtainable whenever the gateway binaries refuse
+cleartext. Under a deployed APP_ENV the control plane will not construct its
+listener without a cert/key, so turning generation off without supplying a
+Secret produces a pod that cannot start. Fail at render instead.
+*/ -}}
+{{- if eq $mode "external" -}}
+  {{- range $chart := list "agentgateway" "trustguard" -}}
+    {{- $sub := default dict (index $.Values $chart) -}}
+    {{- if eq (include "neuraltrust-platform.product.enabled" (dict "ctx" $ "product" (ternary "trustgate" "trustguard" (eq $chart "agentgateway")))) "true" -}}
+      {{- $appEnv := lower (trim ((default dict $sub.config).appEnv | default "")) -}}
+      {{- if has $appEnv (list "prod" "production" "staging" "stage") -}}
+        {{- $tls := default dict (default dict $sub.configSync).grpcTls -}}
+        {{- /* hasKey, not `default`: sprig reads an explicit false back as true. */ -}}
+        {{- $autoGenOff := and (hasKey $tls "autoGenerate") (not $tls.autoGenerate) -}}
+        {{- if and $autoGenOff (not ($tls.existingSecret | default "")) -}}
+          {{- fail (printf "%s.configSync.grpcTls.autoGenerate=false requires %s.configSync.grpcTls.existingSecret: with config.appEnv=%q the control plane refuses to start without a config-sync gRPC TLS cert and key. Supply a kubernetes.io/tls Secret (tls.crt, tls.key, ca.crt), re-enable autoGenerate, or set a non-deployed config.appEnv." $chart $chart $appEnv) -}}
+        {{- end -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
