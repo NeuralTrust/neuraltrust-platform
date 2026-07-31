@@ -121,14 +121,23 @@ trustguard:
         name: "dataagent-enrolment-trustguard"
 ```
 
-Product flags default to **off** and at least one must be `true`. For a subset,
-drop the flags you do not need and use the matching slice —
+Product flags default to **off** and at least one must be `true`. They are keyed
+by product id, which for TrustGate is **not** the same as its values block:
+`global.products.trustgate` selects it, `agentgateway:` configures it. Older
+consoles emit `global.products.agentgateway: true` in the generated
+`values.yaml`; rename that key to `trustgate` or the render fails with
+`global.products supports only trustgate, trustguard, and dataPlane`.
+
+For a subset, drop the flags you do not need and use the matching slice —
 [`values-trustgate.yaml.example`](./values-trustgate.yaml.example),
 [`values-trustguard.yaml.example`](./values-trustguard.yaml.example), or
 [`values-red-teaming.yaml.example`](./values-red-teaming.yaml.example)
 (data-plane API only, no DataAgent or config-sync needed).
 
 ### 5. Install
+
+The chart registry is **public** — no `helm registry login`. Only the container
+images are private, which is what the pull Secret from step 1 covers.
 
 ```bash
 helm upgrade --install neuraltrust-platform \
