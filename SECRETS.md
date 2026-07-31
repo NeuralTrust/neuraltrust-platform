@@ -38,10 +38,9 @@ already points at. Copy-pasteable `kubectl create secret` commands are in
 | `onprem-superadmin` | `ONPREM_SUPERADMIN_EMAIL`, `ONPREM_SUPERADMIN_PASSWORD` | You want a bootstrap console administrator (recommended — there is no hosted console to log in from) |
 
 External needs no config-sync tokens and no enrolment JWTs; it runs its own
-control planes and never deploys DataAgent. Before going live, also read
-[Login CAPTCHA](#login-captcha-turnstile_secret_key--can-lock-users-out) and
+control planes and never deploys DataAgent. Before going live, read
 [`NEXT_PUBLIC_*` cannot be configured at runtime](#next_public_-cannot-be-configured-at-runtime)
-— both can lock administrators out of a self-hosted console.
+— it affects the tenant URL a self-hosted console advertises to IdPs.
 
 ## Quick start
 
@@ -176,16 +175,18 @@ after first login when possible. Empty defaults leave the feature off.
 | `control-plane-secrets` | `resend-invite-sender` | No | Invitation email (unused by the app) |
 | `control-plane-secrets` | `resend-reply-to` | No | Legacy Reply-To; superseded by `global.email.replyTo` |
 
-### Login CAPTCHA (`TURNSTILE_SECRET_KEY`) — can lock users out
+### Login CAPTCHA (`TURNSTILE_SECRET_KEY`) — optional
 
-The published `control-plane-app` images are built with a Cloudflare Turnstile **site
-key** baked in, and the app shows the CAPTCHA after **three** failed login attempts.
-The matching **secret key** is a runtime value that the chart does not set, so an
-on-premise install has none. The verification route then returns HTTP 500 and the
-client refuses the login, so a user who mistypes a password three times cannot get in
-until the pod is given the key or the browser state is cleared.
+`control-plane-app` can put a Cloudflare Turnstile challenge in front of the login
+form after three failed attempts in a 30-minute window. The whole path is gated on
+the build-time `NEXT_PUBLIC_TURNSTILE_SITE_KEY`: with no site key in the image the
+widget never renders, the verification route is never called, and
+`TURNSTILE_SECRET_KEY` is never read. The chart sets neither key, and the
+server-side brute-force lock applies either way.
 
-Set it through the app's `extraEnv` (from your own Secret — do not inline the value):
+If your image was built with a site key and you want the challenge to work, supply
+the matching secret through the app's `extraEnv` (from your own Secret — do not
+inline the value). The pod needs egress to `challenges.cloudflare.com`:
 
 ```yaml
 control-plane-app:
@@ -197,12 +198,6 @@ control-plane-app:
             valueFrom:
               secretKeyRef: { name: my-turnstile-secret, key: TURNSTILE_SECRET_KEY }
 ```
-
-Verification calls `challenges.cloudflare.com` directly, so the pod needs egress to
-it. Without egress the route also fails closed with a 500 — an air-gapped install
-cannot satisfy the challenge at all, and needs an image built without a site key.
-
-A first-class chart value for this key, and removing the lockout itself, are planned.
 
 ### `NEXT_PUBLIC_*` cannot be configured at runtime
 

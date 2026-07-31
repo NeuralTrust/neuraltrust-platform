@@ -193,12 +193,18 @@ and are removed on the next upgrade that rewrites the Secret.
   retired `DATABASE_URL`. This only affects installs where the chart does not manage
   those Secrets (`preserveExistingSecrets`, `autoGenerateSecrets: false`, or an
   `existingSecret`), since otherwise the chart writes the full canonical family.
-- **Documented two on-premise traps in `control-plane-app`.** The login CAPTCHA can
-  lock a user out after three failed attempts: published images bake in a Turnstile
-  site key, while the matching `TURNSTILE_SECRET_KEY` is a runtime value the chart never
-  sets, so the verification route returns 500 and the client refuses the login.
-  `SECRETS.md` gives the `extraEnv` workaround and notes that verification needs egress
-  to Cloudflare. Separately, `NEXT_PUBLIC_*` variables are inlined at image build time
+- **Corrected the login CAPTCHA guidance, which overstated the risk.** Earlier text
+  in `SECRETS.md`, `docs/neuraltrust/deployment/external.mdx`, and the quick start
+  warned that three failed logins would lock an operator out of a self-hosted
+  console unless `TURNSTILE_SECRET_KEY` was supplied. Reading the app shows the
+  entire path is gated on the build-time `NEXT_PUBLIC_TURNSTILE_SITE_KEY`: with no
+  site key in the image the widget never renders, `/api/validateTurnstile` is never
+  called, and the secret is never read. The counter is also client-side with a
+  30-minute TTL, so even in the misconfigured case the state clears itself. The two
+  `<Warning>` blocks are removed and `SECRETS.md` now documents the key as optional,
+  needed only when an image carries a site key and you want the challenge enforced.
+- **Documented a `NEXT_PUBLIC_*` trap in `control-plane-app`.** These variables are
+  inlined at image build time
   and cannot be set from Helm at all, so the SCIM tenant URL and SCIM `meta.location`
   fall back to the hosted default on a self-hosted install — with the surfaces that are
   *not* affected spelled out, since most SSO setup screens derive their origin from the

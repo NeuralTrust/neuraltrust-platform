@@ -9,30 +9,21 @@ name: Auto Release
 on:
   push:
     branches: [main]
+    # Skip release when the push only touches docs, examples, or other
+    # non-chart paths. A mixed push (chart + docs) still releases.
     paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '**.yaml.example'
+      - '**.yml.example'
+      - 'values-required.yaml'
+      - 'values-openshift.yaml'
       - 'k8s/**'
+      - 'local/**'
+      - 'scripts/**'
       - '.github/**'
       - '.gitignore'
-      - 'helmignore'
-      - 'README.md'
-      - 'VALUES_SCENARIOS.md'
-      - 'values-all-deployed.yaml.example'
-      - 'values-required.yaml.example'
-      - 'values.yaml.example'
-      - 'values-all-deployed.yaml'
-      - 'values-required.yaml'
-      - 'DEPLOYMENT.md'
-      - 'SECRETS.md'
-      - 'LICENSE'
-      - 'NOTICE'
-      - 'CODE_OF_CONDUCT.md'
-      - 'CONTRIBUTING.md'
-      - 'CODEOWNERS'
-      - 'PULL_REQUEST_TEMPLATE.md'
-      - 'SECURITY.md'
-      - 'SUPPORT.md'
-      - 'TESTING.md'
-      - 'scripts/**'
+      - '.helmignore'
 
 permissions:
   contents: write
