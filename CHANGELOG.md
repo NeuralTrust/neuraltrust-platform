@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.6.0] — 2026-07-31
+
 Chart `2.5.4` → `2.7.0`. Two minor bumps' worth of new behaviour in the
 per-service datastore blocks: endpoint inheritance, and credentials that can come
 from a Secret you created. Default renders are byte-identical.
