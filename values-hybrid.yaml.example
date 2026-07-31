@@ -31,10 +31,28 @@ global:
   # chart renders control-plane-postgresql with user/database = neuraltrust
   # and a generated password.
   #
-  # External / managed: set deploy: false and reference a Secret containing
-  # DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME, DB_SSL_MODE, and
-  # SENSIBLE_PG_DSN. Pre-create the user and database out-of-band; the chart
-  # never runs CREATE USER.
+  # External / managed: set deploy: false and reference your own Secret.
+  # Naming it here stops the chart rendering postgresql-secrets, so nothing
+  # renames your keys — TrustGate, TrustGuard and DataAgent take the Secret
+  # with envFrom and read these names verbatim:
+  #
+  #   kubectl create secret generic external-postgresql -n neuraltrust \
+  #     --from-literal=DB_HOST='pg.example.com' \
+  #     --from-literal=DB_PORT='5432' \
+  #     --from-literal=DB_USER='neuraltrust' \
+  #     --from-literal=DB_PASSWORD='<password>' \
+  #     --from-literal=DB_NAME='neuraltrust' \
+  #     --from-literal=DB_SSL_MODE='require' \
+  #     --from-literal=POSTGRES_LOGIN='default' \
+  #     --from-literal=SENSIBLE_PG_DSN='postgresql://neuraltrust:<password>@pg.example.com:5432/neuraltrust?sslmode=require'
+  #
+  # DB_SSL_MODE matters: omit it and the gateways fall back to their built-in
+  # "disable", silently turning a TLS install into a plaintext one.
+  # SENSIBLE_PG_DSN is what DataAgent reads as DATABASE_URL. POSTGRES_LOGIN is
+  # the IAM switch — "default" for password auth, "aws" for IAM.
+  #
+  # Pre-create the role and database out-of-band; the chart never runs
+  # CREATE USER, and there is no migration Job for the shared database.
   postgresql:
     deploy: false
     existingSecret:
@@ -70,11 +88,28 @@ trustguard:
         name: "dataagent-enrolment-trustguard"
 
 # The temporary data-plane-api read shim. In hybrid it defaults to PostgreSQL
-# (SQL_DATABASE=postgres) and reuses the shared postgresql-secrets, so nothing
-# below is required for the default path.
-# data-plane-api:
-#   dataPlane:
-#     components:
-#       api:
-#         k8sJobs:
-#           enabled: true
+# (SQL_DATABASE=postgres).
+#
+# It does NOT follow global.postgresql.existingSecret — it has its own
+# reference, defaulting to the chart's postgresql-secrets. Since naming an
+# existingSecret above stops that Secret being rendered, leaving this out
+# points data-plane-api at a Secret that does not exist and its pods stay in
+# CreateContainerConfigError. Repeat the Secret here and map your DB_* keys
+# onto the names this component looks up.
+#
+# Omit this whole block when global.postgresql has no existingSecret — the
+# chart renders postgresql-secrets and the defaults resolve.
+data-plane-api:
+  dataPlane:
+    components:
+      api:
+        database:
+          postgresql:
+            existingSecret:
+              name: "external-postgresql"
+              keys:
+                host: "DB_HOST"
+                port: "DB_PORT"
+                user: "DB_USER"
+                password: "DB_PASSWORD"
+                database: "DB_NAME"
