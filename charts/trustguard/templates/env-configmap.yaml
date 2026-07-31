@@ -39,14 +39,15 @@ data:
   {{- if hasKey .Values.redis "enableCachePubSub" }}{{- $cachePubSub = .Values.redis.enableCachePubSub }}{{- end }}
   ENABLE_CACHE_PUBSUB: {{ $cachePubSub | quote }}
   {{- else }}
-  # v2 external: each service points at its own PostgreSQL role/database. Host
-  # defaults to the in-cluster `control-plane-postgresql` Service; override
-  # `.Values.database.host` for hosted/managed PostgreSQL.
-  DB_HOST: {{ include "neuraltrust-platform.postgres.host" (dict "host" .Values.database.host) | quote }}
-  DB_PORT: {{ .Values.database.port | quote }}
+  # v2 external: each service points at its own PostgreSQL role/database, but
+  # shares the endpoint. Host/port/sslMode fall back to `global.postgresql`, then
+  # to the in-cluster `control-plane-postgresql` Service; set
+  # `.Values.database.*` to override just this service.
+  DB_HOST: {{ include "neuraltrust-platform.postgres.host" (dict "ctx" . "host" .Values.database.host) | quote }}
+  DB_PORT: {{ include "neuraltrust-platform.postgres.port" (dict "ctx" . "port" .Values.database.port) | quote }}
   DB_NAME: {{ include "neuraltrust-platform.v2.dbName" (dict "ctx" . "explicit" .Values.database.name "external" "trustguard") | quote }}
   DB_USER: {{ include "neuraltrust-platform.v2.writerUser" (dict "ctx" . "explicit" .Values.database.user "default" "trustguard") | quote }}
-  DB_SSL_MODE: {{ .Values.database.sslMode | quote }}
+  DB_SSL_MODE: {{ include "neuraltrust-platform.postgres.sslMode" (dict "ctx" . "sslMode" .Values.database.sslMode) | quote }}
   {{- if .Values.database.iamAuth }}
   {{- /* IAM (RDS) DB auth: no static DB_PASSWORD is shipped; the service mints a
          token. POSTGRES_LOGIN is the only switch TrustGuard reads for this
@@ -61,17 +62,21 @@ data:
   AWS_REGION: {{ . | quote }}
   {{- end }}
   {{- end }}
-  REDIS_HOST: {{ .Values.redis.host | quote }}
-  REDIS_PORT: {{ .Values.redis.port | quote }}
+  {{- /* Host/port/username/tls fall back to `global.redis` so a managed cache is
+         declared once rather than per service. */}}
+  {{- $redisUser := include "neuraltrust-platform.redis.username" (dict "ctx" . "username" .Values.redis.username) }}
+  {{- $redisTls := include "neuraltrust-platform.redis.tls" (dict "ctx" . "tls" .Values.redis.tls) }}
+  REDIS_HOST: {{ include "neuraltrust-platform.redis.host" (dict "ctx" . "host" .Values.redis.host) | quote }}
+  REDIS_PORT: {{ include "neuraltrust-platform.redis.port" (dict "ctx" . "port" .Values.redis.port) | quote }}
   {{- $cachePubSub := true }}
   {{- if hasKey .Values.redis "enableCachePubSub" }}{{- $cachePubSub = .Values.redis.enableCachePubSub }}{{- end }}
   ENABLE_CACHE_PUBSUB: {{ $cachePubSub | quote }}
-  {{- if and .Values.redis.username (ne (.Values.redis.username | toString) "") }}
-  REDIS_USERNAME: {{ .Values.redis.username | quote }}
+  {{- if $redisUser }}
+  REDIS_USERNAME: {{ $redisUser | quote }}
   {{- end }}
-  {{- if and .Values.redis.tls (ne (.Values.redis.tls | toString) "") }}
+  {{- if $redisTls }}
   # TLS-only managed Redis (e.g. ElastiCache Serverless enforces in-transit encryption).
-  REDIS_TLS: {{ .Values.redis.tls | quote }}
+  REDIS_TLS: {{ $redisTls | quote }}
   {{- end }}
   {{- if .Values.redis.iamAuth }}
   # IAM (ElastiCache) Redis auth: TrustGuard mints a SigV4 token at connect time

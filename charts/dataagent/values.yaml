@@ -29,12 +29,12 @@ databridge:
 store:
   backend: "postgres"
 database:
-  host: ""
-  port: 5432
+  host: "" # Empty ⇒ global.postgresql.host, else the in-cluster control-plane-postgresql Service
+  port: "" # Empty ⇒ global.postgresql.port, else 5432
   name: ""
   user: ""
   password: ""
-  sslMode: "prefer"
+  sslMode: "" # Empty ⇒ global.postgresql.sslMode (default "prefer"); "require" forces TLS on hosted DBs
 databaseUrl: ""
 existingSecret:
   name: ""

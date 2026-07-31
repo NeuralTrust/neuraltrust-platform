@@ -36,12 +36,18 @@ config:
 # Service. For external Postgres, pre-create the alertengine role + database
 # and set host/user/name/password below.
 database:
-  host: ""
-  port: 5432
+  host: "" # Empty ⇒ global.postgresql.host, else the in-cluster control-plane-postgresql Service
+  port: "" # Empty ⇒ global.postgresql.port, else 5432
   name: "alertengine"
   user: "alertengine"
   password: "" # Auto-generated if empty (in-cluster PG)
-  sslMode: "prefer" # TLS when available, plaintext fallback for the non-TLS in-cluster PG; use "require" for hosted DBs
+  # Read the password from a Secret you created instead of writing it above. The
+  # chart then omits DB_PASSWORD from alertengine-secrets and the pods read your
+  # Secret directly, so no credential reaches values or release history.
+  existingSecret:
+    name: "" # Empty ⇒ the chart owns the password (inline or generated)
+    key: "" # Empty ⇒ "DB_PASSWORD"
+  sslMode: "" # Empty ⇒ global.postgresql.sslMode (default "prefer"); "require" forces TLS on hosted DBs
   # IAM (e.g. AWS RDS) database auth. When true, emits DB_AUTH_MODE=iam /
   # DB_IAM_AUTH and omits DB_PASSWORD. AlertEngine (v0.4.0+) mints a SigV4 token
   # per connection. Requires an IRSA-annotated serviceAccount + awsRegion.

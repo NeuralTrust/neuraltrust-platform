@@ -4,9 +4,130 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+Chart `2.5.4` → `2.7.0`. Two minor bumps' worth of new behaviour in the
+per-service datastore blocks: endpoint inheritance, and credentials that can come
+from a Secret you created. Default renders are byte-identical.
+
+### Added
+
+- **Datastore passwords can be read from a Secret you pre-created, instead of
+  being written into a values file** (AUT-411). External mode gives each service
+  its own database and migrations, so their passwords differ and none can inherit
+  from a single global value; until now the only way to supply them was inline,
+  which also put them in Helm release history. Set
+  `<service>.database.existingSecret.name` (or `.redis.existingSecret.name`) and
+  the chart leaves that key out of the Secret it renders, injecting the variable
+  at each Deployment with a `secretKeyRef` to yours:
+
+  | Values path | Variable | Key defaults to |
+  |---|---|---|
+  | `agentgateway.database.existingSecret` | `DB_PASSWORD` | `DB_PASSWORD` |
+  | `agentgateway.redis.existingSecret` | `REDIS_PASSWORD` | `REDIS_PASSWORD` |
+  | `trustguard.database.existingSecret` | `DB_PASSWORD` | `DB_PASSWORD` |
+  | `trustguard.redis.existingSecret` | `REDIS_PASSWORD` | `REDIS_PASSWORD` |
+  | `alertengine.database.existingSecret` | `DB_PASSWORD` | `DB_PASSWORD` |
+  | `datacore.database.existingSecret` | `POSTGRES_PASSWORD` | `POSTGRES_PASSWORD` |
+  | `data-plane-api.dataPlane.components.api.redis.existingSecret` | `REDIS_URL` | `REDIS_URL` |
+
+  `key` is configurable, so one Secret can hold every Aurora role under its own
+  key. `data-plane-api` is the exception: it reads an assembled DSN rather than a
+  password, so its key holds the whole `redis://` URL and the chart stops
+  composing one into `data-plane-jwt-secret`.
+
+  An inline `password` next to a hook is now **rejected at render** rather than
+  silently ignored. The hooks are inert under `iamAuth: true`, which mints a token
+  per connection, and in hybrid, where every workload takes the shared
+  `postgresql-secrets` / `redis-secrets` wholesale through `envFrom` — that mode
+  already had `global.postgresql.existingSecret` for the same purpose.
+
+  Not covered: the control-plane `neuraltrust` role password
+  (`global.postgresql.password`). The chart bakes it into `SENSIBLE_PG_DSN` and
+  `POSTGRES_PRISMA_URL` while rendering and so must be able to read it; composing
+  those strings from a Secret would require the readers to assemble their own DSN.
+
+  Setting a hook changes nothing for existing installs — renders with every hook
+  unset are byte-identical to `2.6.0`.
+
+### Changed
+
+- **A managed PostgreSQL or Redis is declared once on `global.postgresql` /
+  `global.redis` instead of once per service.** Every runtime resolved its own
+  endpoint before this: an empty `agentgateway.database.host` fell straight
+  through to the literal `control-plane-postgresql`, never consulting
+  `global.postgresql.host`. `port` and `sslMode` behaved the same way, and the
+  Redis equivalents were worse — the umbrella hard-coded `redis` as the host for
+  `agentgateway`, `trustguard` and `data-plane-api`, so there was no empty value
+  left to inherit from. Pointing the platform at Aurora and ElastiCache meant
+  repeating one hostname across six blocks and one cache endpoint across three,
+  with each service free to drift from the others on a later edit.
+
+  `host`, `port` and `sslMode` under `<service>.database`, and `host`, `port`,
+  `username` and `tls` under `<service>.redis`, now resolve in three steps: the
+  per-service value, then the matching `global.*` entry, then the previous
+  in-cluster default. Per-service values keep winning, so a *per-service* overlay
+  is unaffected — including the `*.database.name` / `*.database.user` that give
+  each external service its own role and database, which stay per-service by
+  design.
+
+  **A global overlay is not unaffected.** If your values set
+  `global.postgresql.sslMode`, `global.redis.tls`, `global.redis.username` or
+  `global.redis.password` and leave the matching per-service field empty, those
+  values now reach the runtime services for the first time. Before this change all
+  five services rendered `sslMode: prefer` from their own default, and the gateway
+  ConfigMaps and Secrets never saw the global Redis TLS flag, ACL username or
+  password at all. A global `sslMode: require` against a Postgres without TLS
+  fails, and `disable` silently drops TLS on an install that had been negotiating
+  it opportunistically. Diff `helm template` against your live release before
+  upgrading if any of those four keys appear in your values.
+
+  Two of those keys land in ConfigMaps that the services read with `envFrom`, so a
+  changed value does not alter the pod template and `helm upgrade` will not restart
+  anything — the new `DB_SSL_MODE` / `REDIS_TLS` sits in the ConfigMap until a pod
+  happens to restart for some unrelated reason. If you are in the global-overlay
+  case above, `kubectl rollout restart` the affected Deployments yourself so the
+  change lands at a moment you chose.
+
+  Affected: `agentgateway`, `trustguard`, `alertengine`, `datacore`, `trustlens`,
+  `dataagent` (its generated DSN) and `data-plane-api` (its composed
+  `REDIS_URL`, which upgrades to the `rediss://` scheme when TLS is inherited).
+  The control plane, `data-plane-api`'s Postgres wiring and hybrid workloads were
+  already reading the global blocks through `postgresql-secrets` /
+  `redis-secrets`; they are unchanged.
+
+  To make inheritance reachable, per-service defaults that could never have been
+  intended as endpoints were emptied: `port: 5432` → `""`, `sslMode: "prefer"` →
+  `""`, `redis.port: 6379` → `""`, the umbrella's `agentgateway.redis.host`,
+  `trustguard.redis.host` and `data-plane-api` `redis.host` `"redis"` → `""`, and
+  `trustlens.database.host` `"control-plane-postgresql"` → `""`. Each resolves to
+  the same value it had before, which the render suite asserts.
+
+  **Inheritance is not gated on `global.<block>.deploy`.** An earlier cut of this
+  change skipped the global step while the chart was deploying its own Postgres,
+  on the theory that a leftover global host should not repoint the runtimes. That
+  produced a split platform: `neuraltrust-platform.v2.hybridPg.host` already
+  honours an explicit global host whatever `deploy` says, so the control plane and
+  `data-plane-api` dialled the managed endpoint through `postgresql-secrets` while
+  the runtimes stayed on the in-cluster Service — two halves against two
+  databases. `deploy` decides whether the chart runs a datastore of its own; it
+  does not decide who may read the endpoint. Scenario 17 asserts the two agree.
+
+  One consequence worth knowing: because an empty per-service value inherits, and
+  Helm renders a boolean `false` as an empty string, `--set
+  <service>.redis.tls=false` does **not** switch off an inherited
+  `global.redis.tls: true` — it inherits. Use the quoted form,
+  `--set-string <service>.redis.tls=false` or `tls: "false"` in a values file,
+  which is non-empty and wins. Same for `username`. This matches how
+  `neuraltrust-platform.dataPlaneApi.redisUrl` has always resolved `tls` and
+  `username`.
+
+  `global.redis.password` needed one guard rather than a caveat: the Redis this
+  chart deploys runs without `--requirepass`, so setting the password while
+  `global.redis.deploy` is true and `global.redis.host` is empty now fails at
+  render instead of leaving all three cache consumers unable to authenticate.
+
 ## [v2.5.4] — 2026-07-31
 
-Chart `2.5.3` → `2.6.0`. The minor bump reflects a change to which environment
+Chart `2.5.3` → `2.5.4`. The patch bump reflects a change to which environment
 variables the config-sync workloads take from an operator-owned Secret.
 
 ### Changed

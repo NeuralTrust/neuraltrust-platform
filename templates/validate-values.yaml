@@ -104,6 +104,34 @@ no Kubernetes resource when validation succeeds.
   {{- end -}}
 {{- end -}}
 
+{{- /* A cache password is meaningless against the Redis this chart deploys: it runs
+       `redis-server --protected-mode no` with no `--requirepass`, so every consumer
+       that inherits the password would get "Client sent AUTH, but no password is
+       set". Only reject the unambiguous shape — deploying our own Redis and naming
+       no host, so nothing can be pointing anywhere else. */ -}}
+{{- $globalRedis := default dict $global.redis -}}
+{{- $redisDeploy := true -}}
+{{- if hasKey $globalRedis "deploy" -}}{{- $redisDeploy = $globalRedis.deploy -}}{{- end -}}
+{{- if and ($globalRedis.password | default "") $redisDeploy (not ($globalRedis.host | default "")) -}}
+  {{- fail "global.redis.password is set while the chart deploys its own Redis (global.redis.deploy=true) and global.redis.host is empty. That Redis runs without a password, so every service inheriting this one would fail to authenticate. Set global.redis.deploy=false and global.redis.host for a managed cache, or drop the password." -}}
+{{- end -}}
+
+{{- /* Same rule for datastore credentials (AUT-411): a pre-created Secret owns the
+       credential, so an inline password alongside it would be silently ignored. */ -}}
+{{- range $check := list
+  (dict "path" "agentgateway.database" "values" (default dict (default dict $.Values.agentgateway).database))
+  (dict "path" "agentgateway.redis" "values" (default dict (default dict $.Values.agentgateway).redis))
+  (dict "path" "trustguard.database" "values" (default dict (default dict $.Values.trustguard).database))
+  (dict "path" "trustguard.redis" "values" (default dict (default dict $.Values.trustguard).redis))
+  (dict "path" "alertengine.database" "values" (default dict (default dict $.Values.alertengine).database))
+  (dict "path" "datacore.database" "values" (default dict (default dict $.Values.datacore).database))
+-}}
+  {{- $ref := default dict $check.values.existingSecret -}}
+  {{- if and $ref.name $check.values.password -}}
+    {{- fail (printf "%s.existingSecret.name and %s.password are mutually exclusive; drop the inline credential (the pre-created Secret wins and the chart omits the key)" $check.path $check.path) -}}
+  {{- end -}}
+{{- end -}}
+
 {{- $autoGenerate := true -}}
 {{- if hasKey $global "autoGenerateSecrets" -}}{{- $autoGenerate = $global.autoGenerateSecrets -}}{{- end -}}
 {{- $preserveExisting := false -}}

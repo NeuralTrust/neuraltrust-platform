@@ -673,11 +673,14 @@ control-plane-app:
 agentgateway:
   image:
     tag: "v0.27.0"
+  # Empty host/port/sslMode/username/tls inherit from global.postgresql /
+  # global.redis, then fall back to the in-cluster Services. Set them here only
+  # to point this one service somewhere else.
   database:
-    sslMode: "prefer"
+    sslMode: ""
     iamAuth: false
   redis:
-    host: "redis"
+    host: ""
     iamAuth: false
   trustguard:
     # Empty ⇒ stable in-cluster TrustGuard Service when
@@ -697,11 +700,12 @@ agentgateway:
 trustguard:
   image:
     tag: "v0.24.1"
+  # Empty host/port/sslMode/username/tls inherit — see the agentgateway note.
   database:
-    sslMode: "prefer"
+    sslMode: ""
     iamAuth: false
   redis:
-    host: "redis"
+    host: ""
     iamAuth: false
   dataagent:
     enrolment:
@@ -717,8 +721,10 @@ trustlens:
   image:
     tag: ""
   database:
-    host: "control-plane-postgresql"
-    sslMode: "prefer"
+    # Empty inherits global.postgresql, then control-plane-postgresql:5432.
+    host: ""
+    port: ""
+    sslMode: ""
 # Shared DataAgent defaults. Per-product enrolment lives only under
 # agentgateway.dataagent / trustguard.dataagent.
 dataagent:
@@ -728,7 +734,8 @@ dataagent:
     addr: "databridge.neuraltrust.ai:443"
     serverName: "databridge.neuraltrust.ai"
   database:
-    sslMode: "prefer"
+    # Empty inherits global.postgresql, then control-plane-postgresql:5432.
+    sslMode: ""
 # DataCore (v2 external only): residency API over local ClickHouse + Postgres
 # (deployment metadata). Own `datacore` database/role — not the hybrid shared
 # `global.postgresql` block.
@@ -736,11 +743,13 @@ datacore:
   image:
     tag: "v0.15.1"
   database:
+    # Empty inherits global.postgresql, then control-plane-postgresql:5432.
+    # name/user stay per-service: external gives each service its own role+DB.
     host: ""
-    port: 5432
+    port: ""
     name: "datacore"
     user: "datacore"
-    sslMode: "prefer"
+    sslMode: ""
     iamAuth: false
   clickhouse:
     host: "clickhouse"
@@ -761,11 +770,13 @@ alertengine:
   image:
     tag: "v0.6.0"
   database:
+    # Empty inherits global.postgresql, then control-plane-postgresql:5432.
+    # name/user stay per-service: external gives each service its own role+DB.
     host: ""
-    port: 5432
+    port: ""
     name: "alertengine"
     user: "alertengine"
-    sslMode: "prefer"
+    sslMode: ""
     iamAuth: false
   clickhouse:
     host: "clickhouse"
@@ -887,12 +898,20 @@ data-plane-api:
         extraEnvFrom: []
         redis:
           backend: "" # Empty ⇒ "redis"
-          host: "redis"
-          port: 6379
+          # Empty inherits global.redis.host/port, then the in-cluster Service.
+          host: ""
+          port: ""
           db: "0"
           password: ""
           username: ""
           tls: ""
+          # data-plane-api reads a whole DSN rather than a password, so unlike the
+          # other services this hook supplies the assembled REDIS_URL. Naming a
+          # Secret here keeps the credential out of values: the chart stops
+          # composing the URL into `data-plane-jwt-secret` and the pod reads yours.
+          existingSecret:
+            name: "" # Empty ⇒ the chart composes the URL from the settings above
+            key: "" # Empty ⇒ "REDIS_URL"
           iamAuth: false
           iamUser: ""
           iamCacheName: ""

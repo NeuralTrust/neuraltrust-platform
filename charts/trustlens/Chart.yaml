@@ -2,5 +2,5 @@ apiVersion: v2
 name: trustlens
 description: TrustLens — analytics/inventory backend (api + River worker), Postgres-only. Opt-in via trustlens.enabled.
 type: application
-version: 0.1.1
+version: 0.1.2
 appVersion: "0.1.0"
