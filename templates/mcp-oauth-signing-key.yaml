@@ -171,7 +171,18 @@ spec:
               const token = fs.readFileSync(sa + '/token', 'utf8').trim()
               const name = process.env.SIGNING_SECRET_NAME
               const field = process.env.SIGNING_SECRET_KEY
-              const base = 'https://' + process.env.KUBERNETES_SERVICE_HOST + ':' + process.env.KUBERNETES_SERVICE_PORT
+              // Dial the API server by its in-cluster DNS name rather than
+              // KUBERNETES_SERVICE_HOST. On IPv6 single-stack clusters that variable
+              // holds a bare IPv6 literal, which is not a parsable URL host without
+              // brackets, and even bracketed it fails TLS verification because the
+              // compressed form is string-compared against the expanded IP SAN.
+              // kubernetes.default.svc is address-family agnostic and is in the
+              // default SAN set on every distribution this chart targets — if this
+              // hook fails TLS on a bespoke cluster, check the apiserver certificate
+              // carries it. This does mean the hook needs cluster DNS, which the rest
+              // of the platform needs anyway.
+              const port = process.env.KUBERNETES_SERVICE_PORT || '443'
+              const base = 'https://kubernetes.default.svc:' + port
               const collection = base + '/api/v1/namespaces/' + ns + '/secrets'
               const auth = { Authorization: 'Bearer ' + token }
               const json = Object.assign({ 'Content-Type': 'application/json' }, auth)

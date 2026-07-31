@@ -17,8 +17,8 @@ The chart never generates these. Create them in the release namespace **before**
 | Secret | Keys | Needed when |
 |---|---|---|
 | `gcr-secret` | docker-registry credentials | Always, unless images are mirrored to a registry the nodes can already pull from |
-| `agentgateway-config-sync` | `CONFIG_SYNC_TOKEN`, `CONFIG_SYNC_LKG_KEY` | `global.products.trustgate: true` |
-| `trustguard-config-sync` | `CONFIG_SYNC_TOKEN`, `CONFIG_SYNC_LKG_KEY` | `global.products.trustguard: true` |
+| `agentgateway-config-sync` | `CONFIG_SYNC_TOKEN` (plus `CONFIG_SYNC_LKG_KEY` only when the chart generates no Secrets — see below) | `global.products.trustgate: true` |
+| `trustguard-config-sync` | `CONFIG_SYNC_TOKEN` (plus `CONFIG_SYNC_LKG_KEY` only when the chart generates no Secrets — see below) | `global.products.trustguard: true` |
 | `dataagent-enrolment-trustgate` | `ENROLMENT_TOKEN` | `global.products.trustgate: true` |
 | `dataagent-enrolment-trustguard` | `ENROLMENT_TOKEN` | `global.products.trustguard: true` |
 
@@ -127,7 +127,11 @@ global:
   preserveExistingSecrets: true   # Helm will NOT create or update secrets
 ```
 
-All required secrets must exist in the namespace before deployment.
+All required secrets must exist in the namespace before deployment. In this mode
+the chart generates nothing, so credentials it would otherwise create for you
+become your responsibility — including `CONFIG_SYNC_LKG_KEY` alongside
+`CONFIG_SYNC_TOKEN` in each `configSync.existingSecret`. The data planes refuse
+to start without it.
 
 ## Secret reference
 
@@ -462,7 +466,8 @@ same name in both places.
 | DataCore DB password | `datacore-secrets` | `POSTGRES_PASSWORD` | auto-generated (own `datacore` DB; external only); **omitted when `datacore.database.iamAuth=true`** (`POSTGRES_LOGIN=aws`) |
 | DataCore / AlertEngine / clickstack / data-plane-api ClickHouse password | `clickhouse` | `admin-password` | **shared** — all read `CLICKHOUSE_PASSWORD` from the in-cluster `clickhouse` secret via `clickhouse.existingSecret` (`dataPlane.components.clickhouse.existingSecret` for data-plane-api; no per-service key). External ClickHouse: point `existingSecret.name`/`key` at your secret. |
 | Hybrid ClickStack OTLP | primary DataAgent enrolment Secret + in-memory access JWT | `ENROLMENT_TOKEN` (egress exchanges at DataCore) | **Hybrid — mandatory when TrustGate and/or TrustGuard enabled.** No direct bearer on apps. Local `clickstack-egress-collector` on the primary DataAgent exchanges enrolment for a short-lived OTLP JWT. Requires per-product `*.dataagent.enrolment`. data-plane-only hybrid skips this. Air-gapped / local-only product telemetry → `global.deploymentMode: external`. |
-| Hybrid config-sync (TrustGate / TrustGuard) | operator Secrets (e.g. `agentgateway-config-sync`, `trustguard-config-sync`) | `CONFIG_SYNC_TOKEN`, `CONFIG_SYNC_LKG_KEY` | **On by default in hybrid** (mode-derived) for each enabled product. Prefer `agentgateway.configSync.existingSecret` / `trustguard.configSync.existingSecret`; do not restate `enabled: true`. Set `configSync.enabled: false` only for Postgres-managed configuration. Never auto-generated. |
+| Hybrid config-sync token (TrustGate / TrustGuard) | operator Secrets (e.g. `agentgateway-config-sync`, `trustguard-config-sync`) | `CONFIG_SYNC_TOKEN` | **On by default in hybrid** (mode-derived) for each enabled product. Never auto-generated — the console issues it and the hosted control plane verifies it. Prefer `agentgateway.configSync.existingSecret` / `trustguard.configSync.existingSecret`; do not restate `enabled: true`. Set `configSync.enabled: false` only for Postgres-managed configuration. |
+| Config-sync LKG cache key (TrustGate / TrustGuard) | `agentgateway-secrets`, `trustguard-secrets` | `CONFIG_SYNC_LKG_KEY` | **Auto-generated** (32 random bytes) **while the chart owns the service Secret** — that is, `global.autoGenerateSecrets: true` and `global.preserveExistingSecrets: false`, the default. Reused across upgrades via `lookup`, delivered through `envFrom`. It encrypts only the local last-known-good snapshot file, which lives on an `emptyDir` and is discarded on restart anyway; the runtimes use it purely as the AES-256-GCM key for that file. Override with `configSync.lkgKey`. Putting the key in your `configSync.existingSecret` has no effect on this path: the chart deliberately does not consult the cluster to discover it, because a `lookup`-dependent reference renders differently under `helm upgrade` than under `helm template` or ArgoCD.<br><br>**Under `autoGenerateSecrets: false` or `preserveExistingSecrets: true` the chart owns no Secret to generate it into, so you must add `CONFIG_SYNC_LKG_KEY` (base64, decoding to exactly 32 bytes) to your `configSync.existingSecret` yourself.** The data planes refuse to start without it. `create-secrets.sh` does not create it (AUT-393). |
 | External config-sync gRPC TLS (TrustGate / TrustGuard) | `agentgateway-configsync-tls`, `trustguard-configsync-tls` | `tls.crt`, `tls.key`, `ca.crt` | **External only, and only under a deployed `config.appEnv`** (`prod`/`production`/`staging`/`stage`). Auto-generated self-signed CA + server certificate; the control plane serves it, the data planes verify against the CA. Never rotated (`lookup` + `resource-policy: keep`). Bring your own with `configSync.grpcTls.existingSecret` (`kubernetes.io/tls`, must include `ca.crt`); setting `autoGenerate: false` without one is rejected at render, because the control plane cannot start without a keypair. |
 | External ClickStack OTLP token | `clickstack-collector-secrets` | `OTLP_AUTH_TOKEN`, `OTEL_EXPORTER_OTLP_HEADERS` | **External only** — auto-generated (or `clickstack-otel-collector.otlpAuthToken`). `OTLP_AUTH_TOKEN` is what the collector enforces; `OTEL_EXPORTER_OTLP_HEADERS` is `authorization=<same token>` and is mounted on TrustGuard / AgentGateway via `secretKeyRef`. |
 | Control-plane app auth | `control-plane-secrets` | `AUTH_SECRET` / `NEXTAUTH_SECRET` | one generated or reused value exposed under both aliases |

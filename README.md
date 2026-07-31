@@ -59,19 +59,17 @@ as well, then confirm with
 ### 3. Create the four operator-supplied Secrets
 
 Create TrustGate and TrustGuard in the NeuralTrust console first. Each product
-issues a **config-sync token** plus an **LKG key**, and a **DataAgent enrolment
-JWT**. Full console walkthrough:
+issues a **config-sync token** and a **DataAgent enrolment JWT**. Full console
+walkthrough:
 [Console setup](https://docs.neuraltrust.ai/neuraltrust/deployment/console-setup).
 
 ```bash
 # Config-sync — pulls runtime configuration from the hosted control plane
 kubectl create secret generic agentgateway-config-sync -n neuraltrust \
-  --from-literal=CONFIG_SYNC_TOKEN='<trustgate-config-sync-token>' \
-  --from-literal=CONFIG_SYNC_LKG_KEY='<trustgate-lkg-key>'
+  --from-literal=CONFIG_SYNC_TOKEN='<trustgate-config-sync-token>'
 
 kubectl create secret generic trustguard-config-sync -n neuraltrust \
-  --from-literal=CONFIG_SYNC_TOKEN='<trustguard-config-sync-token>' \
-  --from-literal=CONFIG_SYNC_LKG_KEY='<trustguard-lkg-key>'
+  --from-literal=CONFIG_SYNC_TOKEN='<trustguard-config-sync-token>'
 
 # DataAgent enrolment — powers DataBridge reads and product OTLP egress
 kubectl create secret generic dataagent-enrolment-trustgate -n neuraltrust \
@@ -83,8 +81,11 @@ kubectl create secret generic dataagent-enrolment-trustguard -n neuraltrust \
 
 The enrolment JWT already carries `tenant_id` and `instance_id` — do not
 duplicate them in values. Every other secret (JWT signing keys, PostgreSQL
-password, and so on) is generated on first install and reused on upgrade while
-`global.autoGenerateSecrets: true`. See [SECRETS.md](./SECRETS.md).
+password, the config-sync `CONFIG_SYNC_LKG_KEY` cache key, and so on) is
+generated on first install and reused on upgrade while
+`global.autoGenerateSecrets: true` and `global.preserveExistingSecrets: false`.
+Turn either off and creating those credentials becomes your job. See
+[SECRETS.md](./SECRETS.md).
 
 ### 4. Write your values file
 
@@ -173,7 +174,7 @@ console.
 | Error | Fix |
 |---|---|
 | `v2 hybrid requires at least one product` | Set at least one `global.products.*` to `true` |
-| `agentgateway config-sync requires CONFIG_SYNC_TOKEN and CONFIG_SYNC_LKG_KEY` | Create the Secrets in step 3, or set `configSync.enabled: false` for Postgres-managed configuration |
+| `agentgateway config-sync requires CONFIG_SYNC_TOKEN` | Create the Secrets in step 3, or set `configSync.enabled: false` for Postgres-managed configuration |
 | `hybrid trustgate/trustguard requires dataagent enrolment` | Create the enrolment Secrets in step 3 |
 | `global.clickstack.enabled is no longer supported` | Hybrid OTLP is mandatory. Use `global.deploymentMode: external` for air-gapped or local-only telemetry |
 

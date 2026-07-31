@@ -79,11 +79,19 @@ configSync:
   tlsCa: ""
   # Must match the control plane. Never auto-generated.
   token: ""
+  # Point at a Secret you own to keep the UI-issued token out of values. Only
+  # the token is required while the chart owns the service Secret, because
+  # CONFIG_SYNC_LKG_KEY is generated and delivered via envFrom. Under
+  # global.autoGenerateSecrets=false or global.preserveExistingSecrets=true the
+  # chart owns nothing, and this Secret must also carry CONFIG_SYNC_LKG_KEY
+  # (base64, 32 bytes) or the data planes will not start. To pin the generated
+  # value instead, set configSync.lkgKey below.
   existingSecret:
     name: ""
     tokenKey: "CONFIG_SYNC_TOKEN"
     lkgKey: "CONFIG_SYNC_LKG_KEY"
-  # Local LKG cache key (base64, 32 bytes). Auto-generated when empty.
+  # Local LKG cache key (base64, 32 bytes). Auto-generated when empty; it only
+  # encrypts the on-disk snapshot cache and is never shared with the SaaS.
   lkgKey: ""
   # ---- control-plane gRPC listener TLS (external/full mode) ----
   # In a deployed APP_ENV (prod/staging) the control plane REFUSES to start its
