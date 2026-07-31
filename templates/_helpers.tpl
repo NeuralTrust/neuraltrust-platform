@@ -386,6 +386,46 @@ callers emit the env var only when the resolved value is non-empty.
 {{- end }}
 
 {{/*
+Operator-supplied datastore credentials (AUT-411).
+
+A service's password normally lands in the Secret the chart renders for it, which
+means it has to be written into the values file first. Naming a pre-created
+Secret under `<datastore>.existingSecret` instead keeps the credential out of
+values and out of Helm release history: the key is omitted from the rendered
+Secret (see `datastore.credentialIsExternal`) and the container reads it straight
+from the operator's Secret through the env entry below.
+
+An explicit `env` entry outranks the same name arriving via `envFrom`, but we do
+not rely on that — the key is absent from the chart Secret whenever this fires,
+so there is only ever one source.
+
+  ctx      the subchart context
+  ref      the `existingSecret` map (name, key)
+  envName  the variable the runtime reads
+  default  key to read when `ref.key` is unset, normally envName
+*/}}
+{{- define "neuraltrust-platform.datastore.credentialEnv" -}}
+{{- $ref := default dict .ref -}}
+{{- if $ref.name -}}
+- name: {{ .envName }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ $ref.name | quote }}
+      key: {{ $ref.key | default (.default | default .envName) | quote }}
+{{- end -}}
+{{- end }}
+
+{{/*
+True when a pre-created Secret owns the credential, so the chart must not write
+that key itself. Kept separate from the env helper so Secret templates can ask
+the question without emitting anything.
+*/}}
+{{- define "neuraltrust-platform.datastore.credentialIsExternal" -}}
+{{- $ref := default dict .ref -}}
+{{- if $ref.name -}}true{{- end -}}
+{{- end }}
+
+{{/*
 The one Redis credential, resolved the same way as the endpoint. External mode
 has three consumers of it — the two gateway Secrets and the DSN composed into
 `data-plane-jwt-secret` — and they used to need the password written out once

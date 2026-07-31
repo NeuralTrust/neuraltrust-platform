@@ -45,6 +45,12 @@ database:
   name: "datacore"
   user: "datacore"
   password: "" # Auto-generated if empty (in-cluster PG); omitted when iamAuth=true
+  # Read the password from a Secret you created instead of writing it above. The
+  # chart then omits POSTGRES_PASSWORD from datacore-secrets and the pod reads
+  # your Secret directly, so no credential reaches values or release history.
+  existingSecret:
+    name: "" # Empty ⇒ the chart owns the password (inline or generated)
+    key: "" # Empty ⇒ "POSTGRES_PASSWORD"
   sslMode: "" # Empty ⇒ global.postgresql.sslMode (default "prefer"); "require" forces TLS on hosted DBs
   # IAM (e.g. AWS RDS/Aurora) database auth. When true, emits POSTGRES_LOGIN=aws
   # and omits POSTGRES_PASSWORD. DataCore (v0.12.1+) mints a SigV4 token per

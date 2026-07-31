@@ -324,3 +324,25 @@ CONFIG_SYNC_TLS_INSECURE=true, once APP_ENV is deployed.
 {{- $provisioned := or ($tls.existingSecret | default "") (eq (include "agentgateway.configSyncTls.autoGenerate" .) "true") -}}
 {{- if and $isExternal $deployed $provisioned }}true{{- end -}}
 {{- end }}
+
+{{/*
+Env entries for datastore credentials the operator pre-created (AUT-411).
+
+Hybrid takes both passwords wholesale from the shared `postgresql-secrets` /
+`redis-secrets`, and IAM auth mints a token per connection, so neither case has a
+static password to point at. Emits nothing unless an `existingSecret.name` is set.
+*/}}
+{{- define "agentgateway.datastoreCredentialEnv" -}}
+{{- $entries := list -}}
+{{- if ne (include "neuraltrust-platform.isHybrid" .) "true" -}}
+{{- if not .Values.database.iamAuth -}}
+{{- $db := include "neuraltrust-platform.datastore.credentialEnv" (dict "ref" .Values.database.existingSecret "envName" "DB_PASSWORD") -}}
+{{- if $db }}{{- $entries = append $entries $db }}{{- end -}}
+{{- end -}}
+{{- if not .Values.redis.iamAuth -}}
+{{- $redis := include "neuraltrust-platform.datastore.credentialEnv" (dict "ref" .Values.redis.existingSecret "envName" "REDIS_PASSWORD") -}}
+{{- if $redis }}{{- $entries = append $entries $redis }}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- join "\n" $entries -}}
+{{- end }}

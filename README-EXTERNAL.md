@@ -244,6 +244,25 @@ Add a per-service `database:` / `redis:` block only to send one service somewher
 else — it still takes precedence. ClickHouse has no global block, so its endpoint
 is named per consumer.
 
+The **passwords** need not live in a values file at all. Name a Secret you created
+under `<service>.database.existingSecret` (or `.redis.existingSecret`) and the
+chart omits that key from the Secret it renders, having each pod read yours
+through a `secretKeyRef` instead — so the credential stays out of values and out
+of Helm release history:
+
+```yaml
+agentgateway:
+  database:
+    existingSecret:
+      name: "managed-postgres-roles"
+      key: "AGENTGATEWAY" # key is configurable, so one Secret serves every role
+```
+
+An inline `password` alongside the hook is rejected at render. The one credential
+this cannot cover is the control-plane role in `global.postgresql.password`, which
+the chart bakes into the Prisma and telemetry connection strings while rendering.
+See [Datastore credentials without values](./SECRETS.md#datastore-credentials-without-values).
+
 Pre-create every PostgreSQL role and database before installing — there is no
 chart-managed init Job. DataCore, AlertEngine, the ClickStack collector, and
 `data-plane-api` all read one shared ClickHouse credential; point their

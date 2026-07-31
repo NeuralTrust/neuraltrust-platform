@@ -30,6 +30,12 @@ database:
   name: "" # Empty ⇒ mode-derived (external: "trustguard"; hybrid: shared "neuraltrust")
   user: "trustguard" # v2 external only; hybrid overrides via global.postgresql.user
   password: "" # Auto-generated if empty
+  # Read the password from a Secret you created instead of writing it above. The
+  # chart then omits DB_PASSWORD from trustguard-secrets and the pods read your
+  # Secret directly, so no credential reaches values or release history.
+  existingSecret:
+    name: "" # Empty ⇒ the chart owns the password (inline or generated)
+    key: "" # Empty ⇒ "DB_PASSWORD"
   sslMode: "" # Empty ⇒ global.postgresql.sslMode (default "prefer"); "require" forces TLS on hosted DBs
   # AWS region for RDS IAM token minting. Empty => global.postgresql.awsRegion.
   # IRSA does not supply a region, so leaving both empty makes IAM depend on
@@ -45,6 +51,11 @@ redis:
   host: "" # Empty ⇒ global.redis.host, else the in-cluster redis Service
   port: "" # Empty ⇒ global.redis.port, then 6379
   password: "" # Optional. Empty ⇒ global.redis.password
+  # As with the database above: name a pre-created Secret to keep the cache
+  # credential out of values.
+  existingSecret:
+    name: "" # Empty ⇒ the chart owns the password
+    key: "" # Empty ⇒ "REDIS_PASSWORD"
   username: "" # Empty ⇒ global.redis.username. Optional Redis 6+ ACL username (e.g. ElastiCache user group). Emits REDIS_USERNAME.
   # Empty ⇒ global.redis.tls. Set "true" for TLS-only managed Redis (e.g.
   # ElastiCache Serverless). Emits REDIS_TLS. To opt out of an inherited "true",

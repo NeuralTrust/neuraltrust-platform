@@ -41,6 +41,12 @@ database:
   name: "alertengine"
   user: "alertengine"
   password: "" # Auto-generated if empty (in-cluster PG)
+  # Read the password from a Secret you created instead of writing it above. The
+  # chart then omits DB_PASSWORD from alertengine-secrets and the pods read your
+  # Secret directly, so no credential reaches values or release history.
+  existingSecret:
+    name: "" # Empty ⇒ the chart owns the password (inline or generated)
+    key: "" # Empty ⇒ "DB_PASSWORD"
   sslMode: "" # Empty ⇒ global.postgresql.sslMode (default "prefer"); "require" forces TLS on hosted DBs
   # IAM (e.g. AWS RDS) database auth. When true, emits DB_AUTH_MODE=iam /
   # DB_IAM_AUTH and omits DB_PASSWORD. AlertEngine (v0.4.0+) mints a SigV4 token

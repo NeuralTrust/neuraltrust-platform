@@ -356,11 +356,19 @@ spec:
           - name: EVALUATION_PROGRESS_BACKEND
             value: {{ $dpRedisBackend | quote }}
           {{- if eq $dpRedisBackend "redis" }}
+          {{- $dpRedisSecret := default dict $dpRedisCfg.existingSecret }}
           - name: REDIS_URL
             valueFrom:
               secretKeyRef:
+                {{- if $dpRedisSecret.name }}
+                {{- /* Operator pre-created the DSN, so the chart never composed
+                       one into data-plane-jwt-secret. */}}
+                name: {{ $dpRedisSecret.name | quote }}
+                key: {{ $dpRedisSecret.key | default "REDIS_URL" | quote }}
+                {{- else }}
                 name: {{ if and .Values.dataPlane.secrets .Values.dataPlane.secrets.dataPlaneJWTSecretName }}{{ .Values.dataPlane.secrets.dataPlaneJWTSecretName }}{{ else }}data-plane-jwt-secret{{ end }}
                 key: REDIS_URL
+                {{- end }}
           - name: REDIS_MAX_CONNECTIONS
             value: {{ $dpRedisCfg.maxConnections | default 100 | quote }}
           - name: REDIS_MGET_CHUNK_SIZE

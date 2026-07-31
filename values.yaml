@@ -905,6 +905,13 @@ data-plane-api:
           password: ""
           username: ""
           tls: ""
+          # data-plane-api reads a whole DSN rather than a password, so unlike the
+          # other services this hook supplies the assembled REDIS_URL. Naming a
+          # Secret here keeps the credential out of values: the chart stops
+          # composing the URL into `data-plane-jwt-secret` and the pod reads yours.
+          existingSecret:
+            name: "" # Empty ⇒ the chart composes the URL from the settings above
+            key: "" # Empty ⇒ "REDIS_URL"
           iamAuth: false
           iamUser: ""
           iamCacheName: ""

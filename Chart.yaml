@@ -2,7 +2,7 @@ apiVersion: v2
 name: neuraltrust-platform
 description: NeuralTrust platform Helm chart (v2 hybrid + external)
 type: application
-version: 2.6.0
+version: 2.7.0
 appVersion: "2.0.0"
 icon: https://neuraltrust.ai/favicon.ico
 # For v1 clusters pin --version ~1.14.0.
@@ -16,7 +16,7 @@ dependencies:
       - infrastructure
   # Analytics / evaluation API. Gated by global.products.dataPlane in hybrid.
   - name: data-plane-api
-    version: 1.5.0
+    version: 1.6.0
     repository: file://./charts/data-plane-api
     tags:
       - neuraltrust
@@ -38,14 +38,14 @@ dependencies:
   # TrustGate (values: agentgateway; K8s: agentgateway-*). Hybrid gated by
   # global.products.trustgate.
   - name: agentgateway
-    version: 0.1.34
+    version: 0.1.35
     repository: file://./charts/agentgateway
     tags:
       - neuraltrust
       - v2
   # TrustGuard. Hybrid gated by global.products.trustguard.
   - name: trustguard
-    version: 0.1.32
+    version: 0.1.33
     repository: file://./charts/trustguard
     tags:
       - neuraltrust
@@ -66,7 +66,7 @@ dependencies:
       - v2
   # DataCore — v2 external only.
   - name: datacore
-    version: 0.1.15
+    version: 0.1.16
     repository: file://./charts/datacore
     tags:
       - neuraltrust
@@ -80,7 +80,7 @@ dependencies:
       - v2
   # AlertEngine — v2 external only.
   - name: alertengine
-    version: 0.1.6
+    version: 0.1.7
     repository: file://./charts/alertengine
     tags:
       - neuraltrust
