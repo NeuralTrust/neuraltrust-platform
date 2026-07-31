@@ -1,4 +1,4 @@
-{{- if and (eq (include "neuraltrust-platform.isV2" .) "true") (eq (include "neuraltrust-platform.isExternal" .) "true") }}
+{{- if eq (include "neuraltrust-platform.isExternal" .) "true" }}
 {{- $img := include "clickstack-otel-collector.image" (dict "repository" .Values.image.repository "tag" .Values.image.tag "global" .Values.global) }}
 apiVersion: apps/v1
 kind: Deployment

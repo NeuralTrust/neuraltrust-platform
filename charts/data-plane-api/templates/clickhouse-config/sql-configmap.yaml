@@ -1,4 +1,4 @@
-{{- if or (not (eq (include "neuraltrust-platform.isV2" .) "true")) (eq (include "neuraltrust-platform.dataPlaneApiV2.enabled" .) "true") }}
+{{- if eq (include "neuraltrust-platform.dataPlaneApiV2.enabled" .) "true" }}
 {{- if eq (include "neuraltrust-platform.dataPlaneApi.sqlBackend" .) "clickhouse" }}
 apiVersion: v1
 kind: ConfigMap

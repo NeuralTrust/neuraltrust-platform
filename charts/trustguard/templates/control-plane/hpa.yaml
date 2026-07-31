@@ -1,4 +1,4 @@
-{{- if and (eq (include "trustguard.enabled" .) "true") (eq (include "neuraltrust-platform.isFull" .) "true") }}
+{{- if and (eq (include "trustguard.enabled" .) "true") (eq (include "neuraltrust-platform.isExternal" .) "true") }}
 {{- $as := default dict .Values.controlPlane.autoscaling }}
 {{- if $as.enabled }}
 apiVersion: autoscaling/v2

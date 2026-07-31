@@ -592,13 +592,6 @@ RESEND_ALERT_SENDER=${RESEND_ALERT_SENDER:-""}
 add_secret_key "$SECRET_NAME" "resend-alert-sender" "$RESEND_ALERT_SENDER"
 echo ""
 
-# Resend Invite Sender
-echo "--- Resend Invite Sender Email (Optional) ---"
-RESEND_INVITE_SENDER=$(prompt_secret "RESEND_INVITE_SENDER" "Enter Resend Invite Sender Email (optional)")
-RESEND_INVITE_SENDER=${RESEND_INVITE_SENDER:-""}
-add_secret_key "$SECRET_NAME" "resend-invite-sender" "$RESEND_INVITE_SENDER"
-echo ""
-
 # Firewall JWT Secret
 echo "--- Firewall JWT Secret (Optional) ---"
 FIREWALL_JWT_SECRET=$(prompt_secret "FIREWALL_JWT_SECRET" "Enter Firewall JWT Secret (optional)")

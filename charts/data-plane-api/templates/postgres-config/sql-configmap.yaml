@@ -1,5 +1,5 @@
 {{- /* Postgres DDL for postgres-migrations initContainer; schema substituted at render. */ -}}
-{{- if or (not (eq (include "neuraltrust-platform.isV2" .) "true")) (eq (include "neuraltrust-platform.dataPlaneApiV2.enabled" .) "true") }}
+{{- if eq (include "neuraltrust-platform.dataPlaneApiV2.enabled" .) "true" }}
 {{- if eq (include "neuraltrust-platform.dataPlaneApi.sqlBackend" .) "postgres" }}
 {{- $pgCfg := include "neuraltrust-platform.dataPlaneApi.postgresConfig" . | fromYaml }}
 {{- $pgSchema := include "neuraltrust-platform.dataPlaneApi.postgresSchema" . }}
