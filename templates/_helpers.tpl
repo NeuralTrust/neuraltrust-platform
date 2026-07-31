@@ -304,11 +304,141 @@ Usage: {{ include "neuraltrust-platform.v2.dbName" (dict "ctx" . "explicit" .Val
 {{- end }}
 
 {{/*
-Resolve the PostgreSQL host for a v2 service. Callers pass an override; empty
-falls back to the in-cluster Service name (control-plane-postgresql).
+Resolve one datastore connection scalar for a v2 service, in precedence order:
+  1. the per-service override (`<service>.database.*` / `<service>.redis.*`)
+  2. the matching `global.postgresql.*` / `global.redis.*` entry
+  3. the chart default
+
+Step 2 is what lets a managed Aurora/ElastiCache endpoint be declared once on
+the global block instead of repeated in every per-service block.
+
+Inheritance is deliberately NOT gated on `global.<block>.deploy`. The shared
+`postgresql-secrets` / `redis-secrets` that the control plane and data-plane-api
+consume already honour an explicit global host whatever `deploy` says (see
+`neuraltrust-platform.v2.hybridPg.host` and
+`neuraltrust-platform.dataPlaneApi.redisUrl`), so gating it here would let half
+the platform dial the managed endpoint while the runtimes dialled the in-cluster
+Service. `deploy` decides whether the chart also runs a datastore of its own;
+it does not decide who is allowed to read the endpoint.
+
+An empty per-service value inherits, and Helm renders a boolean `false` as an
+empty string here, so `--set <service>.redis.tls=false` does NOT opt out of an
+inherited `global.redis.tls: true` — it inherits. Use the quoted string instead,
+`--set-string <service>.redis.tls=false` or `tls: "false"` in a values file,
+which is non-empty and therefore wins. Same for `username`, where `""` cannot
+mean "AUTH as the default user" while a global ACL username is set. This matches
+how `dataPlaneApi.redisUrl` has always resolved `tls`/`username`.
+
+Only these keys inherit: `host`, `port` and `sslMode` under `<service>.database`,
+and `host`, `port`, `username`, `tls` and `password` under `<service>.redis`.
+Neighbours such as `tlsInsecureVerify`, `db`, `iamAuth`, `awsRegion`, `cacheName`
+and `awsServerless` have no `global.*` counterpart and stay per-service; setting
+them on a global block does nothing.
+
+`ctx` is optional; without it only the per-service value and the default apply.
+
+Usage: {{ include "neuraltrust-platform.datastore.scalar" (dict "ctx" . "block" "postgresql" "key" "host" "value" .Values.database.host "default" "control-plane-postgresql") }}
+*/}}
+{{- define "neuraltrust-platform.datastore.scalar" -}}
+{{- $global := default dict (default dict (default dict .ctx).Values).global -}}
+{{- $block := default dict (index $global .block) -}}
+{{- $inherited := "" -}}
+{{- if hasKey $block .key -}}
+{{- $inherited = index $block .key -}}
+{{- end -}}
+{{- .value | default $inherited | default (.default | default "") -}}
+{{- end }}
+
+{{/*
+PostgreSQL connection scalars for a v2 service.
+Usage: {{ include "neuraltrust-platform.postgres.host" (dict "ctx" . "host" .Values.database.host) }}
 */}}
 {{- define "neuraltrust-platform.postgres.host" -}}
-{{- .host | default "control-plane-postgresql" }}
+{{- include "neuraltrust-platform.datastore.scalar" (dict "ctx" .ctx "block" "postgresql" "key" "host" "value" .host "default" "control-plane-postgresql") -}}
+{{- end }}
+
+{{- define "neuraltrust-platform.postgres.port" -}}
+{{- include "neuraltrust-platform.datastore.scalar" (dict "ctx" .ctx "block" "postgresql" "key" "port" "value" .port "default" 5432) -}}
+{{- end }}
+
+{{- define "neuraltrust-platform.postgres.sslMode" -}}
+{{- include "neuraltrust-platform.datastore.scalar" (dict "ctx" .ctx "block" "postgresql" "key" "sslMode" "value" .sslMode "default" "prefer") -}}
+{{- end }}
+
+{{/*
+Redis connection scalars for a v2 service. `username` and `tls` have no default:
+callers emit the env var only when the resolved value is non-empty.
+*/}}
+{{- define "neuraltrust-platform.redis.host" -}}
+{{- include "neuraltrust-platform.datastore.scalar" (dict "ctx" .ctx "block" "redis" "key" "host" "value" .host "default" "redis") -}}
+{{- end }}
+
+{{- define "neuraltrust-platform.redis.port" -}}
+{{- include "neuraltrust-platform.datastore.scalar" (dict "ctx" .ctx "block" "redis" "key" "port" "value" .port "default" 6379) -}}
+{{- end }}
+
+{{- define "neuraltrust-platform.redis.username" -}}
+{{- include "neuraltrust-platform.datastore.scalar" (dict "ctx" .ctx "block" "redis" "key" "username" "value" .username) -}}
+{{- end }}
+
+{{- define "neuraltrust-platform.redis.tls" -}}
+{{- include "neuraltrust-platform.datastore.scalar" (dict "ctx" .ctx "block" "redis" "key" "tls" "value" .tls) -}}
+{{- end }}
+
+{{/*
+Operator-supplied datastore credentials (AUT-411).
+
+A service's password normally lands in the Secret the chart renders for it, which
+means it has to be written into the values file first. Naming a pre-created
+Secret under `<datastore>.existingSecret` instead keeps the credential out of
+values and out of Helm release history: the key is omitted from the rendered
+Secret (see `datastore.credentialIsExternal`) and the container reads it straight
+from the operator's Secret through the env entry below.
+
+An explicit `env` entry outranks the same name arriving via `envFrom`, but we do
+not rely on that — the key is absent from the chart Secret whenever this fires,
+so there is only ever one source.
+
+  ctx      the subchart context
+  ref      the `existingSecret` map (name, key)
+  envName  the variable the runtime reads
+  default  key to read when `ref.key` is unset, normally envName
+*/}}
+{{- define "neuraltrust-platform.datastore.credentialEnv" -}}
+{{- $ref := default dict .ref -}}
+{{- if $ref.name -}}
+- name: {{ .envName }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ $ref.name | quote }}
+      key: {{ $ref.key | default (.default | default .envName) | quote }}
+{{- end -}}
+{{- end }}
+
+{{/*
+True when a pre-created Secret owns the credential, so the chart must not write
+that key itself. Kept separate from the env helper so Secret templates can ask
+the question without emitting anything.
+*/}}
+{{- define "neuraltrust-platform.datastore.credentialIsExternal" -}}
+{{- $ref := default dict .ref -}}
+{{- if $ref.name -}}true{{- end -}}
+{{- end }}
+
+{{/*
+The one Redis credential, resolved the same way as the endpoint. External mode
+has three consumers of it — the two gateway Secrets and the DSN composed into
+`data-plane-jwt-secret` — and they used to need the password written out once
+each. Postgres deliberately has no equivalent: external gives every service its
+own role, so a single inherited password would be wrong more often than right.
+
+Note the chart's own Redis has no `--requirepass`, so `global.redis.password`
+belongs to a managed cache only. `validate-values.yaml` rejects the unambiguous
+mistake (a password set while we deploy Redis ourselves and no host is named)
+rather than letting all three consumers fail to authenticate at runtime.
+*/}}
+{{- define "neuraltrust-platform.redis.password" -}}
+{{- include "neuraltrust-platform.datastore.scalar" (dict "ctx" .ctx "block" "redis" "key" "password" "value" .password) -}}
 {{- end }}
 
 {{/*

@@ -230,8 +230,12 @@ PostgreSQL and Redis deploy in-cluster by default in both modes. ClickHouse
 deploys in-cluster only in **external** — hybrid uses hosted analytics, so no
 in-cluster ClickHouse renders there.
 
-Hybrid PostgreSQL and Redis use ONE shared connection contract driven by two
-top-level blocks in `values.yaml`:
+PostgreSQL and Redis use ONE shared connection contract driven by two top-level
+blocks in `values.yaml`. Hybrid workloads read them through the shared
+`postgresql-secrets` / `redis-secrets`; since chart 2.6.0 the external-mode
+runtimes inherit the same endpoints when their own `<service>.database` /
+`<service>.redis` host, port, sslMode, username and tls are left empty, so a
+managed datastore is declared once here rather than per service:
 
 ```yaml
 global:
