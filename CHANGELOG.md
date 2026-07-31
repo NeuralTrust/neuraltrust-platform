@@ -4,9 +4,100 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+Chart `2.5.3` → `2.6.0`. The minor bump reflects a change to which environment
+variables the config-sync workloads take from an operator-owned Secret.
+
+### Changed
+
+- **Operators are no longer asked to invent `CONFIG_SYNC_LKG_KEY`.** The chart has
+  always generated it — `configSync.lkgKey` falls back to the key already stored in
+  the chart-managed service Secret, then to `randBytes 32` — but three separate
+  things insisted otherwise: `configSyncTokenEnv` pulled the key out of the
+  operator's `configSync.existingSecret` alongside the token, the render-time
+  validation demanded both keys, and six documents printed
+  `--from-literal=CONFIG_SYNC_LKG_KEY=…` in the setup steps. An operator who only
+  wanted to keep the console-issued token out of `values.yaml` had to mint an
+  AES-256 key to sit next to it.
+
+  Only the token is genuinely operator-owned: the hosted control plane verifies it.
+  The LKG key is used by the runtimes purely as the AES-256-GCM key for one local
+  file, the last-known-good config snapshot. That file exists only on the three
+  data planes — agentgateway proxy, agentgateway MCP and the TrustGuard data plane
+  — and lives on an `emptyDir`, so it is discarded on every pod restart regardless;
+  a changed key costs one re-fetch and nothing else. The two control planes never
+  receive `CONFIG_SYNC_DATA_PLANE_ENABLED`, so the key was inert there to begin
+  with.
+
+  `CONFIG_SYNC_TOKEN` still comes from the operator Secret. `CONFIG_SYNC_LKG_KEY`
+  now arrives from the chart-managed Secret through the `envFrom` those workloads
+  already carry.
+
+  Whether the reference is emitted depends **only on Secret ownership, never on
+  `lookup`**. Under `autoGenerateSecrets: false` or `preserveExistingSecrets: true`
+  the chart owns no Secret, so the pre-2.6 reference is kept and
+  **`CONFIG_SYNC_LKG_KEY` remains yours to supply** — unchanged behaviour for those
+  two modes, and the documentation now says so instead of claiming the key is
+  always generated.
+
+  An earlier cut of this change consulted `lookup` to detect whether the operator
+  Secret already carried the key. That was withdrawn: it makes the rendered pod spec
+  depend on *how* you render. `helm upgrade` sees the cluster; `helm template`,
+  ArgoCD, `--dry-run` and any CI identity without RBAC to read Secrets do not. Same
+  values, different output, and the divergence only shows up in production.
+
+  **Upgrade note.** If you followed pre-2.6 documentation and put your own
+  `CONFIG_SYNC_LKG_KEY` into the config-sync Secret, it is no longer read on the
+  default path — the generated one is used instead. This is safe: the key only
+  decrypts a cache on an `emptyDir` that is discarded on restart anyway, so a
+  mismatch costs one refetch. To pin a specific value, set `configSync.lkgKey`,
+  which does not depend on how the chart is rendered.
+
+  Affects five workloads: agentgateway proxy, MCP and control plane, and the
+  TrustGuard data and control planes. No Secret is rewritten and no value rotates.
+  Removing an `env` entry does change the pod template hash, so those five roll once
+  on upgrade.
+
+- **Validation asks for the token only.** `agentgateway config-sync requires
+  CONFIG_SYNC_TOKEN and CONFIG_SYNC_LKG_KEY` becomes
+  `agentgateway config-sync requires CONFIG_SYNC_TOKEN`, and the check no longer
+  tests for a managed LKG key. Nothing that rendered before stops rendering; a
+  hybrid install whose operator Secret holds only the token now renders where it
+  previously produced pods stuck in `CreateContainerConfigError`.
+
+### Fixed
+
+- **The `mcp-signing-key` hook no longer breaks `helm upgrade` on IPv6 clusters.** The
+  pre-install/pre-upgrade Job built the API server URL from `KUBERNETES_SERVICE_HOST`.
+  On IPv6 single-stack clusters that holds a bare IPv6 literal, which is not a parsable
+  URL host without brackets — and bracketing it only moves the failure to TLS, because
+  the compressed address is string-compared against the certificate's expanded IP SAN.
+  The Job exhausted `backoffLimit: 3`, leaving the release in `pending-upgrade`; under
+  Flux's default upgrade remediation, or `helm upgrade --atomic`, that then took the
+  whole release down with an automatic rollback. Either way the platform could not be
+  installed or upgraded at all on IPv6. It now
+  dials `kubernetes.default.svc`, which is always a certificate SAN and is
+  address-family agnostic. Behaviour on IPv4 clusters is unchanged.
+
+### Documentation
+
+- `SECRETS.md` claimed the pair was "never auto-generated", which was false for the
+  LKG key. The two are now separate rows: the token as operator-supplied, the LKG
+  key as auto-generated with its threat model spelled out. `README.md` (setup step
+  and troubleshooting row), `DEPLOYMENT.md`, `README-OPENSHIFT.md`,
+  `docs/architecture.md`, `values-required.yaml` and
+  `values-hybrid-reference.yaml.example` no longer tell operators to create the key
+  on the default path.
+
+  Each of those now carries the precondition rather than an unqualified promise:
+  generation depends on the chart owning the service Secret. `SECRETS.md`
+  **Pre-existing secrets (external management)** — the Vault / Sealed Secrets /
+  External Secrets Operator recipe — additionally spells out that the LKG key
+  becomes the operator's responsibility in that mode, which is the case an
+  unqualified claim would have broken.
+
 ## [v2.5.3] — 2026-07-31
 
-Chart `2.5.2` → `2.6.0`, `data-plane-api` `1.4.8` → `1.5.0`. The minor bumps reflect
+Chart `2.5.2` → `2.5.3`, `data-plane-api` `1.4.8` → `1.5.0`. The minor bumps reflect
 removed values keys and three templates dropped from `data-plane-api`; no image
 versions change, and the other subcharts render identically, so they are not bumped.
 

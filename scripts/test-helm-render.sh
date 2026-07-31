@@ -446,8 +446,10 @@ assert_contains "$out1d" 'name: "?agentgateway-config-sync"?' \
   "config-sync: TrustGate references its operator-owned token Secret"
 assert_contains "$out1d" 'name: "?trustguard-config-sync"?' \
   "config-sync: TrustGuard references its operator-owned token Secret"
-assert_contains "$out1d" 'key: "?CONFIG_SYNC_LKG_KEY"?' \
-  "config-sync: existing Secret also supplies the LKG encryption key"
+assert_not_contains "$out1d" 'key: "?CONFIG_SYNC_LKG_KEY"?' \
+  "config-sync: the operator token Secret is not asked for the LKG key"
+assert_contains "$out1d" 'CONFIG_SYNC_LKG_KEY: "' \
+  "config-sync: the chart-managed Secret generates the LKG key instead"
 assert_contains "$out1d" 'mountPath: /var/lib/trustgate' \
   "config-sync: TrustGate LKG path is writable"
 assert_contains "$out1d" 'mountPath: /var/lib/trustguard' \
@@ -474,6 +476,43 @@ assert_contains "$out1e" 'CONFIG_SYNC_TOKEN: "inline-test-token"' \
   "config-sync upgrade: managed Secret carries the inline token"
 assert_contains "$out1e" 'CONFIG_SYNC_LKG_KEY:' \
   "config-sync upgrade: managed Secret carries an LKG encryption key"
+
+# The gate is decided by Secret ownership alone. Renaming the key must not
+# resurrect the reference on the owned path, or a rename would quietly demand a
+# key from a Secret the operator was told not to put one in.
+out1d2="$TMP/scenario-config-sync-custom-lkg-key.yaml"
+render_default "$out1d2" \
+  --set agentgateway.configSync.existingSecret.lkgKey=MY_LKG_KEY
+assert_contains "$out1d2" 'key: "?CONFIG_SYNC_TOKEN"?' \
+  "config-sync token-only: the UI-issued token still comes from the operator Secret"
+assert_not_contains "$out1d2" 'key: "?MY_LKG_KEY"?' \
+  "config-sync token-only: a renamed LKG key is not demanded of the operator Secret either"
+
+# The chart owns no Secret under either opt-out, so the pre-2.6 reference is
+# retained rather than leaving the runtime with no key at all. Both halves of
+# the conjunct are covered: dropping one would strand the other. Counting the
+# occurrences catches a partial regression that leaves only some workloads wired.
+out1d3="$TMP/scenario-config-sync-no-autogen.yaml"
+render_default "$out1d3" \
+  --set global.autoGenerateSecrets=false \
+  --set agentgateway.dataagent.existingSecret.name=dataagent-trustgate-secrets \
+  --set trustguard.dataagent.existingSecret.name=dataagent-trustguard-secrets
+assert_occurrences "$out1d3" 'key: "?CONFIG_SYNC_LKG_KEY"?' 3 \
+  "config-sync: without chart Secret generation all three data planes take the LKG key from the operator Secret"
+out1d4="$TMP/scenario-config-sync-preserve-existing.yaml"
+render_default "$out1d4" \
+  --set global.preserveExistingSecrets=true \
+  --set agentgateway.dataagent.existingSecret.name=dataagent-trustgate-secrets \
+  --set trustguard.dataagent.existingSecret.name=dataagent-trustguard-secrets
+assert_occurrences "$out1d4" 'key: "?CONFIG_SYNC_LKG_KEY"?' 3 \
+  "config-sync: preserveExistingSecrets also leaves the LKG key to the operator Secret"
+# The gate must not read the cluster: a lookup-dependent reference renders one
+# way under `helm upgrade` and another under `helm template` or ArgoCD. An
+# upgrade render must therefore match the install render exactly.
+out1d5="$TMP/scenario-config-sync-upgrade-render.yaml"
+render_default "$out1d5" --is-upgrade
+assert_not_contains "$out1d5" 'key: "?CONFIG_SYNC_LKG_KEY"?' \
+  "config-sync: an upgrade render agrees with the install render on the owned path"
 
 blue "==> Scenario 1e: preserved shared PostgreSQL supports DataAgent"
 out1f="$TMP/scenario-preserved-shared-postgres.yaml"
@@ -853,10 +892,12 @@ render_default "$out3a" \
   --set agentgateway.configSync.existingSecret.name=agentgateway-config-sync \
   --set trustguard.configSync.enabled=true \
   --set trustguard.configSync.existingSecret.name=trustguard-config-sync
-assert_occurrences "$out3a" 'name: "?agentgateway-config-sync"?' 6 \
-  "external config-sync: AgentGateway proxy, MCP, and admin share credentials"
-assert_occurrences "$out3a" 'name: "?trustguard-config-sync"?' 4 \
-  "external config-sync: TrustGuard data and control planes share credentials"
+# One reference per workload: the token only. The LKG key rides along on the
+# chart-managed Secret through envFrom.
+assert_occurrences "$out3a" 'name: "?agentgateway-config-sync"?' 3 \
+  "external config-sync: AgentGateway proxy, MCP, and admin share the operator token"
+assert_occurrences "$out3a" 'name: "?trustguard-config-sync"?' 2 \
+  "external config-sync: TrustGuard data and control planes share the operator token"
 
 # ---------------------------------------------------------------------------
 # 3b. Control-plane RDS IAM env contract (api + app) + DataCore IAM
@@ -1829,6 +1870,13 @@ ruby -ryaml -e '
   script = job.dig("spec", "template", "spec", "containers", 0, "command").last
   abort "the generator does not check for an existing key" unless script.include?("already present")
   abort "the generator does not produce PKCS#8" unless script.include?("pkcs8")
+  # On IPv6 single-stack, KUBERNETES_SERVICE_HOST is a bare literal: unparsable
+  # as a URL host, and unmatchable against the certificate SAN even bracketed.
+  # The Job then exhausts its backoffLimit and fails the release.
+  abort "the generator dials the apiserver by IP instead of DNS" \
+    if script.include?("process.env.KUBERNETES_SERVICE_HOST")
+  abort "the generator does not dial kubernetes.default.svc" \
+    unless script.include?("https://kubernetes.default.svc:")
 
   role = hook.find { |d| d["kind"] == "Role" }
   named = role["rules"].select { |r| r["resourceNames"] }

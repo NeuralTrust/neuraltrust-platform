@@ -20,7 +20,12 @@ global:
 
 # Preferred path: existing Secret names. Keys:
 #   dataagent-enrolment-* → ENROLMENT_TOKEN
-#   *-config-sync → CONFIG_SYNC_TOKEN + CONFIG_SYNC_LKG_KEY (see SECRETS.md)
+#   *-config-sync → CONFIG_SYNC_TOKEN (see SECRETS.md)
+# The enrolment and config-sync tokens are both issued by the NeuralTrust
+# console. Nothing else here is operator-supplied while
+# global.autoGenerateSecrets is true and global.preserveExistingSecrets is
+# false; the chart generates the rest on first install. Flip either and you own
+# every credential the chart would have generated, CONFIG_SYNC_LKG_KEY included.
 agentgateway:
   configSync:
     existingSecret:
