@@ -1,4 +1,4 @@
-{{- if or (not (eq (include "neuraltrust-platform.isV2" .) "true")) (eq (include "neuraltrust-platform.dataPlaneApiV2.enabled" .) "true") }}
+{{- if eq (include "neuraltrust-platform.dataPlaneApiV2.enabled" .) "true" }}
 {{- /*
 RBAC for the shared `data-plane` ServiceAccount, used when k8sJobs is
 enabled. The API pod (which creates Jobs) and the Job pods it spawns both
@@ -13,9 +13,8 @@ Verbs granted:
   - batch/jobs: full lifecycle (create/get/list/watch/delete/patch)
   - core/pods + pods/log: poll Job pod status and stream logs back to the
     API for debugging failed evaluations
-  - core/configmaps: create and clean up the `data-plane-trusttest-config`
-    ConfigMap (and, in csi mode, the entrypoint ConfigMap) that Job pods
-    consume
+  - core/configmaps: create and clean up the ConfigMaps the API builds for Job
+    pods at runtime, including the csi-mode entrypoint ConfigMap
   - core/events: read scheduling/eviction events for troubleshooting
 
 Secrets verbs are deliberately omitted — `secretsMode=inherit` (the

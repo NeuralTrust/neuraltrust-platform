@@ -229,10 +229,6 @@ spec:
         {{- $openaiModel := "gpt-4o-mini" }}
         {{- $controlPlaneApiUrl := "" }}
         {{- $dataPlaneApiUrl := "" }}
-        {{- $schedulerUrl := "" }}
-        {{- $trustgateControlPlaneUrl := "" }}
-        {{- $trustgateDataPlaneUrl := "" }}
-        {{- $trustgateActionsUrl := "" }}
         {{- $nextAuthUrl := "" }}
         {{- $appUrl := "" }}
         {{- $modelScannerApiUrl := "" }}
@@ -248,7 +244,6 @@ spec:
         {{- $trustguardPublicUrl := "" }}
         {{- $datacoreUrl := "http://datacore" }}
         {{- $datacoreMetricsEnabled := "true" }}
-        {{- $forceV2Ui := "true" }}
         {{- /* Prefer platform env email over per-org DB settings. Opt out:
                config.authEmailForceEnv: "false". */}}
         {{- $authEmailForceEnv := "true" }}
@@ -261,10 +256,6 @@ spec:
           {{- if .Values.controlPlane.components.app.config.openaiModel }}{{- $openaiModel = .Values.controlPlane.components.app.config.openaiModel }}{{- end }}
           {{- if .Values.controlPlane.components.app.config.controlPlaneApiUrl }}{{- $controlPlaneApiUrl = .Values.controlPlane.components.app.config.controlPlaneApiUrl }}{{- end }}
           {{- if .Values.controlPlane.components.app.config.dataPlaneApiUrl }}{{- $dataPlaneApiUrl = .Values.controlPlane.components.app.config.dataPlaneApiUrl }}{{- end }}
-          {{- if .Values.controlPlane.components.app.config.schedulerUrl }}{{- $schedulerUrl = .Values.controlPlane.components.app.config.schedulerUrl }}{{- end }}
-          {{- if .Values.controlPlane.components.app.config.trustgateControlPlaneUrl }}{{- $trustgateControlPlaneUrl = .Values.controlPlane.components.app.config.trustgateControlPlaneUrl }}{{- end }}
-          {{- if .Values.controlPlane.components.app.config.trustgateDataPlaneUrl }}{{- $trustgateDataPlaneUrl = .Values.controlPlane.components.app.config.trustgateDataPlaneUrl }}{{- end }}
-          {{- if .Values.controlPlane.components.app.config.trustgateActionsUrl }}{{- $trustgateActionsUrl = .Values.controlPlane.components.app.config.trustgateActionsUrl }}{{- end }}
           {{- if .Values.controlPlane.components.app.config.nextAuthUrl }}{{- $nextAuthUrl = .Values.controlPlane.components.app.config.nextAuthUrl }}{{- end }}
           {{- if .Values.controlPlane.components.app.config.appUrl }}{{- $appUrl = .Values.controlPlane.components.app.config.appUrl }}{{- end }}
           {{- if .Values.controlPlane.components.app.config.modelScannerApiUrl }}{{- $modelScannerApiUrl = .Values.controlPlane.components.app.config.modelScannerApiUrl }}{{- end }}
@@ -274,7 +265,6 @@ spec:
           {{- if .Values.controlPlane.components.app.config.trustguardPublicUrl }}{{- $trustguardPublicUrl = .Values.controlPlane.components.app.config.trustguardPublicUrl }}{{- end }}
           {{- if .Values.controlPlane.components.app.config.datacoreUrl }}{{- $datacoreUrl = .Values.controlPlane.components.app.config.datacoreUrl }}{{- end }}
           {{- if hasKey .Values.controlPlane.components.app.config "datacoreMetricsEnabled" }}{{- $datacoreMetricsEnabled = .Values.controlPlane.components.app.config.datacoreMetricsEnabled | toString }}{{- end }}
-          {{- if hasKey .Values.controlPlane.components.app.config "forceV2Ui" }}{{- $forceV2Ui = .Values.controlPlane.components.app.config.forceV2Ui | toString }}{{- end }}
           {{- if hasKey .Values.controlPlane.components.app.config "authEmailForceEnv" }}{{- $authEmailForceEnv = .Values.controlPlane.components.app.config.authEmailForceEnv | toString }}{{- end }}
           {{- if .Values.controlPlane.components.app.config.alertEngineApiUrl }}{{- $alertEngineApiUrl = .Values.controlPlane.components.app.config.alertEngineApiUrl }}{{- end }}
           {{- if .Values.controlPlane.components.app.config.trustlensApiUrl }}{{- $trustlensApiUrl = .Values.controlPlane.components.app.config.trustlensApiUrl }}{{- end }}
@@ -285,18 +275,6 @@ spec:
         {{- end }}
         {{- if not $dataPlaneApiUrl }}
           {{- $dataPlaneApiUrl = "http://data-plane-api-service:80" }}
-        {{- end }}
-        {{- if not $schedulerUrl }}
-          {{- $schedulerUrl = "http://control-plane-scheduler-service:80" }}
-        {{- end }}
-        {{- if not $trustgateControlPlaneUrl }}
-          {{- $trustgateControlPlaneUrl = "http://trustgate-control-plane:80" }}
-        {{- end }}
-        {{- if not $trustgateDataPlaneUrl }}
-          {{- $trustgateDataPlaneUrl = "http://trustgate-data-plane:80" }}
-        {{- end }}
-        {{- if not $trustgateActionsUrl }}
-          {{- $trustgateActionsUrl = "http://trustgate-actions:80" }}
         {{- end }}
         {{- if not $trustguardPublicUrl }}
           {{- $tgDomain := include "neuraltrust-platform.domain" . }}
@@ -554,7 +532,6 @@ spec:
           valueFrom:
             secretKeyRef:
               {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "DATA_PLANE_JWT_SECRET") | nindent 14 }}
-        {{- if eq (include "neuraltrust-platform.isV2" .) "true" }}
         - name: AUTH_SECRET
           valueFrom:
             secretKeyRef:
@@ -563,10 +540,6 @@ spec:
           valueFrom:
             secretKeyRef:
               {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "NEXTAUTH_SECRET") | nindent 14 }}
-        # Default v2 UI. Opt out: config.forceV2Ui: "false".
-        - name: FORCE_V2_UI
-          value: "{{ $forceV2Ui }}"
-        {{- end }}
         {{- /* Encrypts SSO client secrets and SMTP credentials at rest, and is a
                different key from AUTH_SECRET above, which signs sessions.
                Optional because the chart only generates it on a fresh install:
@@ -664,20 +637,6 @@ spec:
           {{- /* Explicit config.nextAuthUrl wins; else resolve to the real ingress
                  host (app.<domain>). See control-plane.appPublicUrl helper. */}}
           value: "{{ $nextAuthUrl | default (include "control-plane.appPublicUrl" .) }}"
-        {{- if ne (include "neuraltrust-platform.isV2" .) "true" }}
-        - name: CONTROL_PLANE_SCHEDULER_URL
-          value: "{{ $schedulerUrl }}"
-        - name: TRUSTGATE_CONTROL_PLANE_URL
-          value: "{{ $trustgateControlPlaneUrl }}"
-        - name: TRUSTGATE_DATA_PLANE_URL
-          value: "{{ $trustgateDataPlaneUrl }}"
-        - name: TRUSTGATE_ACTIONS_URL
-          value: "{{ $trustgateActionsUrl }}"
-        - name: TRUSTGATE_JWT_SECRET
-          valueFrom:
-            secretKeyRef:
-              {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "TRUSTGATE_JWT_SECRET" "optional" true) | nindent 14 }}
-        {{- end }}
         - name: FIREWALL_API_URL
           # Resolved by the parent chart (templates/platform-secrets.yaml):
           # explicit controlPlane.components.app.config.firewallApiUrl >

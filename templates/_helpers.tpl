@@ -88,16 +88,6 @@ external → control + data + in-cluster analytics; no DataAgent.
 {{- end }}
 
 {{/*
-Backward-compatible aliases. Every v2 template renders under "true" now that
-v1 is retired; keep the guards so subchart templates continue to compile
-without a mass rewrite. `isFull` is the historical alias for "external".
-*/}}
-{{- define "neuraltrust-platform.isV2" -}}true{{- end }}
-{{- define "neuraltrust-platform.isFull" -}}
-{{- include "neuraltrust-platform.isExternal" . }}
-{{- end }}
-
-{{/*
 Check if the current platform is OpenShift.
 Returns "true" (non-empty) if OpenShift, empty string otherwise.
 Usage: {{- if include "neuraltrust-platform.isOpenshift" . }}
@@ -1314,11 +1304,11 @@ Usage: {{- include "neuraltrust-platform.configSyncEnv" (dict "ctx" . "product" 
 {{- $tlsCaPath := .tlsCaPath | default "" -}}
 {{- $cs := default dict $ctx.Values.configSync -}}
 {{- if eq (include "neuraltrust-platform.configSync.enabled" $ctx) "true" -}}
-{{- $isFull := eq (include "neuraltrust-platform.isExternal" $ctx) "true" -}}
+{{- $isExternal := eq (include "neuraltrust-platform.isExternal" $ctx) "true" -}}
 {{- $endpoint := $cs.endpoint -}}
 {{- $insecure := false -}}
 {{- $caPath := "" -}}
-{{- if $isFull -}}
+{{- if $isExternal -}}
   {{- if $tlsCaPath -}}
     {{- $caPath = $tlsCaPath -}}
   {{- else -}}
@@ -1819,9 +1809,6 @@ when any of them is in play:
                hosted platform instead.
   watchdog   → watchdog usage export is on. It calls the control-plane and
                data-plane APIs, so it needs their keys even in hybrid.
-  v1         → the retired v1 console env. `isV2` is always true, so this never
-               matches on a new install; the key survives only where a live
-               Secret already holds it.
 A hybrid install therefore carries only the credentials its in-cluster services
 actually read. Keys already present in a live `platform-secrets` are always
 kept, so an upgrade never drops one an existing install may depend on.
@@ -1833,8 +1820,8 @@ drift this Secret exists to prevent.
 
 `aliasOf` marks a key that must hold the same value as another key. Aliases are
 resolved from their target rather than independently, which is what keeps
-documented invariants (TRUSTGATE_JWT_SECRET == SERVER_SECRET_KEY,
-NEXTAUTH_SECRET == AUTH_SECRET) true on a fresh install too.
+documented invariants (NEXTAUTH_SECRET == AUTH_SECRET) true on a fresh install
+too.
 
 Notes on the cross-service keys that carry a constraint the row cannot express:
 
@@ -1873,7 +1860,6 @@ CONTROL_PLANE_JWT_SECRET: {legacyName: control-plane-secrets, legacyKey: CONTROL
 AUTH_SECRET: {legacyName: control-plane-secrets, legacyKey: AUTH_SECRET, generate: random, length: 64, requires: external}
 NEXTAUTH_SECRET: {legacyName: control-plane-secrets, legacyKey: NEXTAUTH_SECRET, aliasOf: AUTH_SECRET, requires: external}
 MODEL_SCANNER_SECRET: {legacyName: control-plane-secrets, legacyKey: MODEL_SCANNER_SECRET, generate: adopt, requires: external}
-TRUSTGATE_JWT_SECRET: {legacyName: control-plane-secrets, legacyKey: TRUSTGATE_JWT_SECRET, aliasOf: SERVER_SECRET_KEY, requires: v1}
 MCP_OAUTH_CLIENT_SECRET: {legacyName: control-plane-secrets, legacyKey: MCP_OAUTH_CLIENT_SECRET, generate: random, length: 64, requires: mcpOAuth}
 MCP_OAUTH_SIGNING_KEY: {legacyName: control-plane-secrets, legacyKey: MCP_OAUTH_SIGNING_KEY, generate: adopt, requires: mcpOAuth}
 AUTH_SECRET_KEY: {legacyName: control-plane-secrets, legacyKey: AUTH_SECRET_KEY, generate: install, length: 64, requires: external}

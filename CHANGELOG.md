@@ -4,6 +4,103 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+Chart `2.5.2` → `2.6.0`, `data-plane-api` `1.4.8` → `1.5.0`. The minor bumps reflect
+removed values keys and three templates dropped from `data-plane-api`; no image
+versions change, and the other subcharts render identically, so they are not bumped.
+
+### Removed
+
+- **The retired v1 generation is gone from the chart.** `isV2` returned a hardcoded
+  `true`, so every `if not isV2` branch had been unreachable since v1 was retired and
+  every `and (eq isV2 "true") …` guard was a redundant conjunct. Both the helper and
+  its 41 call sites are removed, along with the code only those dead branches reached:
+  the `data-plane-api` `secrets.yaml`, `monitoring.yaml` and `trusttest-configmap.yaml`
+  templates (each wholly wrapped in the dead guard, so each rendered nothing), the
+  worker and kafka-connect HPA/PodDisruptionBudget blocks, the watchdog
+  `v1EnabledCheckIds` overlay, and the `v1` install shape in `platform-secrets`.
+
+  Removing those templates orphaned a few more things, cleaned up here: the
+  `trusttest-config-volume` mount on `data-plane-api`, which referenced a ConfigMap
+  nothing creates any more and would have left the pod in `ContainerCreating` had
+  anyone set `trustTestConfig.enabled: true`; the `trustTestConfig` value and its
+  helper; the `data-plane.getSecretValue` helper; the now-unread
+  `files/.trusttest_config.json`; and four inline `dataPlane.secrets.*` credential
+  values whose only reader was the deleted Secret template — `openaiApiKey`,
+  `googleApiKey`, `resendApiKey` and `huggingFaceToken`. `huggingFaceTokenSecretName`
+  goes with them, having lost its last reader; the firewall's own
+  `firewall.secrets.huggingFaceToken` is a different path and is untouched.
+
+  `dataPlaneJWTSecret` is deliberately **kept**: unlike the four above it is still an
+  operator pin for the shared `DATA_PLANE_JWT_SECRET`. The `openai`/`google`/`resend`
+  `*SecretName` keys also stay — the chart selects those Secrets by name and reads
+  them with optional `secretKeyRef`s; it just never created them in v2. Note that
+  `dataPlaneJWTSecretName`'s refs are *not* optional, so a Secret named there must
+  carry both `DATA_PLANE_JWT_SECRET` and `REDIS_URL`.
+
+  `isFull` is removed as a *name* only. It was an alias for `isExternal`, which is
+  genuinely false in hybrid, so its 11 call sites now call `isExternal` directly rather
+  than being dropped.
+
+  The deleted `monitoring.yaml` also carried a `DataPlaneApiDown` PrometheusRule for a
+  component v2 still ships. It never rendered, so no alert is lost in practice, but
+  restoring alerting for `data-plane-api` is deliberately deferred to its own change
+  rather than smuggled into a deletion.
+
+  **This release renders byte-identical output** in hybrid, and in external differs only
+  by the three deliberate removals below. Verified by diffing full renders against the
+  previous release across hybrid, external, and external with TrustLens and AlertEngine
+  enabled.
+
+- **`FORCE_V2_UI` and `controlPlane.components.app.config.forceV2Ui`.** The console
+  deleted the variable and its UI-version toggle, so the chart was setting an
+  environment variable nothing read. Removing the value is safe: it had no effect.
+
+- **`TRUSTGATE_JWT_SECRET` and `resend-invite-sender` from `control-plane-secrets`**,
+  plus the `trustgateJwtSecret` and `resendInviteSender` values and the registry row
+  aliasing the former to `SERVER_SECRET_KEY`. Both keys were written but never read —
+  `TRUSTGATE_JWT_SECRET`'s only consumer was the v1 env block, and v2 uses
+  `SERVER_SECRET_KEY` (delivered to the console as `AGENTGATEWAY_JWT_SECRET`) for
+  gateway integration.
+
+  **Upgrade note:** the first upgrade to this version *removes* these keys from a live
+  `control-plane-secrets`, and removes `TRUSTGATE_JWT_SECRET` from a live
+  `platform-secrets` as well. Existing external installs carry all of them today.
+
+  A **fresh** install never had the `platform-secrets` copy: the retired row required
+  the long-dead `v1` install shape, so a cluster-less render omits it and the render
+  suite asserts that. Clusters upgraded through this release line nevertheless carry
+  it, because the registry keeps any key the live Secret already holds regardless of
+  what the current shape asks for. Once acquired, the key stayed pinned by that
+  carry-over; deleting the row is what releases it. Both copies were observed on live
+  external and hybrid clusters and both are gone after the upgrade.
+
+  Nothing rotates and no workload restarts: there is no `secretKeyRef` to either key
+  anywhere in the chart, which is also why no dual-key migration window applies here.
+
+  The two copies of `TRUSTGATE_JWT_SECRET` hold **different values**, so treat them
+  separately. The `platform-secrets` copy was an `aliasOf: SERVER_SECRET_KEY` and
+  mirrors that key exactly, so nothing is lost — `SERVER_SECRET_KEY` survives with the
+  same value. The `control-plane-secrets` copy is independently generated and has no
+  surviving twin. If anything outside the chart reads *that* one, copy it out before
+  upgrading:
+
+  ```bash
+  kubectl get secret control-plane-secrets -o jsonpath='{.data.TRUSTGATE_JWT_SECRET}' | base64 -d
+  ```
+
+  If you pre-create Secrets with `preserveExistingSecrets: true`, you no longer need
+  `TRUSTGATE_JWT_SECRET` in `control-plane-secrets`.
+
+### Known issue
+
+- The console still reads five v1-era variables the chart has never emitted in v2, and
+  falls back to values that are wrong for a self-hosted install: `TRUSTGATE_JWT_SECRET`
+  to the literal `secret`, the three `TRUSTGATE_*_URL` variables to SaaS hostnames, and
+  `CONTROL_PLANE_SCHEDULER_URL` to `localhost:3001`. The chart cannot fix these by
+  emitting values — the URLs address v1 API paths that v2 services do not serve, and no
+  scheduler component exists in v2 — so the fallbacks are being removed on the console
+  side. Deleting the dead chart block does not change this behaviour either way.
+
 ## [v2.5.0] — 2026-07-30
 
 ### Added

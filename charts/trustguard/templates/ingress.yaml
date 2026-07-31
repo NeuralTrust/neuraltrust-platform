@@ -41,7 +41,7 @@ spec:
                 name: {{ .Values.dataPlane.name }}
                 port:
                   name: http
-{{- if eq (include "neuraltrust-platform.isFull" .) "true" }}
+{{- if eq (include "neuraltrust-platform.isExternal" .) "true" }}
 {{- $cpHost := include "neuraltrust-platform.ingress.host" (dict "host" .Values.ingress.controlPlane.host "prefix" .Values.ingress.controlPlane.hostPrefix "global" .Values.global) }}
 ---
 # Control-plane (admin) ingress — full only

@@ -1,4 +1,4 @@
-{{- if or (not (eq (include "neuraltrust-platform.isV2" .) "true")) (eq (include "neuraltrust-platform.dataPlaneApiV2.enabled" .) "true") }}
+{{- if eq (include "neuraltrust-platform.dataPlaneApiV2.enabled" .) "true" }}
 {{- /* ClickHouse password secret. Defaults to the in-cluster `clickhouse` secret
        (key admin-password); override via dataPlane.components.clickhouse.existingSecret
        {name,key} to match an external ClickHouse secret (infrastructure.clickhouse.external). */ -}}
@@ -492,11 +492,6 @@ spec:
           {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "python" "ctx" .) | nindent 10 }}
           {{- include "neuraltrust-platform.appVersionEnv" (dict "tag" (dig "components" "api" "image" "tag" "" (.Values.dataPlane | default dict))) | nindent 10 }}
         volumeMounts:
-          {{- if eq (include "data-plane.api.trustTestConfig.enabled" .) "true" }}
-          - name: trusttest-config-volume
-            mountPath: /app/.trusttest_config.json # Assuming app runs from /app
-            subPath: .trusttest_config.json
-          {{- end }}
           - name: tmp
             mountPath: /tmp
           {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 10 }}
@@ -572,11 +567,6 @@ spec:
           items:
             - key: init-db.sql
               path: init-db.sql
-      {{- end }}
-      {{- if eq (include "data-plane.api.trustTestConfig.enabled" .) "true" }}
-      - name: trusttest-config-volume
-        configMap:
-          name: data-plane-trusttest-config
       {{- end }}
       {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" .) | nindent 6 }}
       {{- include "neuraltrust-platform.tolerations" (dict "ctx" .) | nindent 6 }}

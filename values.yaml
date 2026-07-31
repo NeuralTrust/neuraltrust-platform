@@ -509,10 +509,8 @@ control-plane-api:
       resendApiKey: ""
       # Outbound "from" address; the app reads it as SENDER.
       resendAlertSender: ""
-      resendInviteSender: ""
       # Optional Reply-To header on platform emails (REPLY_TO_EMAIL).
       resendReplyTo: ""
-      trustgateJwtSecret: ""
       firewallJwtSecret: ""
       modelScannerSecret: ""
     components:
@@ -605,7 +603,6 @@ control-plane-app:
           appUrl: ""
           nextAuthUrl: ""
           firewallApiUrl: ""
-          forceV2Ui: "true"
           # Prefer platform env email (SES/SMTP/Resend) over per-org DB config.
           # Default true because this chart only renders in external mode.
           authEmailForceEnv: "true"
@@ -787,18 +784,21 @@ data-plane-api:
       name: data-plane
       annotations: {}
     secrets:
+      # Selected by name and read with optional secretKeyRefs, so an absent
+      # Secret leaves the variable unset rather than blocking the pod. The chart
+      # does not create these; pre-create the ones you need.
       openaiApiKeySecretName: "openai-secrets"
-      openaiApiKey: ""
       googleApiKeySecretName: "google-secrets"
-      googleApiKey: ""
       resendApiKeySecretName: "resend-secrets"
-      resendApiKey: ""
       # Empty ⇒ the shared platform Secret (see global.platformSecret). Set this
-      # to read the data-plane JWT from a Secret you manage instead.
+      # to read the data-plane JWT from a Secret you manage instead. Unlike the
+      # three above, these refs are NOT optional: whatever you point this at must
+      # carry both DATA_PLANE_JWT_SECRET and REDIS_URL, or the api pod stops at
+      # CreateContainerConfigError.
       dataPlaneJWTSecretName: ""
+      # Operator pin for the shared DATA_PLANE_JWT_SECRET. Empty ⇒ resolved from
+      # the shared platform Secret.
       dataPlaneJWTSecret: ""
-      huggingFaceTokenSecretName: "huggingface-secrets"
-      huggingFaceToken: ""
     components:
       clickhouse:
         enabled: true
@@ -866,8 +866,6 @@ data-plane-api:
         accessMode: ReadWriteOnce
         huggingfaceToken: ""
         storage: 10Gi
-        trustTestConfig:
-          enabled: false
         replicas: 2
         autoscaling:
           enabled: false

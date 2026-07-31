@@ -111,57 +111,6 @@ data-plane
 {{- end }}
 
 {{/*
-Helper to get secret value - supports both direct values and secret references
-Usage: {{ include "data-plane.getSecretValue" (dict "value" .Values.dataPlane.secrets.openaiApiKey "secretName" "my-secret" "secretKey" "OPENAI_API_KEY" "context" $) }}
-*/}}
-{{- define "data-plane.getSecretValue" -}}
-{{- $value := .value }}
-{{- $secretName := .secretName }}
-{{- $secretKey := .secretKey }}
-{{- $context := .context }}
-{{- $preserveSecrets := false }}
-{{- if $context.Values.global }}
-  {{- if hasKey $context.Values.global "preserveExistingSecrets" }}
-    {{- if $context.Values.global.preserveExistingSecrets }}
-      {{- $preserveSecrets = true }}
-    {{- end }}
-  {{- end }}
-{{- end }}
-
-{{- if kindIs "map" $value }}
-  {{- /* Value is a secret reference object */}}
-  {{- if and (hasKey $value "secretName") (hasKey $value "secretKey") }}
-    {{- $refSecretName := $value.secretName }}
-    {{- $refSecretKey := $value.secretKey }}
-    {{- $refSecret := (lookup "v1" "Secret" $context.Release.Namespace $refSecretName) }}
-    {{- if and $refSecret (hasKey $refSecret.data $refSecretKey) }}
-      {{- /* Use value from referenced secret */}}
-      {{- index $refSecret.data $refSecretKey | quote }}
-    {{- else }}
-      {{- /* Referenced secret doesn't exist, use empty string */}}
-      {{- "" | b64enc | quote }}
-    {{- end }}
-  {{- else }}
-    {{- /* Invalid secret reference format */}}
-    {{- "" | b64enc | quote }}
-  {{- end }}
-{{- else }}
-  {{- /* Value is a direct string - check if we should preserve existing secret */}}
-  {{- $existingSecret := (lookup "v1" "Secret" $context.Release.Namespace $secretName) }}
-  {{- if and $preserveSecrets $existingSecret (hasKey $existingSecret.data $secretKey) }}
-    {{- /* Preserve existing value */}}
-    {{- index $existingSecret.data $secretKey | quote }}
-  {{- else if $value }}
-    {{- /* Use provided value */}}
-    {{- $value | b64enc }}
-  {{- else }}
-    {{- /* Empty value */}}
-    {{- "" | b64enc | quote }}
-  {{- end }}
-{{- end }}
-{{- end }}
-
-{{/*
 Helper that returns the resolved OTel collector endpoint for data-plane
 components. Resolution order:
   1. global.observability.collector.endpoint (umbrella-wide override)
@@ -269,28 +218,4 @@ both the API Deployment and its Jobs.
   {{- if .Values.dataPlane.components.api.k8sJobs.jobImage.tag -}}{{- $tag = .Values.dataPlane.components.api.k8sJobs.jobImage.tag -}}{{- end -}}
 {{- end -}}
 {{- include "data-plane.image" (dict "repository" $repo "tag" $tag "global" .Values.global) -}}
-{{- end }}
-
-{{/*
-Returns "true" when the TrustTest config file should be mounted on data-plane-api
-(and evaluation Job pods). Default: disabled. Set trustTestConfig.enabled: true
-to opt in.
-Usage: {{- if eq (include "data-plane.api.trustTestConfig.enabled" .) "true" }}
-*/}}
-{{- define "data-plane.api.trustTestConfig.enabled" -}}
-{{- $api := dict -}}
-{{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api -}}
-  {{- $api = .Values.dataPlane.components.api -}}
-{{- end -}}
-{{- if hasKey $api "trustTestConfig" -}}
-  {{- $cfg := $api.trustTestConfig -}}
-  {{- if kindIs "map" $cfg -}}
-    {{- if hasKey $cfg "enabled" -}}
-      {{- if $cfg.enabled -}}true{{- end -}}
-    {{- end -}}
-  {{- else if $cfg -}}
-    {{- /* legacy non-map truthy value */ -}}
-    true
-  {{- end -}}
-{{- end -}}
 {{- end }}

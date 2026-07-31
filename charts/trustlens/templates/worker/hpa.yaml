@@ -1,4 +1,4 @@
-{{- if and (eq (include "neuraltrust-platform.isV2" .) "true") .Values.enabled }}
+{{- if .Values.enabled }}
 {{- $as := default dict .Values.dataPlane.autoscaling }}
 {{- if $as.enabled }}
 apiVersion: autoscaling/v2
