@@ -3,10 +3,7 @@ True when TrustGuard templates should render.
 Hybrid: global.products.trustguard must be true. External: always on.
 */}}
 {{- define "trustguard.enabled" -}}
-{{- if and
-  (eq (include "neuraltrust-platform.isV2" .) "true")
-  (eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustguard")) "true")
--}}true{{- end -}}
+{{- if eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustguard")) "true" -}}true{{- end -}}
 {{- end }}
 
 {{/*
@@ -167,11 +164,10 @@ v2 + external/full + a deployed APP_ENV. In that case the chart provisions a
 server cert/key (auto-generated CA, or an operator-provided existingSecret).
 */}}
 {{- define "trustguard.configSyncTls.active" -}}
-{{- $isV2 := eq (include "neuraltrust-platform.isV2" .) "true" -}}
-{{- $isFull := eq (include "neuraltrust-platform.isFull" .) "true" -}}
+{{- $isExternal := eq (include "neuraltrust-platform.isExternal" .) "true" -}}
 {{- $appEnv := lower (trim (.Values.config.appEnv | default "")) -}}
 {{- $deployed := has $appEnv (list "prod" "production" "staging" "stage") -}}
 {{- $tls := (default dict .Values.configSync).grpcTls | default dict -}}
 {{- $provisioned := or ($tls.existingSecret | default "") (eq (include "trustguard.configSyncTls.autoGenerate" .) "true") -}}
-{{- if and $isV2 $isFull $deployed $provisioned }}true{{- end -}}
+{{- if and $isExternal $deployed $provisioned }}true{{- end -}}
 {{- end }}

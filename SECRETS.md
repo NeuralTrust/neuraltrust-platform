@@ -64,7 +64,6 @@ helm upgrade --install neuraltrust-platform . --namespace neuraltrust --create-n
 | Secret | Kubernetes Secret | Key |
 |---|---|---|
 | Control Plane JWT | `control-plane-secrets` | `CONTROL_PLANE_JWT_SECRET` |
-| Gateway integration JWT | `control-plane-secrets` | `TRUSTGATE_JWT_SECRET` |
 
 **How it works:**
 
@@ -159,7 +158,6 @@ after first login when possible. Empty defaults leave the feature off.
 |---|---|---|---|
 | `<your-name>` (caller-controlled) | `ONPREM_SUPERADMIN_EMAIL` / `ONPREM_SUPERADMIN_PASSWORD` (override via `emailKey` / `passwordKey`) | Only when `global.superadmin.existingSecret.name` is set | Bootstrap admin for control-plane-app. Chart does not create this Secret. |
 | `control-plane-secrets` | `CONTROL_PLANE_JWT_SECRET` | Auto-generated | JWT for Control Plane API auth |
-| `control-plane-secrets` | `TRUSTGATE_JWT_SECRET` | Auto-generated | Control-plane ↔ AgentGateway integration key |
 | `control-plane-secrets` | `FIREWALL_JWT_SECRET` | No | JWT for firewall service |
 | `control-plane-secrets` | `FIREWALL_API_URL` | Auto-populated | Firewall base URL (FQDN when firewall enabled, data-plane fallback otherwise) |
 | `control-plane-secrets` | `MODEL_SCANNER_SECRET` | No | Model scanner service secret |
@@ -172,7 +170,6 @@ after first login when possible. Empty defaults leave the feature off.
 | `control-plane-secrets` | `SES_SECRET_ACCESS_KEY` | No | Static SES secret; omit to use the pod IAM role |
 | `control-plane-secrets` | `resend-api-key` | No | Legacy alias of `RESEND_API_KEY`, kept in sync |
 | `control-plane-secrets` | `resend-alert-sender` | No | Legacy "from" address; superseded by `global.email.from` |
-| `control-plane-secrets` | `resend-invite-sender` | No | Invitation email (unused by the app) |
 | `control-plane-secrets` | `resend-reply-to` | No | Legacy Reply-To; superseded by `global.email.replyTo` |
 
 ### Login CAPTCHA (`TURNSTILE_SECRET_KEY`) — optional
@@ -366,7 +363,8 @@ otherwise.
 
 ## Secret reference in values
 
-### Direct value (less secure)
+A per-service credential path takes a **scalar**. It is an operator pin: set it
+and the chart stores that value instead of generating one.
 
 ```yaml
 data-plane-api:
@@ -375,16 +373,22 @@ data-plane-api:
       dataPlaneJWTSecret: "your-secret-value"
 ```
 
-### Secret reference (recommended)
+To keep the credential out of values entirely, point the chart at a Secret you
+own instead of pinning a value — use the `*SecretName` key next to it, or
+`global.platformSecret.existingSecret` for the shared Secret as a whole.
 
 ```yaml
 data-plane-api:
   dataPlane:
     secrets:
-      dataPlaneJWTSecret:
-        secretName: "data-plane-jwt-secret"
-        secretKey: "DATA_PLANE_JWT_SECRET"
+      dataPlaneJWTSecretName: "data-plane-jwt-secret"
 ```
+
+> A `{secretName, secretKey}` map in place of the scalar is **not** supported.
+> The shared Secret discards non-scalar shapes as "not pinned", so a map is
+> silently ignored and the chart generates a value instead. Earlier revisions of
+> this document recommended that form; it never applied to the shared Secret and
+> the one template that honoured it has been removed.
 
 ## Environment variables for the script
 
@@ -401,7 +405,6 @@ export HUGGINGFACE_TOKEN="your-token"
 
 # Control Plane
 export CONTROL_PLANE_JWT_SECRET="your-secret"
-export TRUSTGATE_JWT_SECRET="your-secret"   # control-plane ↔ gateway integration key
 export FIREWALL_JWT_SECRET="your-secret"
 export MODEL_SCANNER_SECRET="your-secret"
 
@@ -556,7 +559,6 @@ Resolution order per key: `global.platformSecret.values` → live `platform-secr
 | Logical key | Adopted from | Value | Emitted when |
 |---|---|---|---|
 | `SERVER_SECRET_KEY` | `agentgateway-secrets` / `SERVER_SECRET_KEY` | generated | external, TrustGate |
-| `TRUSTGATE_JWT_SECRET` | `control-plane-secrets` / `TRUSTGATE_JWT_SECRET` | **= `SERVER_SECRET_KEY`** | v1 only (see below) |
 | `ADMIN_JWT_SECRET` | `trustguard-secrets` / `ADMIN_JWT_SECRET` | generated | external, TrustGuard |
 | `TRUSTGUARD_TOKEN_SIGNING_SECRET` | `trustguard-secrets` / `TRUSTGUARD_TOKEN_SIGNING_SECRET` | generated | external, TrustGuard |
 | `REDIS_EVENTS_SECRET` | `trustguard-secrets` / `REDIS_EVENTS_SECRET` | generated | external, TrustGuard |
@@ -601,9 +603,14 @@ second copy nobody reads, which is the drift this Secret exists to prevent.
 
 **Emitted when** keeps an install down to the credentials its services actually
 read, so a hybrid install carries far fewer keys than an external one. A key
-already present in a live `platform-secrets` is always kept, so an upgrade never
-drops one. `TRUSTGATE_JWT_SECRET` belongs to the retired v1 console and is never
-emitted on a new install; it survives only where a live Secret already holds it.
+already present in a live `platform-secrets` is kept even when this install's
+shape does not ask for it, so an upgrade never drops a credential just because a
+product was turned off.
+
+That carry-over only covers keys that still have a registry row: the check runs
+inside the loop over the registry, so a key whose row is removed is no longer
+visited and disappears from the Secret on the next upgrade. Retiring a row is
+therefore a deliberate decision to delete the key, not a way to leave it behind.
 
 ### MCP OAuth (`global.mcpOAuth`)
 

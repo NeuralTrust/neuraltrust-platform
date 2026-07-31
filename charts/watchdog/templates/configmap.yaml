@@ -141,11 +141,7 @@ data:
         in `.Values.checks` still wins — the overlay only flips off→on.
       */ -}}
       {{- $enabledIds := default (list) .Values.enabledCheckIds }}
-      {{- if eq (include "neuraltrust-platform.isV2" .) "true" }}
-        {{- $enabledIds = concat $enabledIds (default (list) .Values.v2EnabledCheckIds) }}
-      {{- else }}
-        {{- $enabledIds = concat $enabledIds (default (list) .Values.v1EnabledCheckIds) }}
-      {{- end }}
+      {{- $enabledIds = concat $enabledIds (default (list) .Values.v2EnabledCheckIds) }}
       {{- $configMap := default dict .Values.configMap }}
       {{- if $configMap.umbrellaTopologyChecks }}
       {{- range $product := list "trustgate" "trustguard" }}

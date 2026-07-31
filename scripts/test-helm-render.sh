@@ -967,6 +967,21 @@ for scenario_file in "$out1" "$out2" "$out3" "$out4"; do
     "no Kafka Connect Deployment/Service in $(basename "$scenario_file")"
   assert_not_contains "$scenario_file" 'name: v2-postgresql-init' \
     "no v2-postgresql-init Job in $(basename "$scenario_file")"
+  # The v1 console env block was gated on a helper that always returned true,
+  # so it never rendered. Its variables must not come back: the app either
+  # ignores them (FORCE_V2_UI) or would follow them to the SaaS host.
+  for v1_env in FORCE_V2_UI CONTROL_PLANE_SCHEDULER_URL TRUSTGATE_CONTROL_PLANE_URL \
+                TRUSTGATE_DATA_PLANE_URL TRUSTGATE_ACTIONS_URL TRUSTGATE_JWT_SECRET; do
+    assert_not_contains "$scenario_file" "name: ${v1_env}$" \
+      "no ${v1_env} in $(basename "$scenario_file")"
+  done
+done
+
+# Keys nothing reads must not be minted either. Both belonged to the retired v1
+# console; control-plane-secrets only renders in external mode.
+for key in TRUSTGATE_JWT_SECRET resend-invite-sender; do
+  assert_secret_key "$out3" control-plane-secrets absent "$key" \
+    "external: control-plane-secrets omits unread ${key}"
 done
 
 # ---------------------------------------------------------------------------
@@ -1486,7 +1501,7 @@ assert_shared_secret_wiring() {
     # would otherwise be generated independently.
     # An alias is only present when the install shape needs it, so compare the
     # pair only when both were emitted.
-    [["AUTH_SECRET", "NEXTAUTH_SECRET"], ["SERVER_SECRET_KEY", "TRUSTGATE_JWT_SECRET"]].each do |a, b|
+    [["AUTH_SECRET", "NEXTAUTH_SECRET"]].each do |a, b|
       next unless data.key?(a) && data.key?(b)
       errors << "#{a} != #{b}" if data[a] != data[b]
     end
