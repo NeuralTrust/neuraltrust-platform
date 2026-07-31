@@ -36,12 +36,12 @@ config:
 # Service. For external Postgres, pre-create the alertengine role + database
 # and set host/user/name/password below.
 database:
-  host: ""
-  port: 5432
+  host: "" # Empty ⇒ global.postgresql.host, else the in-cluster control-plane-postgresql Service
+  port: "" # Empty ⇒ global.postgresql.port, else 5432
   name: "alertengine"
   user: "alertengine"
   password: "" # Auto-generated if empty (in-cluster PG)
-  sslMode: "prefer" # TLS when available, plaintext fallback for the non-TLS in-cluster PG; use "require" for hosted DBs
+  sslMode: "" # Empty ⇒ global.postgresql.sslMode (default "prefer"); "require" forces TLS on hosted DBs
   # IAM (e.g. AWS RDS) database auth. When true, emits DB_AUTH_MODE=iam /
   # DB_IAM_AUTH and omits DB_PASSWORD. AlertEngine (v0.4.0+) mints a SigV4 token
   # per connection. Requires an IRSA-annotated serviceAccount + awsRegion.

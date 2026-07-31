@@ -38,11 +38,11 @@ stringData:
   {{- $dbPw := include "neuraltrust-platform.resolveSecret" (dict "value" $db.password "existingSecret" $existing "secretKey" "DB_PASSWORD" "length" 32) }}
   {{- $dsn := .Values.databaseUrl }}
   {{- if not $dsn }}
-    {{- $host := include "neuraltrust-platform.postgres.host" (dict "host" $db.host) }}
-    {{- $port := $db.port | default 5432 }}
+    {{- $host := include "neuraltrust-platform.postgres.host" (dict "ctx" . "host" $db.host) }}
+    {{- $port := include "neuraltrust-platform.postgres.port" (dict "ctx" . "port" $db.port) }}
     {{- $name := $db.name | default (include "neuraltrust-platform.v2.hybridPg.database" .) }}
     {{- $user := $db.user | default (include "neuraltrust-platform.v2.hybridPg.user" .) }}
-    {{- $ssl := $db.sslMode | default "prefer" }}
+    {{- $ssl := include "neuraltrust-platform.postgres.sslMode" (dict "ctx" . "sslMode" $db.sslMode) }}
     {{- $dsn = printf "postgresql://%s:%s@%s:%v/%s?sslmode=%s" ($user | urlquery) ($dbPw | urlquery) $host $port $name $ssl }}
   {{- end }}
   DATABASE_URL: {{ $dsn | quote }}

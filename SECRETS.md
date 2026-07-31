@@ -447,13 +447,13 @@ same name in both places.
 | AgentGateway server key | `agentgateway-secrets` | `SERVER_SECRET_KEY` | auto-generated |
 | AgentGateway MCP STS signing | `agentgateway-secrets` | `STS_SIGNING_KEY` | auto-generated RSA PKCS#1 private key (RS256), lookup-preserved so MCP tokens survive upgrades; use `create-secrets.sh` to validate and pre-provision an explicit PEM/base64-PEM key |
 | AgentGateway DB password | `agentgateway-secrets` | `DB_PASSWORD` | **External only** — auto-generated (app reads `DB_PASSWORD`, not `DATABASE_PASSWORD`); **omitted when `agentgateway.database.iamAuth=true`**. In **hybrid** the password comes from the shared `postgresql-secrets` (see below). |
-| AgentGateway raw-telemetry DSN | `agentgateway-secrets` | `SENSIBLE_PG_DSN` | **External only** (assembled DSN when the raw exporter is enabled). In **hybrid** it lives in `postgresql-secrets`. |
+| AgentGateway raw-telemetry DSN | `postgresql-secrets` | `SENSIBLE_PG_DSN` | The umbrella assembles this DSN in **both** modes; the telemetry ConfigMap only names it (`dsn_env: SENSIBLE_PG_DSN`). It is never a key in `agentgateway-secrets`. |
 | TrustGuard admin JWT | `trustguard-secrets` | `ADMIN_JWT_SECRET` | auto-generated |
 | TrustGuard token signing | `trustguard-secrets` | `TRUSTGUARD_TOKEN_SIGNING_SECRET` | auto-generated |
 | TrustGuard Redis events | `trustguard-secrets` | `REDIS_EVENTS_SECRET` | auto-generated; authenticates cache pub/sub events |
 | TrustGuard Firewall client | `firewall-secrets` (mounted as env) | `JWT_SECRET` → `NEURAL_TRUST_FIREWALL_SECRET_KEY` | Present when TrustGuard is on (hybrid product flag or external full stack). Base URL is ConfigMap `NEURAL_TRUST_FIREWALL_BASE_URL` → in-cluster `http://firewall.<ns>.svc.cluster.local`. |
 | TrustGuard DB password | `trustguard-secrets` | `DB_PASSWORD` | **External only** — auto-generated; **omitted when `trustguard.database.iamAuth=true`**. In **hybrid** the password comes from the shared `postgresql-secrets`. |
-| TrustGuard raw-telemetry DSN | `trustguard-secrets` | `SENSIBLE_PG_DSN` | **External only**. In **hybrid** it lives in `postgresql-secrets`. |
+| TrustGuard raw-telemetry DSN | `postgresql-secrets` | `SENSIBLE_PG_DSN` | Same in both modes, as above — not a key in `trustguard-secrets`. |
 | Shared hybrid Postgres credential | `postgresql-secrets` | `POSTGRES_*` plus `SENSIBLE_PG_DSN` — see [One canonical name per fact](#one-canonical-name-per-fact) | **Hybrid only** — the umbrella renders one shared Secret from `global.postgresql.*` (default `user`/`database` = `neuraltrust`), and every hybrid workload connects as that one role. Containers receive `DB_*` / `DATABASE_URL` names through explicit `env` mappings; those are **not** keys in the Secret. Set `global.postgresql.existingSecret.name` to supply your own instead — but then the chart injects it with `envFrom` and cannot rename anything, so **your keys must be `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` / `DB_SSL_MODE` / `SENSIBLE_PG_DSN`**. |
 | Shared hybrid Redis credential | `redis-secrets` | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` / `REDIS_USERNAME` / `REDIS_TLS` | **Hybrid only** — taken wholesale with `envFrom`, and rendered from `global.redis.*`. Empty `REDIS_PASSWORD` for the passwordless in-cluster default. Set `global.redis.existingSecret.name` to reuse a pre-created Secret. TLS is stored once as `REDIS_TLS`, which is the name TrustGuard reads; AgentGateway reads `REDIS_TLS_ENABLED` and is given that name through an explicit `env` mapping, so a supplied Secret only needs `REDIS_TLS`. |
 | Shared TrustGuard client creds | `trustguard-client-credentials` | `CLIENT_ID` / `CLIENT_SECRET` | id defaults to `agentgateway-platform`; secret auto-generated (or `global.v2.trustguardClientSecret`). Injected into both AgentGateway (`TRUSTGUARD_CLIENT_ID`/`_SECRET`) and TrustGuard (`TRUSTGUARD_PLATFORM_CLIENT_ID`/`_SECRET`) so the pair matches. The prerelease `v2-trustguard-client-secret` values are copied during upgrade. |
@@ -491,6 +491,34 @@ install, missing Secrets/keys are created; later upgrades reuse them with `looku
   `global.redis.password` / `global.redis.existingSecret.name` for a hosted /
   authenticated Redis; the chart stores it in the shared `redis-secrets` Secret
   every hybrid workload envFrom's.
+- **Endpoints are declared once (chart 2.6.0+).** `host`, `port` and `sslMode`
+  under any `<service>.database`, and `host`, `port`, `username` and `tls` under
+  any `<service>.redis`, fall back to `global.postgresql` / `global.redis` before
+  falling back to the in-cluster Service names. A managed Aurora/ElastiCache is
+  therefore named once on the global blocks rather than repeated per service, in
+  external mode as well as hybrid. A per-service value still wins, so an overlay
+  can send one service elsewhere. What stays per-service is identity, not
+  endpoint: in external mode each service keeps its own role and database via
+  `database.name` / `database.user`.
+
+  Exactly these keys inherit: `host`, `port` and `sslMode` under
+  `<service>.database`, and `host`, `port`, `username`, `tls` and `password` under
+  `<service>.redis`. Their neighbours — `tlsInsecureVerify`, `db`, `iamAuth`,
+  `awsRegion`, `cacheName`, `awsServerless` — have no `global.*` counterpart, so
+  setting them on a global block does nothing.
+
+  Because an empty value inherits, switching an inherited flag back off for one
+  service needs a **quoted** string: `tls: "false"` in a values file, or
+  `--set-string <service>.redis.tls=false`. A bare `--set …redis.tls=false`
+  renders as an empty string and therefore inherits the global `true` instead.
+  The same applies to `username`, where `""` cannot mean "AUTH as the default
+  user" while a global ACL username is set.
+
+  One credential deserves care: `global.redis.password` reaches all three cache
+  consumers, but the Redis this chart deploys runs without `--requirepass`. A
+  password set while `global.redis.deploy: true` and `global.redis.host` is empty
+  is therefore rejected at render, because every consumer would fail to
+  authenticate against the chart's own Redis.
 - **Shared ClickHouse credential**: DataCore, AlertEngine, `clickstack-otel-collector`
   and `data-plane-api` read the ClickHouse password from the single
   `clickhouse` secret (key `admin-password`) — none store their own

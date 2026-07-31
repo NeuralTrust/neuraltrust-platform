@@ -104,6 +104,18 @@ no Kubernetes resource when validation succeeds.
   {{- end -}}
 {{- end -}}
 
+{{- /* A cache password is meaningless against the Redis this chart deploys: it runs
+       `redis-server --protected-mode no` with no `--requirepass`, so every consumer
+       that inherits the password would get "Client sent AUTH, but no password is
+       set". Only reject the unambiguous shape — deploying our own Redis and naming
+       no host, so nothing can be pointing anywhere else. */ -}}
+{{- $globalRedis := default dict $global.redis -}}
+{{- $redisDeploy := true -}}
+{{- if hasKey $globalRedis "deploy" -}}{{- $redisDeploy = $globalRedis.deploy -}}{{- end -}}
+{{- if and ($globalRedis.password | default "") $redisDeploy (not ($globalRedis.host | default "")) -}}
+  {{- fail "global.redis.password is set while the chart deploys its own Redis (global.redis.deploy=true) and global.redis.host is empty. That Redis runs without a password, so every service inheriting this one would fail to authenticate. Set global.redis.deploy=false and global.redis.host for a managed cache, or drop the password." -}}
+{{- end -}}
+
 {{- $autoGenerate := true -}}
 {{- if hasKey $global "autoGenerateSecrets" -}}{{- $autoGenerate = $global.autoGenerateSecrets -}}{{- end -}}
 {{- $preserveExisting := false -}}
