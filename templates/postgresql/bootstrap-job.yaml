@@ -1,0 +1,307 @@
+{{- /*
+Creates the roles and databases the platform expects on the chart's own
+in-cluster PostgreSQL, and aligns each role's password with the Secret the
+service reads.
+
+The PostgreSQL image bootstraps exactly one role and one database, from
+POSTGRES_USER / POSTGRES_DB. Hybrid needs nothing more — every hybrid service
+shares that pair — but external mode gives each service its own database so it
+can own its own migrations, and nothing was creating those. The services then
+authenticated as roles that did not exist and crash-looped, which is not a state
+an operator should have to fix with psql (AUT-412).
+
+This never touches a managed instance. Host and port below are templated from
+`global.postgresql.service`, never read from `postgresql-secrets`, and
+`bootstrapJob.enabled` already refuses to render once `global.postgresql.host`
+names something else or auth is IAM.
+
+Idempotent, because it runs on every upgrade and on re-installs into a namespace
+whose Secrets were kept: an existing role has its password re-aligned with the
+Secret the pods read, an existing database keeps its data and only gains the
+owner and grants.
+*/ -}}
+{{- if eq (include "neuraltrust-platform.postgresql.bootstrapJob.enabled" .) "true" }}
+{{- $pg := default dict (default dict .Values.global).postgresql }}
+{{- $img := default dict $pg.image }}
+{{- $job := default dict $pg.bootstrapJob }}
+{{- $service := default dict $pg.service }}
+{{- $adminDb := include "neuraltrust-platform.v2.hybridPg.database" . }}
+{{- $adminRole := include "neuraltrust-platform.v2.hybridPg.user" . }}
+{{- $isExternal := eq (include "neuraltrust-platform.isExternal" .) "true" }}
+{{- /* `default` cannot read these: it treats an explicit false as absent. */}}
+{{- $aeEnabled := true }}
+{{- if hasKey (default dict .Values.alertengine) "enabled" }}{{- $aeEnabled = (default dict .Values.alertengine).enabled }}{{- end }}
+{{- $tlEnabled := false }}
+{{- if hasKey (default dict .Values.trustlens) "enabled" }}{{- $tlEnabled = (default dict .Values.trustlens).enabled }}{{- end }}
+
+{{- /* Every service that owns a role: the two telemetry writers resolve theirs
+       through the same mode-aware helpers as their env ConfigMaps, so the Job
+       cannot disagree with what the pod dials. `defaultKey` is the key read from
+       the chart's own Secret; an `existingSecret` hook (AUT-411) redirects both
+       name and key to the operator's Secret. */}}
+{{- $candidates := list
+  (dict "key" "agentgateway" "gate" (eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustgate")) "true") "writer" true "secret" "agentgateway-secrets" "defaultKey" "DB_PASSWORD")
+  (dict "key" "trustguard" "gate" (eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustguard")) "true") "writer" true "secret" "trustguard-secrets" "defaultKey" "DB_PASSWORD")
+  (dict "key" "alertengine" "gate" (and $isExternal $aeEnabled) "secret" "alertengine-secrets" "defaultKey" "DB_PASSWORD")
+  (dict "key" "datacore" "gate" $isExternal "secret" "datacore-secrets" "defaultKey" "POSTGRES_PASSWORD")
+  (dict "key" "trustlens" "gate" $tlEnabled "secret" "trustlens-secrets" "defaultKey" "DATABASE_PASSWORD")
+}}
+{{- $services := list }}
+{{- range $c := $candidates }}
+  {{- $vals := default dict (index $.Values $c.key) }}
+  {{- $db := default dict $vals.database }}
+  {{- $role := "" }}
+  {{- $name := "" }}
+  {{- if $c.writer }}
+    {{- $role = include "neuraltrust-platform.v2.writerUser" (dict "ctx" $ "explicit" $db.user "default" $c.key) }}
+    {{- $name = include "neuraltrust-platform.v2.dbName" (dict "ctx" $ "explicit" $db.name "external" $c.key) }}
+  {{- else }}
+    {{- $role = $db.user | default $c.key }}
+    {{- $name = $db.name | default $c.key }}
+  {{- end }}
+  {{- $ref := default dict $db.existingSecret }}
+  {{- /* Skipped when: the service is not deployed; it authenticates with IAM and
+         so has no password to set; or it shares the bootstrap role, which the
+         image itself created (every hybrid service resolves to exactly that). */}}
+  {{- if and $c.gate (not $db.iamAuth) (ne $role $adminRole) }}
+    {{- $services = append $services (dict
+      "key" $c.key
+      "role" $role
+      "db" $name
+      "env" (printf "%s_DB_PASSWORD" (upper $c.key))
+      "secret" ($ref.name | default $c.secret)
+      "secretKey" ($ref.key | default $c.defaultKey)
+    ) }}
+  {{- end }}
+{{- end }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: control-plane-postgresql-bootstrap
+  labels:
+    app: control-plane-postgresql-bootstrap
+  annotations:
+    {{- /* post-install, not pre-install: the PostgreSQL Deployment is created in
+           the main phase, so there is nothing to connect to before it. Services
+           that need a role may restart a few times while this runs, then
+           recover. */}}
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-5"
+    {{- /* Kept after it finishes, succeeded or not: "which roles did it create"
+           is the first question asked after an install, and deleting on success
+           leaves nothing to answer it with. Replaced on the next install or
+           upgrade, and the TTL below clears it either way. */}}
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: control-plane-postgresql-bootstrap
+    spec:
+      restartPolicy: Never
+      {{- if not (include "neuraltrust-platform.isOpenshift" .) }}
+      securityContext:
+        runAsUser: 999
+        runAsGroup: 999
+        runAsNonRoot: true
+      {{- end }}
+      {{- include "neuraltrust-platform.postgresql.imagePullSecrets" . | nindent 6 }}
+      containers:
+        - name: bootstrap
+          image: {{ include "neuraltrust-platform.image" (dict "repository" $img.repository "tag" $img.tag "global" .Values.global) | quote }}
+          imagePullPolicy: {{ $img.pullPolicy | default "IfNotPresent" }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+            runAsNonRoot: true
+            {{- if not (include "neuraltrust-platform.isOpenshift" .) }}
+            runAsUser: 999
+            runAsGroup: 999
+            {{- end }}
+            seccompProfile:
+              type: RuntimeDefault
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+
+              log() { printf '%s\n' "$*"; }
+
+              if [ -z "${PGPASSWORD:-}" ] || [ -z "${PGUSER:-}" ]; then
+                log "ERROR: postgresql-secrets is missing POSTGRES_USER or POSTGRES_PASSWORD."
+                log "       With autoGenerateSecrets=false or preserveExistingSecrets=true the"
+                log "       chart writes no Secret, so pre-create postgresql-secrets before installing."
+                exit 1
+              fi
+
+              log "Waiting for PostgreSQL at ${PGHOST}:${PGPORT} as \"${PGUSER}\"..."
+              ATTEMPT=0
+              until psql -X -tAc 'SELECT 1' >/dev/null 2>&1; do
+                ATTEMPT=$((ATTEMPT + 1))
+                if [ "${ATTEMPT}" -ge 100 ]; then
+                  log "ERROR: no authenticated connection after $((ATTEMPT * 3))s."
+                  log "       If the data directory outlived the Secret, the stored password is"
+                  log "       no longer POSTGRES_PASSWORD — the image applies that only when it"
+                  log "       initialises an empty directory. Reset the role from inside the"
+                  log "       PostgreSQL pod, or restore the Secret it was initialised with."
+                  exit 1
+                fi
+                [ $((ATTEMPT % 10)) -eq 0 ] && log "  still waiting (attempt ${ATTEMPT})..."
+                sleep 3
+              done
+              log "Connected."
+
+              q() { psql -X -q -v ON_ERROR_STOP=1 "$@"; }
+
+              # Names and passwords reach the server as psql variables, never pasted
+              # into SQL text: :"x" as a quoted identifier, :'x' as a literal. They
+              # only interpolate when the statement arrives on stdin — psql hands a
+              # -c string to the server untouched — hence the here-documents.
+              role_exists() {
+                FOUND="$(psql -X -tA -v r="$1" 2>/dev/null <<'SQL'
+              SELECT 1 FROM pg_roles WHERE rolname = :'r';
+              SQL
+                )"
+                [ "${FOUND}" = "1" ]
+              }
+
+              db_exists() {
+                FOUND="$(psql -X -tA -v d="$1" 2>/dev/null <<'SQL'
+              SELECT 1 FROM pg_database WHERE datname = :'d';
+              SQL
+                )"
+                [ "${FOUND}" = "1" ]
+              }
+
+              # Create the database when absent, otherwise leave its contents alone
+              # and only converge ownership and grants. Owning it is what lets the
+              # service run its own migrations, including on PostgreSQL 15+ where
+              # the public schema no longer grants CREATE to everyone.
+              ensure_database() {
+                DB="$1"; ROLE="$2"
+                if db_exists "${DB}"; then
+                  q -v d="${DB}" -v r="${ROLE}" <<'SQL'
+              ALTER DATABASE :"d" OWNER TO :"r";
+              SQL
+                  log "  database \"${DB}\" already present, owner is \"${ROLE}\""
+                else
+                  q -v d="${DB}" -v r="${ROLE}" <<'SQL'
+              CREATE DATABASE :"d" OWNER :"r";
+              SQL
+                  log "  created database \"${DB}\" owned by \"${ROLE}\""
+                fi
+                q -v d="${DB}" -v r="${ROLE}" <<'SQL'
+              GRANT ALL PRIVILEGES ON DATABASE :"d" TO :"r";
+              SQL
+                q -d "${DB}" -v r="${ROLE}" <<'SQL'
+              GRANT ALL ON SCHEMA public TO :"r";
+              SQL
+              }
+
+              # The password arrives as the NAME of an env var, so it is never a
+              # process argument and never reaches a log line.
+              bootstrap_service() {
+                LABEL="$1"; ROLE="$2"; DB="$3"; PW="$(printenv "$4" || true)"
+                if [ -z "${PW}" ]; then
+                  log "${LABEL}: no password in ${5} (key ${6}); skipping. The service cannot connect until its role exists."
+                  SKIPPED="${SKIPPED} ${LABEL}"
+                  return 0
+                fi
+                if role_exists "${ROLE}"; then
+                  q -v r="${ROLE}" -v p="${PW}" <<'SQL'
+              ALTER ROLE :"r" WITH LOGIN PASSWORD :'p';
+              SQL
+                  log "${LABEL}: role \"${ROLE}\" already present, password re-aligned"
+                else
+                  q -v r="${ROLE}" -v p="${PW}" <<'SQL'
+              CREATE ROLE :"r" WITH LOGIN PASSWORD :'p';
+              SQL
+                  log "${LABEL}: created role \"${ROLE}\""
+                fi
+                ensure_database "${DB}" "${ROLE}"
+              }
+
+              SKIPPED=""
+
+              # The bootstrap pair the image created. Ensured here too so a data
+              # directory that predates a change to global.postgresql.database, or
+              # one restored from elsewhere, still ends up with it.
+              CONTROL_PLANE_DB="${CONTROL_PLANE_DB:-{{ $adminDb }}}"
+              log "control plane: role \"${PGUSER}\", database \"${CONTROL_PLANE_DB}\""
+              ensure_database "${CONTROL_PLANE_DB}" "${PGUSER}"
+              {{ range $s := $services }}
+              bootstrap_service {{ $s.key | quote }} {{ $s.role | quote }} {{ $s.db | quote }} {{ $s.env | quote }} {{ $s.secret | quote }} {{ $s.secretKey | quote }}
+              {{- end }}
+
+              if [ -n "${SKIPPED}" ]; then
+                log "Done, without:${SKIPPED}"
+              else
+                log "Done."
+              fi
+          env:
+            - name: PGHOST
+              value: "control-plane-postgresql"
+            - name: PGPORT
+              value: {{ $service.port | default 5432 | quote }}
+            {{- /* Admin work happens on the always-present `postgres` database, so
+                   the control-plane one can be created if it is somehow missing. */}}
+            - name: PGDATABASE
+              value: "postgres"
+            - name: PGCONNECT_TIMEOUT
+              value: "5"
+            - name: HOME
+              value: "/tmp"
+            {{- /* optional, so a missing Secret produces the message above rather
+                   than a pod stuck in CreateContainerConfigError. */}}
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql-secrets
+                  key: POSTGRES_USER
+                  optional: true
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql-secrets
+                  key: POSTGRES_PASSWORD
+                  optional: true
+            - name: CONTROL_PLANE_DB
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql-secrets
+                  key: POSTGRES_DB
+                  optional: true
+            {{- range $s := $services }}
+            - name: {{ $s.env }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $s.secret | quote }}
+                  key: {{ $s.secretKey | quote }}
+                  optional: true
+            {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            {{- if $job.resources }}
+            {{- toYaml $job.resources | nindent 12 }}
+            {{- else }}
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" .) | nindent 6 }}
+      {{- include "neuraltrust-platform.tolerations" (dict "ctx" .) | nindent 6 }}
+{{- end }}
