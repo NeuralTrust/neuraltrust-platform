@@ -285,12 +285,15 @@ to exist as keys inside the chart-managed Secret.
 > `DB_PASSWORD`, `DB_NAME`, `DB_SSL_MODE`, and `SENSIBLE_PG_DSN` — not the
 > `POSTGRES_*` family. This is the one case where `DB_*` keys are correct.
 
-There is **no** chart-managed schema/role
-init Job in hybrid — application migrations (already namespaced:
+No chart-managed schema migration — application migrations (already namespaced:
 `trustgate_migration_versions`, `trustguard_migration_versions`) own their tables
-directly. For an external / managed PostgreSQL, the DBA (or Terraform)
-pre-creates the database and role before install; point the chart at it via
-`global.postgresql.deploy: false` + host/user/password (or set
+directly. Roles and databases are a separate question, answered by whose instance
+it is: when the chart runs PostgreSQL itself, the
+`control-plane-postgresql-bootstrap` Job creates whatever the image did not
+(hybrid shares the one bootstrap pair, external needs a role and database per
+service). For an external / managed PostgreSQL, the DBA (or Terraform) pre-creates
+them before install and the Job does not render; point the chart at the instance
+via `global.postgresql.deploy: false` + host/user/password (or set
 `global.postgresql.existingSecret.name`). The `data-plane-api` read shim runs on
 PostgreSQL by default in hybrid, sharing the same `postgresql-secrets` — a
 `postgres-migrations` initContainer applies its own schema

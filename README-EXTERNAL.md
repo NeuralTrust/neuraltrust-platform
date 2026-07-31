@@ -263,11 +263,22 @@ this cannot cover is the control-plane role in `global.postgresql.password`, whi
 the chart bakes into the Prisma and telemetry connection strings while rendering.
 See [Datastore credentials without values](./SECRETS.md#datastore-credentials-without-values).
 
-Pre-create every PostgreSQL role and database before installing — there is no
-chart-managed init Job. DataCore, AlertEngine, the ClickStack collector, and
-`data-plane-api` all read one shared ClickHouse credential; point their
-`clickhouse.existingSecret` at your secret when using a managed cluster. Complete
-pattern: `[values-managed-datastores.yaml.example](./values-managed-datastores.yaml.example)`.
+Who creates the PostgreSQL roles and databases depends on whose instance it is:
+
+- **The chart's own PostgreSQL** (`global.postgresql.deploy: true`, the default):
+  since chart 2.7.0 a `control-plane-postgresql-bootstrap` Job creates each role
+  with the password the service's Secret already holds, creates the database owned
+  by it, and grants it the `public` schema. Nothing to pre-create, and nothing to
+  replay after a password rotation — the Job re-aligns roles on every upgrade.
+- **A managed instance**: pre-create every role and database yourself. The Job is
+  not rendered when `global.postgresql.host` names another instance, when `deploy`
+  is false, or under IAM auth, so the chart never issues DDL against an instance
+  it does not own.
+
+DataCore, AlertEngine, the ClickStack collector, and `data-plane-api` all read one
+shared ClickHouse credential; point their `clickhouse.existingSecret` at your
+secret when using a managed cluster. Complete pattern:
+`[values-managed-datastores.yaml.example](./values-managed-datastores.yaml.example)`.
 
 In-cluster ClickHouse defaults to a 50 GiB volume with a ~4 GiB memory request.
 Size the volume for your retention window before first install.
