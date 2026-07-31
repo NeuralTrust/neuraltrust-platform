@@ -199,6 +199,18 @@ global:
     # rename per service (see SECRETS.md).
     existingSecret:
       name: ""
+    # Bootstrap Job for the chart's own PostgreSQL. The container image creates
+    # exactly one role and one database (user/database above), which is all hybrid
+    # needs — every hybrid service shares that pair. External mode gives each
+    # service its own database and its own migrations, so the Job creates and
+    # grants those roles too, taking each password from the Secret the service
+    # itself reads. Idempotent, and it never runs against a managed instance:
+    # setting `host` or authMode=iam stops it rendering at all. Deliberately not
+    # the key AUT-334 retired, whose mode=enabled did reach managed instances: an
+    # overlay still carrying that one is ignored rather than obeyed.
+    bootstrapJob:
+      enabled: true
+      resources: {} # Empty → 100m/64Mi requests, 500m/128Mi limits
     # In-cluster PostgreSQL Deployment image/resources/persistence knobs.
     image:
       repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/postgres

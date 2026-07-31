@@ -4,9 +4,61 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.7.0] — 2026-07-31
+
+Chart `2.6.0` → `2.7.0`. External mode can now be installed on the chart's own
+PostgreSQL without a DBA, which is the shape every demo and smoke test takes.
+
+### Added
+
+- **The chart creates the roles and databases its services need when it is
+  running PostgreSQL itself** (AUT-412). External mode gives each service its own
+  database so it can own its own migrations, but the PostgreSQL image bootstraps
+  exactly one role and one database, and nothing created the rest. A clean install
+  with `deploymentMode: external` and the default `global.postgresql.deploy: true`
+  therefore came up with AgentGateway, TrustGuard, AlertEngine and DataCore
+  authenticating as roles that did not exist, and crash-looping — taking the
+  gateway data planes down with them, since their control planes never started.
+  Every generated `DB_PASSWORD` differs per install, so fixing it by hand meant
+  reading four Secrets and replaying SQL.
+
+  A `control-plane-postgresql-bootstrap` Job now runs on install and upgrade,
+  connects as the bootstrap superuser and, per deployed service, creates the role
+  with the password already in the Secret the pods read, then creates the database
+  owned by it and grants it the `public` schema. Idempotent: an existing role has
+  its password re-aligned with the Secret (which is what makes a re-install into a
+  namespace with kept Secrets work), and an existing database keeps every table but
+  is handed to the service as owner — on PostgreSQL 15+ that also hands it the
+  `public` schema, which is what a role needs to migrate. Skipped per service
+  when it is not deployed, when it uses `iamAuth`, or when it shares the bootstrap
+  role — every hybrid service does, so hybrid gets no per-service role.
+  `<service>.database.existingSecret` is honoured, so a pre-created Secret still
+  owns the credential.
+
+  It never touches a managed instance. The Job is not rendered at all once
+  `global.postgresql.host` names another instance, `deploy` is false, or auth is
+  IAM, and its host and port are templated from `global.postgresql.service`
+  rather than read from `postgresql-secrets`, so no values path can aim it
+  somewhere else. Turn it off with `global.postgresql.bootstrapJob.enabled: false`
+  — a different key from the one AUT-334 retired, whose `mode: enabled` did reach
+  managed instances.
+
+  Hybrid still renders it, with nothing per-service to do, for the one diagnostic
+  it adds: a data directory that outlived its Secret now fails in one place with
+  an explanation, instead of six workloads crash-looping on a password the image
+  only ever applied to an empty directory.
+
+  Expect the Job to run for as long as PostgreSQL takes to accept connections
+  (it waits up to 5 minutes), and expect the services that need a role to restart
+  a few times while it does — a clean install of the full external stack on the
+  chart's own datastores settles with 3-5 restarts on the workloads that were
+  waiting. The Job stays in the namespace afterwards either way, so
+  `kubectl logs job/control-plane-postgresql-bootstrap` says which roles it
+  created; it is replaced on the next upgrade and expires after a day.
+
 ## [v2.6.0] — 2026-07-31
 
-Chart `2.5.4` → `2.7.0`. Two minor bumps' worth of new behaviour in the
+Chart `2.5.4` → `2.6.0`. Two minor bumps' worth of new behaviour in the
 per-service datastore blocks: endpoint inheritance, and credentials that can come
 from a Secret you created. Default renders are byte-identical.
 
