@@ -9,29 +9,37 @@ your environment. For the default hosted-control-plane path, see the
 
 ## Hybrid vs external
 
-| | `hybrid` (default) | `external` |
-|---|---|---|
-| Console / control plane | Hosted by NeuralTrust | `control-plane-app` + `control-plane-api` in your cluster |
-| Product selection | `global.products` flags, at least one `true` | **Flags ignored** — full stack always deploys |
-| Analytics store | Hosted, via enrolment-backed OTLP egress | In-cluster or managed **ClickHouse** |
-| Telemetry collector | `clickstack-egress-collector` sidecar on DataAgent | `clickstack-collector` Deployment writing to ClickHouse |
-| DataAgent | One per enabled product | **Never renders** |
-| Config-sync | On by default, needs console tokens | Off — configuration lives in PostgreSQL |
-| Air-gap capable | No (product OTLP egress is mandatory) | Yes |
+
+|                         | `hybrid` (default)                                 | `external`                                                |
+| ----------------------- | -------------------------------------------------- | --------------------------------------------------------- |
+| Console / control plane | Hosted by NeuralTrust                              | `control-plane-app` + `control-plane-api` in your cluster |
+| Product selection       | `global.products` flags, at least one `true`       | **Flags ignored** — full stack always deploys             |
+| Analytics store         | Hosted, via enrolment-backed OTLP egress           | In-cluster or managed **ClickHouse**                      |
+| Telemetry collector     | `clickstack-egress-collector` sidecar on DataAgent | `clickstack-collector` Deployment writing to ClickHouse   |
+| DataAgent               | One per enabled product                            | **Never renders**                                         |
+| Config-sync             | On by default, needs console tokens                | Off — configuration lives in PostgreSQL                   |
+| Air-gap capable         | No (product OTLP egress is mandatory)              | Yes                                                       |
+
+
+
 
 ## Prerequisites
 
 - A Kubernetes cluster with an ingress controller, and Helm 3.8+ for OCI installs
 - **4–5 worker nodes at 8 vCPU / 16–32 GiB** — external adds the control plane,
-  ClickHouse, ClickStack collector, DataCore, and AlertEngine on top of the data
-  path. See [`docs/sizing.md`](./docs/sizing.md)
+ClickHouse, ClickStack collector, DataCore, and AlertEngine on top of the data
+path. See `[docs/sizing.md](./docs/sizing.md)`
 - A base domain you can point at the cluster ingress, plus TLS certificates for
-  it
+it
 - The NeuralTrust registry pull secret in the release namespace, or all images
-  mirrored into your own registry
+mirrored into your own registry
 - A storage class for the ClickHouse and PostgreSQL volumes
 
+
+
 ## Quick start
+
+
 
 ### 1. Create the namespace and image pull secret
 
@@ -40,6 +48,8 @@ kubectl create namespace neuraltrust
 
 GCR_KEY_FILE=./gcr-keys.json ./create-image-pull-secret.sh --namespace neuraltrust
 ```
+
+
 
 ### 2. Create the bootstrap admin Secret
 
@@ -63,7 +73,7 @@ on upgrade while `global.autoGenerateSecrets: true` — see [SECRETS.md](./SECRE
 
 ### 3. Write your values file
 
-[`values-external.yaml.example`](./values-external.yaml.example) is the
+`[values-external.yaml.example](./values-external.yaml.example)` is the
 tracked minimal external overlay:
 
 ```yaml
@@ -93,6 +103,8 @@ helm upgrade --install neuraltrust-platform \
   -f values-external.yaml.example
 ```
 
+
+
 ### 5. Verify
 
 ```bash
@@ -102,16 +114,18 @@ kubectl get ingress -n neuraltrust
 
 Default hostnames derive from `global.domain`:
 
-| Service | Host |
-|---|---|
-| Console (web app) | `app.<domain>` |
-| Control-plane API | `api.<domain>` |
+
+| Service               | Host                                    |
+| --------------------- | --------------------------------------- |
+| Console (web app)     | `app.<domain>`                          |
+| Control-plane API     | `api.<domain>`                          |
 | TrustGate LLM gateway | `gateway.<domain>` and `*.llm.<domain>` |
-| TrustGate MCP | `mcp.<domain>` and `*.mcp.<domain>` |
-| TrustGate Admin | `admin.<domain>` |
-| TrustGuard | `trustguard.<domain>` |
-| TrustGuard Admin | `trustguard-admin.<domain>` |
-| data-plane API | `data-plane-api.<domain>` |
+| TrustGate MCP         | `mcp.<domain>` and `*.mcp.<domain>`     |
+| TrustGate Admin       | `admin.<domain>`                        |
+| TrustGuard            | `trustguard.<domain>`                   |
+| TrustGuard Admin      | `trustguard-admin.<domain>`             |
+| data-plane API        | `data-plane-api.<domain>`               |
+
 
 Point DNS at the ingress address, then log in at `https://app.<domain>` with the
 bootstrap admin credentials from step 2 and rotate the password.
@@ -122,47 +136,57 @@ External runs the whole platform in your cluster — both control planes and the
 data path. With the defaults in `values-external.yaml.example`, the release
 contains:
 
-**TrustGate** (values key `agentgateway:`; Kubernetes names stay `agentgateway-*`)
+**TrustGate** (values key `agentgateway:`; Kubernetes names stay `agentgateway-`*)
 
-| Workload | Role |
-|---|---|
+
+| Workload             | Role                        |
+| -------------------- | --------------------------- |
 | `agentgateway-admin` | Control plane and admin API |
-| `agentgateway-proxy` | LLM gateway runtime |
-| `agentgateway-mcp` | MCP gateway runtime |
+| `agentgateway-proxy` | LLM gateway runtime         |
+| `agentgateway-mcp`   | MCP gateway runtime         |
+
 
 **TrustGuard and Firewall**
 
-| Workload | Role |
-|---|---|
-| `trustguard-control-plane` | Policy and admin API |
-| `trustguard-data-plane` | `/v1/guard` evaluation runtime |
-| `firewall` | NeuralTrust Firewall model server, deployed with TrustGuard |
-| `prompt-jailbreak-worker`, `response-jailbreak-worker`, `prompt-moderation-worker`, `toxicity-worker`, `indirect-prompt-injections-worker` | Per-detector Firewall workers |
+
+| Workload                                                                                                                                   | Role                                                        |
+| ------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------- |
+| `trustguard-control-plane`                                                                                                                 | Policy and admin API                                        |
+| `trustguard-data-plane`                                                                                                                    | `/v1/guard` evaluation runtime                              |
+| `firewall`                                                                                                                                 | NeuralTrust Firewall model server, deployed with TrustGuard |
+| `prompt-jailbreak-worker`, `response-jailbreak-worker`, `prompt-moderation-worker`, `toxicity-worker`, `indirect-prompt-injections-worker` | Per-detector Firewall workers                               |
+
 
 **Platform control plane**
 
-| Workload | Role |
-|---|---|
-| `control-plane-api` | Platform API |
+
+| Workload            | Role                                                              |
+| ------------------- | ----------------------------------------------------------------- |
+| `control-plane-api` | Platform API                                                      |
 | `control-plane-app` | Console web application; runs Prisma migrations and seed on start |
-| `data-plane-api` | Read and analytics API over ClickHouse |
+| `data-plane-api`    | Read and analytics API over ClickHouse                            |
+
 
 **Analytics and alerting**
 
-| Workload | Role |
-|---|---|
-| `clickstack-collector` (values key `clickstack-otel-collector:`) | Receives product OTLP on 4317/4318, writes to ClickHouse |
-| `clickhouse` | Analytics store (StatefulSet, external mode only) |
-| `datacore` | Residency and analytics queries over landed telemetry |
-| `alertengine-api` / `alertengine-worker` | Rule evaluation, alert state, SIEM and integration forwarding |
+
+| Workload                                                         | Role                                                          |
+| ---------------------------------------------------------------- | ------------------------------------------------------------- |
+| `clickstack-collector` (values key `clickstack-otel-collector:`) | Receives product OTLP on 4317/4318, writes to ClickHouse      |
+| `clickhouse`                                                     | Analytics store (StatefulSet, external mode only)             |
+| `datacore`                                                       | Residency and analytics queries over landed telemetry         |
+| `alertengine-api` / `alertengine-worker`                         | Rule evaluation, alert state, SIEM and integration forwarding |
+
 
 **Datastores and setup** — all in-cluster by default, see [Datastores](#datastores)
 
-| Workload | Role |
-|---|---|
-| `control-plane-postgresql` | PostgreSQL for every service that needs one |
-| `redis` | Shared cache and queue |
-| `neuraltrust-platform-mcp-signing-key` (Job) | Generates the MCP signing key on install |
+
+| Workload                                     | Role                                        |
+| -------------------------------------------- | ------------------------------------------- |
+| `control-plane-postgresql`                   | PostgreSQL for every service that needs one |
+| `redis`                                      | Shared cache and queue                      |
+| `neuraltrust-platform-mcp-signing-key` (Job) | Generates the MCP signing key on install    |
+
 
 Absent in external: `dataagent`, `dataagent-trustguard`, and the
 `clickstack-egress-collector` sidecar. External never enrols a DataAgent, so
@@ -179,7 +203,7 @@ OTLP senders -> ClickStack OTel Collector -> ClickHouse
 AlertEngine is the supported detection, SIEM, and integration path for external
 deployments. Disabling hosted observability export does not disable AlertEngine
 or the ClickStack-to-ClickHouse pipeline. See
-[`docs/observability.md`](./docs/observability.md).
+`[docs/observability.md](./docs/observability.md)`.
 
 ## Datastores
 
@@ -214,7 +238,7 @@ Pre-create every PostgreSQL role and database before installing — there is no
 chart-managed init Job. DataCore, AlertEngine, the ClickStack collector, and
 `data-plane-api` all read one shared ClickHouse credential; point their
 `clickhouse.existingSecret` at your secret when using a managed cluster. Complete
-pattern: [`values-managed-datastores.yaml.example`](./values-managed-datastores.yaml.example).
+pattern: `[values-managed-datastores.yaml.example](./values-managed-datastores.yaml.example)`.
 
 In-cluster ClickHouse defaults to a 50 GiB volume with a ~4 GiB memory request.
 Size the volume for your retention window before first install.
@@ -242,19 +266,8 @@ defaults to. The umbrella collector keeps collecting locally, ClickStack keeps
 writing to your ClickHouse, and AlertEngine keeps forwarding to destinations
 reachable from the cluster.
 
-The hybrid network allowlist in [`docs/hybrid-network.md`](./docs/hybrid-network.md)
+The hybrid network allowlist in `[docs/hybrid-network.md](./docs/hybrid-network.md)`  
 does **not** apply — external needs no outbound path to NeuralTrust.
-
-### Login CAPTCHA can lock admins out
-
-The published `control-plane-app` images embed a Cloudflare Turnstile **site**
-key and show a CAPTCHA after three failed logins. The matching **secret** key is
-a runtime value the chart does not set, and verification calls
-`challenges.cloudflare.com` directly. Without that key — or without egress to
-Cloudflare — a user who mistypes a password three times cannot log in until the
-pod gets the key or the browser state is cleared. An air-gapped install needs an
-image built without a site key. Details and the `extraEnv` workaround are in
-[SECRETS.md](./SECRETS.md#login-captcha-turnstile_secret_key--can-lock-users-out).
 
 ## Platform and ingress
 
@@ -276,13 +289,13 @@ prerequisites, and Security Context Constraints.
 ## Optional components
 
 - umbrella OTel Collector: portable cluster observability, separate from
-  ClickStack
+ClickStack
 - AlertEngine: set `alertengine.enabled: false` to omit rule evaluation and SIEM
-  forwarding
+forwarding
 
 **Firewall is not optional** in external — it always deploys with TrustGuard and
 cannot be switched off. The only choice is CPU workers (default) or GPU via
-[`values-dataplane-gpu.yaml.example`](./values-dataplane-gpu.yaml.example).
+`[values-dataplane-gpu.yaml.example](./values-dataplane-gpu.yaml.example)`.
 
 ## Validate before rollout
 
@@ -315,10 +328,10 @@ each upgrade.
 - [Observability and self-healing](./docs/observability.md)
 - [Cluster sizing](./docs/sizing.md)
 - Public docs: [External (self-hosted)](https://docs.neuraltrust.ai/neuraltrust/deployment/external) ·
-  [Deployment models](https://docs.neuraltrust.ai/neuraltrust/deployment/deployment-models) ·
-  [Configuration](https://docs.neuraltrust.ai/neuraltrust/deployment/configuration) ·
-  [Sizing](https://docs.neuraltrust.ai/neuraltrust/deployment/sizing)
+[Deployment models](https://docs.neuraltrust.ai/neuraltrust/deployment/deployment-models) ·
+[Configuration](https://docs.neuraltrust.ai/neuraltrust/deployment/configuration) ·
+[Sizing](https://docs.neuraltrust.ai/neuraltrust/deployment/sizing)
 
 ---
 
-<sup>**Looking for v1?** The legacy TrustGate/Kafka line ended at [v1.14.16](https://github.com/NeuralTrust/neuraltrust-platform/releases?page=3#release-v1.14.16) — install it with `--version ~1.14.0`.</sup>
+**Looking for v1?** The legacy TrustGate/Kafka line ended at [v1.14.16](https://github.com/NeuralTrust/neuraltrust-platform/releases?page=3#release-v1.14.16) — install it with `--version ~1.14.0`.
