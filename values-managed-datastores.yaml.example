@@ -18,6 +18,14 @@
 # Pre-create the service databases/roles and Kubernetes Secrets before install.
 # This file contains endpoints and secret names only; it contains no credentials.
 #
+# PostgreSQL and Redis endpoints are declared ONCE, on global.postgresql and
+# global.redis. Since chart 2.6.0 every service inherits host/port/sslMode and
+# host/port/username/tls from those blocks, so a per-service `database:` or
+# `redis:` block is only needed to send one service somewhere else. What stays
+# per-service is identity, not endpoint: external mode gives each service its own
+# role and database (`agentgateway`, `trustguard`, `alertengine`, `datacore`),
+# and `database.name` / `database.user` default to the service name.
+#
 # With preserveExistingSecrets=true, pre-create at least:
 # - control-plane-secrets: AUTH_SECRET, NEXTAUTH_SECRET, CONTROL_PLANE_JWT_SECRET
 # - postgresql-secrets: POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER, POSTGRES_DB,
@@ -56,15 +64,18 @@ global:
   domain: "platform.example.com"
   autoGenerateSecrets: false
   preserveExistingSecrets: true
+  # One PostgreSQL endpoint for the whole platform. `deploy: false` skips the
+  # in-cluster Deployment; host/port/sslMode are what every service inherits.
   postgresql:
     deploy: false
-    # Connection scalars on global.postgresql are primarily the hybrid shared
-    # contract. `deploy` still gates the in-cluster Postgres Deployment in every
-    # mode. In external, control-plane-api/app consume the shared
-    # postgresql-secrets fed by this block and/or control-plane overlays below.
-    # Runtime services keep per-service `*.database` as their identity.
+    host: "postgres.example.com"
+    port: "5432"
+    sslMode: "require"
+  # One Redis endpoint for the whole platform, same inheritance.
   redis:
     deploy: false
+    host: "redis.example.com"
+    tls: "true"
   observability:
     hostedExport:
       enabled: false
@@ -80,27 +91,11 @@ infrastructure:
       secretName: "managed-clickhouse"
       secretKey: "password"
 
-agentgateway:
-  database:
-    host: "postgres.example.com"
-    sslMode: "require"
-  redis:
-    host: "redis.example.com"
-    tls: "true"
-
-trustguard:
-  database:
-    host: "postgres.example.com"
-    sslMode: "require"
-  redis:
-    host: "redis.example.com"
-    tls: "true"
-
+# AgentGateway and TrustGuard need no block at all now: they inherit both
+# endpoints from the global blocks above, and their databases/roles default to
+# their own names. ClickHouse has no global block, so it is named per consumer.
 alertengine:
   enabled: true
-  database:
-    host: "postgres.example.com"
-    sslMode: "require"
   clickhouse:
     host: "clickhouse.example.com"
     nativePort: 9440
@@ -110,9 +105,6 @@ alertengine:
       key: "password"
 
 datacore:
-  database:
-    host: "postgres.example.com"
-    sslMode: "require"
   clickhouse:
     host: "clickhouse.example.com"
     nativePort: 9440
@@ -137,24 +129,10 @@ data-plane-api:
         existingSecret:
           name: "managed-clickhouse"
           key: "password"
-      api:
-        redis:
-          host: "redis.example.com"
-          tls: "true"
 
-# Control-plane split (external only). Point both charts at the managed Postgres.
-control-plane-api:
-  controlPlane:
-    components:
-      postgresql:
-        secrets:
-          host: "postgres.example.com"
-          port: "5432"
-
-control-plane-app:
-  controlPlane:
-    components:
-      postgresql:
-        secrets:
-          host: "postgres.example.com"
-          port: "5432"
+# Control-plane split (external only). Both charts read POSTGRES_* from the
+# pre-created postgresql-secrets listed at the top of this file — with
+# autoGenerateSecrets=false the chart renders no Secret at all, so the managed
+# host/port/DSNs must be in the Secret you create. The per-chart
+# `controlPlane.components.postgresql.secrets.host` overlay only feeds the
+# chart-generated Secret, so it is not needed here.

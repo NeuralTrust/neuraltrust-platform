@@ -210,19 +210,25 @@ or the ClickStack-to-ClickHouse pipeline. See
 External mode uses PostgreSQL, Redis, **and** ClickHouse. All three deploy
 in-cluster by default.
 
-Unlike hybrid's single shared PostgreSQL role, external runtime services use
-per-service `*.database` / `*.redis` blocks — each control plane owns its own
-database and migrations. `global.postgresql` still gates in-cluster PostgreSQL
-and feeds `postgresql-secrets` for control-plane-api/app.
-
-To use managed services:
+Unlike hybrid's single shared PostgreSQL role, each external service owns its own
+database and migrations, named by the per-service `*.database.name` /
+`*.database.user`. The **endpoint** is shared: since chart 2.6.0 an empty
+per-service `host`, `port` or `sslMode` (and `host`, `port`, `username`, `tls`
+under `*.redis`) inherits from `global.postgresql` / `global.redis` before
+falling back to the in-cluster Service names. So a managed datastore is named
+once:
 
 ```yaml
 global:
   postgresql:
     deploy: false
+    host: "postgres.example.com"
+    port: "5432"
+    sslMode: "require"
   redis:
     deploy: false
+    host: "redis.example.com"
+    tls: "true"
 
 infrastructure:
   clickhouse:
@@ -233,6 +239,10 @@ infrastructure:
       secretName: "managed-clickhouse"
       secretKey: "password"
 ```
+
+Add a per-service `database:` / `redis:` block only to send one service somewhere
+else — it still takes precedence. ClickHouse has no global block, so its endpoint
+is named per consumer.
 
 Pre-create every PostgreSQL role and database before installing — there is no
 chart-managed init Job. DataCore, AlertEngine, the ClickStack collector, and

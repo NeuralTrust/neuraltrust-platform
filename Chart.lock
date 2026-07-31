@@ -13,30 +13,30 @@ dependencies:
   version: 0.1.21
 - name: agentgateway
   repository: file://./charts/agentgateway
-  version: 0.1.33
+  version: 0.1.34
 - name: trustguard
   repository: file://./charts/trustguard
-  version: 0.1.31
+  version: 0.1.32
 - name: trustlens
   repository: file://./charts/trustlens
-  version: 0.1.1
+  version: 0.1.2
 - name: dataagent
   repository: file://./charts/dataagent
-  version: 0.1.12
+  version: 0.1.13
 - name: datacore
   repository: file://./charts/datacore
-  version: 0.1.14
+  version: 0.1.15
 - name: clickstack-otel-collector
   repository: file://./charts/clickstack-otel-collector
   version: 0.1.5
 - name: alertengine
   repository: file://./charts/alertengine
-  version: 0.1.5
+  version: 0.1.6
 - name: firewall
   repository: file://./charts/firewall
   version: 2.1.6
 - name: watchdog
   repository: file://./charts/watchdog
   version: 0.3.3
-digest: sha256:9ebdbc23c62161dc9c26cb02e988ad629ad14ab6137aedb33db00b2be62602a9
-generated: "2026-07-31T16:29:14.294410667Z"
+digest: sha256:834d2714f6114c67d02eb1ba16dbefc217e016b1d1dc52fbafb88ee614c83997
+generated: "2026-07-31T18:16:58.364139Z"

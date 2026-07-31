@@ -8,9 +8,9 @@ metadata:
 data:
   ENVIRONMENT: {{ .Values.config.environment | quote }}
   HTTP_ADDR: {{ .Values.config.httpAddr | quote }}
-  DATABASE_HOST: {{ include "neuraltrust-platform.postgres.host" (dict "host" .Values.database.host) | quote }}
-  DATABASE_PORT: {{ .Values.database.port | quote }}
+  DATABASE_HOST: {{ include "neuraltrust-platform.postgres.host" (dict "ctx" . "host" .Values.database.host) | quote }}
+  DATABASE_PORT: {{ include "neuraltrust-platform.postgres.port" (dict "ctx" . "port" .Values.database.port) | quote }}
   DATABASE_NAME: {{ .Values.database.name | quote }}
   DATABASE_USER: {{ .Values.database.user | quote }}
-  DATABASE_SSLMODE: {{ .Values.database.sslMode | quote }}
+  DATABASE_SSLMODE: {{ include "neuraltrust-platform.postgres.sslMode" (dict "ctx" . "sslMode" .Values.database.sslMode) | quote }}
 {{- end }}
