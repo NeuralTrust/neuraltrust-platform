@@ -95,6 +95,39 @@ variables the config-sync workloads take from an operator-owned Secret.
   becomes the operator's responsibility in that mode, which is the case an
   unqualified claim would have broken.
 
+- **The console emits a product key the chart rejects.** Older consoles write
+  `global.products.agentgateway: true` into the generated `values.yaml`, which
+  fails at render with `global.products supports only trustgate, trustguard, and
+  dataPlane (got "agentgateway")`. TrustGate is the only product whose product id
+  and values block differ, and the wizard used one name for both. `README.md`
+  step 4 now states the distinction and the rename. Fixed upstream in the console;
+  the note stays because consoles and charts version independently.
+
+- **The `DB_*` warning in `values-managed-datastores.yaml.example` read as
+  unconditional.** "Do NOT add DB_* or DATABASE_URL here" is correct for the
+  chart's own `postgresql-secrets`, which is what that file pre-creates, but the
+  exact opposite holds when `global.postgresql.existingSecret.name` points at a
+  Secret of your own: the chart then renders nothing to map from, every consumer
+  `envFrom`s yours directly, and the keys must be `DB_*`. An operator on the
+  `existingSecret` path who followed the header would have produced a Secret whose
+  keys are never read. The header now scopes the warning and names the other
+  contract.
+
+- **Managed ClickHouse is presented as the norm when it is the exception.**
+  `values-managed-datastores.yaml.example` wires ClickHouse externally in five
+  places and its title implied that is the expected external shape. Managed
+  PostgreSQL and Redis are the usual production choice; ClickHouse is the
+  platform's own telemetry store and is normally left in-cluster. The header now
+  says so and gives the exact edit to keep it in-cluster — including the Secret
+  swap that `preserveExistingSecrets: true` forces, from `managed-clickhouse` to
+  `clickhouse-secrets` (`admin-password`, `CLICKHOUSE_HOST`, `CLICKHOUSE_PORT`,
+  `CLICKHOUSE_DATABASE`) and `clickhouse` (`CLICKHOUSE_USER`). Verified by
+  rendering both variants.
+
+- **The chart registry is public; only the images are not.** `README.md` step 5
+  showed the OCI install without saying so, leaving operators to assume the pull
+  Secret from step 1 also gated `helm install`.
+
 ## [v2.5.3] — 2026-07-31
 
 Chart `2.5.2` → `2.5.3`, `data-plane-api` `1.4.8` → `1.5.0`. The minor bumps reflect

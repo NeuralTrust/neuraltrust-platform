@@ -1,4 +1,20 @@
-# External with managed PostgreSQL, Redis, and ClickHouse.
+# External with every datastore managed outside the cluster: PostgreSQL, Redis
+# and ClickHouse.
+#
+# Managed PostgreSQL and Redis are the usual production choice. Managed
+# ClickHouse is not — most external deployments let the chart run ClickHouse
+# in-cluster, since it is the platform's own telemetry store. This file shows
+# the fully external case because it is the one with the most moving parts.
+#
+# To keep ClickHouse in-cluster, drop the `infrastructure.clickhouse` block
+# below and the four `clickhouse:` overlays that reference `managed-clickhouse`.
+# Because this file also sets preserveExistingSecrets=true, swap the
+# `managed-clickhouse` entry in the pre-create list for the Secrets the
+# in-cluster StatefulSet expects instead:
+# - clickhouse-secrets: admin-password, CLICKHOUSE_HOST, CLICKHOUSE_PORT,
+#   CLICKHOUSE_DATABASE
+# - clickhouse: CLICKHOUSE_USER
+#
 # Pre-create the service databases/roles and Kubernetes Secrets before install.
 # This file contains endpoints and secret names only; it contains no credentials.
 #
@@ -9,7 +25,12 @@
 #   SENSIBLE_PG_DSN, POSTGRES_PRISMA_URL
 #   (and POSTGRES_PASSWORD in password mode)
 #   Do NOT add DB_* or DATABASE_URL here — the chart maps the keys above to
-#   whatever variable names each container expects.
+#   whatever variable names each container expects. This applies to the chart's
+#   own `postgresql-secrets`, as used here. The opposite holds if you instead
+#   point `global.postgresql.existingSecret.name` at a Secret of your own: the
+#   chart then renders no Secret to map from, every consumer envFrom's yours
+#   directly, and its keys must be DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME/
+#   DB_SSL_MODE plus SENSIBLE_PG_DSN. See SECRETS.md.
 # - agentgateway-secrets: SERVER_SECRET_KEY, STS_SIGNING_KEY, DB_PASSWORD
 # - trustguard-secrets: ADMIN_JWT_SECRET, TRUSTGUARD_TOKEN_SIGNING_SECRET,
 #   REDIS_EVENTS_SECRET, DB_PASSWORD
