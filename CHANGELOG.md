@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.5.4] — 2026-07-31
+
 Chart `2.5.3` → `2.6.0`. The minor bump reflects a change to which environment
 variables the config-sync workloads take from an operator-owned Secret.
 
