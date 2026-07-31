@@ -176,6 +176,28 @@ Returns "true" when global.postgresql.deploy is true (the only path in v2).
 {{- end -}}
 
 {{/*
+Gate for the bootstrap Job that creates the platform's roles and databases on the
+chart's own PostgreSQL (see templates/postgresql/bootstrap-job.yaml).
+
+Requires all of:
+  - `deploy` is on, so the chart is running the instance itself
+  - `host` is empty, so nobody has pointed the platform at another instance. With
+    a host set the Job would have a managed endpoint within reach, and creating
+    roles on a customer's instance is not ours to do
+  - password auth. IAM means a managed instance mints tokens instead
+  - `bootstrapJob.enabled` has not been turned off
+*/}}
+{{- define "neuraltrust-platform.postgresql.bootstrapJob.enabled" -}}
+{{- $pg := default dict (default dict .Values.global).postgresql -}}
+{{- $job := default dict $pg.bootstrapJob -}}
+{{- $on := true -}}
+{{- if hasKey $job "enabled" -}}{{- $on = $job.enabled -}}{{- end -}}
+{{- $host := "" -}}
+{{- if $pg.host -}}{{- $host = $pg.host | toString -}}{{- end -}}
+{{- if and $on (include "neuraltrust-platform.postgresql.deploy" .) (eq $host "") (ne ($pg.authMode | default "password" | toString) "iam") -}}true{{- end -}}
+{{- end -}}
+
+{{/*
 PostgreSQL connection scalars. In hybrid every service connects to the shared
 `control-plane-postgresql` Service; in external, callers overlay their own
 host/port under their subchart values. These helpers always return sensible

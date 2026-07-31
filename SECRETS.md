@@ -517,17 +517,31 @@ AlertEngine URLs are non-secret values wired directly into the control-plane app
 Deployment, alongside the other backend service URLs. On first
 install, missing Secrets/keys are created; later upgrades reuse them with `lookup`.
 
-- **Postgres (hybrid)**: the chart no longer runs a schema/role init Job.
-  Application migrations own their tables in the shared `neuraltrust` database
+- **Postgres (hybrid)**: no chart-managed schema migration. Application migrations
+  own their tables in the shared `neuraltrust` database
   (`trustgate_migration_versions` / `trustguard_migration_versions` are already
   namespaced). For **in-cluster PostgreSQL** the umbrella renders
   `control-plane-postgresql` with `POSTGRES_USER=neuraltrust` /
-  `POSTGRES_DB=neuraltrust`. For an **external / managed** PostgreSQL the DBA (or
-  Terraform) pre-creates the database and login role; point the chart at it via
-  `global.postgresql.deploy: false` + host/user/password (or
-  `global.postgresql.existingSecret.name`). External deployments keep the classic
-  per-service databases (each control plane owns its own migrations) and are not
-  affected by this simplification.
+  `POSTGRES_DB=neuraltrust`, the pair every hybrid workload shares. For an
+  **external / managed** PostgreSQL the DBA (or Terraform) pre-creates the database
+  and login role; point the chart at it via `global.postgresql.deploy: false` +
+  host/user/password (or `global.postgresql.existingSecret.name`).
+- **Roles and databases on the chart's own PostgreSQL (chart 2.7.0+)**: external
+  mode gives each service its own database, and the PostgreSQL image creates only
+  the pair above, so a `control-plane-postgresql-bootstrap` Job creates the rest.
+  Per deployed service it creates the role with the password already in that
+  service's Secret — `agentgateway-secrets` / `trustguard-secrets` /
+  `alertengine-secrets` (`DB_PASSWORD`), `datacore-secrets`
+  (`POSTGRES_PASSWORD`), `trustlens-secrets` (`DATABASE_PASSWORD`), or the Secret
+  named under `<service>.database.existingSecret` — then creates the database owned
+  by it. So generated passwords never need transcribing, and rotating one is
+  applied to the role on the next upgrade. Skipped per service when it is not
+  deployed, uses `iamAuth`, or shares the bootstrap role, which is every hybrid
+  service. It runs only when the chart owns the instance: naming another host,
+  `deploy: false`, IAM auth, or
+  `global.postgresql.bootstrapJob.enabled: false` all stop it rendering, and its
+  target is templated rather than read from `postgresql-secrets`. Managed instances
+  stay the DBA's to provision.
 - **In-cluster Redis** (`redis`) is passwordless by default. Set
   `global.redis.password` / `global.redis.existingSecret.name` for a hosted /
   authenticated Redis; the chart stores it in the shared `redis-secrets` Secret

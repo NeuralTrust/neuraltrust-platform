@@ -2537,5 +2537,99 @@ render_default "$out18iam" --set global.deploymentMode=external \
 assert_not_contains "$out18iam" 'name: "ag-db"' \
   "IAM database auth ignores the credential hook"
 
+blue "==> Scenario 19: PostgreSQL bootstrap Job for the in-cluster instance (AUT-412)"
+
+# The Job is the only thing that creates the per-service roles external mode
+# expects, so assert on the service list it actually bootstraps, not just on the
+# Job being present. Reads the rendered shell rather than guessing: each service
+# contributes exactly one bootstrap_service call and one password env entry.
+bootstrap_services() {
+  ruby -ryaml -e '
+    docs = []
+    YAML.load_stream(File.read(ARGV.fetch(0), encoding: "UTF-8")) { |d| docs << d if d.is_a?(Hash) }
+    job = docs.find { |d| d["kind"] == "Job" && d.dig("metadata", "name") == "control-plane-postgresql-bootstrap" }
+    exit 0 if job.nil?
+    container = job.dig("spec", "template", "spec", "containers").fetch(0)
+    script = container["command"].fetch(2)
+    calls = script.scan(/^bootstrap_service "([^"]+)" "([^"]+)" "([^"]+)" "([^"]+)" "([^"]+)" "([^"]+)"$/)
+    envs = (container["env"] || []).map { |e| e["name"] }
+    calls.each do |key, role, db, env_name, secret, secret_key|
+      abort "#{key}: #{env_name} is not wired into the pod" unless envs.include?(env_name)
+      puts "#{key}:#{role}:#{db}:#{secret}/#{secret_key}"
+    end
+  ' "$1"
+}
+
+assert_bootstrap() {
+  local file="$1" expected="$2" msg="$3" got
+  got="$(bootstrap_services "$file" | tr '\n' ' ' | sed 's/ $//')"
+  if [[ "$got" != "$expected" ]]; then
+    red "FAIL: $msg"
+    red "  expected: ${expected:-<no Job>}"
+    red "  got:      ${got:-<no Job>}"
+    exit 1
+  fi
+  green "ok  - $msg"
+}
+
+out19ext="$TMP/scenario-bootstrap-external.yaml"
+render_default "$out19ext" --set global.deploymentMode=external
+assert_bootstrap "$out19ext" \
+  "agentgateway:agentgateway:agentgateway:agentgateway-secrets/DB_PASSWORD trustguard:trustguard:trustguard:trustguard-secrets/DB_PASSWORD alertengine:alertengine:alertengine:alertengine-secrets/DB_PASSWORD datacore:datacore:datacore:datacore-secrets/POSTGRES_PASSWORD" \
+  "external + in-cluster Postgres bootstraps all four per-service roles"
+assert_contains "$out19ext" '"helm.sh/hook": post-install,post-upgrade' \
+  "the Job runs after the PostgreSQL Deployment exists, not before it"
+# Templated target, so no values path can aim this Job at someone's managed instance.
+assert_contains "$out19ext" 'value: "control-plane-postgresql"' \
+  "the Job dials the in-cluster Service, not the endpoint in postgresql-secrets"
+
+# A managed instance is provisioned by its own tooling; the chart must never try
+# to create roles there, whichever way the operator names it.
+for managed in \
+  "--set global.postgresql.deploy=false --set global.postgresql.host=pg.example.com" \
+  "--set global.postgresql.host=pg.example.com" \
+  "--set global.postgresql.deploy=false" \
+  "--set global.postgresql.authMode=iam" \
+  "--set global.postgresql.bootstrapJob.enabled=false"; do
+  out19off="$TMP/scenario-bootstrap-off.yaml"
+  # shellcheck disable=SC2086 # deliberate word splitting of the flag pairs above
+  render_default "$out19off" --set global.deploymentMode=external $managed
+  assert_bootstrap "$out19off" "" "no bootstrap Job with $managed"
+done
+
+# Hybrid shares one role and database, which the PostgreSQL image itself creates,
+# so the Job has nothing per-service to do — but it still renders to converge the
+# shared database and to turn a stale superuser password into one legible error
+# instead of six crash-looping pods.
+out19hy="$TMP/scenario-bootstrap-hybrid.yaml"
+render_default "$out19hy"
+assert_bootstrap "$out19hy" "" "hybrid bootstraps no per-service role"
+assert_contains "$out19hy" 'name: control-plane-postgresql-bootstrap' \
+  "hybrid still renders the Job for the shared database"
+
+# Only deployed services get a role, and IAM auth has no password to set.
+out19off1="$TMP/scenario-bootstrap-alertengine-off.yaml"
+render_default "$out19off1" --set global.deploymentMode=external --set alertengine.enabled=false
+assert_bootstrap "$out19off1" \
+  "agentgateway:agentgateway:agentgateway:agentgateway-secrets/DB_PASSWORD trustguard:trustguard:trustguard:trustguard-secrets/DB_PASSWORD datacore:datacore:datacore:datacore-secrets/POSTGRES_PASSWORD" \
+  "a disabled service gets no role"
+out19iam="$TMP/scenario-bootstrap-iam.yaml"
+render_default "$out19iam" --set global.deploymentMode=external \
+  --set agentgateway.database.iamAuth=true --set agentgateway.database.awsRegion=eu-west-1
+assert_bootstrap "$out19iam" \
+  "trustguard:trustguard:trustguard:trustguard-secrets/DB_PASSWORD alertengine:alertengine:alertengine:alertengine-secrets/DB_PASSWORD datacore:datacore:datacore:datacore-secrets/POSTGRES_PASSWORD" \
+  "an IAM-auth service is skipped"
+
+# The credential hooks from Scenario 18 must move where the Job reads the
+# password too, or it would set a role to a value the pod never uses.
+out19hook="$TMP/scenario-bootstrap-hook.yaml"
+render_default "$out19hook" --set global.deploymentMode=external \
+  --set agentgateway.database.existingSecret.name=postgres-roles \
+  --set agentgateway.database.existingSecret.key=AGENTGATEWAY \
+  --set datacore.database.user=dc --set datacore.database.name=dcdb
+assert_bootstrap "$out19hook" \
+  "agentgateway:agentgateway:agentgateway:postgres-roles/AGENTGATEWAY trustguard:trustguard:trustguard:trustguard-secrets/DB_PASSWORD alertengine:alertengine:alertengine:alertengine-secrets/DB_PASSWORD datacore:dc:dcdb:datacore-secrets/POSTGRES_PASSWORD" \
+  "the Job follows the credential hooks and custom role/database names"
+
 green ""
 green "All v2 render scenarios passed."
