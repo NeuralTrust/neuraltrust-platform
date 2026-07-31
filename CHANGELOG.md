@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.5.3] — 2026-07-31
+
 Chart `2.5.2` → `2.6.0`, `data-plane-api` `1.4.8` → `1.5.0`. The minor bumps reflect
 removed values keys and three templates dropped from `data-plane-api`; no image
 versions change, and the other subcharts render identically, so they are not bumped.
