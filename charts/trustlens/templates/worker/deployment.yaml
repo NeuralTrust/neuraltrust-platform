@@ -1,4 +1,4 @@
-{{- if and (eq (include "neuraltrust-platform.isV2" .) "true") .Values.enabled }}
+{{- if .Values.enabled }}
 {{- $img := include "trustlens.image" (dict "repository" .Values.image.repository "tag" .Values.image.tag "global" .Values.global) }}
 apiVersion: apps/v1
 kind: Deployment

@@ -3,10 +3,7 @@ True when TrustGate (AgentGateway) templates should render.
 Hybrid: global.products.trustgate must be true. External: always on.
 */}}
 {{- define "agentgateway.enabled" -}}
-{{- if and
-  (eq (include "neuraltrust-platform.isV2" .) "true")
-  (eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustgate")) "true")
--}}true{{- end -}}
+{{- if eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustgate")) "true" -}}true{{- end -}}
 {{- end }}
 
 {{/*
@@ -320,10 +317,10 @@ listener without cert+key, and the data plane refuses to start with
 CONFIG_SYNC_TLS_INSECURE=true, once APP_ENV is deployed.
 */}}
 {{- define "agentgateway.configSyncTls.active" -}}
-{{- $isFull := eq (include "neuraltrust-platform.isFull" .) "true" -}}
+{{- $isExternal := eq (include "neuraltrust-platform.isExternal" .) "true" -}}
 {{- $appEnv := lower (trim (.Values.config.appEnv | default "")) -}}
 {{- $deployed := has $appEnv (list "prod" "production" "staging" "stage") -}}
 {{- $tls := (default dict .Values.configSync).grpcTls | default dict -}}
 {{- $provisioned := or ($tls.existingSecret | default "") (eq (include "agentgateway.configSyncTls.autoGenerate" .) "true") -}}
-{{- if and $isFull $deployed $provisioned }}true{{- end -}}
+{{- if and $isExternal $deployed $provisioned }}true{{- end -}}
 {{- end }}

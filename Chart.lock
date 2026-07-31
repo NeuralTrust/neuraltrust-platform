@@ -4,7 +4,7 @@ dependencies:
   version: 1.0.5
 - name: data-plane-api
   repository: file://./charts/data-plane-api
-  version: 1.4.8
+  version: 1.5.0
 - name: control-plane-api
   repository: file://./charts/control-plane-api
   version: 0.1.2
@@ -38,5 +38,5 @@ dependencies:
 - name: watchdog
   repository: file://./charts/watchdog
   version: 0.3.3
-digest: sha256:fb8c2dcfcc08e08e3951965016ad5e2340210c7d3f488efd84e09cd828fdde77
-generated: "2026-07-29T13:49:48.14485164Z"
+digest: sha256:c9bf65066904b681ca055136aff77754d8e7c7923ed9d93323ea62d3acef127d
+generated: "2026-07-31T15:29:52.599624+02:00"

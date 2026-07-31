@@ -1,4 +1,4 @@
-{{- if and (eq (include "trustguard.enabled" .) "true") (eq (include "neuraltrust-platform.isFull" .) "true") }}
+{{- if and (eq (include "trustguard.enabled" .) "true") (eq (include "neuraltrust-platform.isExternal" .) "true") }}
 {{- $img := include "trustguard.image" (dict "repository" .Values.image.repository "tag" .Values.image.tag "global" .Values.global) }}
 apiVersion: apps/v1
 kind: Deployment

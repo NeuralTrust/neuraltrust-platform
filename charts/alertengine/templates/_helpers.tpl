@@ -59,7 +59,7 @@ Renders ONLY when global.deploymentMode=external
 AND the subchart is enabled.
 */}}
 {{- define "alertengine.deploy" -}}
-{{- if and (eq (include "neuraltrust-platform.isV2" .) "true") (eq (include "neuraltrust-platform.isExternal" .) "true") .Values.enabled -}}
+{{- if and (eq (include "neuraltrust-platform.isExternal" .) "true") .Values.enabled -}}
 true
 {{- end -}}
 {{- end }}
