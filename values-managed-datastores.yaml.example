@@ -39,17 +39,25 @@
 #   chart then renders no Secret to map from, every consumer envFrom's yours
 #   directly, and its keys must be DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME/
 #   DB_SSL_MODE plus SENSIBLE_PG_DSN. See SECRETS.md.
-# - agentgateway-secrets: SERVER_SECRET_KEY, STS_SIGNING_KEY, DB_PASSWORD
+# - agentgateway-secrets: SERVER_SECRET_KEY, STS_SIGNING_KEY
 # - trustguard-secrets: ADMIN_JWT_SECRET, TRUSTGUARD_TOKEN_SIGNING_SECRET,
-#   REDIS_EVENTS_SECRET, DB_PASSWORD
+#   REDIS_EVENTS_SECRET
 # - trustguard-client-credentials: CLIENT_ID, CLIENT_SECRET
-# - data-plane-jwt-secret: DATA_PLANE_JWT_SECRET, REDIS_URL
+# - data-plane-jwt-secret: DATA_PLANE_JWT_SECRET
 # - datacore-secrets: AUTH_JWT_HS256_SECRET, CLICKHOUSE_USER
-#   (and POSTGRES_PASSWORD in password mode; omit when datacore.database.iamAuth=true)
-# - alertengine-secrets: DB_PASSWORD, AUTH_JWT_SECRET, APP_ENCRYPTION_KEY
+# - alertengine-secrets: AUTH_JWT_SECRET, APP_ENCRYPTION_KEY
+# The datastore passwords are deliberately absent from those four: the
+# `existingSecret` blocks at the bottom of this file move them into two Secrets of
+# their own, so rotating a database password never touches a Secret holding
+# signing keys. Keep them inline in the lists above instead if you prefer one
+# Secret per service.
 # - clickstack-collector-secrets: CLICKHOUSE_ENDPOINT, CLICKHOUSE_USER,
 #   OTLP_AUTH_TOKEN
 # - managed-clickhouse: password (the shared ClickHouse credential referenced below)
+# - managed-postgres-roles: AGENTGATEWAY, TRUSTGUARD, ALERTENGINE, DATACORE
+# - managed-redis-auth: REDIS_PASSWORD, REDIS_URL
+#   (REDIS_URL is the whole DSN, e.g. rediss://user:pw@redis.example.com:6379/0 —
+#    data-plane-api reads an assembled URL rather than a password)
 # Omit static DB password keys only for services whose IAM mode is supported.
 # See SECRETS.md for the complete per-component contract.
 
@@ -91,11 +99,34 @@ infrastructure:
       secretName: "managed-clickhouse"
       secretKey: "password"
 
-# AgentGateway and TrustGuard need no block at all now: they inherit both
-# endpoints from the global blocks above, and their databases/roles default to
-# their own names. ClickHouse has no global block, so it is named per consumer.
+# Datastore passwords, read from two Secrets instead of written here. `key` is
+# configurable, so one Secret holds every Aurora role under its own key. Only
+# identity and endpoints live in this file; no credential does.
+agentgateway:
+  database:
+    existingSecret:
+      name: "managed-postgres-roles"
+      key: "AGENTGATEWAY"
+  redis:
+    existingSecret:
+      name: "managed-redis-auth" # key defaults to REDIS_PASSWORD
+
+trustguard:
+  database:
+    existingSecret:
+      name: "managed-postgres-roles"
+      key: "TRUSTGUARD"
+  redis:
+    existingSecret:
+      name: "managed-redis-auth"
+
+# ClickHouse has no global block, so its endpoint is still named per consumer.
 alertengine:
   enabled: true
+  database:
+    existingSecret:
+      name: "managed-postgres-roles"
+      key: "ALERTENGINE"
   clickhouse:
     host: "clickhouse.example.com"
     nativePort: 9440
@@ -105,6 +136,10 @@ alertengine:
       key: "password"
 
 datacore:
+  database:
+    existingSecret:
+      name: "managed-postgres-roles"
+      key: "DATACORE"
   clickhouse:
     host: "clickhouse.example.com"
     nativePort: 9440
@@ -129,6 +164,11 @@ data-plane-api:
         existingSecret:
           name: "managed-clickhouse"
           key: "password"
+      api:
+        redis:
+          existingSecret:
+            name: "managed-redis-auth"
+            key: "REDIS_URL"
 
 # Control-plane split (external only). Both charts read POSTGRES_* from the
 # pre-created postgresql-secrets listed at the top of this file — with

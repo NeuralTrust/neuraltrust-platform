@@ -47,6 +47,11 @@ spec:
         {{- /* Shared credentials come from platform-secrets; an explicit env
                entry outranks the legacy copy still arriving via envFrom. */}}
         {{- include "neuraltrust-platform.platformSecretEnv" (dict "ctx" . "keys" (dict "AUTH_JWT_SECRET" "AUTH_JWT_SECRET" "APP_ENCRYPTION_KEY" "APP_ENCRYPTION_KEY") "skip" .Values.worker.extraEnv) | nindent 8 }}
+        {{- if not .Values.database.iamAuth }}
+        {{- with include "neuraltrust-platform.datastore.credentialEnv" (dict "ref" .Values.database.existingSecret "envName" "DB_PASSWORD") }}
+        {{- . | nindent 8 }}
+        {{- end }}
+        {{- end }}
         # Shared ClickHouse password (same secret DataCore reads). Explicit env
         # wins over the alertengine-secrets envFrom above.
         - name: CLICKHOUSE_PASSWORD

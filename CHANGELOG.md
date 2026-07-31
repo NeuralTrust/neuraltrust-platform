@@ -4,9 +4,49 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
-Chart `2.5.4` → `2.6.0`. The per-service datastore blocks now inherit their
-endpoint from the global blocks, so a managed Aurora or ElastiCache is named once
-rather than repeated per service. Default renders are byte-identical.
+Chart `2.5.4` → `2.7.0`. Two minor bumps' worth of new behaviour in the
+per-service datastore blocks: endpoint inheritance, and credentials that can come
+from a Secret you created. Default renders are byte-identical.
+
+### Added
+
+- **Datastore passwords can be read from a Secret you pre-created, instead of
+  being written into a values file** (AUT-411). External mode gives each service
+  its own database and migrations, so their passwords differ and none can inherit
+  from a single global value; until now the only way to supply them was inline,
+  which also put them in Helm release history. Set
+  `<service>.database.existingSecret.name` (or `.redis.existingSecret.name`) and
+  the chart leaves that key out of the Secret it renders, injecting the variable
+  at each Deployment with a `secretKeyRef` to yours:
+
+  | Values path | Variable | Key defaults to |
+  |---|---|---|
+  | `agentgateway.database.existingSecret` | `DB_PASSWORD` | `DB_PASSWORD` |
+  | `agentgateway.redis.existingSecret` | `REDIS_PASSWORD` | `REDIS_PASSWORD` |
+  | `trustguard.database.existingSecret` | `DB_PASSWORD` | `DB_PASSWORD` |
+  | `trustguard.redis.existingSecret` | `REDIS_PASSWORD` | `REDIS_PASSWORD` |
+  | `alertengine.database.existingSecret` | `DB_PASSWORD` | `DB_PASSWORD` |
+  | `datacore.database.existingSecret` | `POSTGRES_PASSWORD` | `POSTGRES_PASSWORD` |
+  | `data-plane-api.dataPlane.components.api.redis.existingSecret` | `REDIS_URL` | `REDIS_URL` |
+
+  `key` is configurable, so one Secret can hold every Aurora role under its own
+  key. `data-plane-api` is the exception: it reads an assembled DSN rather than a
+  password, so its key holds the whole `redis://` URL and the chart stops
+  composing one into `data-plane-jwt-secret`.
+
+  An inline `password` next to a hook is now **rejected at render** rather than
+  silently ignored. The hooks are inert under `iamAuth: true`, which mints a token
+  per connection, and in hybrid, where every workload takes the shared
+  `postgresql-secrets` / `redis-secrets` wholesale through `envFrom` — that mode
+  already had `global.postgresql.existingSecret` for the same purpose.
+
+  Not covered: the control-plane `neuraltrust` role password
+  (`global.postgresql.password`). The chart bakes it into `SENSIBLE_PG_DSN` and
+  `POSTGRES_PRISMA_URL` while rendering and so must be able to read it; composing
+  those strings from a Secret would require the readers to assemble their own DSN.
+
+  Setting a hook changes nothing for existing installs — renders with every hook
+  unset are byte-identical to `2.6.0`.
 
 ### Changed
 

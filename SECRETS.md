@@ -36,6 +36,7 @@ already points at. Copy-pasteable `kubectl create secret` commands are in
 |---|---|---|
 | `gcr-secret` | docker-registry credentials | Same as hybrid |
 | `onprem-superadmin` | `ONPREM_SUPERADMIN_EMAIL`, `ONPREM_SUPERADMIN_PASSWORD` | You want a bootstrap console administrator (recommended — there is no hosted console to log in from) |
+| your own name | one key per managed datastore role | You would rather not write datastore passwords into a values file — see [Datastore credentials without values](#datastore-credentials-without-values) |
 
 External needs no config-sync tokens and no enrolment JWTs; it runs its own
 control planes and never deploys DataAgent. Before going live, read
@@ -280,6 +281,46 @@ when convenient — it is validated at render time, `extraEnv` is not.
 | `postgresql-secrets` | `POSTGRES_CONNECTION_TYPE` | No | `postgres` (password) or `aurora` (IAM). Read by the Python API (`src/database.py`). |
 | `postgresql-secrets` | `SENSIBLE_PG_DSN` | Yes (if pre-generating) | lib/pq-compatible DSN, without the Prisma-only query parameters. |
 | `postgresql-secrets` | `POSTGRES_PRISMA_URL` | Yes in external | Prisma-compatible URL, carrying `connection_limit`. Password-less when `authMode: iam` (init-db mints a token at migrate time). Not rendered in hybrid, which has no Prisma reader. |
+
+#### Datastore credentials without values
+
+External mode gives each service its own database and its own migrations, so their
+passwords differ and none of them can inherit from a single global value. Writing
+them into a values file is the default but not the only option: name a Secret you
+created under `<service>.database.existingSecret` (or `.redis.existingSecret`) and
+the chart leaves that key out of the Secret it renders, injecting the variable at
+each Deployment with a `secretKeyRef` to yours instead. Nothing then reaches the
+values file or Helm release history. An inline `password` alongside the hook is
+rejected at render, since only one of the two can win.
+
+| Values path | Variable | Key defaults to |
+|---|---|---|
+| `agentgateway.database.existingSecret` | `DB_PASSWORD` | `DB_PASSWORD` |
+| `agentgateway.redis.existingSecret` | `REDIS_PASSWORD` | `REDIS_PASSWORD` |
+| `trustguard.database.existingSecret` | `DB_PASSWORD` | `DB_PASSWORD` |
+| `trustguard.redis.existingSecret` | `REDIS_PASSWORD` | `REDIS_PASSWORD` |
+| `alertengine.database.existingSecret` | `DB_PASSWORD` | `DB_PASSWORD` |
+| `datacore.database.existingSecret` | `POSTGRES_PASSWORD` | `POSTGRES_PASSWORD` |
+| `data-plane-api.dataPlane.components.api.redis.existingSecret` | `REDIS_URL` | `REDIS_URL` |
+
+Because `key` is configurable, one Secret can serve every role — four Aurora
+passwords under four keys, and a cache Secret holding both `REDIS_PASSWORD` for
+the gateways and the assembled `REDIS_URL` that data-plane-api reads instead of a
+password. `values-managed-datastores.yaml.example` shows that layout.
+
+Two credentials stay outside this mechanism. IAM auth has no static password to
+point at, so the hooks are ignored when `iamAuth: true`. And the control-plane
+`neuraltrust` role password is still read from `global.postgresql.password`,
+because the chart bakes it into the `SENSIBLE_PG_DSN` and `POSTGRES_PRISMA_URL`
+connection strings at render time and cannot compose those from a Secret it may
+not read. Pointing `global.postgresql.existingSecret` at a Secret suppresses
+`postgresql-secrets` wholesale and leaves you hand-writing all eleven of its keys,
+both connection strings included — usually the worse trade.
+
+Hybrid needs none of this: every workload connects as the one shared role, taking
+`postgresql-secrets` and `redis-secrets` wholesale through `envFrom`, so a
+pre-created Secret is already supported there via `global.postgresql.existingSecret`
+/ `global.redis.existingSecret`. The per-service hooks are inert in hybrid.
 
 #### One canonical name per fact
 
