@@ -94,6 +94,31 @@ assert_render_fails() {
   green "ok  - $msg"
 }
 
+# Same, but pinned to the message the guard raises. Without this a guard that was
+# deleted or replaced by an unrelated nil-pointer error still "passes".
+assert_render_fails_with() {
+  local needle="$1" msg="$2"
+  shift 2
+  local err
+  err="$(mktemp)"
+  if helm template test "$CHART_DIR" --namespace default -f "$CHART_DIR/values-required.yaml" \
+      "${CLICKSTACK_DEFAULT_ARGS[@]}" "$@" >/dev/null 2>"$err"; then
+    red "FAIL: $msg"
+    red "  the render succeeded; expected it to fail with: $needle"
+    rm -f "$err"
+    exit 1
+  fi
+  if ! grep -qF -- "$needle" "$err"; then
+    red "FAIL: $msg"
+    red "  the render failed for the wrong reason; expected: $needle"
+    red "  got: $(tr '\n' ' ' < "$err")"
+    rm -f "$err"
+    exit 1
+  fi
+  rm -f "$err"
+  green "ok  - $msg"
+}
+
 assert_contains() {
   local file="$1" needle="$2" msg="$3"
   if ! grep -qE -- "$needle" "$file"; then
@@ -648,10 +673,15 @@ assert_contains "$out3" 'POSTGRES_PASSWORD:' \
 # Same canonical Postgres family as hybrid, plus the Prisma URL the app needs.
 for canonical in POSTGRES_HOST POSTGRES_PORT POSTGRES_DB POSTGRES_USER \
   POSTGRES_PASSWORD POSTGRES_SSLMODE POSTGRES_LOGIN POSTGRES_AUTH_MODE \
-  POSTGRES_CONNECTION_TYPE SENSIBLE_PG_DSN POSTGRES_PRISMA_URL; do
+  POSTGRES_CONNECTION_TYPE POSTGRES_PRISMA_URL; do
   assert_secret_key "$out3" postgresql-secrets present "$canonical" \
     "external: postgresql-secrets stores canonical ${canonical}"
 done
+# The lib/pq DSN has no external reader: the gateways gate that env entry on
+# hybrid and DataAgent is hybrid-only. Storing it anyway meant a credential
+# written for nobody, and one more thing to compose at render time.
+assert_secret_key "$out3" postgresql-secrets absent SENSIBLE_PG_DSN \
+  "external: postgresql-secrets omits the lib/pq DSN it has no reader for"
 for retired in DB_HOST DB_PORT DB_NAME DB_USER DB_PASSWORD DB_SSL_MODE \
   DATABASE_URL DATABASE_AUTH_MODE DATABASE_IAM_AUTH; do
   assert_secret_key "$out3" postgresql-secrets absent "$retired" \
@@ -659,8 +689,10 @@ for retired in DB_HOST DB_PORT DB_NAME DB_USER DB_PASSWORD DB_SSL_MODE \
 done
 # The app reads POSTGRES_DATABASE and DATABASE_URL; both are renames of canonical
 # keys (POSTGRES_DB, POSTGRES_PRISMA_URL) rather than separately stored duplicates.
+# SSLMODE and CONNECTION_LIMIT are the remaining two parts of the URL, so the app
+# can rebuild exactly what the chart would have composed when no URL is supplied.
 assert_datastore_env "$out3" control-plane-app app \
-  'DATABASE_URL POSTGRES_AUTH_MODE POSTGRES_DATABASE POSTGRES_HOST POSTGRES_PASSWORD POSTGRES_PORT POSTGRES_PRISMA_URL POSTGRES_USER' \
+  'DATABASE_URL POSTGRES_AUTH_MODE POSTGRES_CONNECTION_LIMIT POSTGRES_DATABASE POSTGRES_HOST POSTGRES_PASSWORD POSTGRES_PORT POSTGRES_PRISMA_URL POSTGRES_SSLMODE POSTGRES_USER' \
   "external: control-plane-app renames POSTGRES_DB/POSTGRES_PRISMA_URL at the consumption site"
 assert_no_envfrom_secret "$out3" postgresql-secrets \
   "external: no workload injects postgresql-secrets wholesale"
@@ -2630,6 +2662,174 @@ render_default "$out19hook" --set global.deploymentMode=external \
 assert_bootstrap "$out19hook" \
   "agentgateway:agentgateway:agentgateway:postgres-roles/AGENTGATEWAY trustguard:trustguard:trustguard:trustguard-secrets/DB_PASSWORD alertengine:alertengine:alertengine:alertengine-secrets/DB_PASSWORD datacore:dc:dcdb:datacore-secrets/POSTGRES_PASSWORD" \
   "the Job follows the credential hooks and custom role/database names"
+
+blue "==> Scenario 20: the control-plane Postgres password lives in an operator Secret"
+# The point of the hook is that a managed-external values file can hold no
+# credential at all, so the assertions are about absence: no password and no
+# composed connection string anywhere in the render, and every consumer pointed
+# at the operator's Secret instead.
+out20="$TMP/scenario-pg-password-secret.yaml"
+render_default "$out20" \
+  --set global.deploymentMode=external \
+  --set global.postgresql.deploy=false \
+  --set global.postgresql.host=pg.example.com \
+  --set global.postgresql.passwordSecret.name=postgres-roles \
+  --set global.postgresql.passwordSecret.key=CONTROL_PLANE \
+  --set 'data-plane-api.dataPlane.components.api.database.backend=postgres'
+
+# SENSIBLE_PG_DSN is not listed here: external omits it whether or not the hook
+# is set (line 683 covers that), so asserting it again would pass either way and
+# read as coverage the hook does not actually have.
+for absent in POSTGRES_PASSWORD POSTGRES_PRISMA_URL; do
+  assert_secret_key "$out20" postgresql-secrets absent "$absent" \
+    "passwordSecret: postgresql-secrets omits ${absent}"
+done
+for present in POSTGRES_HOST POSTGRES_PORT POSTGRES_USER POSTGRES_DB POSTGRES_SSLMODE; do
+  assert_secret_key "$out20" postgresql-secrets present "$present" \
+    "passwordSecret: postgresql-secrets still stores ${present}"
+done
+
+# Every reader of the control-plane role has to follow the password, including
+# the init container that runs the migrations and data-plane-api when it is on
+# Postgres. One of them left behind would be a crash-loop on first install.
+password_refs() {
+  ruby -ryaml -e '
+    Encoding.default_external = Encoding::UTF_8
+    docs = YAML.load_stream(File.read(ARGV.fetch(0))).compact
+    docs.each do |doc|
+      next unless doc["kind"] == "Deployment"
+      name = doc.dig("metadata", "name")
+      spec = doc.dig("spec", "template", "spec") || {}
+      (spec["initContainers"].to_a + spec["containers"].to_a).each do |c|
+        (c["env"] || []).each do |e|
+          next unless e["name"] == "POSTGRES_PASSWORD"
+          ref = e.dig("valueFrom", "secretKeyRef") || {}
+          puts "#{name}/#{c["name"]}=#{ref["name"]}:#{ref["key"]}"
+        end
+      end
+    end
+  ' "$1" | sort
+}
+got20="$(password_refs "$out20" | tr '\n' ' ' | sed 's/ $//')"
+expected20='control-plane-api/control-plane-api=postgres-roles:CONTROL_PLANE control-plane-app/app=postgres-roles:CONTROL_PLANE control-plane-app/init-db=postgres-roles:CONTROL_PLANE data-plane-api/api=postgres-roles:CONTROL_PLANE data-plane-api/postgres-migrations=postgres-roles:CONTROL_PLANE'
+if [[ "$got20" != "$expected20" ]]; then
+  red "FAIL: passwordSecret: every control-plane Postgres reader follows the operator Secret"
+  red "  expected: $expected20"
+  red "  got:      $got20"
+  exit 1
+fi
+green "ok  - passwordSecret: every control-plane Postgres reader follows the operator Secret"
+
+# A reference the operator wrote by hand is hard, so a typo in passwordSecret.key
+# stops the pod with CreateContainerConfigError instead of quietly connecting
+# without a password and surfacing as an authentication failure.
+if ruby -ryaml -e '
+  docs = YAML.load_stream(File.read(ARGV.fetch(0))).compact
+  bad = docs.flat_map do |doc|
+    next [] unless doc["kind"] == "Deployment"
+    spec = doc.dig("spec", "template", "spec") || {}
+    (spec["initContainers"].to_a + spec["containers"].to_a).flat_map do |c|
+      (c["env"] || []).select do |e|
+        e["name"] == "POSTGRES_PASSWORD" &&
+          e.dig("valueFrom", "secretKeyRef", "name") == "postgres-roles" &&
+          e.dig("valueFrom", "secretKeyRef", "optional")
+      end.map { "#{doc.dig("metadata", "name")}/#{c["name"]}" }
+    end
+  end
+  abort(bad.join(" ")) unless bad.empty?
+' "$out20"; then
+  green "ok  - passwordSecret: the operator's own reference is required, not optional"
+else
+  red "FAIL: passwordSecret: the operator's own reference is required, not optional"
+  exit 1
+fi
+
+# The migration step goes through Prisma's CLI, which reads a URL and nothing
+# else, so the init container has to build one when the Secret carries none.
+assert_contains "$out20" 'node scripts/postgres-password-url.mjs' \
+  "passwordSecret: the init container builds the Prisma URL from the parts"
+assert_contains "$out20" 'name: POSTGRES_CONNECTION_LIMIT'$'\n''          value: "15"' \
+  "passwordSecret: the app receives the pool size the chart used to bake into the URL"
+
+# Nothing may compose a connection string out of a password the chart cannot
+# read — an empty credential in a DSN is a silent authentication failure.
+assert_not_contains "$out20" 'postgresql://[^"]*:[^"@]*@pg\.example\.com' \
+  "passwordSecret: no rendered DSN carries control-plane credentials"
+
+# The default path keeps composing, so existing installs see no change.
+out20def="$TMP/scenario-pg-password-default.yaml"
+render_default "$out20def" --set global.deploymentMode=external
+for present in POSTGRES_PASSWORD POSTGRES_PRISMA_URL; do
+  assert_secret_key "$out20def" postgresql-secrets present "$present" \
+    "no passwordSecret: postgresql-secrets still stores ${present}"
+done
+
+# Guardrails. Each of these is a configuration that renders happily and then
+# fails at runtime, so they have to fail at render instead — and for the stated
+# reason, or the guard could be replaced by an unrelated error and still pass.
+assert_render_fails_with \
+  "global.postgresql.passwordSecret.name and global.postgresql.password are mutually exclusive" \
+  "passwordSecret and an inline password are mutually exclusive" \
+  --set global.deploymentMode=external \
+  --set global.postgresql.deploy=false \
+  --set global.postgresql.host=pg.example.com \
+  --set global.postgresql.passwordSecret.name=postgres-roles \
+  --set global.postgresql.password=inline
+assert_render_fails_with \
+  "control-plane-api.controlPlane.components.postgresql.secrets.password are mutually exclusive" \
+  "passwordSecret and the control-plane-api overlay password are mutually exclusive" \
+  --set global.deploymentMode=external \
+  --set global.postgresql.deploy=false \
+  --set global.postgresql.host=pg.example.com \
+  --set global.postgresql.passwordSecret.name=postgres-roles \
+  --set 'control-plane-api.controlPlane.components.postgresql.secrets.password=inline'
+assert_render_fails_with \
+  "global.postgresql.passwordSecret.name and global.postgresql.existingSecret.name are mutually exclusive" \
+  "passwordSecret and existingSecret are mutually exclusive" \
+  --set global.deploymentMode=external \
+  --set global.postgresql.deploy=false \
+  --set global.postgresql.host=pg.example.com \
+  --set global.postgresql.passwordSecret.name=postgres-roles \
+  --set global.postgresql.existingSecret.name=whole-secret
+assert_render_fails_with \
+  "global.postgresql.passwordSecret is external-only" \
+  "passwordSecret is rejected in hybrid, which still composes a DSN" \
+  --set global.postgresql.deploy=false \
+  --set global.postgresql.host=pg.example.com \
+  --set global.postgresql.passwordSecret.name=postgres-roles
+assert_render_fails_with \
+  "global.postgresql.passwordSecret requires global.postgresql.deploy=false" \
+  "passwordSecret is rejected while the chart runs its own PostgreSQL" \
+  --set global.deploymentMode=external \
+  --set global.postgresql.passwordSecret.name=postgres-roles
+
+# IAM has no static password to redirect, so the hook is ignored rather than
+# rejected — the same way the per-service credential hooks behave (AUT-411).
+out20iam="$TMP/scenario-pg-password-iam.yaml"
+render_default "$out20iam" \
+  --set global.deploymentMode=external \
+  --set global.postgresql.deploy=false \
+  --set global.postgresql.host=pg.example.com \
+  --set global.postgresql.authMode=iam \
+  --set global.postgresql.passwordSecret.name=postgres-roles \
+  --set global.postgresql.passwordSecret.key=CONTROL_PLANE
+assert_not_contains "$out20iam" 'postgres-roles' \
+  "passwordSecret: IAM auth ignores the hook entirely"
+
+# The chart cannot omit keys from a Secret it does not write, so the protection
+# has to live in the env entries. Both emitters carry the same condition, and
+# postgresql/secrets.yaml is the copy this exercises.
+out20keep="$TMP/scenario-pg-password-preserved.yaml"
+render_default "$out20keep" \
+  --set global.deploymentMode=external \
+  --set global.autoGenerateSecrets=false \
+  --set global.preserveExistingSecrets=true \
+  --set global.postgresql.deploy=false \
+  --set global.postgresql.host=pg.example.com \
+  --set global.postgresql.passwordSecret.name=postgres-roles \
+  --set global.postgresql.passwordSecret.key=CONTROL_PLANE
+assert_not_contains "$out20keep" 'key: POSTGRES_PRISMA_URL' \
+  "passwordSecret: a preserved Secret cannot smuggle a stale connection string back in"
 
 green ""
 green "All v2 render scenarios passed."

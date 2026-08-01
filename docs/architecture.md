@@ -263,8 +263,11 @@ per fact** — no aliases:
 
 - `postgresql-secrets` — `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`,
   `POSTGRES_PASSWORD`, `POSTGRES_DB`, `POSTGRES_SSLMODE`, `POSTGRES_LOGIN`,
-  `POSTGRES_AUTH_MODE`, `POSTGRES_CONNECTION_TYPE`, and `SENSIBLE_PG_DSN`.
-  External mode adds `POSTGRES_PRISMA_URL`.
+  `POSTGRES_AUTH_MODE`, and `POSTGRES_CONNECTION_TYPE`, plus one connection
+  string: hybrid adds `SENSIBLE_PG_DSN`, external adds `POSTGRES_PRISMA_URL`.
+  Setting `global.postgresql.passwordSecret` (external only) drops both
+  `POSTGRES_PASSWORD` and `POSTGRES_PRISMA_URL`, and the console assembles its
+  own connection from the parts.
 - `redis-secrets` — `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_USERNAME`,
   `REDIS_TLS`.
 
@@ -282,8 +285,11 @@ to exist as keys inside the chart-managed Secret.
 > or `global.preserveExistingSecrets: true` and workloads fall back to `envFrom`
 > on your Secret, injecting its keys verbatim as environment variables. Your keys
 > must then be the names the applications read — `DB_HOST`, `DB_PORT`, `DB_USER`,
-> `DB_PASSWORD`, `DB_NAME`, `DB_SSL_MODE`, and `SENSIBLE_PG_DSN` — not the
-> `POSTGRES_*` family. This is the one case where `DB_*` keys are correct.
+> `DB_PASSWORD`, `DB_NAME`, `DB_SSL_MODE`, and, in hybrid, `SENSIBLE_PG_DSN` —
+> not the `POSTGRES_*` family. This is the one case where `DB_*` keys are
+> correct. In external, `global.postgresql.passwordSecret` replaces only the
+> password and leaves the rest of the chart's Secret intact, which is almost
+> always what you actually want.
 
 No chart-managed schema migration — application migrations (already namespaced:
 `trustgate_migration_versions`, `trustguard_migration_versions`) own their tables

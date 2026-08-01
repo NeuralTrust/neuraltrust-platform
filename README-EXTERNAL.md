@@ -258,10 +258,29 @@ agentgateway:
       key: "AGENTGATEWAY" # key is configurable, so one Secret serves every role
 ```
 
-An inline `password` alongside the hook is rejected at render. The one credential
-this cannot cover is the control-plane role in `global.postgresql.password`, which
-the chart bakes into the Prisma and telemetry connection strings while rendering.
-See [Datastore credentials without values](./SECRETS.md#datastore-credentials-without-values).
+An inline `password` alongside the hook is rejected at render.
+
+Since chart 2.8.0 the control-plane role is covered too, by
+`global.postgresql.passwordSecret` — the same shape, only global, and only
+against a managed instance:
+
+```yaml
+global:
+  postgresql:
+    deploy: false
+    host: "postgres.example.com"
+    passwordSecret:
+      name: "managed-postgres-roles"
+      key: "CONTROL_PLANE"
+```
+
+The chart then writes every `postgresql-secrets` key except the password and the
+Prisma URL, drops the connection-string environment entries entirely so a stale
+URL cannot outrank your Secret, and `control-plane-app` assembles its own
+connection from the parts — so the app image has to carry
+`scripts/postgres-password-url.mjs`, which the migration step needs. With every
+hook in place a managed external values file holds no credential at all. See
+[Datastore credentials without values](./SECRETS.md#datastore-credentials-without-values).
 
 Who creates the PostgreSQL roles and databases depends on whose instance it is:
 

@@ -771,7 +771,10 @@ if [ -n "$POSTGRES_SECRET_NAME" ]; then
         exit 1
     fi
     
-    # Create DATABASE_URL (values are already trimmed)
+    # Create DATABASE_URL (values are already trimmed).
+    # Not used when global.postgresql.passwordSecret names an operator Secret:
+    # the chart then renders no URL env entry at all, and the console assembles
+    # its connection from the discrete POSTGRES_* variables instead.
     POSTGRES_PASSWORD_ENCODED=$(url_encode "$POSTGRES_PASSWORD")
     DATABASE_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD_ENCODED}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}?connection_limit=15"
     POSTGRES_PRISMA_URL="$DATABASE_URL"

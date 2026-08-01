@@ -29,16 +29,19 @@
 # With preserveExistingSecrets=true, pre-create at least:
 # - control-plane-secrets: AUTH_SECRET, NEXTAUTH_SECRET, CONTROL_PLANE_JWT_SECRET
 # - postgresql-secrets: POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER, POSTGRES_DB,
-#   POSTGRES_SSLMODE, POSTGRES_LOGIN, POSTGRES_AUTH_MODE, POSTGRES_CONNECTION_TYPE,
-#   SENSIBLE_PG_DSN, POSTGRES_PRISMA_URL
-#   (and POSTGRES_PASSWORD in password mode)
+#   POSTGRES_SSLMODE, POSTGRES_LOGIN, POSTGRES_AUTH_MODE, POSTGRES_CONNECTION_TYPE
+#   (and POSTGRES_PASSWORD in password mode, unless
+#    global.postgresql.passwordSecret points elsewhere)
+#   POSTGRES_PRISMA_URL is optional: control-plane-app builds its own connection
+#   from the parts above when the key is absent. SENSIBLE_PG_DSN is hybrid-only —
+#   nothing in external reads it.
 #   Do NOT add DB_* or DATABASE_URL here — the chart maps the keys above to
 #   whatever variable names each container expects. This applies to the chart's
 #   own `postgresql-secrets`, as used here. The opposite holds if you instead
 #   point `global.postgresql.existingSecret.name` at a Secret of your own: the
 #   chart then renders no Secret to map from, every consumer envFrom's yours
 #   directly, and its keys must be DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME/
-#   DB_SSL_MODE plus SENSIBLE_PG_DSN. See SECRETS.md.
+#   DB_SSL_MODE (plus SENSIBLE_PG_DSN in hybrid). See SECRETS.md.
 # - agentgateway-secrets: SERVER_SECRET_KEY, STS_SIGNING_KEY
 # - trustguard-secrets: ADMIN_JWT_SECRET, TRUSTGUARD_TOKEN_SIGNING_SECRET,
 #   REDIS_EVENTS_SECRET
@@ -54,7 +57,8 @@
 # - clickstack-collector-secrets: CLICKHOUSE_ENDPOINT, CLICKHOUSE_USER,
 #   OTLP_AUTH_TOKEN
 # - managed-clickhouse: password (the shared ClickHouse credential referenced below)
-# - managed-postgres-roles: AGENTGATEWAY, TRUSTGUARD, ALERTENGINE, DATACORE
+# - managed-postgres-roles: CONTROL_PLANE, AGENTGATEWAY, TRUSTGUARD, ALERTENGINE,
+#   DATACORE
 # - managed-redis-auth: REDIS_PASSWORD, REDIS_URL
 #   (REDIS_URL is the whole DSN, e.g. rediss://user:pw@redis.example.com:6379/0 —
 #    data-plane-api reads an assembled URL rather than a password)
@@ -79,6 +83,18 @@ global:
     host: "postgres.example.com"
     port: "5432"
     sslMode: "require"
+    # The control-plane role's password, in the same Secret as the four service
+    # roles below. External composes no connection string, so it never has to be
+    # readable while Helm renders. Needs an app image carrying
+    # scripts/postgres-password-url.mjs for the migration step.
+    #
+    # Safe alongside preserveExistingSecrets above: the chart drops the
+    # connection-string env entries in this mode, so a POSTGRES_PRISMA_URL left
+    # in the Secret you pre-created is never read and cannot keep an old
+    # password alive.
+    passwordSecret:
+      name: "managed-postgres-roles"
+      key: "CONTROL_PLANE"
   # One Redis endpoint for the whole platform, same inheritance.
   redis:
     deploy: false
@@ -100,7 +116,7 @@ infrastructure:
       secretKey: "password"
 
 # Datastore passwords, read from two Secrets instead of written here. `key` is
-# configurable, so one Secret holds every Aurora role under its own key. Only
+# configurable, so one Secret holds every database role under its own key. Only
 # identity and endpoints live in this file; no credential does.
 agentgateway:
   database:

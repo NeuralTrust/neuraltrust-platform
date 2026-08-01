@@ -132,6 +132,36 @@ no Kubernetes resource when validation succeeds.
   {{- end -}}
 {{- end -}}
 
+{{- /* The same hook for the control-plane role (AUT-413), which needs more guarding
+       than the per-service ones because the chart used to compose connection
+       strings out of this password. It can only be honoured where nothing reads a
+       composed DSN. */ -}}
+{{- $globalPg := default dict $global.postgresql -}}
+{{- $pgPasswordRef := default dict $globalPg.passwordSecret -}}
+{{- if $pgPasswordRef.name -}}
+  {{- if $globalPg.password -}}
+    {{- fail "global.postgresql.passwordSecret.name and global.postgresql.password are mutually exclusive; drop the inline credential (the pre-created Secret wins and the chart omits the key)" -}}
+  {{- end -}}
+  {{- /* The same password under its other name: platform-secrets.yaml and
+         postgresql/secrets.yaml both accept this overlay, so leaving it out
+         would let an inline credential be silently dropped. */ -}}
+  {{- $apiPg := default dict (default dict (default dict (default dict (index $.Values "control-plane-api")).controlPlane).components).postgresql -}}
+  {{- if (default dict $apiPg.secrets).password -}}
+    {{- fail "global.postgresql.passwordSecret.name and control-plane-api.controlPlane.components.postgresql.secrets.password are mutually exclusive; drop the inline credential (the pre-created Secret wins and the chart omits the key)" -}}
+  {{- end -}}
+  {{- if (default dict $globalPg.existingSecret).name -}}
+    {{- fail "global.postgresql.passwordSecret.name and global.postgresql.existingSecret.name are mutually exclusive. existingSecret hands the chart a whole Secret to inject as-is, so it already owns the password; passwordSecret keeps the chart writing every other key and takes only the credential from you." -}}
+  {{- end -}}
+  {{- if ne $mode "external" -}}
+    {{- fail (printf "global.postgresql.passwordSecret is external-only, and this release is %s. Hybrid composes SENSIBLE_PG_DSN from this password for the TrustGate and TrustGuard telemetry exporters and for DataAgent, none of which can take the parts separately yet (RUN-1086, AUT-397)." $mode) -}}
+  {{- end -}}
+  {{- $pgDeploy := true -}}
+  {{- if hasKey $globalPg "deploy" -}}{{- $pgDeploy = $globalPg.deploy -}}{{- end -}}
+  {{- if $pgDeploy -}}
+    {{- fail "global.postgresql.passwordSecret requires global.postgresql.deploy=false. The chart's own PostgreSQL is initialised from POSTGRES_PASSWORD in postgresql-secrets and the bootstrap Job authenticates with it, so the chart has to own that key when it runs the instance itself." -}}
+  {{- end -}}
+{{- end -}}
+
 {{- $autoGenerate := true -}}
 {{- if hasKey $global "autoGenerateSecrets" -}}{{- $autoGenerate = $global.autoGenerateSecrets -}}{{- end -}}
 {{- $preserveExisting := false -}}

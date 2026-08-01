@@ -220,12 +220,7 @@ spec:
             secretKeyRef:
               name: {{ $pgSecretName }}
               key: POSTGRES_USER
-        - name: POSTGRES_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: {{ $pgSecretName }}
-              key: POSTGRES_PASSWORD
-              optional: true
+        {{- include "neuraltrust-platform.postgresql.passwordEnv" (dict "ctx" . "secret" $pgSecretName) | nindent 8 }}
         {{- /* Python API mints RDS IAM tokens when POSTGRES_CONNECTION_TYPE=aurora
                (see control-plane-api/src/database.py). Optional secret keys so
                pre-provisioned secrets without them keep working. */}}
