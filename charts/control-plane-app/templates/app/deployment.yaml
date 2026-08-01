@@ -68,7 +68,7 @@ spec:
       initContainers:
       - name: init-db
         {{- $initImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
-        {{- $initImageTag := "v1.125.1" }}
+        {{- $initImageTag := "v1.125.2" }}
         {{- $initPullPolicy := "IfNotPresent" }}
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.image }}
           {{- if .Values.controlPlane.components.app.image.repository }}{{- $initImageRepo = .Values.controlPlane.components.app.image.repository }}{{- end }}
@@ -106,11 +106,24 @@ spec:
           export PRISMA_GENERATE_SKIP_AUTOINSTALL=true
           export PRISMA_SKIP_POSTINSTALL_GENERATE=true
 
-          # IAM: Prisma's engine needs a password in the URL. Mint a short-lived
-          # RDS token (scripts/postgres-iam-url.mjs; app image v1.93.0+).
+          # Prisma's CLI only reads a connection string, so this step needs one
+          # even though the app itself now builds its own from the POSTGRES_*
+          # parts. IAM mints a short-lived RDS token (app image v1.93.0+);
+          # password mode assembles the URL, percent-encoding included, when the
+          # Secret carries no ready-made one because its password is owned by an
+          # operator Secret (global.postgresql.passwordSecret).
+          # Assign before exporting: `export VAR=$(cmd)` reports export's exit
+          # status, not the command's, so under `set -e` a failing script would
+          # leave an empty URL and a confusing Prisma error instead of stopping.
           if [ "${POSTGRES_AUTH_MODE:-password}" = "iam" ]; then
             echo "Minting RDS IAM auth token for Prisma migrations..."
-            export POSTGRES_PRISMA_URL="$(node scripts/postgres-iam-url.mjs)"
+            POSTGRES_PRISMA_URL="$(node scripts/postgres-iam-url.mjs)"
+            export POSTGRES_PRISMA_URL
+            export DATABASE_URL="$POSTGRES_PRISMA_URL"
+          elif [ -z "${POSTGRES_PRISMA_URL:-}" ]; then
+            echo "Building the Prisma URL from POSTGRES_* variables..."
+            POSTGRES_PRISMA_URL="$(node scripts/postgres-password-url.mjs)"
+            export POSTGRES_PRISMA_URL
             export DATABASE_URL="$POSTGRES_PRISMA_URL"
           fi
 
@@ -150,12 +163,19 @@ spec:
             secretKeyRef:
               key: POSTGRES_USER
               name: {{ $pgSecretName }}
-        - name: POSTGRES_PASSWORD
+        {{- include "neuraltrust-platform.postgresql.passwordEnv" (dict "ctx" . "secret" $pgSecretName) | nindent 8 }}
+        {{- /* The URL the app and the CLI build has to match the one the chart
+               composes when it owns the password, or an install would change
+               TLS behaviour and pool size the moment the credential moved to a
+               Secret. */}}
+        - name: POSTGRES_SSLMODE
           valueFrom:
             secretKeyRef:
-              key: POSTGRES_PASSWORD
+              key: POSTGRES_SSLMODE
               name: {{ $pgSecretName }}
               optional: true
+        - name: POSTGRES_CONNECTION_LIMIT
+          value: {{ include "neuraltrust-platform.postgresql.connectionLimit" . | quote }}
         - name: POSTGRES_AUTH_MODE
           valueFrom:
             secretKeyRef:
@@ -169,12 +189,17 @@ spec:
           value: {{ $awsRegion | quote }}
         {{- end }}
         {{- end }}
+        {{- if ne (include "neuraltrust-platform.postgresql.passwordIsExternal" .) "true" }}
         # Read DATABASE_URL / POSTGRES_PRISMA_URL from the secret instead of
         # building them inline. The secret encodes the password with urlquery
         # so backticks, '@', '/', '?' etc. in the password are safe; an inline
         # "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@..." breaks Prisma
         # (P1013 "invalid port number in database URL") when the password
         # contains URL-reserved chars. Overwritten above when POSTGRES_AUTH_MODE=iam.
+        # Not rendered at all when the password lives in an operator Secret
+        # (global.postgresql.passwordSecret): a URL left behind in a preserved or
+        # hand-written Secret would otherwise outrank the credential the operator
+        # just pointed us at, and keep the old password alive through a rotation.
         - name: POSTGRES_PRISMA_URL
           valueFrom:
             secretKeyRef:
@@ -191,6 +216,7 @@ spec:
               key: POSTGRES_PRISMA_URL
               name: {{ $pgSecretName }}
               optional: true
+        {{- end }}
         {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "node" "ctx" .) | nindent 8 }}
         {{- if include "neuraltrust-platform.customCaCert.enabled" . }}
         volumeMounts:
@@ -217,7 +243,7 @@ spec:
       containers:
       - name: app
         {{- $appImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
-        {{- $appImageTag := "v1.125.1" }}
+        {{- $appImageTag := "v1.125.2" }}
         {{- $appPullPolicy := "IfNotPresent" }}
         {{- $appPort := 3000 }}
         {{- $nodeEnv := "production" }}
@@ -318,12 +344,17 @@ spec:
             secretKeyRef:
               name: {{ $pgSecretName }}
               key: POSTGRES_USER
-        - name: POSTGRES_PASSWORD
+        {{- include "neuraltrust-platform.postgresql.passwordEnv" (dict "ctx" . "secret" $pgSecretName) | nindent 8 }}
+        {{- /* Both are only read when the app has to assemble its own URL, and
+               both must agree with what the chart would have composed. */}}
+        - name: POSTGRES_SSLMODE
           valueFrom:
             secretKeyRef:
               name: {{ $pgSecretName }}
-              key: POSTGRES_PASSWORD
+              key: POSTGRES_SSLMODE
               optional: true
+        - name: POSTGRES_CONNECTION_LIMIT
+          value: {{ include "neuraltrust-platform.postgresql.connectionLimit" . | quote }}
         {{- /* Next.js app reads POSTGRES_AUTH_MODE=iam (lib/db/postgresConfig.ts).
                Optional secret keys so pre-provisioned secrets keep working. */}}
         - name: POSTGRES_AUTH_MODE
@@ -344,7 +375,9 @@ spec:
         - name: POSTGRES_IAM_SSL_REJECT_UNAUTHORIZED
           value: "false"
         {{- end }}
-        {{- /* Both names, one stored key — see the init container above. */}}
+        {{- if ne (include "neuraltrust-platform.postgresql.passwordIsExternal" .) "true" }}
+        {{- /* Both names, one stored key — see the init container above, which
+               also explains why neither is rendered under passwordSecret. */}}
         - name: DATABASE_URL
           valueFrom:
             secretKeyRef:
@@ -357,6 +390,7 @@ spec:
               name: {{ $pgSecretName }}
               key: POSTGRES_PRISMA_URL
               optional: true
+        {{- end }}
         {{- /* Outbound email. The app builds one transport chosen by
                AUTH_EMAIL_PROVIDER (features/auth/server/authEmail/platformEnv.ts):
                resend, ses or smtp. Addresses are plain env (they are public);

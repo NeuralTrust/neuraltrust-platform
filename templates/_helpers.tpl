@@ -448,6 +448,73 @@ the question without emitting anything.
 {{- end }}
 
 {{/*
+The same hook for the control-plane PostgreSQL role (AUT-413).
+
+It needed its own pair of helpers because that password is not just a key in a
+Secret: the chart used to bake it into `POSTGRES_PRISMA_URL` and
+`SENSIBLE_PG_DSN` while rendering, which is why it was the last credential that
+had to sit in a values file. External mode reads neither of those any more — the
+app assembles its own URL from the POSTGRES_* parts — so the password can arrive
+as a reference like every other one. `validate-values.yaml` rejects the hook
+where a composed DSN is still required.
+
+Callable from the umbrella or from a subchart, since `global` is merged into
+both. Takes the whole `.Values.global.postgresql.passwordSecret` map.
+*/}}
+{{- define "neuraltrust-platform.postgresql.passwordSecretRef" -}}
+{{- default dict (default dict (default dict .Values.global).postgresql).passwordSecret | toYaml -}}
+{{- end }}
+
+{{/*
+Whether the control-plane password comes from an operator Secret.
+
+IAM auth answers false however the hook is set: there is no static password to
+redirect, and every doc says the credential hooks are ignored under IAM. Keeping
+that here rather than in each call site means one answer for the env entries, the
+omitted Secret keys and the validation.
+*/}}
+{{- define "neuraltrust-platform.postgresql.passwordIsExternal" -}}
+{{- $ref := (include "neuraltrust-platform.postgresql.passwordSecretRef" . | fromYaml) -}}
+{{- $pg := default dict (default dict .Values.global).postgresql -}}
+{{- if and $ref.name (ne ($pg.authMode | default "password") "iam") -}}true{{- end -}}
+{{- end }}
+
+{{/*
+The POSTGRES_PASSWORD env entry, pointing at the operator's Secret when the hook
+is set and at the chart's own otherwise.
+
+Strictness follows ownership rather than the call site. A reference into the
+chart's own Secret stays optional, so a pre-provisioned Secret without the key
+leaves the service to fail its own config validation instead of leaving the pod
+unable to start. A reference the operator wrote by hand is hard: a typo in
+`passwordSecret.key` should stop the pod with CreateContainerConfigError, not
+quietly build a password-less connection and surface as an authentication
+failure with nothing pointing at the cause.
+
+  ctx       the subchart context
+  secret    Secret holding the chart's own copy, when the hook is unset
+  optional  pass false to force a hard reference to the chart's own Secret too
+*/}}
+{{- define "neuraltrust-platform.postgresql.passwordEnv" -}}
+{{- $isExternal := eq (include "neuraltrust-platform.postgresql.passwordIsExternal" .ctx) "true" -}}
+{{- $ref := (include "neuraltrust-platform.postgresql.passwordSecretRef" .ctx | fromYaml) -}}
+{{- $name := .secret -}}
+{{- $key := "POSTGRES_PASSWORD" -}}
+{{- if $isExternal -}}
+{{- $name = $ref.name -}}
+{{- $key = $ref.key | default "POSTGRES_PASSWORD" -}}
+{{- end -}}
+- name: POSTGRES_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ $name | quote }}
+      key: {{ $key | quote }}
+      {{- if and (not $isExternal) (ne (.optional | toString) "false") }}
+      optional: true
+      {{- end }}
+{{- end }}
+
+{{/*
 The one Redis credential, resolved the same way as the endpoint. External mode
 has three consumers of it — the two gateway Secrets and the DSN composed into
 `data-plane-jwt-secret` — and they used to need the password written out once
@@ -1040,11 +1107,21 @@ needs this tunable. Prefer `global.postgresql.connectionLimit`, else 15.
       name: {{ $secretName | quote }}
       key: {{ $databaseKey | quote }}
 {{- end }}
+{{- /* Reading the chart's own Secret with the default key means connecting as the
+       control-plane role, so the password has to follow wherever that role's
+       password lives (global.postgresql.passwordSecret). A redirected Secret or a
+       renamed key is the operator's own wiring and is left alone. Both default to
+       the chart's own names here rather than to empty, so they have to be compared
+       rather than just tested. */}}
+{{- if or (ne $secretName "postgresql-secrets") (ne $passwordKey "POSTGRES_PASSWORD") }}
 - name: POSTGRES_PASSWORD
   valueFrom:
     secretKeyRef:
       name: {{ $secretName | quote }}
       key: {{ $passwordKey | quote }}
+{{- else }}
+{{ include "neuraltrust-platform.postgresql.passwordEnv" (dict "ctx" . "secret" $secretName "optional" false) }}
+{{- end }}
 - name: POSTGRES_SCHEMA
   value: {{ include "neuraltrust-platform.dataPlaneApi.postgresSchema" . | quote }}
 - name: PGSSLMODE

@@ -4,6 +4,82 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.8.0] — 2026-08-01
+
+Chart `2.7.1` → `2.8.0`. A managed external values file can now hold no
+credential at all.
+
+### Added
+
+- **`global.postgresql.passwordSecret` — the control-plane PostgreSQL password
+  from a Secret you created** (AUT-413). It was the last credential that had to
+  be written into a values file, and therefore into Helm release history, because
+  the chart composed connection strings while rendering and could not compose one
+  out of a password it could not read. `global.postgresql.existingSecret` was the
+  only escape and it suppresses `postgresql-secrets` wholesale, leaving all eleven
+  keys to be hand-written.
+
+  Set `name` (and `key`, defaulting to `POSTGRES_PASSWORD`) and the chart keeps
+  writing every other key, omits `POSTGRES_PASSWORD` and `POSTGRES_PRISMA_URL`,
+  and points `control-plane-app` (both containers), `control-plane-api` and
+  `data-plane-api` at your Secret by reference. The parts those services already
+  received are enough for the console to assemble its own connection.
+
+  The connection-string environment entries are not rendered at all in this mode,
+  rather than merely left unset. A `POSTGRES_PRISMA_URL` surviving in a preserved
+  or hand-written Secret would otherwise outrank the credential you just pointed
+  the chart at, and keep the old password alive through a rotation with no error
+  anywhere. For the same reason the reference to your Secret is **required**: a
+  typo in `key` stops the pod with `CreateContainerConfigError` instead of
+  connecting without a password.
+
+  **External only, and only against a managed instance.** Rendering fails if the
+  key is combined with an inline `password` (either `global.postgresql.password`
+  or the `control-plane-api` overlay) or with `existingSecret`, if the release is
+  hybrid (which still composes `SENSIBLE_PG_DSN` for the TrustGate and TrustGuard
+  telemetry exporters and for DataAgent — RUN-1086, AUT-397), or if
+  `global.postgresql.deploy` is true (the chart's own PostgreSQL is initialised
+  from that key and the bootstrap Job authenticates with it). Under
+  `authMode: iam` it is ignored rather than rejected, like the per-service
+  credential hooks: there is no static password to redirect.
+
+  **Requires an app image carrying `scripts/postgres-password-url.mjs`.** The
+  runtime builds its own connection from the parts, but `prisma migrate deploy`
+  goes through Prisma's CLI, which reads a URL and nothing else; the init
+  container now builds one with that script whenever the Secret carries none.
+  An older image starts with no datasource and fails its migrations. The
+  subchart's default `app` tag must be at or above that release before this key
+  is usable with chart defaults — check `charts/control-plane-app/values.yaml`
+  against the app release that introduced the script.
+
+### Changed
+
+- **External mode no longer stores `SENSIBLE_PG_DSN`.** Nothing there ever read
+  it: the gateways gate that environment entry on hybrid, and DataAgent is
+  hybrid-only. It was a credential written for no one, and the second reason the
+  password had to be readable at render time. Hybrid is unchanged. If an overlay
+  of yours reads the key out of `postgresql-secrets` in external mode, compose it
+  yourself from the `POSTGRES_*` keys, which all remain.
+
+- **`control-plane-app` receives `POSTGRES_SSLMODE` and
+  `POSTGRES_CONNECTION_LIMIT` in every external release**, not only when the hook
+  above is set, so the URL the app builds can match the one the chart composes.
+  Both containers therefore roll on upgrade in external mode. Hybrid renders
+  byte-identically to 2.7.1.
+
+- **Upgrade note for the omitted keys.** Helm prunes `POSTGRES_PASSWORD` and
+  `POSTGRES_PRISMA_URL` from `postgresql-secrets` when you adopt the hook, but
+  only for keys it wrote itself. A key added out of band — by `kubectl` or by
+  `create-secrets.sh` — was never in the previous manifest and survives. It is
+  inert, since nothing references those entries any more, but delete it if you
+  would rather not leave an old credential in the cluster.
+
+### Fixed
+
+- **The user is now URL-encoded in the composed Prisma URL.** The lib/pq DSN
+  next to it already encoded it. No effect on any name that is a plain SQL
+  identifier, which is every default.
+
 ## [v2.7.0] — 2026-07-31
 
 Chart `2.6.0` → `2.7.0`. External mode can now be installed on the chart's own
