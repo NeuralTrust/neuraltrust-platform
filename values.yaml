@@ -319,8 +319,13 @@ infrastructure:
       limits:
         cpu: 500m
         memory: 512Mi
+    # Persistence is required, not an optimisation: TrustGate's MCP data plane
+    # stores durable OAuth state in this Redis (user credentials for upstream
+    # MCP servers, dynamically registered OAuth clients, session records). With
+    # an emptyDir every pod restart wipes it and every user is sent back
+    # through the consent flow for every provider.
     persistence:
-      enabled: false
+      enabled: true
       size: 2Gi
       storageClass: ""
     nodeSelector: {}

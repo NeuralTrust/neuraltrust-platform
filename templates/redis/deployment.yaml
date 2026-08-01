@@ -34,7 +34,10 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
-          # Plain Redis (no RediSearch modules) — sessions + cache for v2 services.
+          # Plain Redis (no RediSearch modules). Not just a cache: TrustGate's
+          # MCP data plane keeps durable OAuth state here (vault credentials,
+          # DCR clients, session records), which is why persistence defaults
+          # to enabled — see infrastructure.redis.persistence in values.yaml.
           command: ["redis-server"]
           args:
             - "--port"
