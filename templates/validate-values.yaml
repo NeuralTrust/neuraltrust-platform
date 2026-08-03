@@ -132,10 +132,11 @@ no Kubernetes resource when validation succeeds.
   {{- end -}}
 {{- end -}}
 
-{{- /* The same hook for the control-plane role (AUT-413), which needs more guarding
-       than the per-service ones because the chart used to compose connection
-       strings out of this password. It can only be honoured where nothing reads a
-       composed DSN. */ -}}
+{{- /* Control-plane Postgres password from an operator Secret (AUT-413).
+       Hybrid no longer composes SENSIBLE_PG_DSN (RUN-1086, RUN-1093), so the
+       hook is available in both modes. It still requires deploy=false because
+       the chart's own PostgreSQL is initialised from POSTGRES_PASSWORD in
+       postgresql-secrets. */ -}}
 {{- $globalPg := default dict $global.postgresql -}}
 {{- $pgPasswordRef := default dict $globalPg.passwordSecret -}}
 {{- if $pgPasswordRef.name -}}
@@ -151,9 +152,6 @@ no Kubernetes resource when validation succeeds.
   {{- end -}}
   {{- if (default dict $globalPg.existingSecret).name -}}
     {{- fail "global.postgresql.passwordSecret.name and global.postgresql.existingSecret.name are mutually exclusive. existingSecret hands the chart a whole Secret to inject as-is, so it already owns the password; passwordSecret keeps the chart writing every other key and takes only the credential from you." -}}
-  {{- end -}}
-  {{- if ne $mode "external" -}}
-    {{- fail (printf "global.postgresql.passwordSecret is external-only, and this release is %s. Hybrid composes SENSIBLE_PG_DSN from this password for the TrustGate and TrustGuard telemetry exporters and for DataAgent, none of which can take the parts separately yet (RUN-1086, AUT-397)." $mode) -}}
   {{- end -}}
   {{- $pgDeploy := true -}}
   {{- if hasKey $globalPg "deploy" -}}{{- $pgDeploy = $globalPg.deploy -}}{{- end -}}

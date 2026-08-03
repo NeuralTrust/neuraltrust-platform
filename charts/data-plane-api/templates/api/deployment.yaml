@@ -519,7 +519,9 @@ spec:
           {{- end }}
         readinessProbe:
           httpGet:
-            path: /health
+            # /health always 200; /health/ready reflects dependency readiness
+            # (matches data-plane-api/k8s/base and src/app.py).
+            path: /health/ready
             port: 8000
             httpHeaders:
             - name: Accept
