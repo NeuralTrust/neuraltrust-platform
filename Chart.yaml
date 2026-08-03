@@ -38,14 +38,14 @@ dependencies:
   # TrustGate (values: agentgateway; K8s: agentgateway-*). Hybrid gated by
   # global.products.trustgate.
   - name: agentgateway
-    version: 0.1.36
+    version: 0.1.37
     repository: file://./charts/agentgateway
     tags:
       - neuraltrust
       - v2
   # TrustGuard. Hybrid gated by global.products.trustguard.
   - name: trustguard
-    version: 0.1.33
+    version: 0.1.34
     repository: file://./charts/trustguard
     tags:
       - neuraltrust
@@ -59,7 +59,7 @@ dependencies:
       - v2
   # DataAgent (hybrid; agentgateway.dataagent / trustguard.dataagent).
   - name: dataagent
-    version: 0.1.13
+    version: 0.1.14
     repository: file://./charts/dataagent
     tags:
       - neuraltrust
