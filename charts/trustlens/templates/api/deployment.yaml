@@ -69,6 +69,13 @@ spec:
         {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 8 }}
         resources:
           {{- toYaml .Values.controlPlane.resources | nindent 10 }}
+        startupProbe:
+          httpGet:
+            path: /health
+            port: http
+          periodSeconds: 5
+          timeoutSeconds: 5
+          failureThreshold: 30
         readinessProbe:
           httpGet:
             path: /ready

@@ -330,30 +330,32 @@ assert_contains "$out1" 'name: postgresql-secrets' \
 # drift from what any single service reads.
 for canonical in POSTGRES_HOST POSTGRES_PORT POSTGRES_USER POSTGRES_PASSWORD \
   POSTGRES_DB POSTGRES_SSLMODE POSTGRES_LOGIN POSTGRES_AUTH_MODE \
-  POSTGRES_CONNECTION_TYPE SENSIBLE_PG_DSN; do
+  POSTGRES_CONNECTION_TYPE; do
   assert_secret_key "$out1" postgresql-secrets present "$canonical" \
     "hybrid: postgresql-secrets stores canonical ${canonical}"
 done
 for retired in DB_HOST DB_PORT DB_USER DB_PASSWORD DB_NAME DB_SSL_MODE \
-  DATABASE_AUTH_MODE DATABASE_IAM_AUTH DATABASE_URL; do
+  DATABASE_AUTH_MODE DATABASE_IAM_AUTH DATABASE_URL SENSIBLE_PG_DSN; do
   assert_secret_key "$out1" postgresql-secrets absent "$retired" \
     "hybrid: postgresql-secrets no longer stores ${retired}"
 done
 # Prisma is the control-plane app's reader and hybrid does not deploy it.
 assert_secret_key "$out1" postgresql-secrets absent POSTGRES_PRISMA_URL \
   "hybrid: postgresql-secrets omits the Prisma URL it has no reader for"
-# The three Go services read DB_*; POSTGRES_LOGIN is the IAM switch. Nothing else.
+# The three Go services read DB_*; POSTGRES_LOGIN is the IAM switch. Telemetry
+# falls back to those same DB_* parts (RUN-1086) — no SENSIBLE_PG_DSN.
 for wl in agentgateway-proxy:proxy agentgateway-mcp:mcp trustguard-data-plane:data-plane; do
   assert_datastore_env "$out1" "${wl%%:*}" "${wl##*:}" \
-    'DB_HOST,DB_NAME,DB_PASSWORD,DB_PORT,DB_SSL_MODE,DB_USER,POSTGRES_LOGIN,SENSIBLE_PG_DSN' \
+    'DB_HOST,DB_NAME,DB_PASSWORD,DB_PORT,DB_SSL_MODE,DB_USER,POSTGRES_LOGIN' \
     "hybrid: ${wl%%:*} receives only the datastore keys it reads"
 done
-# DataAgent reads DATABASE_URL and nothing else, so it takes one key rather than
-# the whole Secret it used to receive via envFrom.
-assert_datastore_env "$out1" dataagent dataagent 'DATABASE_URL' \
-  "hybrid: DataAgent receives only DATABASE_URL"
-assert_datastore_env "$out1" dataagent-trustguard dataagent 'DATABASE_URL' \
-  "hybrid: TrustGuard DataAgent receives only DATABASE_URL"
+# DataAgent builds its connection from discrete POSTGRES_* parts (RUN-1093).
+assert_datastore_env "$out1" dataagent dataagent \
+  'POSTGRES_DB,POSTGRES_HOST,POSTGRES_PASSWORD,POSTGRES_PORT,POSTGRES_SSLMODE,POSTGRES_USER' \
+  "hybrid: DataAgent receives discrete POSTGRES_* parts"
+assert_datastore_env "$out1" dataagent-trustguard dataagent \
+  'POSTGRES_DB,POSTGRES_HOST,POSTGRES_PASSWORD,POSTGRES_PORT,POSTGRES_SSLMODE,POSTGRES_USER' \
+  "hybrid: TrustGuard DataAgent receives discrete POSTGRES_* parts"
 # A wholesale Postgres envFrom creeping back would silently undo the collapse.
 assert_no_envfrom_secret "$out1" postgresql-secrets \
   "hybrid: no workload injects postgresql-secrets wholesale"
@@ -412,8 +414,12 @@ assert_occurrences "$out1" '^  name: clickstack-egress-collector$' 1 \
   "hybrid: single clickstack-egress-collector Service"
 assert_contains "$out1" 'name: clickstack-egress-collector'$'\n''        image:' \
   "hybrid: OTLP egress sidecar on primary DataAgent renders"
-assert_contains "$out1" 'name: DATABASE_URL'$'\n''          valueFrom:'$'\n''            secretKeyRef:'$'\n''              name: "postgresql-secrets"'$'\n''              key: SENSIBLE_PG_DSN' \
-  "hybrid: DataAgent DATABASE_URL overrides Prisma DSN with SENSIBLE_PG_DSN"
+assert_contains "$out1" 'name: POSTGRES_HOST'$'\n''          valueFrom:'$'\n''            secretKeyRef:'$'\n''              name: "postgresql-secrets"'$'\n''              key: POSTGRES_HOST' \
+  "hybrid: DataAgent reads POSTGRES_HOST from postgresql-secrets"
+assert_contains "$out1" 'type: postgres'$'\n' \
+  "hybrid: telemetry ConfigMap registers sensible-pg without dsn_env"
+assert_not_contains "$out1" 'dsn_env: SENSIBLE_PG_DSN' \
+  "hybrid: telemetry ConfigMap no longer names SENSIBLE_PG_DSN"
 assert_contains "$out1" 'name: OAUTH_BROKER_ADDR'$'\n''          value: "127.0.0.1:9465"' \
   "hybrid: DataAgent enables loopback OAuth broker for egress sidecar"
 assert_contains "$out1" 'token_url: "http://127.0.0.1:9465/oauth/token"' \
@@ -601,8 +607,8 @@ assert_contains "$out2b" 'name: postgresql-secrets' \
   "autoGenerate=false: postgresql-secrets fallback renders"
 assert_contains "$out2b" 'ZmFsbGJhY2stcGctc2VjcmV0' \
   "autoGenerate=false: explicit password reaches postgresql-secrets"
-assert_contains "$out2b" 'SENSIBLE_PG_DSN:' \
-  "autoGenerate=false: shared fallback includes DataAgent-compatible DSN"
+assert_not_contains "$out2b" 'SENSIBLE_PG_DSN:' \
+  "autoGenerate=false: shared fallback no longer composes SENSIBLE_PG_DSN"
 assert_contains "$out2b" 'name: dataagent$' \
   "autoGenerate=false: TrustGate DataAgent reuses shared fallback Secret"
 assert_contains "$out2b" 'name: dataagent-trustguard$' \
@@ -2791,12 +2797,22 @@ assert_render_fails_with \
   --set global.postgresql.host=pg.example.com \
   --set global.postgresql.passwordSecret.name=postgres-roles \
   --set global.postgresql.existingSecret.name=whole-secret
-assert_render_fails_with \
-  "global.postgresql.passwordSecret is external-only" \
-  "passwordSecret is rejected in hybrid, which still composes a DSN" \
+# Hybrid no longer composes SENSIBLE_PG_DSN, so passwordSecret is allowed there
+# too (RUN-1086 / RUN-1093). The password must still follow the operator Secret.
+out20hyb="$TMP/scenario-pg-password-secret-hybrid.yaml"
+render_default "$out20hyb" \
   --set global.postgresql.deploy=false \
   --set global.postgresql.host=pg.example.com \
-  --set global.postgresql.passwordSecret.name=postgres-roles
+  --set global.postgresql.passwordSecret.name=postgres-roles \
+  --set global.postgresql.passwordSecret.key=CONTROL_PLANE
+assert_secret_key "$out20hyb" postgresql-secrets absent POSTGRES_PASSWORD \
+  "hybrid passwordSecret: postgresql-secrets omits POSTGRES_PASSWORD"
+assert_secret_key "$out20hyb" postgresql-secrets absent SENSIBLE_PG_DSN \
+  "hybrid passwordSecret: postgresql-secrets omits SENSIBLE_PG_DSN"
+assert_contains "$out20hyb" 'name: DB_PASSWORD'$'\n''          valueFrom:'$'\n''            secretKeyRef:'$'\n''              name: "postgres-roles"'$'\n''              key: "CONTROL_PLANE"' \
+  "hybrid passwordSecret: gateway DB_PASSWORD follows the operator Secret"
+assert_contains "$out20hyb" 'name: POSTGRES_PASSWORD'$'\n''          valueFrom:'$'\n''            secretKeyRef:'$'\n''              name: "postgres-roles"'$'\n''              key: "CONTROL_PLANE"' \
+  "hybrid passwordSecret: DataAgent POSTGRES_PASSWORD follows the operator Secret"
 assert_render_fails_with \
   "global.postgresql.passwordSecret requires global.postgresql.deploy=false" \
   "passwordSecret is rejected while the chart runs its own PostgreSQL" \
@@ -2830,6 +2846,117 @@ render_default "$out20keep" \
   --set global.postgresql.passwordSecret.key=CONTROL_PLANE
 assert_not_contains "$out20keep" 'key: POSTGRES_PRISMA_URL' \
   "passwordSecret: a preserved Secret cannot smuggle a stale connection string back in"
+
+# ---------------------------------------------------------------------------
+# AUT-322: port + probe parity against service k8s overlays / health routes.
+# A wrong readiness path marks Ready while broken; a missing startupProbe
+# CrashLoops migration-bound boots (TrustGate admin, TrustLens API).
+# ---------------------------------------------------------------------------
+blue "==> AUT-322: port and probe parity"
+assert_workload_parity() {
+  local file="$1" deploy="$2" container="$3"
+  local expect_port="$4" ready_path="$5" live_path="$6" start_path="$7"
+  ruby -ryaml -e '
+    docs = YAML.load_stream(File.read(ARGV.fetch(0))).compact
+    deploy, cname, port, ready, live, start = ARGV[1], ARGV[2], ARGV[3].to_i, ARGV[4], ARGV[5], ARGV[6]
+    d = docs.find { |x| x["kind"] == "Deployment" && x.dig("metadata", "name") == deploy }
+    abort "missing Deployment #{deploy}" if d.nil?
+    c = (d.dig("spec", "template", "spec", "containers") || []).find { |x| x["name"] == cname }
+    abort "missing container #{cname} on #{deploy}" if c.nil?
+    ports = (c["ports"] || []).map { |p| p["containerPort"].to_i }
+    abort "#{deploy}/#{cname}: expected containerPort #{port}, got #{ports.inspect}" unless ports.include?(port)
+    %w[readinessProbe livenessProbe startupProbe].each do |probe|
+      abort "#{deploy}/#{cname}: missing #{probe}" if c[probe].nil?
+    end
+    got_ready = c.dig("readinessProbe", "httpGet", "path")
+    got_live  = c.dig("livenessProbe", "httpGet", "path")
+    got_start = c.dig("startupProbe", "httpGet", "path")
+    abort "#{deploy}: readiness #{got_ready.inspect} != #{ready.inspect}" unless got_ready == ready
+    abort "#{deploy}: liveness #{got_live.inspect} != #{live.inspect}" unless got_live == live
+    abort "#{deploy}: startup #{got_start.inspect} != #{start.inspect}" unless got_start == start
+  ' "$file" "$deploy" "$container" "$expect_port" "$ready_path" "$live_path" "$start_path"
+  green "ok  - ${deploy}: port ${expect_port}, ready=${ready_path} live=${live_path} start=${start_path}"
+}
+
+out322ext="$TMP/scenario-aut322-external.yaml"
+render_default "$out322ext" \
+  --set global.deploymentMode=external \
+  --set trustlens.enabled=true --set trustlens.image.tag=v0.1.0
+assert_workload_parity "$out322ext" agentgateway-admin admin 8080 /readyz /healthz /healthz
+assert_workload_parity "$out322ext" agentgateway-proxy proxy 8081 /readyz /healthz /healthz
+assert_workload_parity "$out322ext" agentgateway-mcp mcp 8082 /readyz /healthz /healthz
+assert_workload_parity "$out322ext" trustguard-control-plane control-plane 8080 /readyz /healthz /healthz
+assert_workload_parity "$out322ext" trustguard-data-plane data-plane 8081 /readyz /healthz /healthz
+assert_workload_parity "$out322ext" trustlens-api api 8080 /ready /health /health
+assert_workload_parity "$out322ext" data-plane-api api 8000 /health/ready /health /health
+
+out322hyb="$TMP/scenario-aut322-hybrid.yaml"
+render_default "$out322hyb"
+# Primary TrustGate DataAgent is named `dataagent`; TrustGuard's slice is
+# `dataagent-trustguard` (see charts/dataagent fullname helpers).
+for da in dataagent dataagent-trustguard; do
+  assert_workload_parity "$out322hyb" "$da" dataagent 8080 /readyz /healthz /healthz
+done
+assert_render_fails_with \
+  "trustlens.image.tag is required when trustlens.enabled=true" \
+  "AUT-322: TrustLens refuses to render without an image tag" \
+  --set trustlens.enabled=true
+
+# ---------------------------------------------------------------------------
+# AUT-393: create-secrets.sh must track platformSecret.registry and the
+# canonical Postgres family. Drift here is silent until an operator runs the
+# script under preserveExistingSecrets.
+# ---------------------------------------------------------------------------
+blue "create-secrets.sh registry + Postgres contract"
+SCRIPT_KEYS="$(awk '
+  /PLATFORM_SECRET_REGISTRY_KEYS_BEGIN/ { in_list=1; next }
+  /PLATFORM_SECRET_REGISTRY_KEYS_END/ { in_list=0 }
+  in_list && /^[[:space:]]*[A-Z0-9_]+[[:space:]]*$/ {
+    gsub(/[[:space:]]/, "", $0)
+    print $0
+  }
+' create-secrets.sh | sort)"
+HELPER_KEYS="$(awk '
+  /define "neuraltrust-platform.platformSecret.registry"/ { in_reg=1; next }
+  in_reg && /{{- end }}/ { exit }
+  in_reg && /^[A-Z0-9_]+:/ {
+    sub(/:.*/, "", $0)
+    print $0
+  }
+' templates/_helpers.tpl | sort)"
+if [ "$SCRIPT_KEYS" != "$HELPER_KEYS" ]; then
+  red "FAIL - create-secrets.sh PLATFORM_SECRET_REGISTRY_KEYS drifts from platformSecret.registry"
+  echo "--- script ---"
+  echo "$SCRIPT_KEYS"
+  echo "--- helpers ---"
+  echo "$HELPER_KEYS"
+  exit 1
+fi
+green "ok  - create-secrets.sh registry keys match platformSecret.registry"
+
+for key in $HELPER_KEYS; do
+  if ! grep -q "ensure_platform_secret_key \"$key\"" create-secrets.sh; then
+    red "FAIL - create-secrets.sh never calls ensure_platform_secret_key for $key"
+    exit 1
+  fi
+done
+green "ok  - create-secrets.sh materialises every registry key into platform-secrets"
+
+for needle in POSTGRES_SSLMODE POSTGRES_LOGIN POSTGRES_AUTH_MODE POSTGRES_CONNECTION_TYPE; do
+  if ! grep -q -- "--from-literal=${needle}=" create-secrets.sh; then
+    red "FAIL - create-secrets.sh postgresql-secrets omits ${needle}"
+    exit 1
+  fi
+done
+if grep -q -- '--from-literal=DATABASE_URL=' create-secrets.sh; then
+  red "FAIL - create-secrets.sh still writes retired DATABASE_URL into postgresql-secrets"
+  exit 1
+fi
+if grep -q -- '--from-literal=SENSIBLE_PG_DSN=' create-secrets.sh; then
+  red "FAIL - create-secrets.sh must not compose SENSIBLE_PG_DSN"
+  exit 1
+fi
+green "ok  - create-secrets.sh writes the canonical Postgres family without DSN composition"
 
 green ""
 green "All v2 render scenarios passed."

@@ -20,10 +20,10 @@ data:
           type: otlp
       {{- end }}
       raw:
+        {{- /* No dsn_env: the exporter falls back to the service DB_* config
+               (RUN-1086). Requires a TrustGate image that supports that path. */}}
         - name: sensible-pg
           type: postgres
-          settings:
-            dsn_env: SENSIBLE_PG_DSN
         {{- if eq (include "neuraltrust-platform.clickstackHybridEnabled" .) "true" }}
         - name: raw-otlp
           type: otlp

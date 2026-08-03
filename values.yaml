@@ -199,24 +199,25 @@ global:
     # rename per service (see SECRETS.md).
     existingSecret:
       name: ""
-    # External mode only: the control-plane role's password, owned by a Secret
-    # you created. The chart then leaves `POSTGRES_PASSWORD` out of
-    # postgresql-secrets and injects yours by reference wherever it is read, so
-    # no credential passes through values or release history. Unlike
-    # `existingSecret` above, the chart still writes every other key.
+    # The control-plane role's password, owned by a Secret you created. The
+    # chart then leaves `POSTGRES_PASSWORD` out of postgresql-secrets and
+    # injects yours by reference wherever it is read, so no credential passes
+    # through values or release history. Unlike `existingSecret` above, the
+    # chart still writes every other key. Available in both external and hybrid.
     #
-    # It works because nothing in external mode needs a connection string
-    # composed at render time: `control-plane-app` builds its own from the
-    # POSTGRES_* parts, and every other service already connected that way.
-    # Hybrid still composes `SENSIBLE_PG_DSN` for the telemetry exporters and
-    # DataAgent, so the key is rejected there.
+    # It works because nothing needs a connection string composed at render
+    # time: `control-plane-app` builds its own from the POSTGRES_* parts, and
+    # the TrustGate / TrustGuard telemetry exporters plus DataAgent fall back
+    # to the same discrete parts when no DSN is configured (RUN-1086, RUN-1093).
     #
     # Ignored under authMode=iam, which has no static password to redirect.
     #
-    # Requires an app image carrying `scripts/postgres-password-url.mjs`, which
-    # the migration step needs because Prisma's CLI only reads a URL. Older
-    # images start with no datasource and fail their migrations — check the app
-    # tag in charts/control-plane-app/values.yaml before setting this.
+    # Image floor: app images need `scripts/postgres-password-url.mjs` (Prisma
+    # CLI still wants a URL at migrate time). TrustGate / TrustGuard / DataAgent
+    # need the discrete-parts fallback — older images still expect
+    # SENSIBLE_PG_DSN and will skip the raw-telemetry sink or fail DataAgent
+    # config validation. Check the tags in the subchart values before setting
+    # this on hybrid.
     #
     # The reference is required rather than optional: a wrong `key` stops the pod
     # with CreateContainerConfigError instead of connecting with no password.

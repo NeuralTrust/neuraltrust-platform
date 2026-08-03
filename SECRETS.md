@@ -104,19 +104,18 @@ export CONTROL_PLANE_JWT_SECRET="your-secret"
 # Script options
 ./create-secrets.sh --replace-existing      # replace without asking
 ./create-secrets.sh --no-replace-existing   # skip existing without asking
+
+# Shape the shared Secret (defaults: external, all products on)
+export DEPLOYMENT_MODE=hybrid
+export ENABLE_TRUSTGATE=true ENABLE_TRUSTGUARD=true ENABLE_DATAPLANE=false
 ```
 
-> **The script does not cover everything the chart now expects.** It predates the
-> shared `platform-secrets` Secret and does not create it, and the
-> `postgresql-secrets` it writes is missing `SENSIBLE_PG_DSN`, `POSTGRES_SSLMODE`,
-> `POSTGRES_LOGIN` and the two mode flags while still writing the retired
-> `DATABASE_URL`. This only matters when the chart is not managing those Secrets
-> (`preserveExistingSecrets: true`, `autoGenerateSecrets: false`, or an
-> `existingSecret`): there nothing tops up the missing keys, and the hybrid
-> services that read `SENSIBLE_PG_DSN` — TrustGate and TrustGuard telemetry, and
-> DataAgent's `DATABASE_URL` — lose their connection string. DataAgent's reference is not optional,
-> so its pod stays in `CreateContainerConfigError` rather than starting unconfigured.
-> Add the missing keys yourself, or let the chart own these two Secrets.
+The script writes the canonical `POSTGRES_*` family (including `POSTGRES_SSLMODE`,
+`POSTGRES_LOGIN`, `POSTGRES_AUTH_MODE`, `POSTGRES_CONNECTION_TYPE`) and the shared
+`platform-secrets` keys for the shapes you select. It does **not** compose
+`SENSIBLE_PG_DSN` or store the retired `DATABASE_URL`. Set
+`global.preserveExistingSecrets: true` (or `autoGenerateSecrets: false`) when Helm
+must leave those Secrets alone.
 
 ### Pre-existing secrets (external management)
 
@@ -279,8 +278,7 @@ when convenient — it is validated at render time, `extraEnv` is not.
 | `postgresql-secrets` | `POSTGRES_LOGIN` | No | `aws` (IAM) or `default`. The only IAM switch the Go services read (`pkg/config/config.go`). |
 | `postgresql-secrets` | `POSTGRES_AUTH_MODE` | No | `password` (default) or `iam`. Read by the Next.js app (`lib/db/postgresConfig.ts`). |
 | `postgresql-secrets` | `POSTGRES_CONNECTION_TYPE` | No | `postgres` (password) or `aurora` (IAM). Read by the Python API (`src/database.py`). |
-| `postgresql-secrets` | `SENSIBLE_PG_DSN` | Yes in hybrid (if pre-generating) | lib/pq-compatible DSN, without the Prisma-only query parameters. **Hybrid only** since 2.8.0 — external never had a reader for it. |
-| `postgresql-secrets` | `POSTGRES_PRISMA_URL` | Yes in external | Prisma-compatible URL, carrying `connection_limit`. Password-less when `authMode: iam` (init-db mints a token at migrate time). Not rendered in hybrid, which has no Prisma reader, nor when `global.postgresql.passwordSecret` owns the password — the app then builds the URL itself. |
+| `postgresql-secrets` | `POSTGRES_PRISMA_URL` | Yes in external | Prisma-compatible URL, carrying `connection_limit`. Password-less when `authMode: iam` (init-db mints a token at migrate time). Not rendered in hybrid, which has no Prisma reader, nor when `global.postgresql.passwordSecret` owns the password — the app then builds the URL itself. `SENSIBLE_PG_DSN` is no longer written: hybrid readers build connections from the discrete `POSTGRES_*` / `DB_*` parts (RUN-1086, RUN-1093). |
 
 #### Datastore credentials without values
 
@@ -317,11 +315,12 @@ the credential three workloads share, so setting it makes the chart omit
 `control-plane-app` (both containers), `control-plane-api` and `data-plane-api`
 at your Secret. `control-plane-app` then assembles its own connection URL from
 the `POSTGRES_*` parts, which needs an image carrying
-`scripts/postgres-password-url.mjs` for the migration step. Rendering fails if
-you combine it with an inline `password` — `global.postgresql.password` or the
-`control-plane-api` overlay — or with `existingSecret`, in hybrid (which still
-composes `SENSIBLE_PG_DSN`), or while the chart runs its own PostgreSQL (which is
-initialised from that key).
+`scripts/postgres-password-url.mjs` for the migration step. Available in both
+external and hybrid once TrustGate / TrustGuard / DataAgent images fall back to
+discrete parts (RUN-1086, RUN-1093). Rendering fails if you combine it with an
+inline `password` — `global.postgresql.password` or the `control-plane-api`
+overlay — or with `existingSecret`, or while the chart runs its own PostgreSQL
+(which is initialised from that key).
 
 Two details make the redirection airtight rather than merely intended. The
 connection-string environment entries are **not rendered at all** in this mode:
@@ -358,24 +357,25 @@ helper, so the manifest shows which variables a pod actually reads:
 | `POSTGRES_DB` | `DB_NAME` | TrustGate, TrustGuard |
 | `POSTGRES_DB` | `POSTGRES_DATABASE` | control-plane-app, control-plane-api, DataCore |
 | `POSTGRES_SSLMODE` | `DB_SSL_MODE` | TrustGate, TrustGuard |
-| `SENSIBLE_PG_DSN` | `DATABASE_URL` | DataAgent (`lib/pq`) — hybrid only |
-| `POSTGRES_PRISMA_URL` | `DATABASE_URL` | control-plane-app (Prisma) |
+| `POSTGRES_HOST` / `_PORT` / `_USER` / `_PASSWORD` / `_DB` / `_SSLMODE` | (same names) | DataAgent (`lib/pq`) — hybrid; builds its own keyword DSN (RUN-1093) |
+| `POSTGRES_PRISMA_URL` | `DATABASE_URL` | control-plane-app (Prisma) — external only |
 
 DataAgent must not receive the Prisma URL: its `connection_limit` parameter is not a
 `lib/pq` connection option, so `lib/pq` forwards it to the server as a runtime
-setting and every query fails with `42704`.
+setting and every query fails with `42704`. The chart therefore injects the discrete
+`POSTGRES_*` parts instead of any composed DSN.
 
 Earlier revisions also stored `DB_*` copies of the first four rows plus
-`DATABASE_URL`, `DATABASE_AUTH_MODE` and `DATABASE_IAM_AUTH`. Those keys had either
-a single reader or none, and every consumer had to take the whole Secret through
-`envFrom` to get the few it used. They are no longer written. Keys left over in an
-existing Secret are harmless — nothing references them — and are removed on the next
-upgrade that rewrites the Secret.
+`DATABASE_URL`, `SENSIBLE_PG_DSN`, `DATABASE_AUTH_MODE` and `DATABASE_IAM_AUTH`.
+Those keys had either a single reader or none, and every consumer had to take the
+whole Secret through `envFrom` to get the few it used. They are no longer written.
+Keys left over in an existing Secret are harmless — nothing references them — and
+are removed on the next upgrade that rewrites the Secret.
 
 > **IAM auth for Control-Plane Postgres.** Setting
 > `control-plane-api.controlPlane.components.postgresql.authMode: iam`
 > (and/or `global.postgresql.authMode: iam`) makes the chart emit a password-less
-> `POSTGRES_PRISMA_URL` (and, in hybrid, `SENSIBLE_PG_DSN`), sets the three per-runtime switches
+> `POSTGRES_PRISMA_URL` (external only), sets the three per-runtime switches
 > (`POSTGRES_LOGIN`, `POSTGRES_AUTH_MODE`, `POSTGRES_CONNECTION_TYPE`), and stops
 > generating `POSTGRES_PASSWORD`.
 > Set `awsRegion` (or `global.postgresql.awsRegion`) so Deployments get
@@ -512,17 +512,17 @@ same name in both places.
 | AgentGateway server key | `agentgateway-secrets` | `SERVER_SECRET_KEY` | auto-generated |
 | AgentGateway MCP STS signing | `agentgateway-secrets` | `STS_SIGNING_KEY` | auto-generated RSA PKCS#1 private key (RS256), lookup-preserved so MCP tokens survive upgrades; use `create-secrets.sh` to validate and pre-provision an explicit PEM/base64-PEM key |
 | AgentGateway DB password | `agentgateway-secrets` | `DB_PASSWORD` | **External only** — auto-generated (app reads `DB_PASSWORD`, not `DATABASE_PASSWORD`); **omitted when `agentgateway.database.iamAuth=true`**. In **hybrid** the password comes from the shared `postgresql-secrets` (see below). |
-| AgentGateway raw-telemetry DSN | `postgresql-secrets` | `SENSIBLE_PG_DSN` | **Hybrid only** — the umbrella assembles the DSN and the telemetry ConfigMap only names it (`dsn_env: SENSIBLE_PG_DSN`). It is never a key in `agentgateway-secrets`. External gates the environment entry off, so since 2.8.0 the key is not written there at all. |
+| AgentGateway raw-telemetry Postgres | `postgresql-secrets` → `DB_*` env | (discrete parts) | **Hybrid only** — the telemetry exporter falls back to the service `DatabaseConfig` (`DB_HOST` / `DB_PASSWORD` / …) when no `dsn_env` is set (RUN-1086). `SENSIBLE_PG_DSN` is no longer written or injected. |
 | TrustGuard admin JWT | `trustguard-secrets` | `ADMIN_JWT_SECRET` | auto-generated |
 | TrustGuard token signing | `trustguard-secrets` | `TRUSTGUARD_TOKEN_SIGNING_SECRET` | auto-generated |
 | TrustGuard Redis events | `trustguard-secrets` | `REDIS_EVENTS_SECRET` | auto-generated; authenticates cache pub/sub events |
 | TrustGuard Firewall client | `firewall-secrets` (mounted as env) | `JWT_SECRET` → `NEURAL_TRUST_FIREWALL_SECRET_KEY` | Present when TrustGuard is on (hybrid product flag or external full stack). Base URL is ConfigMap `NEURAL_TRUST_FIREWALL_BASE_URL` → in-cluster `http://firewall.<ns>.svc.cluster.local`. |
 | TrustGuard DB password | `trustguard-secrets` | `DB_PASSWORD` | **External only** — auto-generated; **omitted when `trustguard.database.iamAuth=true`**. In **hybrid** the password comes from the shared `postgresql-secrets`. |
-| TrustGuard raw-telemetry DSN | `postgresql-secrets` | `SENSIBLE_PG_DSN` | Hybrid only, as above — not a key in `trustguard-secrets`. |
-| Shared hybrid Postgres credential | `postgresql-secrets` | `POSTGRES_*` plus `SENSIBLE_PG_DSN` — see [One canonical name per fact](#one-canonical-name-per-fact) | **Hybrid only** — the umbrella renders one shared Secret from `global.postgresql.*` (default `user`/`database` = `neuraltrust`), and every hybrid workload connects as that one role. Containers receive `DB_*` / `DATABASE_URL` names through explicit `env` mappings; those are **not** keys in the Secret. Set `global.postgresql.existingSecret.name` to supply your own instead — but then the chart injects it with `envFrom` and cannot rename anything, so **your keys must be `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` / `DB_SSL_MODE` / `SENSIBLE_PG_DSN`**. |
+| TrustGuard raw-telemetry Postgres | `postgresql-secrets` → `DB_*` env | (discrete parts) | Hybrid only, same as AgentGateway (RUN-1086). |
+| Shared hybrid Postgres credential | `postgresql-secrets` | `POSTGRES_*` — see [One canonical name per fact](#one-canonical-name-per-fact) | **Hybrid only** — the umbrella renders one shared Secret from `global.postgresql.*` (default `user`/`database` = `neuraltrust`), and every hybrid workload connects as that one role. Containers receive `DB_*` / `POSTGRES_*` names through explicit `env` mappings; those are **not** keys in the Secret. Set `global.postgresql.existingSecret.name` to supply your own instead — but then the chart injects it with `envFrom` and cannot rename anything, so **your keys must be `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` / `DB_SSL_MODE`** (gateways) or the canonical `POSTGRES_*` family (DataAgent). |
 | Shared hybrid Redis credential | `redis-secrets` | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` / `REDIS_USERNAME` / `REDIS_TLS` | **Hybrid only** — taken wholesale with `envFrom`, and rendered from `global.redis.*`. Empty `REDIS_PASSWORD` for the passwordless in-cluster default. Set `global.redis.existingSecret.name` to reuse a pre-created Secret. TLS is stored once as `REDIS_TLS`, which is the name TrustGuard reads; AgentGateway reads `REDIS_TLS_ENABLED` and is given that name through an explicit `env` mapping, so a supplied Secret only needs `REDIS_TLS`. |
 | Shared TrustGuard client creds | `trustguard-client-credentials` | `CLIENT_ID` / `CLIENT_SECRET` | id defaults to `agentgateway-platform`; secret auto-generated (or `global.v2.trustguardClientSecret`). Injected into both AgentGateway (`TRUSTGUARD_CLIENT_ID`/`_SECRET`) and TrustGuard (`TRUSTGUARD_PLATFORM_CLIENT_ID`/`_SECRET`) so the pair matches. The prerelease `v2-trustguard-client-secret` values are copied during upgrade. |
-| DataAgent DB DSN | `postgresql-secrets` (shared) | `SENSIBLE_PG_DSN` | **Hybrid** — DataAgent reads this one key and receives it as `DATABASE_URL`; it connects as `global.postgresql.user` (default `neuraltrust`). There is no separate DataAgent password key in the shared Secret. Override the product's `dataagent.databaseUrl` (or `dataagent.database.password`) to keep a per-service credential in `dataagent-secrets` instead. |
+| DataAgent Postgres | `postgresql-secrets` (shared) | `POSTGRES_HOST` / `PORT` / `USER` / `PASSWORD` / `DB` / `SSLMODE` | **Hybrid** — DataAgent builds a libpq keyword connection string from these parts when `DATABASE_URL` is unset (RUN-1093). It connects as `global.postgresql.user` (default `neuraltrust`). |
 | DataAgent enrolment token | operator Secret (e.g. `dataagent-enrolment-trustgate`), or `dataagent-secrets` / `dataagent-trustguard-secrets` when supplied inline | `ENROLMENT_TOKEN` (configurable key) | **Never** auto-generated — from `agentgateway.dataagent.enrolment` / `trustguard.dataagent.enrolment`. With the preferred `existingSecret.name` path the chart-managed `dataagent-*-secrets` render empty and the token is read straight from your Secret. |
 | AlertEngine DB password | `alertengine-secrets` | `DB_PASSWORD` | auto-generated (own `alertengine` DB; external only); **omitted when `alertengine.database.iamAuth=true`** |
 | AlertEngine auth JWT | `alertengine-secrets` | `AUTH_JWT_SECRET` | auto-generated — must match the app BFF token signer for UI auth |

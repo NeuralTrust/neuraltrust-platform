@@ -453,10 +453,13 @@ The same hook for the control-plane PostgreSQL role (AUT-413).
 It needed its own pair of helpers because that password is not just a key in a
 Secret: the chart used to bake it into `POSTGRES_PRISMA_URL` and
 `SENSIBLE_PG_DSN` while rendering, which is why it was the last credential that
-had to sit in a values file. External mode reads neither of those any more — the
-app assembles its own URL from the POSTGRES_* parts — so the password can arrive
-as a reference like every other one. `validate-values.yaml` rejects the hook
-where a composed DSN is still required.
+had to sit in a values file. Nothing composes a DSN from this password any more
+— the app, the telemetry exporters (RUN-1086) and DataAgent (RUN-1093) all build
+connections from the discrete POSTGRES_* / DB_* parts — so the password can
+arrive as a reference in both external and hybrid.
+
+Requires TrustGate / TrustGuard / DataAgent images that fall back to discrete
+parts when no DSN is configured. Older images still expect SENSIBLE_PG_DSN.
 
 Callable from the umbrella or from a subchart, since `global` is merged into
 both. Takes the whole `.Values.global.postgresql.passwordSecret` map.
@@ -504,7 +507,11 @@ failure with nothing pointing at the cause.
 {{- $name = $ref.name -}}
 {{- $key = $ref.key | default "POSTGRES_PASSWORD" -}}
 {{- end -}}
-- name: POSTGRES_PASSWORD
+{{- /* envName lets hybrid gateways inject the same credential as DB_PASSWORD
+       (what TrustGate/TrustGuard read) while control-plane consumers keep
+       POSTGRES_PASSWORD. The Secret key is always the Postgres family name
+       unless passwordSecret redirects it. */}}
+- name: {{ .envName | default "POSTGRES_PASSWORD" }}
   valueFrom:
     secretKeyRef:
       name: {{ $name | quote }}
@@ -601,22 +608,24 @@ TrustLens reads DATABASE_* but is deliberately not handled here: it owns a separ
 database identity (its own user, database and password), so pointing it at the
 shared credential would change which database it connects to.
 
-Usage: (dict "ctx" $ "dsn" true "skip" .Values.dataPlane.extraEnv)
-  dsn     also emit SENSIBLE_PG_DSN, read by the TrustGate and TrustGuard
-          telemetry exporters
+Usage: (dict "ctx" $ "skip" .Values.dataPlane.extraEnv)
   skip    env entries that already define these names, so an operator override in
           extraEnv is not duplicated; duplicate env names fail the upgrade patch
+
+SENSIBLE_PG_DSN is no longer injected: TrustGate/TrustGuard telemetry exporters
+fall back to the service DatabaseConfig (DB_*) when no dsn_env is set (RUN-1086).
 */}}
 {{- define "neuraltrust-platform.postgresEnv" -}}
 {{- $ctx := .ctx -}}
 {{- $secret := include "neuraltrust-platform.v2.hybridPg.secretName" $ctx -}}
-{{- $map := dict "DB_HOST" "POSTGRES_HOST" "DB_PORT" "POSTGRES_PORT" "DB_USER" "POSTGRES_USER" "DB_PASSWORD" "POSTGRES_PASSWORD" "DB_NAME" "POSTGRES_DB" "DB_SSL_MODE" "POSTGRES_SSLMODE" -}}
+{{- /* DB_PASSWORD is handled separately via passwordEnv so passwordSecret
+       redirects work in hybrid too. */}}
+{{- $map := dict "DB_HOST" "POSTGRES_HOST" "DB_PORT" "POSTGRES_PORT" "DB_USER" "POSTGRES_USER" "DB_NAME" "POSTGRES_DB" "DB_SSL_MODE" "POSTGRES_SSLMODE" -}}
 {{- /* POSTGRES_LOGIN is the only IAM switch these services read, and hybrid never
        delivered it: the gateways got it solely from their own subchart flag, so a
        hybrid install against an IAM-authenticated Postgres quietly attempted
        password auth. It resolves to "default" for password installs. */}}
 {{- $_ := set $map "POSTGRES_LOGIN" "POSTGRES_LOGIN" -}}
-{{- if .dsn -}}{{- $_ := set $map "SENSIBLE_PG_DSN" "SENSIBLE_PG_DSN" -}}{{- end -}}
 {{- $skip := list -}}
 {{- range $e := (default list .skip) -}}{{- $skip = append $skip $e.name -}}{{- end -}}
 {{- range $envName, $key := $map }}
@@ -632,6 +641,9 @@ Usage: (dict "ctx" $ "dsn" true "skip" .Values.dataPlane.extraEnv)
              pod that never starts. */}}
       optional: true
 {{- end }}
+{{- end }}
+{{- if not (has "DB_PASSWORD" $skip) }}
+{{- include "neuraltrust-platform.postgresql.passwordEnv" (dict "ctx" $ctx "secret" $secret "envName" "DB_PASSWORD") }}
 {{- end }}
 {{- end -}}
 
@@ -878,7 +890,9 @@ Credential readiness for a merged instance cfg (dict "ctx" $ "cfg" $merged).
 {{- if and $sharedPgSecret (kindIs "map" $sharedPgSecret) $sharedPgSecret.data -}}
   {{- $sharedPgData = $sharedPgSecret.data -}}
 {{- end -}}
-{{- $sharedPgReady := or ($globalPgExisting.name | default "") (and (hasKey $sharedPgData "SENSIBLE_PG_DSN") (ne (index $sharedPgData "SENSIBLE_PG_DSN") "")) -}}
+{{- /* POSTGRES_HOST is the readiness signal now that SENSIBLE_PG_DSN is gone
+       (RUN-1086 / RUN-1093). existingSecret.name still wins without a lookup. */}}
+{{- $sharedPgReady := or ($globalPgExisting.name | default "") (and (hasKey $sharedPgData "POSTGRES_HOST") (ne (index $sharedPgData "POSTGRES_HOST") "")) -}}
 {{- $preserve := dig "preserveExistingSecrets" false ($root.Values.global | default dict) -}}
 {{- $autoGenerate := eq (include "neuraltrust-platform.autoGenerateSecrets" $root) "true" -}}
 {{- $chartGeneratesDatabase := and $autoGenerate (not $preserve) -}}

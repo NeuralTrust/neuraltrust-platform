@@ -288,6 +288,115 @@ ensure_rsa_private_key_secret_key() {
     add_secret_key "$secret_name" "$key" "$value"
 }
 
+# Canonical logical keys from neuraltrust-platform.platformSecret.registry.
+# scripts/test-helm-render.sh asserts this list cannot drift from the helper.
+# PLATFORM_SECRET_REGISTRY_KEYS_BEGIN
+PLATFORM_SECRET_REGISTRY_KEYS=(
+    SERVER_SECRET_KEY
+    ADMIN_JWT_SECRET
+    TRUSTGUARD_TOKEN_SIGNING_SECRET
+    REDIS_EVENTS_SECRET
+    AUTH_JWT_HS256_SECRET
+    AUTH_JWT_SECRET
+    APP_ENCRYPTION_KEY
+    TRUSTLENS_JWT_SECRET
+    ENCRYPTION_KEYSET
+    JWT_SECRET
+    DATA_PLANE_JWT_SECRET
+    CONTROL_PLANE_JWT_SECRET
+    AUTH_SECRET
+    NEXTAUTH_SECRET
+    MODEL_SCANNER_SECRET
+    MCP_OAUTH_CLIENT_SECRET
+    MCP_OAUTH_SIGNING_KEY
+    AUTH_SECRET_KEY
+)
+# PLATFORM_SECRET_REGISTRY_KEYS_END
+
+PLATFORM_SECRET_NAME="platform-secrets"
+PLATFORM_SHAPES=()
+
+shape_enabled() {
+    local want=$1
+    local s
+    for s in "${PLATFORM_SHAPES[@]+"${PLATFORM_SHAPES[@]}"}"; do
+        if [ "$s" = "$want" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+requires_any_shape() {
+    local requires=$1
+    local shape
+    for shape in $requires; do
+        if shape_enabled "$shape"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+read_secret_key_value() {
+    local secret_name=$1
+    local key=$2
+    kubectl get secret "$secret_name" -n "$NAMESPACE" \
+        -o "jsonpath={.data.${key}}" 2>/dev/null | base64 -d 2>/dev/null || true
+}
+
+# Write one registry key into platform-secrets. generate: adopt keys are only
+# written when an env/legacy value exists (never invented). aliasOf keys mirror
+# their target. MCP_OAUTH_SIGNING_KEY stays adopt-only — the chart's hook Job
+# owns generation (AUT-393 out of scope).
+ensure_platform_secret_key() {
+    local key=$1
+    local legacy_name=$2
+    local legacy_key=$3
+    local generate=$4
+    local env_name=$5
+    local requires=$6
+    local alias_of=${7:-}
+
+    if ! requires_any_shape "$requires"; then
+        return 0
+    fi
+
+    local value=""
+    if [ -n "$env_name" ]; then
+        value="${!env_name:-}"
+    fi
+    if [ -z "$value" ]; then
+        value=$(read_secret_key_value "$PLATFORM_SECRET_NAME" "$key")
+    fi
+    if [ -z "$value" ] && [ -n "$alias_of" ]; then
+        value=$(read_secret_key_value "$PLATFORM_SECRET_NAME" "$alias_of")
+    fi
+    if [ -z "$value" ] && [ -n "$legacy_name" ]; then
+        value=$(read_secret_key_value "$legacy_name" "$legacy_key")
+    fi
+    if [ -z "$value" ] && [ -n "$alias_of" ] && [ -n "$legacy_name" ]; then
+        value=$(read_secret_key_value "$legacy_name" "$alias_of")
+    fi
+
+    if [ -z "$value" ]; then
+        case "$generate" in
+            random|install)
+                value=$(openssl rand -base64 48 | tr -d '\n\r')
+                ;;
+            adopt)
+                echo -e "${YELLOW}Skipping ${key} in ${PLATFORM_SECRET_NAME} (adopt-only; supply ${env_name:-$key})${NC}"
+                return 0
+                ;;
+            *)
+                return 0
+                ;;
+        esac
+    fi
+
+    add_secret_key "$PLATFORM_SECRET_NAME" "$key" "$value"
+}
+
 echo "=========================================="
 echo "NeuralTrust Platform Secrets Creation"
 echo "=========================================="
@@ -319,6 +428,9 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Environment variables:"
             echo "  All secret values can be provided via environment variables:"
+            echo "  - DEPLOYMENT_MODE       hybrid|external (default: external)"
+            echo "  - ENABLE_TRUSTGATE / ENABLE_TRUSTGUARD / ENABLE_DATAPLANE"
+            echo "  - ENABLE_TRUSTLENS / ENABLE_MCP_OAUTH / ENABLE_WATCHDOG"
             echo "  - DATA_PLANE_JWT_SECRET"
             echo "  - DATA_PLANE_REDIS_URL (optional; platform-v2 evaluation-progress cache)"
             echo "  - CONTROL_PLANE_JWT_SECRET"
@@ -327,15 +439,17 @@ while [[ $# -gt 0 ]]; do
             echo "  - RESEND_API_KEY"
             echo "  - HUGGINGFACE_TOKEN"
             echo "  - CLICKHOUSE_PASSWORD"
-            echo "  - POSTGRES_PASSWORD"
+            echo "  - POSTGRES_PASSWORD / POSTGRES_AUTH_MODE / POSTGRES_SSLMODE"
             echo "  - FIREWALL_JWT_SECRET"
             echo "  - OBSERVABILITY_TOKEN (hosted OTLP bearer for collector.neuraltrust.ai)"
             echo "  - APP_AUTH_SECRET (written to AUTH_SECRET and NEXTAUTH_SECRET)"
+            echo "  - AUTH_SECRET_KEY / MODEL_SCANNER_SECRET / MCP_OAUTH_CLIENT_SECRET"
             echo "  - AGENTGATEWAY_SERVER_SECRET_KEY / AGENTGATEWAY_STS_SIGNING_KEY (RSA PEM)"
             echo "  - TRUSTGUARD_CLIENT_ID / TRUSTGUARD_CLIENT_SECRET"
             echo "  - TRUSTGUARD_ADMIN_JWT_SECRET / TRUSTGUARD_TOKEN_SIGNING_SECRET"
             echo "  - TRUSTGUARD_REDIS_EVENTS_SECRET"
             echo "  - DATACORE_JWT_SECRET / DATACORE_DB_PASSWORD / ALERTENGINE_JWT_SECRET"
+            echo "  - TRUSTLENS_JWT_SECRET / TRUSTLENS_ENCRYPTION_KEYSET"
             echo "  - DATAAGENT_DB_PASSWORD (ENROLMENT_TOKEN is never generated)"
             echo "  - And more..."
             echo ""
@@ -358,6 +472,71 @@ if ! kubectl get namespace "$NAMESPACE" &>/dev/null; then
 fi
 
 echo -e "${GREEN}Using namespace: ${NAMESPACE}${NC}"
+echo ""
+
+# ============================================================================
+# DEPLOYMENT SHAPE (drives which platform-secrets keys are created)
+# ============================================================================
+echo -e "${BLUE}=== Deployment shape ===${NC}"
+DEPLOYMENT_MODE=$(prompt_secret "DEPLOYMENT_MODE" "Enter deployment mode (hybrid|external, default: external)")
+DEPLOYMENT_MODE=$(printf '%s' "${DEPLOYMENT_MODE:-external}" | tr '[:upper:]' '[:lower:]')
+case "$DEPLOYMENT_MODE" in
+    hybrid|external) ;;
+    *)
+        echo -e "${RED}Error: DEPLOYMENT_MODE must be hybrid or external${NC}"
+        exit 1
+        ;;
+esac
+
+prompt_yes_default() {
+    local env_name=$1
+    local prompt=$2
+    local default_yes=$3
+    local current="${!env_name:-}"
+    if [ -n "$current" ]; then
+        case "$(printf '%s' "$current" | tr '[:upper:]' '[:lower:]')" in
+            1|true|yes|y) return 0 ;;
+            *) return 1 ;;
+        esac
+    fi
+    if [ -t 0 ]; then
+        local hint="y/N"
+        [ "$default_yes" = "true" ] && hint="Y/n"
+        read -p "${prompt} (${hint}): " -n 1 -r
+        echo
+        if [ -z "$REPLY" ]; then
+            [ "$default_yes" = "true" ]
+            return $?
+        fi
+        [[ $REPLY =~ ^[Yy]$ ]]
+        return $?
+    fi
+    [ "$default_yes" = "true" ]
+}
+
+if [ "$DEPLOYMENT_MODE" = "external" ]; then
+    PLATFORM_SHAPES+=(external trustgate trustguard dataPlane)
+else
+    if prompt_yes_default "ENABLE_TRUSTGATE" "Enable TrustGate product secrets?" "true"; then
+        PLATFORM_SHAPES+=(trustgate)
+    fi
+    if prompt_yes_default "ENABLE_TRUSTGUARD" "Enable TrustGuard product secrets?" "true"; then
+        PLATFORM_SHAPES+=(trustguard)
+    fi
+    if prompt_yes_default "ENABLE_DATAPLANE" "Enable data-plane product secrets?" "true"; then
+        PLATFORM_SHAPES+=(dataPlane)
+    fi
+fi
+if prompt_yes_default "ENABLE_TRUSTLENS" "Enable TrustLens secrets?" "false"; then
+    PLATFORM_SHAPES+=(trustlens)
+fi
+if [ "$DEPLOYMENT_MODE" = "external" ] && prompt_yes_default "ENABLE_MCP_OAUTH" "Enable MCP OAuth client secret?" "true"; then
+    PLATFORM_SHAPES+=(mcpOAuth)
+fi
+if prompt_yes_default "ENABLE_WATCHDOG" "Enable Watchdog usage-export JWT secrets?" "false"; then
+    PLATFORM_SHAPES+=(watchdog)
+fi
+echo -e "${GREEN}Active shapes: ${PLATFORM_SHAPES[*]:-none}${NC}"
 echo ""
 
 # ============================================================================
@@ -592,11 +771,15 @@ RESEND_ALERT_SENDER=${RESEND_ALERT_SENDER:-""}
 add_secret_key "$SECRET_NAME" "resend-alert-sender" "$RESEND_ALERT_SENDER"
 echo ""
 
-# Firewall JWT Secret
+# Firewall JWT Secret — legacy control-plane key plus the chart's firewall-secrets
+# contract (JWT_SECRET) that platform-secrets adopts from.
 echo "--- Firewall JWT Secret (Optional) ---"
 FIREWALL_JWT_SECRET=$(prompt_secret "FIREWALL_JWT_SECRET" "Enter Firewall JWT Secret (optional)")
 if [ -n "$FIREWALL_JWT_SECRET" ]; then
     add_secret_key "$SECRET_NAME" "FIREWALL_JWT_SECRET" "$FIREWALL_JWT_SECRET"
+    add_secret_key "firewall-secrets" "JWT_SECRET" "$FIREWALL_JWT_SECRET"
+elif shape_enabled "trustguard" || shape_enabled "external"; then
+    ensure_generated_secret_key "firewall-secrets" "JWT_SECRET" "FIREWALL_JWT_SECRET"
 fi
 echo ""
 
@@ -607,6 +790,14 @@ if [ -n "$MODEL_SCANNER_SECRET" ]; then
     add_secret_key "$SECRET_NAME" "MODEL_SCANNER_SECRET" "$MODEL_SCANNER_SECRET"
 fi
 echo ""
+
+# TrustLens secrets (only when the TrustLens shape is active)
+if shape_enabled "trustlens"; then
+    echo "--- TrustLens Secrets ---"
+    ensure_generated_secret_key "trustlens-secrets" "JWT_SECRET" "TRUSTLENS_JWT_SECRET"
+    ensure_generated_secret_key "trustlens-secrets" "ENCRYPTION_KEYSET" "TRUSTLENS_ENCRYPTION_KEYSET"
+    echo ""
+fi
 
 # ============================================================================
 # INFRASTRUCTURE SECRETS
@@ -717,13 +908,20 @@ else
 fi
 echo ""
 
-# PostgreSQL Connection
+# PostgreSQL Connection — canonical POSTGRES_* family only.
+# No SENSIBLE_PG_DSN / DATABASE_URL composition: hybrid readers (TrustGate /
+# TrustGuard telemetry, DataAgent) and the control-plane app build connections
+# from the discrete parts (RUN-1086, RUN-1093, AUT-413). POSTGRES_PRISMA_URL is
+# still written for external installs that pin an older app image; omit it when
+# authMode=iam (passwordless) or when POSTGRES_PASSWORD is empty (operator-owned
+# passwordSecret path).
 echo "--- PostgreSQL Connection Configuration ---"
 POSTGRES_SECRET_NAME="postgresql-secrets"
 
 if kubectl get secret "$POSTGRES_SECRET_NAME" -n "$NAMESPACE" &>/dev/null; then
-    EXISTING_DATABASE_URL=$(kubectl get secret "$POSTGRES_SECRET_NAME" -n "$NAMESPACE" -o jsonpath='{.data.DATABASE_URL}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
-    if [ -z "$EXISTING_DATABASE_URL" ] || should_replace_secret "$POSTGRES_SECRET_NAME"; then
+    EXISTING_POSTGRES_HOST=$(kubectl get secret "$POSTGRES_SECRET_NAME" -n "$NAMESPACE" \
+        -o jsonpath='{.data.POSTGRES_HOST}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
+    if [ -z "$EXISTING_POSTGRES_HOST" ] || should_replace_secret "$POSTGRES_SECRET_NAME"; then
         if should_replace_secret "$POSTGRES_SECRET_NAME"; then
             kubectl delete secret "$POSTGRES_SECRET_NAME" -n "$NAMESPACE" --ignore-not-found=true
         else
@@ -738,8 +936,8 @@ if kubectl get secret "$POSTGRES_SECRET_NAME" -n "$NAMESPACE" &>/dev/null; then
 fi
 
 if [ -n "$POSTGRES_SECRET_NAME" ]; then
-    # Check for existing POSTGRES_HOST in the secret
-    EXISTING_POSTGRES_HOST=$(kubectl get secret "$POSTGRES_SECRET_NAME" -n "$NAMESPACE" -o jsonpath='{.data.POSTGRES_HOST}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
+    EXISTING_POSTGRES_HOST=$(kubectl get secret "$POSTGRES_SECRET_NAME" -n "$NAMESPACE" \
+        -o jsonpath='{.data.POSTGRES_HOST}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
     if [ -n "$EXISTING_POSTGRES_HOST" ]; then
         HOST_PROMPT="Enter PostgreSQL Host (current: $EXISTING_POSTGRES_HOST, default: control-plane-postgresql)"
     else
@@ -751,49 +949,67 @@ if [ -n "$POSTGRES_SECRET_NAME" ]; then
     POSTGRES_PORT=${POSTGRES_PORT:-5432}
     POSTGRES_USER=$(prompt_secret "POSTGRES_USER" "Enter PostgreSQL User (default: neuraltrust)")
     POSTGRES_USER=${POSTGRES_USER:-neuraltrust}
-    POSTGRES_PASSWORD=$(prompt_secret "POSTGRES_PASSWORD" "Enter NeuralTrust Password")
+    POSTGRES_PASSWORD=$(prompt_secret "POSTGRES_PASSWORD" "Enter NeuralTrust Password (empty when using passwordSecret / IAM)")
     POSTGRES_DB=$(prompt_secret "POSTGRES_DB" "Enter PostgreSQL Database Name (default: neuraltrust)")
     POSTGRES_DB=${POSTGRES_DB:-neuraltrust}
-    
-    # Trim all values to remove newlines and whitespace
+    POSTGRES_AUTH_MODE=$(prompt_secret "POSTGRES_AUTH_MODE" "Enter PostgreSQL authMode (password|iam, default: password)")
+    POSTGRES_AUTH_MODE=$(printf '%s' "${POSTGRES_AUTH_MODE:-password}" | tr '[:upper:]' '[:lower:]')
+    POSTGRES_SSLMODE=$(prompt_secret "POSTGRES_SSLMODE" "Enter PostgreSQL SSL mode (default: prefer for password, require for iam)")
+    if [ -z "$POSTGRES_SSLMODE" ]; then
+        if [ "$POSTGRES_AUTH_MODE" = "iam" ]; then
+            POSTGRES_SSLMODE="require"
+        else
+            POSTGRES_SSLMODE="prefer"
+        fi
+    fi
+
     POSTGRES_HOST=$(trim_value "$POSTGRES_HOST")
     POSTGRES_PORT=$(trim_value "$POSTGRES_PORT")
     POSTGRES_USER=$(trim_value "$POSTGRES_USER")
     POSTGRES_PASSWORD=$(trim_value "$POSTGRES_PASSWORD")
     POSTGRES_DB=$(trim_value "$POSTGRES_DB")
-    
-    if [ -z "$POSTGRES_PASSWORD" ]; then
-        echo -e "${YELLOW}Warning: PostgreSQL password is empty${NC}"
-    fi
-    
+    POSTGRES_SSLMODE=$(trim_value "$POSTGRES_SSLMODE")
+    POSTGRES_AUTH_MODE=$(trim_value "$POSTGRES_AUTH_MODE")
+
     if [ -z "$POSTGRES_HOST" ]; then
         echo -e "${RED}Error: PostgreSQL host is required${NC}"
         exit 1
     fi
-    
-    # Create DATABASE_URL (values are already trimmed).
-    # Not used when global.postgresql.passwordSecret names an operator Secret:
-    # the chart then renders no URL env entry at all, and the console assembles
-    # its connection from the discrete POSTGRES_* variables instead.
-    POSTGRES_PASSWORD_ENCODED=$(url_encode "$POSTGRES_PASSWORD")
-    DATABASE_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD_ENCODED}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}?connection_limit=15"
-    POSTGRES_PRISMA_URL="$DATABASE_URL"
-    
-    echo -e "${GREEN}Creating PostgreSQL connection secret${NC}"
-    # Values are already trimmed, but trim again for safety and ensure DATABASE_URL has no newlines
-    DATABASE_URL=$(printf '%s' "$DATABASE_URL" | tr -d '\n\r')
-    POSTGRES_PRISMA_URL=$(printf '%s' "$POSTGRES_PRISMA_URL" | tr -d '\n\r')
-    kubectl create secret generic "$POSTGRES_SECRET_NAME" \
-        --from-literal=POSTGRES_HOST="$POSTGRES_HOST" \
-        --from-literal=POSTGRES_PORT="$POSTGRES_PORT" \
-        --from-literal=POSTGRES_USER="$POSTGRES_USER" \
-        --from-literal=POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
-        --from-literal=POSTGRES_DB="$POSTGRES_DB" \
-        --from-literal=DATABASE_URL="$DATABASE_URL" \
-        --from-literal=POSTGRES_PRISMA_URL="$POSTGRES_PRISMA_URL" \
-        -n "$NAMESPACE" \
-        --dry-run=client -o yaml | kubectl apply -f -
-    
+    if [ "$POSTGRES_AUTH_MODE" = "iam" ]; then
+        POSTGRES_LOGIN="aws"
+        POSTGRES_CONNECTION_TYPE="aurora"
+    else
+        POSTGRES_LOGIN="default"
+        POSTGRES_CONNECTION_TYPE="postgres"
+        if [ -z "$POSTGRES_PASSWORD" ]; then
+            echo -e "${YELLOW}Warning: PostgreSQL password is empty (ok for passwordSecret)${NC}"
+        fi
+    fi
+
+    echo -e "${GREEN}Creating PostgreSQL connection secret (canonical family)${NC}"
+    kubectl_pg_cmd=(kubectl create secret generic "$POSTGRES_SECRET_NAME" -n "$NAMESPACE"
+        --from-literal=POSTGRES_HOST="$POSTGRES_HOST"
+        --from-literal=POSTGRES_PORT="$POSTGRES_PORT"
+        --from-literal=POSTGRES_USER="$POSTGRES_USER"
+        --from-literal=POSTGRES_DB="$POSTGRES_DB"
+        --from-literal=POSTGRES_SSLMODE="$POSTGRES_SSLMODE"
+        --from-literal=POSTGRES_LOGIN="$POSTGRES_LOGIN"
+        --from-literal=POSTGRES_AUTH_MODE="$POSTGRES_AUTH_MODE"
+        --from-literal=POSTGRES_CONNECTION_TYPE="$POSTGRES_CONNECTION_TYPE")
+    if [ -n "$POSTGRES_PASSWORD" ] && [ "$POSTGRES_AUTH_MODE" != "iam" ]; then
+        kubectl_pg_cmd+=(--from-literal=POSTGRES_PASSWORD="$POSTGRES_PASSWORD")
+        POSTGRES_PASSWORD_ENCODED=$(url_encode "$POSTGRES_PASSWORD")
+        POSTGRES_PRISMA_URL=$(printf 'postgresql://%s:%s@%s:%s/%s?connection_limit=15&sslmode=%s' \
+            "$POSTGRES_USER" "$POSTGRES_PASSWORD_ENCODED" "$POSTGRES_HOST" "$POSTGRES_PORT" \
+            "$POSTGRES_DB" "$POSTGRES_SSLMODE" | tr -d '\n\r')
+        kubectl_pg_cmd+=(--from-literal=POSTGRES_PRISMA_URL="$POSTGRES_PRISMA_URL")
+    elif [ "$POSTGRES_AUTH_MODE" = "iam" ]; then
+        POSTGRES_PRISMA_URL=$(printf 'postgresql://%s@%s:%s/%s?connection_limit=15&sslmode=%s' \
+            "$POSTGRES_USER" "$POSTGRES_HOST" "$POSTGRES_PORT" "$POSTGRES_DB" "$POSTGRES_SSLMODE" | tr -d '\n\r')
+        kubectl_pg_cmd+=(--from-literal=POSTGRES_PRISMA_URL="$POSTGRES_PRISMA_URL")
+    fi
+    "${kubectl_pg_cmd[@]}" --dry-run=client -o yaml | kubectl apply -f -
+
     echo -e "${GREEN}✓ PostgreSQL connection secret created${NC}"
 fi
 echo ""
@@ -878,6 +1094,34 @@ add_secret_key "control-plane-secrets" "NEXTAUTH_SECRET" "$APP_AUTH_SECRET_VALUE
 unset APP_AUTH_SECRET_VALUE
 
 # ============================================================================
+# SHARED PLATFORM SECRET (platform-secrets)
+# Driven by the same logical key list as platformSecret.registry so consumers
+# that read via secretRef work under preserveExistingSecrets / autoGenerateSecrets=false.
+# ============================================================================
+echo -e "${BLUE}=== Shared platform-secrets ===${NC}"
+# Args: key legacyName legacyKey generate envName requires [aliasOf]
+ensure_platform_secret_key "SERVER_SECRET_KEY" "agentgateway-secrets" "SERVER_SECRET_KEY" "random" "AGENTGATEWAY_SERVER_SECRET_KEY" "external trustgate"
+ensure_platform_secret_key "ADMIN_JWT_SECRET" "trustguard-secrets" "ADMIN_JWT_SECRET" "random" "TRUSTGUARD_ADMIN_JWT_SECRET" "external trustguard"
+ensure_platform_secret_key "TRUSTGUARD_TOKEN_SIGNING_SECRET" "trustguard-secrets" "TRUSTGUARD_TOKEN_SIGNING_SECRET" "random" "TRUSTGUARD_TOKEN_SIGNING_SECRET" "external trustguard"
+ensure_platform_secret_key "REDIS_EVENTS_SECRET" "trustguard-secrets" "REDIS_EVENTS_SECRET" "random" "TRUSTGUARD_REDIS_EVENTS_SECRET" "external trustguard"
+ensure_platform_secret_key "AUTH_JWT_HS256_SECRET" "datacore-secrets" "AUTH_JWT_HS256_SECRET" "random" "DATACORE_JWT_SECRET" "external"
+ensure_platform_secret_key "AUTH_JWT_SECRET" "alertengine-secrets" "AUTH_JWT_SECRET" "random" "ALERTENGINE_JWT_SECRET" "external"
+ensure_platform_secret_key "APP_ENCRYPTION_KEY" "alertengine-secrets" "APP_ENCRYPTION_KEY" "random" "ALERTENGINE_APP_ENCRYPTION_KEY" "external"
+ensure_platform_secret_key "TRUSTLENS_JWT_SECRET" "trustlens-secrets" "JWT_SECRET" "random" "TRUSTLENS_JWT_SECRET" "trustlens"
+ensure_platform_secret_key "ENCRYPTION_KEYSET" "trustlens-secrets" "ENCRYPTION_KEYSET" "random" "TRUSTLENS_ENCRYPTION_KEYSET" "trustlens"
+ensure_platform_secret_key "JWT_SECRET" "firewall-secrets" "JWT_SECRET" "random" "FIREWALL_JWT_SECRET" "external trustguard"
+ensure_platform_secret_key "DATA_PLANE_JWT_SECRET" "data-plane-jwt-secret" "DATA_PLANE_JWT_SECRET" "random" "DATA_PLANE_JWT_SECRET" "external dataPlane watchdog"
+ensure_platform_secret_key "CONTROL_PLANE_JWT_SECRET" "control-plane-secrets" "CONTROL_PLANE_JWT_SECRET" "random" "CONTROL_PLANE_JWT_SECRET" "external watchdog"
+ensure_platform_secret_key "AUTH_SECRET" "control-plane-secrets" "AUTH_SECRET" "random" "APP_AUTH_SECRET" "external"
+ensure_platform_secret_key "NEXTAUTH_SECRET" "control-plane-secrets" "NEXTAUTH_SECRET" "random" "APP_AUTH_SECRET" "external" "AUTH_SECRET"
+ensure_platform_secret_key "MODEL_SCANNER_SECRET" "control-plane-secrets" "MODEL_SCANNER_SECRET" "adopt" "MODEL_SCANNER_SECRET" "external"
+ensure_platform_secret_key "MCP_OAUTH_CLIENT_SECRET" "control-plane-secrets" "MCP_OAUTH_CLIENT_SECRET" "random" "MCP_OAUTH_CLIENT_SECRET" "mcpOAuth"
+ensure_platform_secret_key "MCP_OAUTH_SIGNING_KEY" "control-plane-secrets" "MCP_OAUTH_SIGNING_KEY" "adopt" "MCP_OAUTH_SIGNING_KEY" "mcpOAuth"
+ensure_platform_secret_key "AUTH_SECRET_KEY" "control-plane-secrets" "AUTH_SECRET_KEY" "install" "AUTH_SECRET_KEY" "external"
+echo -e "${GREEN}✓ ${PLATFORM_SECRET_NAME} keys ready for shapes: ${PLATFORM_SHAPES[*]:-none}${NC}"
+echo ""
+
+# ============================================================================
 # SUMMARY
 # ============================================================================
 echo "=========================================="
@@ -891,4 +1135,6 @@ echo "    --namespace ${NAMESPACE} \\"
 echo "    -f values.yaml"
 echo ""
 echo "The Helm chart will automatically reference these pre-created secrets."
+echo "Set global.preserveExistingSecrets=true (or autoGenerateSecrets=false) when"
+echo "the chart must not overwrite the Secrets this script just wrote."
 

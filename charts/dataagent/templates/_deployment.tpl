@@ -59,16 +59,37 @@ spec:
         {{- end }}
         env:
         {{- if eq (include "neuraltrust-platform.isHybrid" .) "true" }}
-        {{- /* DATABASE_URL is the only datastore variable DataAgent reads
-               (internal/config/config.go), so it takes just that one key rather
-               than the whole shared Secret. lib/pq treats unknown query params as
-               Postgres GUCs, so it needs the plain DSN: the Prisma URL's
-               connection_limit=15 would raise 42704 on every query. */}}
-        - name: DATABASE_URL
+        {{- /* Discrete POSTGRES_* parts (RUN-1093). DataAgent builds a libpq
+               keyword connection string in-process, so the chart no longer
+               composes SENSIBLE_PG_DSN. Requires a DataAgent image that reads
+               these vars when DATABASE_URL is unset. */}}
+        {{- $pgSecret := include "neuraltrust-platform.v2.hybridPg.secretName" . }}
+        - name: POSTGRES_HOST
           valueFrom:
             secretKeyRef:
-              name: {{ include "neuraltrust-platform.v2.hybridPg.secretName" . | quote }}
-              key: SENSIBLE_PG_DSN
+              name: {{ $pgSecret | quote }}
+              key: POSTGRES_HOST
+        - name: POSTGRES_PORT
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecret | quote }}
+              key: POSTGRES_PORT
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecret | quote }}
+              key: POSTGRES_USER
+        - name: POSTGRES_DB
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecret | quote }}
+              key: POSTGRES_DB
+        - name: POSTGRES_SSLMODE
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecret | quote }}
+              key: POSTGRES_SSLMODE
+        {{- include "neuraltrust-platform.postgresql.passwordEnv" (dict "ctx" . "secret" $pgSecret) | nindent 8 }}
         {{- end }}
         {{- if $egressEnabled }}
         - name: OAUTH_BROKER_ADDR
@@ -104,6 +125,12 @@ spec:
         {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 8 }}
         resources:
           {{- toYaml .Values.resources | nindent 10 }}
+        startupProbe:
+          httpGet:
+            path: /healthz
+            port: health
+          periodSeconds: 5
+          failureThreshold: 30
         readinessProbe:
           httpGet:
             path: /readyz

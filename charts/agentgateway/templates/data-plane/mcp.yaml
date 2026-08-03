@@ -75,7 +75,7 @@ spec:
         {{- . | nindent 8 }}
         {{- end }}
         {{- if and (eq (include "neuraltrust-platform.isHybrid" .) "true") (eq (include "neuraltrust-platform.v2.hybridPg.chartManagedSecret" .) "true") }}
-        {{- include "neuraltrust-platform.postgresEnv" (dict "ctx" . "dsn" true "skip" .Values.mcp.extraEnv) | nindent 8 }}
+        {{- include "neuraltrust-platform.postgresEnv" (dict "ctx" . "skip" .Values.mcp.extraEnv) | nindent 8 }}
         {{- end }}
         {{- include "neuraltrust-platform.hybridRedisTlsEnv" . | nindent 8 }}
         {{- with .Values.mcp.extraEnv }}
@@ -123,6 +123,12 @@ spec:
         {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 8 }}
         resources:
           {{- toYaml .Values.mcp.resources | nindent 10 }}
+        startupProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          periodSeconds: 5
+          failureThreshold: 30
         readinessProbe:
           httpGet:
             path: /readyz
