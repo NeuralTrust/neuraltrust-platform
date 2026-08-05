@@ -1618,6 +1618,8 @@ assert_shared_secret_wiring "$out12hyb" \
 # A hybrid install must not carry credentials only the hosted control plane
 # reads. Keys already present in a live Secret are preserved by a `lookup` that
 # render tests cannot exercise, so only the gating is asserted here.
+# AUTH_JWT_SECRET / APP_ENCRYPTION_KEY follow the alertengine shape (AUT-382):
+# present in external with alertengine.enabled (default), absent in hybrid.
 blue "==> Scenario 12a: keys are gated to the install shape"
 for key in CONTROL_PLANE_JWT_SECRET AUTH_SECRET NEXTAUTH_SECRET \
            AUTH_JWT_HS256_SECRET AUTH_JWT_SECRET APP_ENCRYPTION_KEY; do
@@ -1625,6 +1627,14 @@ for key in CONTROL_PLANE_JWT_SECRET AUTH_SECRET NEXTAUTH_SECRET \
     "hybrid: platform-secrets omits control-plane-only key ${key}"
   assert_platform_key "$out12ext" present "${key}" \
     "external: platform-secrets carries ${key}"
+done
+
+# AlertEngine off ⇒ its credentials must not be minted (AUT-382).
+out12aeoff="$TMP/scenario-shared-secret-alertengine-off.yaml"
+render_default "$out12aeoff" --set global.deploymentMode=external --set alertengine.enabled=false
+for key in AUTH_JWT_SECRET APP_ENCRYPTION_KEY; do
+  assert_platform_key "$out12aeoff" absent "${key}" \
+    "alertengine disabled: platform-secrets omits ${key}"
 done
 
 # An opt-in subchart and a retired code path must not mint credentials nobody
@@ -2957,6 +2967,103 @@ if grep -q -- '--from-literal=SENSIBLE_PG_DSN=' create-secrets.sh; then
   exit 1
 fi
 green "ok  - create-secrets.sh writes the canonical Postgres family without DSN composition"
+
+# ---------------------------------------------------------------------------
+# AUT-385 / AUT-386 / AUT-392: AlertEngine ClickHouse DB, firewall REDIS_URL,
+# and umbrella IAM inheritance for gateway POSTGRES_LOGIN.
+# ---------------------------------------------------------------------------
+blue "==> Scenario 21: AlertEngine reads the events database (AUT-385)"
+out21="$TMP/scenario-alertengine-ch-default.yaml"
+render_default "$out21" --set global.deploymentMode=external
+if ! ruby -ryaml -e '
+  docs = YAML.load_stream(File.read(ARGV[0])).compact
+  cm = docs.find { |d| d["kind"] == "ConfigMap" && d.dig("metadata", "name") == "alertengine-env-vars" }
+  abort "alertengine-env-vars not rendered" if cm.nil?
+  db = cm.dig("data", "CLICKHOUSE_DATABASE")
+  abort "CLICKHOUSE_DATABASE=#{db.inspect}, want default" unless db == "default"
+' "$out21"; then
+  red "FAIL: AUT-385 AlertEngine CLICKHOUSE_DATABASE=default"
+  exit 1
+fi
+green "ok  - AUT-385: AlertEngine CLICKHOUSE_DATABASE=default"
+
+blue "==> Scenario 22: firewall REDIS_URL from shared Redis (AUT-386)"
+out22="$TMP/scenario-firewall-redis-url.yaml"
+render_default "$out22" --set global.deploymentMode=external
+assert_contains "$out22" 'REDIS_URL: "redis://redis:6379/0"' \
+  "AUT-386: firewall-config carries REDIS_URL for in-cluster Redis"
+# Password-bearing URL must land in the Secret, not the ConfigMap.
+# validate-values rejects a password against the chart's own Redis, so point at
+# a managed host the same way operators do.
+out22pw="$TMP/scenario-firewall-redis-url-pw.yaml"
+render_default "$out22pw" --set global.deploymentMode=external \
+  --set global.redis.deploy=false \
+  --set global.redis.host=cache.example.com \
+  --set global.redis.password=s3cret
+if ! ruby -ryaml -e '
+  docs = YAML.load_stream(File.read(ARGV[0])).compact
+  cm = docs.find { |d| d["kind"] == "ConfigMap" && d.dig("metadata", "name") == "firewall-config" }
+  abort "firewall-config missing" if cm.nil?
+  abort "password REDIS_URL leaked into ConfigMap" if cm.dig("data", "REDIS_URL")
+  sec = docs.find { |d| d["kind"] == "Secret" && d.dig("metadata", "name") == "firewall-secrets" }
+  abort "firewall-secrets missing" if sec.nil?
+  raw = sec.dig("data", "REDIS_URL")
+  abort "firewall-secrets missing REDIS_URL" if raw.nil? || raw.empty?
+  url = raw.unpack1("m0")
+  abort "unexpected REDIS_URL=#{url.inspect}" unless url.include?("s3cret") && url.include?("cache.example.com") && url.start_with?("redis://")
+' "$out22pw"; then
+  red "FAIL: AUT-386 password REDIS_URL placement"
+  exit 1
+fi
+green "ok  - AUT-386: password REDIS_URL lives in firewall-secrets"
+
+blue "==> Scenario 23: umbrella IAM drives gateway POSTGRES_LOGIN (AUT-392)"
+# global.authMode=iam + unset per-service ⇒ POSTGRES_LOGIN=aws
+out23iam="$TMP/scenario-iam-inherit.yaml"
+render_default "$out23iam" --set global.deploymentMode=external \
+  --set global.postgresql.deploy=false \
+  --set global.postgresql.host=pg.example.com \
+  --set global.postgresql.authMode=iam \
+  --set global.postgresql.awsRegion=eu-west-1
+if ! ruby -ryaml -e '
+  docs = YAML.load_stream(File.read(ARGV[0])).compact
+  %w[agentgateway-env-vars trustguard-env-vars].each do |name|
+    cm = docs.find { |d| d["kind"] == "ConfigMap" && d.dig("metadata", "name") == name }
+    abort "#{name} not rendered" if cm.nil?
+    login = cm.dig("data", "POSTGRES_LOGIN")
+    abort "#{name} POSTGRES_LOGIN=#{login.inspect}, want aws" unless login == "aws"
+    region = cm.dig("data", "AWS_REGION")
+    abort "#{name} AWS_REGION=#{region.inspect}, want eu-west-1" unless region == "eu-west-1"
+  end
+' "$out23iam"; then
+  red "FAIL: AUT-392 global IAM inheritance"
+  exit 1
+fi
+green "ok  - AUT-392: global.postgresql.authMode=iam ⇒ POSTGRES_LOGIN=aws"
+
+# Explicit per-service false still wins against global iam.
+out23off="$TMP/scenario-iam-override-off.yaml"
+render_default "$out23off" --set global.deploymentMode=external \
+  --set global.postgresql.deploy=false \
+  --set global.postgresql.host=pg.example.com \
+  --set global.postgresql.authMode=iam \
+  --set global.postgresql.awsRegion=eu-west-1 \
+  --set agentgateway.database.iamAuth=false
+if ! ruby -ryaml -e '
+  docs = YAML.load_stream(File.read(ARGV[0])).compact
+  ag = docs.find { |d| d["kind"] == "ConfigMap" && d.dig("metadata", "name") == "agentgateway-env-vars" }
+  abort "agentgateway-env-vars not rendered" if ag.nil?
+  login = ag.dig("data", "POSTGRES_LOGIN")
+  abort "explicit iamAuth=false should leave POSTGRES_LOGIN unset, got #{login.inspect}" unless login.nil?
+  tg = docs.find { |d| d["kind"] == "ConfigMap" && d.dig("metadata", "name") == "trustguard-env-vars" }
+  abort "trustguard-env-vars not rendered" if tg.nil?
+  tlogin = tg.dig("data", "POSTGRES_LOGIN")
+  abort "trustguard should still inherit global IAM, got #{tlogin.inspect}" unless tlogin == "aws"
+' "$out23off"; then
+  red "FAIL: AUT-392 explicit iamAuth=false override"
+  exit 1
+fi
+green "ok  - AUT-392: explicit iamAuth=false wins; sibling still inherits"
 
 green ""
 green "All v2 render scenarios passed."

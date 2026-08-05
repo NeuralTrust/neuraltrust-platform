@@ -335,7 +335,7 @@ static password to point at. Emits nothing unless an `existingSecret.name` is se
 {{- define "agentgateway.datastoreCredentialEnv" -}}
 {{- $entries := list -}}
 {{- if ne (include "neuraltrust-platform.isHybrid" .) "true" -}}
-{{- if not .Values.database.iamAuth -}}
+{{- if ne (include "neuraltrust-platform.postgres.iamAuth" (dict "ctx" . "database" .Values.database)) "true" -}}
 {{- $db := include "neuraltrust-platform.datastore.credentialEnv" (dict "ref" .Values.database.existingSecret "envName" "DB_PASSWORD") -}}
 {{- if $db }}{{- $entries = append $entries $db }}{{- end -}}
 {{- end -}}

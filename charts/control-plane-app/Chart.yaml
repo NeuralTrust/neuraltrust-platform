@@ -3,4 +3,4 @@ name: control-plane-app
 description: NeuralTrust Control Plane App/UI (v2 external only)
 type: application
 version: 0.1.22
-appVersion: "1.111.0"
+appVersion: "1.126.0"

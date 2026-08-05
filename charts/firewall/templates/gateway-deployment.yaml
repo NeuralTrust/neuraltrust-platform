@@ -52,7 +52,7 @@ spec:
       containers:
         - name: gateway
           {{- $gwRepo := .Values.firewall.gateway.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu" }}
-          {{- $gwTag := .Values.firewall.gateway.image.tag | default "v2.19.0" }}
+          {{- $gwTag := .Values.firewall.gateway.image.tag | default "v2.21.0" }}
           image: {{ include "firewall.image" (dict "repository" $gwRepo "tag" $gwTag "global" .Values.global) | quote }}
           imagePullPolicy: {{ .Values.firewall.gateway.image.pullPolicy | default "IfNotPresent" }}
           {{- /* No args override: the firewall image CMD (`python -m src.serve`)
@@ -81,6 +81,14 @@ spec:
                   name: firewall-secrets
                   key: HUGGINGFACE_TOKEN
                   optional: true
+            {{- if eq (include "neuraltrust-platform.firewall.redisUrl.hasPassword" .) "true" }}
+            # Password-bearing REDIS_URL lives in firewall-secrets, not the ConfigMap.
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: firewall-secrets
+                  key: REDIS_URL
+            {{- end }}
             {{- with .Values.firewall.gateway.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

@@ -538,6 +538,66 @@ rather than letting all three consumers fail to authenticate at runtime.
 {{- end }}
 
 {{/*
+Firewall REDIS_URL composed from the shared Redis helpers (AUT-386).
+
+The firewall Python client reads only REDIS_URL and otherwise falls back to
+redis://localhost:6379/0, which is never reachable in-cluster. Emit a URL only
+when a host resolves so that fallback is never shipped silently.
+
+ElastiCache IAM is unsupported: the client has no SigV4 / REDIS_LOGIN path, so
+an IAM-only cache needs a static password (or an in-cluster Redis) instead.
+*/}}
+{{- define "neuraltrust-platform.firewall.redisUrl" -}}
+{{- $host := include "neuraltrust-platform.redis.host" (dict "ctx" . "host" "") -}}
+{{- if $host -}}
+{{- $port := include "neuraltrust-platform.redis.port" (dict "ctx" . "port" "") -}}
+{{- $user := include "neuraltrust-platform.redis.username" (dict "ctx" . "username" "") -}}
+{{- $tls := include "neuraltrust-platform.redis.tls" (dict "ctx" . "tls" "") -}}
+{{- $pw := include "neuraltrust-platform.redis.password" (dict "ctx" . "password" "") -}}
+{{- $scheme := "redis" -}}
+{{- if eq ($tls | toString) "true" }}{{- $scheme = "rediss" }}{{- end -}}
+{{- $authority := "" -}}
+{{- if $user -}}
+  {{- $authority = printf "%s:%s@" ($user | urlquery) ($pw | urlquery) -}}
+{{- else if $pw -}}
+  {{- $authority = printf ":%s@" ($pw | urlquery) -}}
+{{- end -}}
+{{- printf "%s://%s%s:%v/0" $scheme $authority $host $port -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Whether the composed firewall REDIS_URL carries a password (must live in a
+Secret, never a ConfigMap).
+*/}}
+{{- define "neuraltrust-platform.firewall.redisUrl.hasPassword" -}}
+{{- $pw := include "neuraltrust-platform.redis.password" (dict "ctx" . "password" "") -}}
+{{- if $pw }}true{{- end -}}
+{{- end }}
+
+{{/*
+Per-service Postgres IAM resolution (AUT-392).
+
+An explicit `<service>.database.iamAuth` true/false always wins, so mixed-auth
+external installs stay expressible and existing `--set …iamAuth=true` overlays
+keep working. When the key is unset, inherit global.postgresql.authMode=iam —
+but only against a managed Postgres (`deploy=false`); the chart's own Postgres
+has no IAM path.
+Usage: {{ include "neuraltrust-platform.postgres.iamAuth" (dict "ctx" . "database" .Values.database) }}
+*/}}
+{{- define "neuraltrust-platform.postgres.iamAuth" -}}
+{{- $ctx := .ctx -}}
+{{- $db := default dict .database -}}
+{{- $globalPg := default dict (default dict $ctx.Values.global).postgresql -}}
+{{- if hasKey $db "iamAuth" -}}
+  {{- if $db.iamAuth }}true{{- end -}}
+{{- else if eq (include "neuraltrust-platform.postgresql.deploy" $ctx) "true" -}}
+{{- else if eq ($globalPg.authMode | default "password" | toString | lower) "iam" -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/*
 v2 PostgreSQL connection scalars. Callable from either umbrella or subchart
 contexts (subcharts see .Values.global via umbrella merge).
 */}}
@@ -2066,6 +2126,9 @@ when any of them is in play:
   trustgate / trustguard / dataPlane → the product claims it in hybrid
   trustlens  → the opt-in subchart is enabled, in either mode. External deploys
                the full stack, so shape alone would not gate an opt-in chart.
+  alertengine → the AlertEngine subchart is enabled in external mode. External
+               alone must not mint its credentials when the subchart is off
+               (`alertengine.enabled=false`); hybrid never deploys AlertEngine.
   mcpOAuth   → MCP OAuth resolved as active: external, and a signing key exists.
                On by default in external, but only once the key the app needs is
                available — external alone must not conjure credentials for a
@@ -2115,8 +2178,8 @@ ADMIN_JWT_SECRET: {legacyName: trustguard-secrets, legacyKey: ADMIN_JWT_SECRET, 
 TRUSTGUARD_TOKEN_SIGNING_SECRET: {legacyName: trustguard-secrets, legacyKey: TRUSTGUARD_TOKEN_SIGNING_SECRET, generate: random, length: 64, requires: external trustguard}
 REDIS_EVENTS_SECRET: {legacyName: trustguard-secrets, legacyKey: REDIS_EVENTS_SECRET, generate: random, length: 64, requires: external trustguard}
 AUTH_JWT_HS256_SECRET: {legacyName: datacore-secrets, legacyKey: AUTH_JWT_HS256_SECRET, generate: random, length: 64, requires: external}
-AUTH_JWT_SECRET: {legacyName: alertengine-secrets, legacyKey: AUTH_JWT_SECRET, generate: random, length: 64, requires: external}
-APP_ENCRYPTION_KEY: {legacyName: alertengine-secrets, legacyKey: APP_ENCRYPTION_KEY, generate: random, length: 32, requires: external}
+AUTH_JWT_SECRET: {legacyName: alertengine-secrets, legacyKey: AUTH_JWT_SECRET, generate: random, length: 64, requires: alertengine}
+APP_ENCRYPTION_KEY: {legacyName: alertengine-secrets, legacyKey: APP_ENCRYPTION_KEY, generate: random, length: 32, requires: alertengine}
 TRUSTLENS_JWT_SECRET: {legacyName: trustlens-secrets, legacyKey: JWT_SECRET, generate: random, length: 64, requires: trustlens}
 ENCRYPTION_KEYSET: {legacyName: trustlens-secrets, legacyKey: ENCRYPTION_KEYSET, generate: random, length: 64, requires: trustlens}
 JWT_SECRET: {legacyName: firewall-secrets, legacyKey: JWT_SECRET, generate: random, length: 64, requires: external trustguard}
