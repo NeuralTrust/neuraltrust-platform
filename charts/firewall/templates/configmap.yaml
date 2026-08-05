@@ -41,6 +41,13 @@ data:
   OTEL_SERVICE_NAME: {{ .Values.firewall.config.otelServiceName | quote }}
   {{- end }}
   OTEL_ENVIRONMENT: {{ .Values.firewall.config.otelEnvironment | quote }}
+  {{- /* REDIS_URL without a password is safe in the ConfigMap. When a password
+         is present the URL goes in firewall-secrets instead (see secrets.yaml /
+         platform-secrets.yaml) and is injected via an env entry on the pods. */}}
+  {{- $redisUrl := include "neuraltrust-platform.firewall.redisUrl" . }}
+  {{- if and $redisUrl (ne (include "neuraltrust-platform.firewall.redisUrl.hasPassword" .) "true") }}
+  REDIS_URL: {{ $redisUrl | quote }}
+  {{- end }}
   {{- range $workerName, $workerCfg := .Values.firewall.workers }}
   {{- if $workerCfg.enabled }}
   {{- $envKey := printf "%s_WORKER_URL" ($workerName | upper | replace "-" "_") }}

@@ -626,21 +626,31 @@ install, missing Secrets/keys are created; later upgrades reuse them with `looku
   The ClickHouse credential below applies only when the API is on ClickHouse
   (external mode, or hybrid pinned to an external ClickHouse).
 - **Optional IAM DB/Redis auth (AWS)**: the Go services accept
-  `database.iamAuth` / `redis.iamAuth` (default false). When on they emit
-  `POSTGRES_LOGIN=aws` (Postgres) or
+  `database.iamAuth` / `redis.iamAuth`. When `database.iamAuth` is **unset**, it
+  inherits `global.postgresql.authMode=iam` (AUT-392) so an umbrella IAM setting
+  cannot silently fall back to password auth on TrustGate / TrustGuard /
+  DataCore / AlertEngine. An explicit per-service `true`/`false` still wins.
+  When on they emit `POSTGRES_LOGIN=aws` (Postgres) or
   `REDIS_LOGIN=aws`/`REDIS_CACHE_NAME`/`REDIS_IAM_AUTH` (Redis) and ship no
   static password. AgentGateway and TrustGuard mint RDS **and** ElastiCache
   SigV4 tokens at connect time (require IRSA + `redis.{username,tls,cacheName}`;
   set `redis.awsServerless=true` for ElastiCache Serverless). `data-plane-api`
   Redis IAM uses `api.redis.iamAuth` (`REDIS_AUTH_MODE=aws_iam`). AlertEngine
-  (v0.4.0+) mints RDS IAM tokens via `database.iamAuth` (`DB_AUTH_MODE=iam`) and
-  requires `database.awsRegion` → `AWS_REGION`. RDS IAM is also live for the
-  Python control-plane (`controlPlane.components.postgresql.authMode: iam`).
+  (v0.4.0+) mints RDS IAM tokens via `database.iamAuth` / inherited global auth
+  mode (`DB_AUTH_MODE=iam`) and requires `database.awsRegion` → `AWS_REGION`.
+  RDS IAM is also live for the Python control-plane
+  (`controlPlane.components.postgresql.authMode: iam`).
   Every IAM service needs a region: IRSA supplies a role and a token file but no
   region, and the SigV4 signer fails without one. Set it once as
   `global.postgresql.awsRegion` — AgentGateway and TrustGuard fall back to it,
   and `<chart>.database.awsRegion` overrides per chart.
   Use `values-managed-datastores.yaml.example` as the tracked starting point.
+- **Firewall Redis URL (AUT-386)**: the firewall Python client reads only
+  `REDIS_URL` (defaulting to `redis://localhost:6379/0` when unset). The chart
+  composes that URL from the shared Redis helpers into `firewall-config` (no
+  password) or `firewall-secrets` (password present). **ElastiCache IAM is not
+  supported** by this client — an IAM-only cache needs a static password or an
+  in-cluster Redis.
 - **Each selected product DataAgent** renders when its nested `dataagent`
   has either `enrolment.token` or (preferred)
   `enrolment.existingSecret.name` (never generated). The JWT

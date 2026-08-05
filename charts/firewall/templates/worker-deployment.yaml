@@ -90,7 +90,7 @@ spec:
         - name: worker
           {{- $wImage := $workerCfg.image | default $defaults.image }}
           {{- $wRepo := $wImage.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu" }}
-          {{- $wTag := $wImage.tag | default "v2.19.0" }}
+          {{- $wTag := $wImage.tag | default "v2.21.0" }}
           image: {{ include "firewall.image" (dict "repository" $wRepo "tag" $wTag "global" $.Values.global) | quote }}
           imagePullPolicy: {{ $wImage.pullPolicy | default "IfNotPresent" }}
           {{- /* The firewall image CMD (`python -m src.serve`) dual-binds to 0.0.0.0
@@ -122,6 +122,14 @@ spec:
                   name: firewall-secrets
                   key: HUGGINGFACE_TOKEN
                   optional: true
+            {{- if eq (include "neuraltrust-platform.firewall.redisUrl.hasPassword" $) "true" }}
+            # Password-bearing REDIS_URL lives in firewall-secrets, not the ConfigMap.
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: firewall-secrets
+                  key: REDIS_URL
+            {{- end }}
             {{- with $workerCfg.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

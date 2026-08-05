@@ -47,7 +47,7 @@ spec:
         {{- /* Shared credentials come from platform-secrets; an explicit env
                entry outranks the legacy copy still arriving via envFrom. */}}
         {{- include "neuraltrust-platform.platformSecretEnv" (dict "ctx" . "keys" (dict "AUTH_JWT_SECRET" "AUTH_JWT_SECRET" "APP_ENCRYPTION_KEY" "APP_ENCRYPTION_KEY") "skip" .Values.api.extraEnv) | nindent 8 }}
-        {{- if not .Values.database.iamAuth }}
+        {{- if ne (include "neuraltrust-platform.postgres.iamAuth" (dict "ctx" . "database" .Values.database)) "true" }}
         {{- with include "neuraltrust-platform.datastore.credentialEnv" (dict "ref" .Values.database.existingSecret "envName" "DB_PASSWORD") }}
         {{- . | nindent 8 }}
         {{- end }}

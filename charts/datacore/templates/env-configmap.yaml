@@ -14,12 +14,14 @@ data:
   POSTGRES_DATABASE: {{ .Values.database.name | quote }}
   POSTGRES_USER: {{ .Values.database.user | quote }}
   POSTGRES_SSLMODE: {{ include "neuraltrust-platform.postgres.sslMode" (dict "ctx" . "sslMode" .Values.database.sslMode) | quote }}
-  {{- if .Values.database.iamAuth }}
+  {{- if eq (include "neuraltrust-platform.postgres.iamAuth" (dict "ctx" . "database" .Values.database)) "true" }}
   # IAM (RDS) DB auth: DataCore mints a SigV4 token per connection (POSTGRES_LOGIN=aws).
-  # No static POSTGRES_PASSWORD is shipped. AWS_REGION is required by the binary.
+  # No static POSTGRES_PASSWORD is shipped. Defaults from global.postgresql.authMode
+  # when database.iamAuth is unset (AUT-392). AWS_REGION is required by the binary.
   POSTGRES_LOGIN: "aws"
-  {{- if and .Values.database.awsRegion (ne (.Values.database.awsRegion | toString) "") }}
-  AWS_REGION: {{ .Values.database.awsRegion | quote }}
+  {{- $dcRegion := .Values.database.awsRegion | default (default dict (default dict .Values.global).postgresql).awsRegion | default "" }}
+  {{- if and $dcRegion (ne ($dcRegion | toString) "") }}
+  AWS_REGION: {{ $dcRegion | quote }}
   {{- end }}
   {{- end }}
   CLICKHOUSE_ADDR: {{ printf "%s:%v" .Values.clickhouse.host .Values.clickhouse.nativePort | quote }}

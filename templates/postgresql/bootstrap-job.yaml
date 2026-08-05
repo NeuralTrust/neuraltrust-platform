@@ -63,7 +63,8 @@ owner and grants.
   {{- /* Skipped when: the service is not deployed; it authenticates with IAM and
          so has no password to set; or it shares the bootstrap role, which the
          image itself created (every hybrid service resolves to exactly that). */}}
-  {{- if and $c.gate (not $db.iamAuth) (ne $role $adminRole) }}
+  {{- $iam := eq (include "neuraltrust-platform.postgres.iamAuth" (dict "ctx" $ "database" $db)) "true" }}
+  {{- if and $c.gate (not $iam) (ne $role $adminRole) }}
     {{- $services = append $services (dict
       "key" $c.key
       "role" $role

@@ -49,17 +49,21 @@ database:
     key: "" # Empty ⇒ "DB_PASSWORD"
   sslMode: "" # Empty ⇒ global.postgresql.sslMode (default "prefer"); "require" forces TLS on hosted DBs
   # IAM (e.g. AWS RDS) database auth. When true, emits DB_AUTH_MODE=iam /
-  # DB_IAM_AUTH and omits DB_PASSWORD. AlertEngine (v0.4.0+) mints a SigV4 token
-  # per connection. Requires an IRSA-annotated serviceAccount + awsRegion.
-  # Leave false for password auth.
-  iamAuth: false
-  awsRegion: "" # Required when iamAuth=true → AWS_REGION (also accepts AWS_DEFAULT_REGION / DB_AWS_REGION in the binary)
+  # DB_IAM_AUTH and omits DB_PASSWORD. When unset, inherits
+  # global.postgresql.authMode=iam (AUT-392). Explicit true/false wins.
+  # Requires IRSA + awsRegion.
+  # iamAuth:
+  awsRegion: "" # Required when IAM is on → AWS_REGION (falls back to global.postgresql.awsRegion)
 # ClickHouse (native protocol, port 9000). Defaults to the in-cluster clickhouse
 # subchart; set host/nativePort to your endpoint when infrastructure.clickhouse.deploy=false.
 clickhouse:
   host: "clickhouse"
   nativePort: 9000
-  database: "otel" # DB where clickstack-otel-collector writes telemetry events
+  # Event tables (trustgate_events / trustguard_events) live in `default`.
+  # `otel` is only the OTLP landing database that ClickStack writes; DataCore
+  # materialized views transform those logs into the event tables AlertEngine
+  # queries. SaaS overlays use CLICKHOUSE_DATABASE=default for the same reason.
+  database: "default"
   username: "neuraltrust"
   # CLICKHOUSE_PASSWORD is read from a shared secret — the in-cluster `clickhouse`
   # subchart secret by default (same secret DataCore uses). For external ClickHouse

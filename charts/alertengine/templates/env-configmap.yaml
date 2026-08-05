@@ -16,13 +16,15 @@ data:
   DB_NAME: {{ .Values.database.name | quote }}
   DB_USER: {{ .Values.database.user | quote }}
   DB_SSL_MODE: {{ include "neuraltrust-platform.postgres.sslMode" (dict "ctx" . "sslMode" .Values.database.sslMode) | quote }}
-  {{- if .Values.database.iamAuth }}
+  {{- if eq (include "neuraltrust-platform.postgres.iamAuth" (dict "ctx" . "database" .Values.database)) "true" }}
   # IAM (RDS) DB auth: AlertEngine mints a SigV4 token per connection (DB_AUTH_MODE=iam).
-  # No static DB_PASSWORD is shipped. AWS_REGION is required by the binary.
+  # No static DB_PASSWORD is shipped. Defaults from global.postgresql.authMode when
+  # database.iamAuth is unset (AUT-392). AWS_REGION is required by the binary.
   DB_IAM_AUTH: "true"
   DB_AUTH_MODE: "iam"
-  {{- if and .Values.database.awsRegion (ne (.Values.database.awsRegion | toString) "") }}
-  AWS_REGION: {{ .Values.database.awsRegion | quote }}
+  {{- $aeRegion := .Values.database.awsRegion | default (default dict (default dict .Values.global).postgresql).awsRegion | default "" }}
+  {{- if and $aeRegion (ne ($aeRegion | toString) "") }}
+  AWS_REGION: {{ $aeRegion | quote }}
   {{- end }}
   {{- end }}
   # ---- ClickHouse (event source, native protocol) ----

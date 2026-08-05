@@ -4,6 +4,55 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.9.2] — 2026-08-05
+
+Chart `2.9.1` → `2.9.2`. Four chart defects against the SaaS gitops reference.
+
+### Fixed
+
+- **AUT-385: AlertEngine ClickHouse database is `default`, not `otel`.** The
+  OTLP landing database is `otel`; DataCore materialized views write event
+  tables into `default`. Every SaaS overlay already sets
+  `CLICKHOUSE_DATABASE=default`. The chart default and the umbrella overlay
+  now match.
+
+- **AUT-382: AlertEngine credentials follow the subchart flag.**
+  `AUTH_JWT_SECRET` and `APP_ENCRYPTION_KEY` in `platform-secrets` used
+  `requires: external`, so they were minted even with
+  `alertengine.enabled=false`. They now use a dedicated `alertengine` shape
+  (external + enabled), mirroring the TrustLens opt-in gate.
+
+- **AUT-386: firewall gets a shared `REDIS_URL`.** The Python client only
+  reads `REDIS_URL` and otherwise falls back to `localhost:6379`, which is
+  unreachable in-cluster. The chart now composes the URL from the shared
+  Redis helpers into `firewall-config` (no password) or `firewall-secrets`
+  (password present). ElastiCache IAM is unsupported by this client — use a
+  static password or in-cluster Redis.
+
+- **AUT-392: umbrella IAM no longer silently falls back to password auth.**
+  `database.iamAuth: false` hardcodes used to ignore
+  `global.postgresql.authMode=iam` on TrustGate / TrustGuard / DataCore /
+  AlertEngine in external mode. Per-service `iamAuth` is now unset by
+  default and inherits the global auth mode; an explicit `true`/`false`
+  still wins for mixed-auth installs.
+
+### Changed
+
+- **Service image pins refreshed to the latest Artifact Registry tags:**
+  - TrustGate / agentgateway `v0.32.1 → v0.33.2`
+  - TrustGuard `v0.27.0 → v0.29.0`
+  - Firewall `v2.19.0 → v2.21.0`
+  - control-plane-api `v1.23.1 → v1.23.2`
+  - app / control-plane-app `v1.125.2 → v1.126.0`
+  - data-plane-api `v1.44.3 → v1.45.0`
+  - watchdog `v0.13.2 → v0.13.4`
+  - AlertEngine `v0.6.0`, DataCore `v0.15.1`, dataagent `v0.5.0`,
+    clickstack-otel-collector `2.32.0` unchanged (already latest).
+
+- Subcharts: `agentgateway` `0.1.37 → 0.1.38`, `trustguard` `0.1.34 → 0.1.35`,
+  `datacore` `0.1.16 → 0.1.17`, `alertengine` `0.1.7 → 0.1.8`,
+  `firewall` `2.1.6 → 2.1.7`.
+
 ## [v2.8.0] — 2026-08-01
 
 Chart `2.7.1` → `2.8.0`. A managed external values file can now hold no

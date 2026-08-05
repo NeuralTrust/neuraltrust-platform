@@ -53,11 +53,11 @@ database:
     key: "" # Empty ⇒ "POSTGRES_PASSWORD"
   sslMode: "" # Empty ⇒ global.postgresql.sslMode (default "prefer"); "require" forces TLS on hosted DBs
   # IAM (e.g. AWS RDS/Aurora) database auth. When true, emits POSTGRES_LOGIN=aws
-  # and omits POSTGRES_PASSWORD. DataCore (v0.12.1+) mints a SigV4 token per
-  # connection via the AWS SDK default chain (IRSA). Requires an IRSA-annotated
-  # serviceAccount + awsRegion, and POSTGRES_SSLMODE require|verify-ca|verify-full.
-  iamAuth: false
-  awsRegion: "" # Required when iamAuth=true → AWS_REGION
+  # and omits POSTGRES_PASSWORD. When unset, inherits global.postgresql.authMode=iam
+  # (AUT-392). Explicit true/false wins. Requires IRSA + awsRegion, and
+  # POSTGRES_SSLMODE require|verify-ca|verify-full.
+  # iamAuth:
+  awsRegion: "" # Required when IAM is on → AWS_REGION (falls back to global.postgresql.awsRegion)
 # ClickHouse (native protocol, port 9000). Defaults to the in-cluster clickhouse
 # subchart; set clickhouse.host/nativePort to your endpoint when
 # infrastructure.clickhouse.deploy=false.

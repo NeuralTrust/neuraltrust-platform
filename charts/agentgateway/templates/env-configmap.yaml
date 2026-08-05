@@ -33,12 +33,11 @@ data:
   DB_NAME: {{ include "neuraltrust-platform.v2.dbName" (dict "ctx" . "explicit" .Values.database.name "external" "agentgateway") | quote }}
   DB_USER: {{ include "neuraltrust-platform.v2.writerUser" (dict "ctx" . "explicit" .Values.database.user "default" "agentgateway") | quote }}
   DB_SSL_MODE: {{ include "neuraltrust-platform.postgres.sslMode" (dict "ctx" . "sslMode" .Values.database.sslMode) | quote }}
-  {{- if .Values.database.iamAuth }}
+  {{- if eq (include "neuraltrust-platform.postgres.iamAuth" (dict "ctx" . "database" .Values.database)) "true" }}
   {{- /* IAM (RDS) DB auth: no static DB_PASSWORD is shipped; the service mints a
          token. POSTGRES_LOGIN is the only switch TrustGate reads for this
-         (pkg/config/config.go). DB_IAM_AUTH and DB_AUTH_MODE used to be set here
-         too and have no reader in the binary — AlertEngine reads DB_AUTH_MODE, a
-         different service. */}}
+         (pkg/config/config.go). Defaults from global.postgresql.authMode when
+         database.iamAuth is unset (AUT-392). */}}
   POSTGRES_LOGIN: "aws"
   {{- /* The binary does not read AWS_REGION itself, but the AWS SDK it hands the
          token request to fails with "aws region is required" when the default

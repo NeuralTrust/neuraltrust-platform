@@ -3,4 +3,4 @@ name: control-plane-api
 description: NeuralTrust Control Plane API (v2 external only)
 type: application
 version: 0.1.2
-appVersion: "1.23.1"
+appVersion: "1.23.2"

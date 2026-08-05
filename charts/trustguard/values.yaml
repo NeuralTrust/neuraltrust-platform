@@ -8,7 +8,7 @@ fullnameOverride: "trustguard"
 securityHardening: true
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustguard
-  tag: "v0.27.0"
+  tag: "v0.29.0"
   pullPolicy: IfNotPresent
 imagePullSecrets: "gcr-secret"
 serviceAccount:
@@ -42,11 +42,10 @@ database:
   # node-level configuration and fail with "aws region is required" without it.
   awsRegion: ""
   # IAM (e.g. AWS RDS) database auth. Emits POSTGRES_LOGIN=aws and omits the static
-  # DB_PASSWORD; the service mints a SigV4 token at connect time. In external mode
-  # this flag is independent of global.postgresql.authMode, so set both when the
-  # data plane and the control plane share an IAM-authenticated database.
-  # Requires an IRSA-annotated serviceAccount. Leave false for password auth.
-  iamAuth: false
+  # DB_PASSWORD; the service mints a SigV4 token at connect time. When unset,
+  # inherits global.postgresql.authMode=iam (AUT-392). Explicit true/false wins
+  # so a mixed-auth external install stays expressible. Requires IRSA.
+  # iamAuth:
 redis:
   host: "" # Empty ⇒ global.redis.host, else the in-cluster redis Service
   port: "" # Empty ⇒ global.redis.port, then 6379
