@@ -30,7 +30,7 @@ dependencies:
       - v2
   # Control-plane App/UI — external only.
   - name: control-plane-app
-    version: 0.1.22
+    version: 0.1.23
     repository: file://./charts/control-plane-app
     tags:
       - neuraltrust
@@ -45,7 +45,7 @@ dependencies:
       - v2
   # TrustGuard. Hybrid gated by global.products.trustguard.
   - name: trustguard
-    version: 0.1.35
+    version: 0.1.36
     repository: file://./charts/trustguard
     tags:
       - neuraltrust

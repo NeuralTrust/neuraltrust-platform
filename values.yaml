@@ -630,7 +630,7 @@ control-plane-app:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.126.0"
+          tag: "v1.127.0"
           pullPolicy: IfNotPresent
         config:
           nodeEnv: production
@@ -737,7 +737,7 @@ agentgateway:
 # TrustGuard: control-plane + data-plane (/v1/evaluate).
 trustguard:
   image:
-    tag: "v0.29.0"
+    tag: "v0.30.0"
   # Empty host/port/sslMode/username/tls inherit — see the agentgateway note.
   database:
     sslMode: ""
