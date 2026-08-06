@@ -138,7 +138,11 @@ firewall:
     cudaMpsPinnedDeviceMemLimit: "3500M"
     applicationVersion: ""
     otelEnabled: "false"
-    otelExporterOtlpEndpoint: "http://opentelemetry-collector.opentelemetry.svc.cluster.local:4318"
+    # Empty by default. No customer install has a collector at a NeuralTrust
+    # internal address, so a hostname here only produces exporter errors when an
+    # operator enables OTel without also setting the umbrella-wide endpoint.
+    # Sibling charts already omit their OTel config when nothing resolves.
+    otelExporterOtlpEndpoint: ""
     otelServiceName: ""
     otelEnvironment: "prod"
     extraEnv: {}

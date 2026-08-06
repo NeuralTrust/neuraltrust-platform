@@ -29,6 +29,8 @@ data:
       2. firewall.config.otelExporterOtlpEndpoint (per-component override)
     The umbrella override wins so an operator can flip every component to
     the in-chart collector with one knob without editing every subchart.
+    When neither resolves the key is omitted, so the SDK falls back to its own
+    default rather than being handed an empty endpoint it cannot dial.
   */ -}}
   {{- $otelEndpoint := .Values.firewall.config.otelExporterOtlpEndpoint -}}
   {{- $globalObs := default dict (default dict .Values.global).observability -}}
@@ -36,7 +38,9 @@ data:
   {{- if $globalColl.endpoint -}}
     {{- $otelEndpoint = $globalColl.endpoint -}}
   {{- end }}
+  {{- if $otelEndpoint }}
   OTEL_EXPORTER_OTLP_ENDPOINT: {{ $otelEndpoint | quote }}
+  {{- end }}
   {{- if .Values.firewall.config.otelServiceName }}
   OTEL_SERVICE_NAME: {{ .Values.firewall.config.otelServiceName | quote }}
   {{- end }}
