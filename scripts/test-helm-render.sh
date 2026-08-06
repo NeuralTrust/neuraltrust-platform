@@ -39,6 +39,9 @@ trap 'rm -rf "$TMP"' EXIT
 red()   { printf '\033[31m%s\033[0m\n' "$*"; }
 green() { printf '\033[32m%s\033[0m\n' "$*"; }
 blue()  { printf '\033[34m%s\033[0m\n' "$*"; }
+# Used by optional checks that skip. Undefined, this aborted the whole suite
+# under set -e on any machine without node, silently skipping later scenarios.
+yellow(){ printf '\033[33m%s\033[0m\n' "$*"; }
 
 blue "==> HELM_SUITE=${HELM_SUITE}"
 
@@ -162,6 +165,23 @@ assert_not_contains() {
     exit 1
   fi
   green "ok  - $msg"
+}
+
+# Write the single rendered document whose metadata.name matches, so an
+# assertion about one ConfigMap is not satisfied (or broken) by a same-named
+# key in a sibling component's ConfigMap.
+document_named() {
+  local file="$1" name="$2" out="$3"
+  awk -v want="$name" '
+    /^---$/ { if (keep) exit; buf = ""; keep = 0; next }
+    { buf = buf $0 "\n" }
+    $0 == "  name: " want { keep = 1 }
+    END { if (keep) printf "%s", buf }
+  ' "$file" > "$out"
+  if [[ ! -s "$out" ]]; then
+    red "FAIL: no rendered document named $name in $file"
+    exit 1
+  fi
 }
 
 assert_occurrences() {
@@ -1487,6 +1507,30 @@ assert_contains "$out10d" 'nvidia.com/gpu' \
   "gpu: Firewall workers request GPU resources"
 assert_contains "$out10d" 'hostIPC: true' \
   "gpu: Firewall workers share host IPC for CUDA MPS"
+
+blue "==> Scenario 10f: Firewall OTLP endpoint resolution"
+# The chart used to default this to a NeuralTrust-internal collector namespace,
+# which no customer cluster has. Enabling OTel without an endpoint must leave
+# the variable unset rather than ship an address that cannot resolve.
+out10f_fw="$TMP/scenario-firewall-otel-unset.yaml"
+render_default "$out10f_fw" \
+  --set firewall.firewall.config.otelEnabled=true
+document_named "$out10f_fw" firewall-config "$TMP/firewall-config-unset.yaml"
+assert_contains "$TMP/firewall-config-unset.yaml" 'OTEL_ENABLED: "true"' \
+  "firewall otel: SDK gate is on"
+assert_not_contains "$TMP/firewall-config-unset.yaml" 'OTEL_EXPORTER_OTLP_ENDPOINT' \
+  "firewall otel: no endpoint resolves, so the key is omitted"
+assert_not_contains "$out10f_fw" 'opentelemetry-collector.opentelemetry' \
+  "firewall otel: retired collector namespace is not a default"
+
+out10f_glob="$TMP/scenario-firewall-otel-umbrella.yaml"
+render_default "$out10f_glob" \
+  --set firewall.firewall.config.otelEnabled=true \
+  --set firewall.firewall.config.otelExporterOtlpEndpoint=http://per-component:4318 \
+  --set global.observability.collector.endpoint=http://umbrella:4318
+document_named "$out10f_glob" firewall-config "$TMP/firewall-config-umbrella.yaml"
+assert_contains "$TMP/firewall-config-umbrella.yaml" 'OTEL_EXPORTER_OTLP_ENDPOINT: "http://umbrella:4318"' \
+  "firewall otel: umbrella endpoint overrides the per-component setting"
 
 # ---------------------------------------------------------------------------
 # 11. Positive hybrid product selection
