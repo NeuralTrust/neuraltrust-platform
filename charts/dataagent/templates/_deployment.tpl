@@ -23,10 +23,18 @@ spec:
       labels:
         {{- include "dataagent.labels" . | nindent 8 }}
         app.kubernetes.io/component: data-plane
-      {{- if $egressEnabled }}
       annotations:
+        {{- /* AUT-403: library chart templates are named defines, not BasePath files. */}}
+        checksum/env-configmap: {{ include "dataagent.envConfigMap" . | sha256sum }}
+        {{- $dataSecret := default dict .Values.existingSecret }}
+        {{- $managedDataSecret := and (eq (include "neuraltrust-platform.autoGenerateSecrets" .) "true") (not .Values.global.preserveExistingSecrets) }}
+        {{- if and (not $dataSecret.name) $managedDataSecret }}
+        checksum/secrets: {{ include "dataagent.secrets" . | sha256sum }}
+        {{- end }}
+        {{- /* existingSecret is operator-owned — no chart content to checksum. */}}
+        {{- if $egressEnabled }}
         checksum/egress-config: {{ include "dataagent.egressConfigmapData" . | sha256sum }}
-      {{- end }}
+        {{- end }}
     spec:
       serviceAccountName: {{ include "dataagent.serviceAccountName" . }}
       {{- include "dataagent.imagePullSecrets" . | nindent 6 }}
