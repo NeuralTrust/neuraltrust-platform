@@ -4,6 +4,21 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.9.5] — 2026-08-06
+
+Chart `2.9.4` → `2.9.5`.
+
+### Fixed
+
+- **AUT-390: control-plane pull secrets honour documented precedence.**
+  `controlPlane.imagePullSecrets`, the subchart root key, and
+  `global.imagePullSecrets` were ignored because both control-plane charts
+  defaulted `imagePullSecrets` to `"gcr-secret"`, so the first branch always
+  won. Defaults are omitted; a shared helper resolves
+  `controlPlane` → root → `global` → `gcr-secret`, with `"none"` /
+  `["none"]` suppressing. The MCP signing-key Job uses the same helper so it
+  keeps tracking the app image.
+
 ## [v2.9.2] — 2026-08-05
 
 Chart `2.9.1` → `2.9.2`. Four chart defects against the SaaS gitops reference.

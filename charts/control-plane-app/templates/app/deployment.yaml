@@ -49,17 +49,7 @@ spec:
           labelSelector:
             matchLabels:
               app: control-plane-app
-      {{- $imagePullSecret := "gcr-secret" }}
-      {{- if .Values.imagePullSecrets }}
-        {{- $imagePullSecret = .Values.imagePullSecrets }}
-      {{- else if and .Values.controlPlane (hasKey .Values.controlPlane "imagePullSecrets") }}
-        {{- /* Assign unconditionally so "none"/"" opt out (the guard below suppresses them). */}}
-        {{- $imagePullSecret = .Values.controlPlane.imagePullSecrets }}
-      {{- end }}
-      {{- if and $imagePullSecret (ne $imagePullSecret "none") (ne $imagePullSecret "") }}
-      imagePullSecrets:
-        - name: {{ $imagePullSecret }}
-      {{- end }}
+      {{- include "neuraltrust-platform.controlPlane.imagePullSecrets" (dict "root" .Values "global" (.Values.global | default dict)) | nindent 6 }}
       {{- $pgSecretName := "postgresql-secrets" }}
       {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.postgresql .Values.controlPlane.components.postgresql.secrets .Values.controlPlane.components.postgresql.secrets.name }}
         {{- $pgSecretName = .Values.controlPlane.components.postgresql.secrets.name }}
