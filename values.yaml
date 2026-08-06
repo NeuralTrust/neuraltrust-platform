@@ -91,7 +91,9 @@ global:
   # Base domain used for URL generation (<hostPrefix>.<domain>).
   domain: "neuraltrust.ai"
   imageRegistry: "" # Global registry mirror; empty = per-component defaults
-  imagePullSecrets: [] # Optional global pull-secret list applied to platform workloads
+  # Optional global pull-secret list. Control-plane app/api honour it after
+  # their own keys (AUT-390); other product charts vary — see chart-wide audit.
+  imagePullSecrets: []
   autoGenerateSecrets: true
   preserveExistingSecrets: false
   # Shared platform Secret (`platform-secrets`) — one home for every
@@ -529,12 +531,14 @@ clickhouse:
 # =============================================================================
 # Both charts share the umbrella-owned `control-plane` ServiceAccount and
 # `control-plane-secrets` Secret (templates/control-plane/). Component config
-# lives inside each chart's own root; put shared knobs (secrets, image pull
-# secret) under either root — the umbrella reads from both.
+# lives inside each chart's own root.
+#
+# imagePullSecrets precedence (AUT-390): controlPlane.imagePullSecrets →
+# <subchart>.imagePullSecrets → global.imagePullSecrets → gcr-secret.
+# Omit the keys (do not default them) so unset falls through; set "none" (or
+# global ["none"]) to suppress. Fallback lives only in the template helper.
 control-plane-api:
-  imagePullSecrets: "gcr-secret"
   controlPlane:
-    imagePullSecrets: "gcr-secret"
     serviceAccount:
       create: true
       name: control-plane
@@ -604,9 +608,7 @@ control-plane-api:
           host: "control-plane-postgresql"
           port: "5432"
 control-plane-app:
-  imagePullSecrets: "gcr-secret"
   controlPlane:
-    imagePullSecrets: "gcr-secret"
     serviceAccount:
       create: true
       name: control-plane

@@ -2094,6 +2094,105 @@ ruby -ryaml -e '
 ' "$out12reg" || { red "FAIL: the generator does not follow the app image into a custom registry"; exit 1; }
 green "ok  - the generator follows the app image through a mirrored registry and pull secrets"
 
+# AUT-390: control-plane pull-secret precedence
+#   controlPlane.imagePullSecrets → subchart root → global.imagePullSecrets → gcr-secret
+#   "none" (or global ["none"]) suppresses. Default path must stay gcr-secret.
+blue "==> AUT-390: control-plane imagePullSecrets precedence"
+assert_pull_secrets() {
+  local file="$1" workload="$2" expected_csv="$3" msg="$4"
+  ruby -ryaml -e '
+    docs = YAML.load_stream(File.read(ARGV.fetch(0))).compact
+    want, expected = ARGV.fetch(1), ARGV.fetch(2).split(",").reject(&:empty?)
+    d = docs.find { |x|
+      next false unless %w[Deployment Job].include?(x["kind"])
+      x.dig("metadata", "name") == want ||
+        x.dig("metadata", "labels", "app.kubernetes.io/component") == want
+    }
+    abort "#{want} not rendered" if d.nil?
+    actual = (d.dig("spec", "template", "spec", "imagePullSecrets") || []).map { |s| s["name"] }
+    abort "expected #{expected.inspect}, got #{actual.inspect}" unless actual == expected
+  ' "$file" "$workload" "$expected_csv" || { red "FAIL: $msg"; exit 1; }
+  green "ok  - $msg"
+}
+
+out390def="$TMP/scenario-aut390-default.yaml"
+render_default "$out390def" --set global.deploymentMode=external
+assert_pull_secrets "$out390def" control-plane-app "gcr-secret" \
+  "AUT-390: default external app still uses gcr-secret"
+assert_pull_secrets "$out390def" control-plane-api "gcr-secret" \
+  "AUT-390: default external api still uses gcr-secret"
+assert_pull_secrets "$out390def" mcp-signing-key "gcr-secret" \
+  "AUT-390: default signing-key Job still uses gcr-secret"
+
+out390cp="$TMP/scenario-aut390-controlplane.yaml"
+render_default "$out390cp" --set global.deploymentMode=external \
+  --set 'control-plane-app.controlPlane.imagePullSecrets=cp-creds' \
+  --set 'control-plane-api.controlPlane.imagePullSecrets=cp-api-creds'
+assert_pull_secrets "$out390cp" control-plane-app "cp-creds" \
+  "AUT-390: controlPlane.imagePullSecrets reaches the app pod"
+assert_pull_secrets "$out390cp" control-plane-api "cp-api-creds" \
+  "AUT-390: controlPlane.imagePullSecrets reaches the api pod"
+assert_pull_secrets "$out390cp" mcp-signing-key "cp-creds" \
+  "AUT-390: signing-key Job tracks app controlPlane pull secret"
+
+out390root="$TMP/scenario-aut390-root.yaml"
+render_default "$out390root" --set global.deploymentMode=external \
+  --set 'control-plane-app.imagePullSecrets=root-creds' \
+  --set 'control-plane-api.imagePullSecrets=root-api-creds'
+assert_pull_secrets "$out390root" control-plane-app "root-creds" \
+  "AUT-390: subchart root imagePullSecrets reaches the app pod"
+assert_pull_secrets "$out390root" mcp-signing-key "root-creds" \
+  "AUT-390: signing-key Job tracks app root pull secret"
+
+out390glob="$TMP/scenario-aut390-global.yaml"
+render_default "$out390glob" --set global.deploymentMode=external \
+  --set 'global.imagePullSecrets[0].name=global-creds'
+assert_pull_secrets "$out390glob" control-plane-app "global-creds" \
+  "AUT-390: global.imagePullSecrets reaches the app pod"
+assert_pull_secrets "$out390glob" control-plane-api "global-creds" \
+  "AUT-390: global.imagePullSecrets reaches the api pod"
+assert_pull_secrets "$out390glob" mcp-signing-key "global-creds" \
+  "AUT-390: signing-key Job tracks global pull secret"
+
+out390none="$TMP/scenario-aut390-none-cp.yaml"
+render_default "$out390none" --set global.deploymentMode=external \
+  --set 'control-plane-app.controlPlane.imagePullSecrets=none' \
+  --set 'control-plane-api.controlPlane.imagePullSecrets=none'
+assert_pull_secrets "$out390none" control-plane-app "" \
+  "AUT-390: controlPlane imagePullSecrets=none suppresses app pull secrets"
+assert_pull_secrets "$out390none" control-plane-api "" \
+  "AUT-390: controlPlane imagePullSecrets=none suppresses api pull secrets"
+assert_pull_secrets "$out390none" mcp-signing-key "" \
+  "AUT-390: controlPlane none suppresses signing-key Job pull secrets"
+
+out390noneroot="$TMP/scenario-aut390-none-root.yaml"
+render_default "$out390noneroot" --set global.deploymentMode=external \
+  --set 'control-plane-app.imagePullSecrets=none' \
+  --set 'control-plane-api.imagePullSecrets=none'
+assert_pull_secrets "$out390noneroot" control-plane-app "" \
+  "AUT-390: root imagePullSecrets=none suppresses app pull secrets"
+assert_pull_secrets "$out390noneroot" mcp-signing-key "" \
+  "AUT-390: root none suppresses signing-key Job pull secrets"
+
+out390noneglob="$TMP/scenario-aut390-none-global.yaml"
+render_default "$out390noneglob" --set global.deploymentMode=external \
+  --set 'global.imagePullSecrets[0]=none'
+assert_pull_secrets "$out390noneglob" control-plane-app "" \
+  "AUT-390: global imagePullSecrets [none] suppresses app pull secrets"
+assert_pull_secrets "$out390noneglob" mcp-signing-key "" \
+  "AUT-390: global none suppresses signing-key Job pull secrets"
+
+# Most-specific wins when several levels are set.
+out390win="$TMP/scenario-aut390-precedence-wins.yaml"
+render_default "$out390win" --set global.deploymentMode=external \
+  --set 'global.imagePullSecrets[0].name=global-creds' \
+  --set 'control-plane-app.imagePullSecrets=root-creds' \
+  --set 'control-plane-app.controlPlane.imagePullSecrets=cp-creds'
+assert_pull_secrets "$out390win" control-plane-app "cp-creds" \
+  "AUT-390: controlPlane wins over root and global"
+assert_pull_secrets "$out390win" mcp-signing-key "cp-creds" \
+  "AUT-390: signing-key Job follows the winning app level"
+
 # The embedded script ships as a string, so a syntax error would surface as a
 # CrashLoopBackOff during an upgrade rather than at render time.
 if command -v node >/dev/null 2>&1; then

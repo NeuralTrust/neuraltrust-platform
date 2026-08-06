@@ -264,6 +264,76 @@ imagePullSecrets:
 {{- end -}}
 
 {{/*
+imagePullSecrets for control-plane-app / control-plane-api (and the MCP
+signing-key Job that must pull the same image).
+
+Precedence (most specific first):
+  1. <subchart>.controlPlane.imagePullSecrets  (string; hasKey so ""/"none" suppress)
+  2. <subchart>.imagePullSecrets               (string; unset/empty falls through)
+  3. global.imagePullSecrets                   (list of names or {name}; ["none"] suppresses)
+  4. chart default `gcr-secret`
+
+Call with a dict so the umbrella Job can resolve against control-plane-app
+values while subchart Deployments pass their own .Values root:
+
+  {{- include "neuraltrust-platform.controlPlane.imagePullSecrets" (dict "root" .Values "global" .Values.global) | nindent 6 }}
+*/}}
+{{- define "neuraltrust-platform.controlPlane.imagePullSecrets" -}}
+{{- $root := default dict .root -}}
+{{- $global := default dict .global -}}
+{{- $cp := default dict $root.controlPlane -}}
+{{- $secrets := list -}}
+{{- $suppress := false -}}
+{{- $chosen := false -}}
+{{- if hasKey $cp "imagePullSecrets" -}}
+  {{- $chosen = true -}}
+  {{- $v := $cp.imagePullSecrets -}}
+  {{- if or (not $v) (eq ($v | toString) "") (eq ($v | toString) "none") -}}
+    {{- $suppress = true -}}
+  {{- else if kindIs "string" $v -}}
+    {{- $secrets = append $secrets $v -}}
+  {{- end -}}
+{{- end -}}
+{{- if not $chosen -}}
+  {{- $v := $root.imagePullSecrets | default "" -}}
+  {{- if $v -}}
+    {{- $chosen = true -}}
+    {{- if eq ($v | toString) "none" -}}
+      {{- $suppress = true -}}
+    {{- else if kindIs "string" $v -}}
+      {{- $secrets = append $secrets $v -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- if and (not $chosen) (not $suppress) -}}
+  {{- range (default (list) $global.imagePullSecrets) -}}
+    {{- $name := "" -}}
+    {{- if kindIs "map" . -}}{{- $name = .name | default "" -}}
+    {{- else if kindIs "string" . -}}{{- $name = . -}}
+    {{- end -}}
+    {{- if eq $name "none" -}}
+      {{- $suppress = true -}}
+      {{- $secrets = list -}}
+    {{- else if and $name (ne $name "") -}}
+      {{- $secrets = append $secrets $name -}}
+    {{- end -}}
+  {{- end -}}
+  {{- if or $suppress (gt (len $secrets) 0) -}}
+    {{- $chosen = true -}}
+  {{- end -}}
+{{- end -}}
+{{- if and (not $suppress) (eq (len $secrets) 0) -}}
+  {{- $secrets = append $secrets "gcr-secret" -}}
+{{- end -}}
+{{- if gt (len $secrets) 0 -}}
+imagePullSecrets:
+{{- range $secrets }}
+  - name: {{ . }}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Component-level PostgreSQL config accessor kept for umbrella templates that
 still read via a helper. Empty in v2 because the shared Postgres config lives
 under `global.postgresql`.
