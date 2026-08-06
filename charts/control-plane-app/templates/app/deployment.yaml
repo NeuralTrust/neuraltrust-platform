@@ -27,6 +27,12 @@ spec:
     metadata:
       labels:
         app: control-plane-app
+      {{- /* AUT-403: otel ConfigMap is the only chart-owned envFrom source.
+             extraEnvFrom may point at operator Secrets — those are not checksummed. */}}
+      {{- if include "control-plane.otelEndpoint" (dict "component" "app" "context" .) }}
+      annotations:
+        {{- include "neuraltrust-platform.checksumAnnotations" (dict "context" . "files" (list "/app/otel-configmap.yaml")) | nindent 8 }}
+      {{- end }}
     spec:
       serviceAccountName: {{ include "control-plane.serviceAccountName" . }}
       terminationGracePeriodSeconds: 60
