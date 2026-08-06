@@ -39,6 +39,12 @@ spec:
       labels:
         app: api
         plane: data
+      {{- /* AUT-403: otel ConfigMap is the only chart-owned envFrom source.
+             extraEnvFrom may point at operator Secrets — those are not checksummed. */}}
+      {{- if include "data-plane.otelEndpoint" (dict "component" "api" "context" .) }}
+      annotations:
+        {{- include "neuraltrust-platform.checksumAnnotations" (dict "context" . "files" (list "/api/otel-configmap.yaml")) | nindent 8 }}
+      {{- end }}
     spec:
       {{- include "data-plane.imagePullSecrets" . | nindent 6 }}
       serviceAccountName: {{ include "data-plane.serviceAccountName" . }}

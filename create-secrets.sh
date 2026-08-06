@@ -236,6 +236,46 @@ ensure_generated_secret_key() {
     add_secret_key "$secret_name" "$key" "$value"
 }
 
+# Ensure the config-sync last-known-good cache key exists in the Secret the data
+# planes actually read. The chart generates this key only while it owns the
+# service Secret (autoGenerateSecrets=true and preserveExistingSecrets=false).
+# On the pre-provisioned path this script exists to serve, the chart owns no
+# Secret and instead emits a secretKeyRef into configSync.existingSecret, so the
+# key has to be there or TrustGate/TrustGuard refuse to start (AUT-393).
+#
+# The value must be base64 decoding to exactly 32 bytes: the runtimes use it
+# directly as an AES-256-GCM key, which is what the chart's randBytes 32 yields.
+ensure_config_sync_lkg_key() {
+    local secret_name=$1
+    local key=$2
+    local env_name=$3
+    local value="${!env_name:-}"
+    local source="$env_name"
+
+    if [ -z "$value" ]; then
+        value="${CONFIG_SYNC_LKG_KEY:-}"
+        source="CONFIG_SYNC_LKG_KEY"
+    fi
+    if [ -z "$value" ]; then
+        value=$(read_secret_key_value "$secret_name" "$key")
+        source="existing ${secret_name}/${key}"
+    fi
+    if [ -z "$value" ]; then
+        value=$(openssl rand -base64 32 | tr -d '\n\r')
+        source="generated"
+    fi
+
+    local decoded_bytes
+    decoded_bytes=$(printf '%s' "$value" | base64 -d 2>/dev/null | wc -c | tr -d '[:space:]')
+    if [ "${decoded_bytes:-0}" != "32" ]; then
+        echo -e "${RED}Error: ${key} for ${secret_name} must be base64 that decodes to exactly 32 bytes (AES-256-GCM), but ${source} decodes to ${decoded_bytes:-0}.${NC}" >&2
+        echo -e "${RED}Generate one with: openssl rand -base64 32${NC}" >&2
+        exit 1
+    fi
+
+    add_secret_key "$secret_name" "$key" "$value"
+}
+
 # Ensure AgentGateway's MCP STS signer receives an RSA private key. The runtime
 # accepts PEM or base64-wrapped PEM; storing the wrapped form keeps the Secret
 # value single-line and avoids shell/YAML newline corruption.
@@ -431,6 +471,11 @@ while [[ $# -gt 0 ]]; do
             echo "  - DEPLOYMENT_MODE       hybrid|external (default: external)"
             echo "  - ENABLE_TRUSTGATE / ENABLE_TRUSTGUARD / ENABLE_DATAPLANE"
             echo "  - ENABLE_TRUSTLENS / ENABLE_MCP_OAUTH / ENABLE_WATCHDOG"
+            echo "  - ENABLE_CONFIG_SYNC (default: on for hybrid, off for external)"
+            echo "  - CONFIG_SYNC_LKG_KEY (base64, exactly 32 bytes; generated when unset)"
+            echo "    TRUSTGATE_CONFIG_SYNC_LKG_KEY / TRUSTGUARD_CONFIG_SYNC_LKG_KEY override per product"
+            echo "    CONFIG_SYNC_SECRET_TRUSTGATE / CONFIG_SYNC_SECRET_TRUSTGUARD set the Secret names"
+            echo "    (defaults: agentgateway-config-sync / trustguard-config-sync)"
             echo "  - DATA_PLANE_JWT_SECRET"
             echo "  - DATA_PLANE_REDIS_URL (optional; platform-v2 evaluation-progress cache)"
             echo "  - CONTROL_PLANE_JWT_SECRET"
@@ -1120,6 +1165,39 @@ ensure_platform_secret_key "MCP_OAUTH_SIGNING_KEY" "control-plane-secrets" "MCP_
 ensure_platform_secret_key "AUTH_SECRET_KEY" "control-plane-secrets" "AUTH_SECRET_KEY" "install" "AUTH_SECRET_KEY" "external"
 echo -e "${GREEN}✓ ${PLATFORM_SECRET_NAME} keys ready for shapes: ${PLATFORM_SHAPES[*]:-none}${NC}"
 echo ""
+
+# ============================================================================
+# CONFIG-SYNC LKG CACHE KEY (TrustGate / TrustGuard)
+# Written into the operator-owned configSync.existingSecret, because that is the
+# only place the chart looks under preserveExistingSecrets / autoGenerateSecrets=false
+# (see neuraltrust-platform.configSyncTokenEnv). The companion CONFIG_SYNC_TOKEN
+# is issued by the console and is never generated here.
+# ============================================================================
+if shape_enabled trustgate || shape_enabled trustguard; then
+    CONFIG_SYNC_DEFAULT_YES="false"
+    if [ "$DEPLOYMENT_MODE" = "hybrid" ]; then
+        CONFIG_SYNC_DEFAULT_YES="true"
+    fi
+    if prompt_yes_default "ENABLE_CONFIG_SYNC" "Enable config-sync (SaaS-managed configuration) secrets?" "$CONFIG_SYNC_DEFAULT_YES"; then
+        echo -e "${BLUE}=== Config-sync LKG cache key ===${NC}"
+        CONFIG_SYNC_LKG_KEY_NAME="${CONFIG_SYNC_LKG_KEY_NAME:-CONFIG_SYNC_LKG_KEY}"
+        if shape_enabled trustgate; then
+            ensure_config_sync_lkg_key \
+                "${CONFIG_SYNC_SECRET_TRUSTGATE:-agentgateway-config-sync}" \
+                "$CONFIG_SYNC_LKG_KEY_NAME" \
+                "TRUSTGATE_CONFIG_SYNC_LKG_KEY"
+        fi
+        if shape_enabled trustguard; then
+            ensure_config_sync_lkg_key \
+                "${CONFIG_SYNC_SECRET_TRUSTGUARD:-trustguard-config-sync}" \
+                "$CONFIG_SYNC_LKG_KEY_NAME" \
+                "TRUSTGUARD_CONFIG_SYNC_LKG_KEY"
+        fi
+        echo -e "${YELLOW}Note: CONFIG_SYNC_TOKEN is issued by the NeuralTrust console and is never generated.${NC}"
+        echo -e "${YELLOW}Add it to the same Secret(s) and point <product>.configSync.existingSecret.name at them.${NC}"
+        echo ""
+    fi
+fi
 
 # ============================================================================
 # SUMMARY

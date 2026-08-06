@@ -20,6 +20,9 @@ spec:
       labels:
         {{- include "trustlens.labels" . | nindent 8 }}
         app.kubernetes.io/component: data-plane
+      annotations:
+        {{- /* AUT-403: roll when env ConfigMap / chart-managed Secret changes. */}}
+        {{- include "neuraltrust-platform.checksumAnnotations" (dict "context" . "files" (list "/env-configmap.yaml" "/secrets.yaml")) | nindent 8 }}
     spec:
       serviceAccountName: {{ include "trustlens.serviceAccountName" . }}
       {{- include "trustlens.imagePullSecrets" . | nindent 6 }}
