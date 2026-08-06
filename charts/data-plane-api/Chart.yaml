@@ -2,5 +2,5 @@ apiVersion: v2
 name: data-plane-api
 description: NeuralTrust Data Plane API (analytics / evaluation)
 type: application
-version: 1.6.0
+version: 1.6.1
 appVersion: "1.45.0"
