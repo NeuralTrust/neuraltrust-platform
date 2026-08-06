@@ -765,6 +765,40 @@ v2 Redis connection scalars.
 {{- end }}
 
 {{/*
+Fingerprint of the chart-managed `redis-secrets` payload for AUT-403 checksums.
+
+Subchart Deployments envFrom `redis-secrets`, but `$.Template.BasePath` points at
+the subchart so they cannot `include` `templates/platform-secrets.yaml`. This
+helper mirrors the Secret's keys from the same `global.redis` inputs (and the
+lookup-adopted password) so a Redis host/password change rolls the pods that
+read it. Operator `global.redis.existingSecret` is intentionally omitted — the
+chart has no content to hash, and that Secret is out of scope for checksum
+rollouts.
+*/}}
+{{- define "neuraltrust-platform.v2.hybridRedis.secretChecksum" -}}
+{{- $r := default dict (default dict .Values.global).redis -}}
+{{- $host := $r.host | default "redis" -}}
+{{- $port := $r.port | default 6379 | toString -}}
+{{- $user := $r.username | default "" -}}
+{{- $tls := "" -}}
+{{- if hasKey $r "tls" }}{{- $tls = $r.tls | toString }}{{- end -}}
+{{- $password := "" -}}
+{{- if and $r.password (ne ($r.password | toString) "") -}}
+  {{- $password = $r.password | toString -}}
+{{- else -}}
+  {{- $existing := lookup "v1" "Secret" .Release.Namespace "redis-secrets" -}}
+  {{- if and $existing (kindIs "map" $existing) (index $existing "data") (hasKey $existing.data "REDIS_PASSWORD") -}}
+    {{- $password = index $existing.data "REDIS_PASSWORD" | b64dec -}}
+  {{- end -}}
+{{- end -}}
+REDIS_HOST={{ $host }}
+REDIS_PORT={{ $port }}
+REDIS_PASSWORD={{ $password }}
+REDIS_USERNAME={{ $user }}
+REDIS_TLS={{ $tls }}
+{{- end }}
+
+{{/*
 Renames the shared Redis TLS flag for TrustGate, which reads REDIS_TLS_ENABLED
 while TrustGuard reads REDIS_TLS. `redis-secrets` stores the canonical
 REDIS_TLS, so without this the AgentGateway data planes never see the flag and
@@ -2085,7 +2119,20 @@ selector:
 {{- end -}}
 
 {{/*
-Config-map/Secret checksum annotations for Deployment restart-on-change.
+ConfigMap/Secret checksum annotations for Deployment restart-on-change (AUT-403).
+
+Usage from a subchart pod template:
+  annotations:
+    {{- include "neuraltrust-platform.checksumAnnotations" (dict "context" . "files" (list "/env-configmap.yaml" "/secrets.yaml")) | nindent 8 }}
+
+`files` are paths under the caller's `$.Template.BasePath`. For umbrella-owned
+Secrets consumed via envFrom (hybrid `redis-secrets`), add
+`checksum/redis-secrets` from `neuraltrust-platform.v2.hybridRedis.secretChecksum`
+separately — BasePath cannot reach `templates/platform-secrets.yaml`.
+
+Operator-owned `existingSecret` references are deliberately not checksummed:
+the chart has no template content to hash, and a lookup-dependent annotation
+would render differently under `helm template` / ArgoCD than under `helm upgrade`.
 */}}
 {{- define "neuraltrust-platform.checksumAnnotations" -}}
 {{- $ctx := .context -}}

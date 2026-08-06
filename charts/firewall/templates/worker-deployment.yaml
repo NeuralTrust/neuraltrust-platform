@@ -29,6 +29,9 @@ spec:
     metadata:
       labels:
         {{- include "firewall.worker.labels" (dict "name" $workerName "context" $) | nindent 8 }}
+      annotations:
+        {{- /* AUT-403: envFrom is ConfigMap-only; JWT/REDIS_URL use secretKeyRef. */}}
+        {{- include "neuraltrust-platform.checksumAnnotations" (dict "context" $ "files" (list "/configmap.yaml")) | nindent 8 }}
     spec:
       {{- if $.Values.firewall.serviceAccount.create }}
       serviceAccountName: {{ $.Values.firewall.serviceAccount.name | default "firewall" }}

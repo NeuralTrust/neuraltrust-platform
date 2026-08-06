@@ -20,6 +20,14 @@ spec:
       labels:
         {{- include "agentgateway.labels" . | nindent 8 }}
         app.kubernetes.io/component: data-plane
+      annotations:
+        {{- /* AUT-403: roll when env ConfigMap / chart-managed Secret changes. */}}
+        {{- include "neuraltrust-platform.checksumAnnotations" (dict "context" . "files" (list "/env-configmap.yaml" "/secrets.yaml")) | nindent 8 }}
+        {{- /* Hybrid redis-secrets is umbrella-owned; BasePath cannot reach it.
+               Operator existingSecret is intentionally omitted (no chart content). */}}
+        {{- if and (eq (include "neuraltrust-platform.isHybrid" .) "true") (eq (include "neuraltrust-platform.v2.hybridRedis.chartManagedSecret" .) "true") }}
+        checksum/redis-secrets: {{ include "neuraltrust-platform.v2.hybridRedis.secretChecksum" . | sha256sum }}
+        {{- end }}
     spec:
       serviceAccountName: {{ include "agentgateway.serviceAccountName" . }}
       {{- include "agentgateway.imagePullSecrets" . | nindent 6 }}
@@ -65,7 +73,8 @@ spec:
             optional: true
         {{- if ne (include "neuraltrust-platform.v2.hybridPg.chartManagedSecret" .) "true" }}
         {{- /* An operator-supplied Secret keeps the passthrough: its key names are
-               theirs, so the chart cannot rename them. */}}
+               theirs, so the chart cannot rename them. Deliberately not checksummed
+               (AUT-403): the chart has no template content to hash. */}}
         - secretRef:
             name: {{ include "neuraltrust-platform.v2.hybridPg.secretName" . | quote }}
             optional: true

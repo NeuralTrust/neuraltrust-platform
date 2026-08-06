@@ -2968,6 +2968,32 @@ if grep -q -- '--from-literal=SENSIBLE_PG_DSN=' create-secrets.sh; then
 fi
 green "ok  - create-secrets.sh writes the canonical Postgres family without DSN composition"
 
+# AUT-393: on the pre-provisioned path the chart owns no service Secret, so it
+# references configSync.existingSecret for CONFIG_SYNC_LKG_KEY instead of
+# generating one. The script has to write that key or the data planes will not
+# start. Guard both the call sites and the 32-byte contract, since a wrong-length
+# key fails at runtime rather than at render.
+for product in trustgate trustguard; do
+  if ! grep -q "shape_enabled $product" create-secrets.sh; then
+    red "FAIL - create-secrets.sh never gates the config-sync LKG key on the $product shape"
+    exit 1
+  fi
+done
+if ! grep -q 'ensure_config_sync_lkg_key' create-secrets.sh; then
+  red "FAIL - create-secrets.sh never creates CONFIG_SYNC_LKG_KEY (AUT-393)"
+  exit 1
+fi
+if ! grep -q 'openssl rand -base64 32' create-secrets.sh; then
+  red "FAIL - create-secrets.sh config-sync LKG key must be 32 bytes to match randBytes 32"
+  exit 1
+fi
+LKG_DEFAULT_NAMES="$(grep -c -e 'agentgateway-config-sync' -e 'trustguard-config-sync' create-secrets.sh || true)"
+if [ "${LKG_DEFAULT_NAMES:-0}" -lt 2 ]; then
+  red "FAIL - create-secrets.sh must default to the documented config-sync Secret names"
+  exit 1
+fi
+green "ok  - create-secrets.sh creates a 32-byte CONFIG_SYNC_LKG_KEY for both data planes"
+
 # ---------------------------------------------------------------------------
 # AUT-385 / AUT-386 / AUT-392: AlertEngine ClickHouse DB, firewall REDIS_URL,
 # and umbrella IAM inheritance for gateway POSTGRES_LOGIN.
@@ -3064,6 +3090,153 @@ if ! ruby -ryaml -e '
   exit 1
 fi
 green "ok  - AUT-392: explicit iamAuth=false wins; sibling still inherits"
+
+# ---------------------------------------------------------------------------
+# AUT-403: ConfigMap/Secret checksum annotations roll envFrom consumers.
+# ---------------------------------------------------------------------------
+blue "==> Scenario 24: AUT-403 checksum annotations change on config edits and stay stable on no-op"
+
+# Helper: print "deploy|annotation|value" lines for the named Deployments.
+aut403_ann() {
+  local file=$1
+  shift
+  ruby -ryaml -e '
+    want = ARGV[1..]
+    docs = YAML.load_stream(File.read(ARGV[0])).compact
+    docs.select { |d| d["kind"] == "Deployment" && want.include?(d.dig("metadata", "name")) }.each do |d|
+      name = d.dig("metadata", "name")
+      ann = d.dig("spec", "template", "metadata", "annotations") || {}
+      ann.keys.sort.each { |k| puts "#{name}|#{k}|#{ann[k]}" if k.start_with?("checksum/") }
+    end
+  ' "$file" "$@"
+}
+
+out24a="$TMP/scenario-aut403-baseline.yaml"
+render_default "$out24a"
+out24b="$TMP/scenario-aut403-baseline-rerun.yaml"
+render_default "$out24b"
+out24c="$TMP/scenario-aut403-loglevel.yaml"
+render_default "$out24c" --set agentgateway.config.logLevel=debug
+out24d="$TMP/scenario-aut403-redis-host.yaml"
+render_default "$out24d" --set global.redis.host=cache.example.com
+out24e="$TMP/scenario-aut403-external.yaml"
+render_default "$out24e" --set global.deploymentMode=external
+out24f="$TMP/scenario-aut403-external-fw.yaml"
+render_default "$out24f" --set global.deploymentMode=external \
+  --set firewall.firewall.config.otelEnvironment=aut403-test
+
+# Every envFrom v2 workload must carry at least the env ConfigMap checksum.
+# Secrets checksum is also required where the chart owns the Secret; its value
+# is intentionally NOT asserted for byte-stability across bare helm template
+# runs, because resolveSecret/randAlphaNum regenerates without cluster lookup.
+# Live upgrades stay stable via lookup — that is the helm-diff gate.
+if ! ruby -ryaml -e '
+  docs = YAML.load_stream(File.read(ARGV[0])).compact
+  # Hybrid profile (values-required): no agentgateway-admin / trustguard-control-plane.
+  required = {
+    "agentgateway-proxy" => %w[checksum/env-configmap checksum/secrets checksum/redis-secrets],
+    "agentgateway-mcp" => %w[checksum/env-configmap checksum/secrets checksum/redis-secrets],
+    "trustguard-data-plane" => %w[checksum/env-configmap checksum/secrets checksum/redis-secrets],
+    "dataagent" => %w[checksum/env-configmap],
+    "dataagent-trustguard" => %w[checksum/env-configmap],
+    "firewall" => %w[checksum/configmap],
+  }
+  docs.select { |d| d["kind"] == "Deployment" }.each do |d|
+    name = d.dig("metadata", "name")
+    next unless required.key?(name)
+    ann = d.dig("spec", "template", "metadata", "annotations") || {}
+    required[name].each do |key|
+      abort "#{name} missing #{key}" unless ann[key].to_s =~ /\A[0-9a-f]{64}\z/
+    end
+  end
+' "$out24a"; then
+  red "FAIL: AUT-403 hybrid workloads missing checksum annotations"
+  exit 1
+fi
+green "ok  - AUT-403: hybrid envFrom workloads carry ConfigMap/Secret/redis checksums"
+
+if ! ruby -ryaml -e '
+  docs = YAML.load_stream(File.read(ARGV[0])).compact
+  required = {
+    "agentgateway-admin" => %w[checksum/env-configmap checksum/secrets],
+    "agentgateway-proxy" => %w[checksum/env-configmap checksum/secrets],
+    "agentgateway-mcp" => %w[checksum/env-configmap checksum/secrets],
+    "trustguard-control-plane" => %w[checksum/env-configmap checksum/secrets],
+    "trustguard-data-plane" => %w[checksum/env-configmap checksum/secrets],
+    "datacore" => %w[checksum/env-configmap checksum/secrets],
+    "alertengine-api" => %w[checksum/env-configmap checksum/secrets],
+    "alertengine-worker" => %w[checksum/env-configmap checksum/secrets],
+    "firewall" => %w[checksum/configmap],
+    "clickstack-collector" => %w[checksum/config checksum/secrets],
+  }
+  # Firewall workers share the gateway ConfigMap checksum.
+  docs.select { |d| d["kind"] == "Deployment" }.each do |d|
+    name = d.dig("metadata", "name").to_s
+    keys = required[name]
+    if keys.nil? && name.end_with?("-worker") && name != "alertengine-worker"
+      # firewall toxicity-worker etc.
+      keys = %w[checksum/configmap] if name.match?(/^(toxicity|indirect-prompt-injections|prompt-jailbreak|prompt-moderation|response-jailbreak)-worker$/)
+    end
+    next if keys.nil?
+    ann = d.dig("spec", "template", "metadata", "annotations") || {}
+    keys.each do |key|
+      abort "#{name} missing #{key}" unless ann[key].to_s =~ /\A[0-9a-f]{64}\z/
+    end
+  end
+' "$out24e"; then
+  red "FAIL: AUT-403 external workloads missing checksum annotations"
+  exit 1
+fi
+green "ok  - AUT-403: external envFrom workloads carry ConfigMap/Secret checksums"
+
+# Deterministic ConfigMap checksums must be byte-identical across two no-op renders.
+env_a=$(aut403_ann "$out24a" agentgateway-proxy | awk -F'|' '$2=="checksum/env-configmap"{print $3}')
+env_b=$(aut403_ann "$out24b" agentgateway-proxy | awk -F'|' '$2=="checksum/env-configmap"{print $3}')
+redis_a=$(aut403_ann "$out24a" agentgateway-proxy | awk -F'|' '$2=="checksum/redis-secrets"{print $3}')
+redis_b=$(aut403_ann "$out24b" agentgateway-proxy | awk -F'|' '$2=="checksum/redis-secrets"{print $3}')
+if [ -z "$env_a" ] || [ "$env_a" != "$env_b" ]; then
+  red "FAIL: AUT-403 env-configmap checksum not stable across identical renders"
+  exit 1
+fi
+if [ -z "$redis_a" ] || [ "$redis_a" != "$redis_b" ]; then
+  red "FAIL: AUT-403 redis-secrets checksum not stable across identical renders"
+  exit 1
+fi
+green "ok  - AUT-403: env-configmap and redis-secrets checksums are byte-stable on no-op"
+
+# A ConfigMap value edit must flip only the env checksum.
+env_c=$(aut403_ann "$out24c" agentgateway-proxy | awk -F'|' '$2=="checksum/env-configmap"{print $3}')
+redis_c=$(aut403_ann "$out24c" agentgateway-proxy | awk -F'|' '$2=="checksum/redis-secrets"{print $3}')
+if [ "$env_a" = "$env_c" ]; then
+  red "FAIL: AUT-403 logLevel change did not flip checksum/env-configmap"
+  exit 1
+fi
+if [ "$redis_a" != "$redis_c" ]; then
+  red "FAIL: AUT-403 logLevel change unexpectedly flipped checksum/redis-secrets"
+  exit 1
+fi
+green "ok  - AUT-403: ConfigMap edit flips env-configmap checksum only"
+
+# A Redis host edit must flip the umbrella redis checksum, not the env ConfigMap.
+env_d=$(aut403_ann "$out24d" agentgateway-proxy | awk -F'|' '$2=="checksum/env-configmap"{print $3}')
+redis_d=$(aut403_ann "$out24d" agentgateway-proxy | awk -F'|' '$2=="checksum/redis-secrets"{print $3}')
+if [ "$redis_a" = "$redis_d" ]; then
+  red "FAIL: AUT-403 redis host change did not flip checksum/redis-secrets"
+  exit 1
+fi
+if [ "$env_a" != "$env_d" ]; then
+  red "FAIL: AUT-403 redis host change unexpectedly flipped checksum/env-configmap"
+  exit 1
+fi
+green "ok  - AUT-403: umbrella redis-secrets checksum tracks global.redis.host"
+
+fw_e=$(aut403_ann "$out24e" firewall | awk -F'|' '$2=="checksum/configmap"{print $3}')
+fw_f=$(aut403_ann "$out24f" firewall | awk -F'|' '$2=="checksum/configmap"{print $3}')
+if [ -z "$fw_e" ] || [ "$fw_e" = "$fw_f" ]; then
+  red "FAIL: AUT-403 firewall config edit did not flip checksum/configmap"
+  exit 1
+fi
+green "ok  - AUT-403: firewall ConfigMap edit flips checksum/configmap"
 
 green ""
 green "All v2 render scenarios passed."
