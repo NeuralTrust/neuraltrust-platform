@@ -632,7 +632,7 @@ control-plane-app:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.127.0"
+          tag: "v1.128.0"
           pullPolicy: IfNotPresent
         config:
           nodeEnv: production
@@ -711,7 +711,7 @@ control-plane-app:
 # stays agentgateway for now; K8s names stay agentgateway-*.
 agentgateway:
   image:
-    tag: "v0.33.2"
+    tag: "v0.34.2"
   # Empty host/port/sslMode/username/tls inherit from global.postgresql /
   # global.redis, then fall back to the in-cluster Services. Set them here only
   # to point this one service somewhere else.
@@ -782,7 +782,7 @@ dataagent:
 # `global.postgresql` block.
 datacore:
   image:
-    tag: "v0.15.1"
+    tag: "v0.16.0"
   database:
     # Empty inherits global.postgresql, then control-plane-postgresql:5432.
     # name/user stay per-service: external gives each service its own role+DB.
@@ -810,7 +810,7 @@ clickstack-otel-collector:
 alertengine:
   enabled: true
   image:
-    tag: "v0.6.0"
+    tag: "v0.7.0"
   database:
     # Empty inherits global.postgresql, then control-plane-postgresql:5432.
     # name/user stay per-service: external gives each service its own role+DB.
@@ -916,7 +916,7 @@ data-plane-api:
                   memory: 128Mi
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.45.0
+          tag: v1.46.0
           pullPolicy: IfNotPresent
         accessMode: ReadWriteOnce
         huggingfaceToken: ""
@@ -998,7 +998,7 @@ firewall:
       replicas: 2
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-        tag: "v2.21.0"
+        tag: "v2.21.1"
         pullPolicy: IfNotPresent
       resources:
         requests:
@@ -1025,7 +1025,7 @@ firewall:
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
         # Keep in lockstep with gateway.image.tag.
-        tag: "v2.21.0"
+        tag: "v2.21.1"
         pullPolicy: IfNotPresent
       replicas: 1
       resources:
