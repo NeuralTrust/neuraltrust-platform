@@ -8,11 +8,29 @@
        provisioned whenever persistence OR the overlay is enabled. */ -}}
 {{- $persist := or .Values.persistence.enabled .Values.overlay.enabled -}}
 {{- $obs := default dict (default dict .Values.global).observability -}}
-{{- $hostedEnabled := include "neuraltrust-watchdog.hostedExportEnabled" . -}}
 {{- $tenantID := default $obs.tenantId .Values.telemetry.tenantId -}}
+{{- /* OTLP resolution (AUT-346): explicit override wins; else ClickStack by
+       deploymentMode (external collector or hybrid egress); hostedExport is
+       no longer the customer default. Signal-neutral :4318 base only. */ -}}
 {{- $otlpEndpoint := .Values.telemetry.otlp.endpoint -}}
-{{- if and (not $otlpEndpoint) $hostedEnabled -}}
-{{- $otlpEndpoint = include "neuraltrust-watchdog.hostedEndpoint" . -}}
+{{- $useClickstackHeaders := false -}}
+{{- /* Hybrid egress detection uses global.products (visible in the subchart
+       scope). clickstackEgress.enabled also requires agentgateway/trustguard
+       values that are only injected into the umbrella ConfigMap wrap. */ -}}
+{{- $hybridEgress := and
+  (eq (include "neuraltrust-platform.isHybrid" .) "true")
+  (or
+    (eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustgate")) "true")
+    (eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustguard")) "true")
+  )
+-}}
+{{- if not $otlpEndpoint -}}
+{{- if eq (include "neuraltrust-platform.isExternal" .) "true" -}}
+{{- $otlpEndpoint = include "neuraltrust-platform.clickstack.externalOtlpHTTPBaseEndpoint" . -}}
+{{- $useClickstackHeaders = true -}}
+{{- else if $hybridEgress -}}
+{{- $otlpEndpoint = include "neuraltrust-platform.clickstackEgress.otlpHTTPBaseEndpoint" . -}}
+{{- end -}}
 {{- end -}}
 apiVersion: apps/v1
 kind: StatefulSet
@@ -99,13 +117,8 @@ spec:
             {{- if .Values.telemetry.otlp.headers }}
             - name: OTEL_EXPORTER_OTLP_HEADERS
               value: {{ .Values.telemetry.otlp.headers | quote }}
-            {{- end }}
-            {{- if $hostedEnabled }}
-            - name: OPENTELEMETRY_AUTH_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "neuraltrust-watchdog.hostedTokenSecretName" . }}
-                  key: {{ include "neuraltrust-watchdog.hostedTokenSecretKey" . }}
+            {{- else if $useClickstackHeaders }}
+            {{- include "neuraltrust-platform.clickstack.externalOtlpHeadersEnv" . | nindent 12 }}
             {{- end }}
             {{- if or .Values.server.authToken.value .Values.server.authToken.existingSecret }}
             - name: WATCHDOG_API_TOKEN

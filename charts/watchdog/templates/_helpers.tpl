@@ -130,14 +130,27 @@ Hosted OTLP endpoint from global.observability.hostedExport (collector-less path
 {{- end }}
 
 {{/*
-Whether the collector-less hosted OTLP path is configured for watchdog. The
-umbrella default is true; operators can set hostedExport.enabled=false for
-purely in-cluster / air-gapped installs.
+Whether the collector-less hosted OTLP path is enabled for watchdog side
+effects (logExport auto-enable, log-export RBAC). Defaults true when the key
+is unset; an explicit false (bool or string) stays false.
+
+Do NOT use Sprig `default true $hosted.enabled` — Sprig treats boolean false
+as empty, so `hostedExport.enabled: false` would resolve back to true.
 */}}
 {{- define "neuraltrust-watchdog.hostedExportEnabled" -}}
 {{- $obs := default dict (default dict .Values.global).observability -}}
 {{- $hosted := default dict $obs.hostedExport -}}
-{{- if default true $hosted.enabled -}}true{{- end -}}
+{{- if hasKey $hosted "enabled" -}}
+{{- $raw := $hosted.enabled -}}
+{{- if kindIs "bool" $raw -}}
+{{- if $raw -}}true{{- end -}}
+{{- else -}}
+{{- $v := toString $raw | trim | lower -}}
+{{- if has $v (list "true" "yes" "on" "1") -}}true{{- end -}}
+{{- end -}}
+{{- else -}}
+true
+{{- end -}}
 {{- end }}
 
 {{/*

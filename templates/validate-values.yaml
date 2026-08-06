@@ -8,6 +8,10 @@ no Kubernetes resource when validation succeeds.
   {{- fail (printf "global.deploymentMode must be one of: hybrid, external (got %q)" $mode) -}}
 {{- end -}}
 
+{{- /* Reject a bad region even when nothing in the release resolves a SaaS
+       hostname (external mode), so the typo is caught before it matters. */ -}}
+{{- $_ := include "neuraltrust-platform.saas.region" . -}}
+
 {{- $products := default dict $global.products -}}
 {{- range $name, $enabled := $products -}}
   {{- if not (has $name (list "trustgate" "trustguard" "dataPlane")) -}}

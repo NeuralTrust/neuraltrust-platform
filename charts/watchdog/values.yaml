@@ -222,9 +222,16 @@ networkPolicy:
     enabled: true
     # Appended verbatim for custom cluster-scoped egress rules.
     extraEgress: []
-# Telemetry: when otlp.endpoint is empty the umbrella can inject the hosted OTLP
-# endpoint from global.observability.hostedExport. When both are empty the OTel
-# SDK is initialized with no-op providers (graceful no-egress).
+# Telemetry: when otlp.endpoint is empty the umbrella resolves a signal-neutral
+# :4318 base by deploymentMode (AUT-346):
+#   external → clickstack-collector.<ns>:4318 + OTEL_EXPORTER_OTLP_HEADERS
+#              from clickstack-collector-secrets
+#   hybrid with DataAgent egress → clickstack-egress-collector.<ns>:4318
+#              (no app Authorization header)
+#   otherwise (e.g. data-plane-only hybrid) → no default
+# Break-glass: set telemetry.otlp.endpoint / headers explicitly (e.g. legacy
+# collector.neuraltrust.ai). hostedExport no longer defaults watchdog OTLP.
+# Empty endpoint → OTel SDK no-op providers (graceful no-egress).
 telemetry:
   serviceName: neuraltrust-watchdog
   # clusterName is an operator label for THIS deployment (e.g. "acme-eks"). 
@@ -279,12 +286,13 @@ kindDefaults:
   deployment_health:
     thresholds: {maxRestartsPerInterval: 3, minAvailableRatio: 1.0}
 # Log bridge: tail ERROR/WARN, redact secrets, ship via OTLP / pull / bundle.
-# Hosted export auto-enables this and defaults sources to the release namespace.
-# Set global.observability.hostedExport.enabled=false for no-egress installs.
-# Pull transport requires server.authToken.
+# Auto-enables when ClickStack OTLP is wired (external collector or hybrid
+# egress) or when legacy hostedExport remains enabled. Defaults sources to the
+# release namespace. Pull transport requires server.authToken.
 logExport:
-  # When true, hostedExport automatically enables ERROR/WARN OTLP log export.
-  # Set false to keep hosted check-status metrics while disabling remote logs.
+  # When true, ClickStack (or legacy hostedExport) automatically enables
+  # ERROR/WARN OTLP log export. Set false to keep check-status metrics while
+  # disabling remote logs.
   autoEnabled: true
   enabled: false
   severities: [error, warn]

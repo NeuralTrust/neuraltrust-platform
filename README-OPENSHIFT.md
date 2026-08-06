@@ -167,10 +167,43 @@ Full walkthrough, including the bootstrap admin Secret and ClickHouse sizing:
 
 ## Security Context Constraints
 
-The chart adapts pod security settings when `global.platform: openshift`.
-Grant additional SCC permissions only when required by cluster policy. GPU
-Firewall workers may require a dedicated SCC because they use `hostIPC` and GPU
-device resources.
+Most workloads run non-root with all capabilities dropped and admit under
+`restricted-v2` unchanged. With `global.platform: openshift` the chart also stops
+emitting fixed `runAsUser` / `fsGroup` on the in-cluster PostgreSQL Deployment and
+its bootstrap Job, so the namespace-assigned UID applies instead.
+
+Two workloads need a decision before install:
+
+| Workload | Why | Options |
+|---|---|---|
+| Firewall gateway + workers | `firewall.securityContext` defaults to `runAsUser: 0` / `runAsNonRoot: false`, and `firewall.config.hfHome` is `/root/.cache/huggingface` | Grant `anyuid` to the `firewall` ServiceAccount, or override both values for an arbitrary UID |
+| GPU Firewall workers | `hostIPC: true` for CUDA MPS, plus GPU device resources | Dedicated SCC; only applies when GPU workers are opted into |
+
+Granting `anyuid` to the one ServiceAccount is narrower than relaxing the
+namespace default:
+
+```bash
+oc adm policy add-scc-to-user anyuid -z firewall -n neuraltrust
+```
+
+To run Firewall under an arbitrary UID instead, the model cache has to move off
+`/root`, otherwise the container cannot write it:
+
+```yaml
+firewall:
+  podSecurityContext: {}     # let OpenShift assign fsGroup
+  securityContext:
+    capabilities:
+      drop: ["ALL"]
+    allowPrivilegeEscalation: false
+    runAsNonRoot: true       # runAsUser omitted; OpenShift assigns it
+  config:
+    hfHome: "/tmp/huggingface"
+```
+
+Firewall is deployed with TrustGuard and is not separately optional, so settle
+this with the cluster owner rather than at install time. Keep `restricted-v2` for
+everything else.
 
 ## Storage and images
 

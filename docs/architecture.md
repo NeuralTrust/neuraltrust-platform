@@ -48,14 +48,18 @@ DataAgent egress sidecar), and DataAgent DataBridge. Every connection is
 initiated by the customer cluster over TLS:
 
 1. AgentGateway proxy/MCP opens config-sync gRPC to
-   `agentgateway-configsync.neuraltrust.ai:443`.
+   `agentgateway-configsync.<saas domain>:443`.
 2. TrustGuard data plane opens config-sync gRPC to
-   `trustguard-configsync.neuraltrust.ai:443`.
-3. Enrolled DataAgent opens gRPC to `databridge.neuraltrust.ai:443`.
+   `trustguard-configsync.<saas domain>:443`.
+3. Enrolled DataAgent opens gRPC to `databridge.<saas domain>:443`.
 4. AgentGateway and TrustGuard send product events as plain OTLP to the local
    `clickstack-egress-collector`, which forwards to
-   `https://telemetry.neuraltrust.ai` after exchanging the DataAgent
+   `https://telemetry.<saas domain>` after exchanging the DataAgent
    enrolment JWT for a short-lived OTLP access token.
+
+`<saas domain>` comes from `global.saasRegion`: `neuraltrust.ai` for `eu`
+(default) or `us.neuraltrust.ai` for `us`. All four channels move together, so
+an Americas install flips one value instead of four endpoints.
 
 Firewall / security-group allowlist (hostnames, IPs, and the NeuralTrust
 inbound source IP): [hybrid-network.md](./hybrid-network.md).

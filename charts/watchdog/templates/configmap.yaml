@@ -47,8 +47,21 @@ data:
     kindDefaults:
       {{- toYaml . | nindent 6 }}
     {{- end }}
-    {{- $hostedLogExport := and .Values.logExport.autoEnabled (include "neuraltrust-watchdog.hostedExportEnabled" .) }}
-    {{- if or .Values.logExport.enabled $hostedLogExport }}
+    {{- /* Auto logExport when ClickStack OTLP is wired (external / hybrid egress)
+           or the legacy hosted path is still enabled. Explicit false on
+           hostedExport must not keep auto-enable when no ClickStack path exists.
+           Prefer global.products for hybrid so subchart-scoped renders agree
+           with the StatefulSet (agentgateway values are umbrella-injected here). */ -}}
+    {{- $hybridEgress := and
+      (eq (include "neuraltrust-platform.isHybrid" .) "true")
+      (or
+        (eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustgate")) "true")
+        (eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustguard")) "true")
+      )
+    -}}
+    {{- $clickstackOtlp := or (eq (include "neuraltrust-platform.isExternal" .) "true") $hybridEgress -}}
+    {{- $autoLogExport := and .Values.logExport.autoEnabled (or $clickstackOtlp (eq (include "neuraltrust-watchdog.hostedExportEnabled" .) "true")) -}}
+    {{- if or .Values.logExport.enabled $autoLogExport }}
     logExport:
       enabled: true
       severities:

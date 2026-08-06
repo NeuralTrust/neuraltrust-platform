@@ -37,6 +37,6 @@ dependencies:
   version: 2.1.8
 - name: watchdog
   repository: file://./charts/watchdog
-  version: 0.3.4
-digest: sha256:057c053c45b13b0f28c21cdcb474efe9b74da69143bcbe70becf34bf95adb955
-generated: "2026-08-06T09:20:22.874318346Z"
+  version: 0.3.5
+digest: sha256:98c3f64275cbef96f76e957990b4003e9cf750d57e54040741af1110f2d20f2a
+generated: "2026-08-06T13:56:28.687965+02:00"

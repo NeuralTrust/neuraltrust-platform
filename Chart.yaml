@@ -2,7 +2,7 @@ apiVersion: v2
 name: neuraltrust-platform
 description: NeuralTrust platform Helm chart (v2 hybrid + external)
 type: application
-version: 2.9.5
+version: 2.9.6
 appVersion: "2.0.0"
 icon: https://neuraltrust.ai/favicon.ico
 # For v1 clusters pin --version ~1.14.0.
@@ -94,7 +94,7 @@ dependencies:
       - neuraltrust
   # Watchdog — optional self-monitoring/self-healing.
   - name: watchdog
-    version: 0.3.4
+    version: 0.3.5
     repository: file://./charts/watchdog
     condition: watchdog.enabled
     tags:
