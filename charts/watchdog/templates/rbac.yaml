@@ -2,7 +2,16 @@
 {{- $name := include "neuraltrust-watchdog.fullname" . -}}
 {{- $sa := include "neuraltrust-watchdog.serviceAccountName" . -}}
 {{- $allowRestart := .Values.rbac.actions.restartDeployment.enabled -}}
-{{- $allowLogExport := or (and .Values.rbac.logExport .Values.rbac.logExport.enabled) (and .Values.logExport.autoEnabled (include "neuraltrust-watchdog.hostedExportEnabled" .)) -}}
+{{- $hybridEgress := and
+  (eq (include "neuraltrust-platform.isHybrid" .) "true")
+  (or
+    (eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustgate")) "true")
+    (eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustguard")) "true")
+  )
+-}}
+{{- $clickstackOtlp := or (eq (include "neuraltrust-platform.isExternal" .) "true") $hybridEgress -}}
+{{- $autoLogExport := and .Values.logExport.autoEnabled (or $clickstackOtlp (eq (include "neuraltrust-watchdog.hostedExportEnabled" .) "true")) -}}
+{{- $allowLogExport := or (and .Values.rbac.logExport .Values.rbac.logExport.enabled) $autoLogExport -}}
 {{- if .Values.rbac.watchAllNamespaces }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole

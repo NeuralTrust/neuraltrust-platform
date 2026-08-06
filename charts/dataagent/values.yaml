@@ -23,8 +23,12 @@ nodeSelector: {}
 tolerations: []
 extraEnv: []
 databridge:
-  addr: "databridge.neuraltrust.ai:443"
-  serverName: "databridge.neuraltrust.ai"
+  # Empty derives from global.saasRegion:
+  #   eu → databridge.neuraltrust.ai:443
+  #   us → databridge.us.neuraltrust.ai:443
+  # Set both to pin a host the region map does not cover.
+  addr: ""
+  serverName: ""
   tlsMode: "tls"
 store:
   backend: "postgres"

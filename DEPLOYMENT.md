@@ -106,6 +106,10 @@ Hybrid needs outbound TCP 443 to NeuralTrust config-sync and DataBridge hosts,
 plus inbound allow from a NeuralTrust source IP to your published entry points.
 Hostnames and IPs: [`docs/hybrid-network.md`](./docs/hybrid-network.md).
 
+Those hostnames depend on `global.saasRegion` (`eu` default, `us` for
+Americas). Set it before requesting firewall rules — it moves config-sync,
+DataBridge, and telemetry together.
+
 ## 4. Configure cluster integration
 
 Set the provider, base domain, storage class, and optional registry mirror:

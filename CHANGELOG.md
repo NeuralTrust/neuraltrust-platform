@@ -4,6 +4,50 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.9.6] — 2026-08-06
+
+Chart `2.9.5` → `2.9.6`. Watchdog subchart `0.3.4` → `0.3.5`.
+
+### Fixed
+
+- **AUT-346: watchdog OTLP follows ClickStack by `deploymentMode`.** Customer
+  installs no longer default to `collector.neuraltrust.ai` +
+  `OPENTELEMETRY_AUTH_TOKEN`. Empty `watchdog.telemetry.otlp.endpoint` resolves
+  to a signal-neutral `:4318` base: hybrid with DataAgent egress →
+  `clickstack-egress-collector` (no app auth header); external →
+  `clickstack-collector` plus `OTEL_EXPORTER_OTLP_HEADERS` from
+  `clickstack-collector-secrets`. Data-plane-only hybrid leaves OTLP unset
+  unless overridden. Explicit `telemetry.otlp.endpoint` / `headers` remain
+  break-glass.
+
+- **`hostedExport.enabled: false` is honoured.** Sprig
+  `default true $hosted.enabled` treated boolean false as empty. The watchdog
+  helper and the umbrella observability-token Secret now use an explicit
+  key-presence / boolean check so air-gap renders suppress the hosted endpoint,
+  token Secret, and hosted-only side effects.
+
+### Added
+
+- **`global.saasRegion` selects the SaaS region a hybrid install dials.**
+  `eu` (default, `*.neuraltrust.ai`) or `us` (`*.us.neuraltrust.ai`). One value
+  now drives config-sync (`{product}-configsync.<domain>:443`), DataAgent
+  DataBridge (`databridge.<domain>:443`, SNI follows), and the ClickStack egress
+  exporter (`https://telemetry.<domain>`). Previously each surface hardcoded EU,
+  so Americas installs silently synced and enrolled against the EU control plane
+  unless the operator overrode all three independently. Any other value is
+  rejected at render. Watchdog is unaffected: its OTLP stays in-cluster and
+  reaches the region through the egress sidecar.
+
+### Changed
+
+- Watchdog logExport / log-export RBAC auto-enable when ClickStack OTLP is
+  wired (external or hybrid egress), not only when hostedExport is on.
+
+- `agentgateway.configSync.saasDomain`, `trustguard.configSync.saasDomain`, and
+  `dataagent.databridge.addr` / `serverName` default to empty and derive from
+  `global.saasRegion`. Explicitly set values still win, and EU renders are
+  unchanged.
+
 ## [v2.9.5] — 2026-08-06
 
 Chart `2.9.4` → `2.9.5`.

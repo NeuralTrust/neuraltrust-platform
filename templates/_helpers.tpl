@@ -88,6 +88,53 @@ external → control + data + in-cluster analytics; no DataAgent.
 {{- end }}
 
 {{/*
+Which NeuralTrust SaaS region a hybrid install dials: "eu" (default) or "us".
+deploymentMode picks the topology; saasRegion picks the SaaS behind it. Every
+public NeuralTrust hostname derives from one domain so operators flip a single
+value instead of config-sync, DataBridge and telemetry endpoints separately.
+
+Rejects anything else — a typo must not silently keep sending Americas data to
+the EU control plane. External mode never dials SaaS, so the value is inert
+there.
+*/}}
+{{- define "neuraltrust-platform.saas.region" -}}
+{{- $region := (default dict .Values.global).saasRegion | default "eu" | toString | trim | lower -}}
+{{- if not (has $region (list "eu" "us")) -}}
+{{- fail (printf "global.saasRegion must be \"eu\" or \"us\", got %q" $region) -}}
+{{- end -}}
+{{- $region -}}
+{{- end }}
+
+{{/*
+Public DNS suffix of the selected SaaS region.
+*/}}
+{{- define "neuraltrust-platform.saas.domain" -}}
+{{- if eq (include "neuraltrust-platform.saas.region" .) "us" -}}
+us.neuraltrust.ai
+{{- else -}}
+neuraltrust.ai
+{{- end -}}
+{{- end }}
+
+{{/*
+Regional DataBridge southbound host (TLS SNI) and dial address.
+*/}}
+{{- define "neuraltrust-platform.saas.databridgeHost" -}}
+{{- printf "databridge.%s" (include "neuraltrust-platform.saas.domain" .) -}}
+{{- end }}
+
+{{- define "neuraltrust-platform.saas.databridgeAddr" -}}
+{{- printf "%s:443" (include "neuraltrust-platform.saas.databridgeHost" .) -}}
+{{- end }}
+
+{{/*
+Regional ClickStack ingest endpoint the DataAgent egress sidecar exports to.
+*/}}
+{{- define "neuraltrust-platform.saas.telemetryEndpoint" -}}
+{{- printf "https://telemetry.%s" (include "neuraltrust-platform.saas.domain" .) -}}
+{{- end }}
+
+{{/*
 Check if the current platform is OpenShift.
 Returns "true" (non-empty) if OpenShift, empty string otherwise.
 Usage: {{- if include "neuraltrust-platform.isOpenshift" . }}
@@ -1726,7 +1773,7 @@ Usage: {{- include "neuraltrust-platform.configSyncEnv" (dict "ctx" . "product" 
     {{- $endpoint = printf "%s.%s.svc.cluster.local:%v" $ctx.Values.controlPlane.name $ctx.Release.Namespace $ctx.Values.controlPlane.ports.grpc -}}
   {{- end -}}
 {{- else -}}
-  {{- $saasDomain := $cs.saasDomain | default "neuraltrust.ai" -}}
+  {{- $saasDomain := $cs.saasDomain | default (include "neuraltrust-platform.saas.domain" $ctx) -}}
   {{- $caPath = $cs.tlsCa -}}
   {{- if not $endpoint -}}
     {{- $endpoint = printf "%s-configsync.%s:443" $product $saasDomain -}}
@@ -1898,6 +1945,22 @@ Call with (dict "ctx" $ "port" 4317). Default listenHost "::" → "[::]:port"
 {{- end }}
 
 {{/*
+Signal-neutral OTLP/HTTP base (:4318, no /v1/logs) for the hybrid egress
+collector. Watchdog (and any multi-signal SDK) expands /v1/{logs,traces,metrics}
+itself — reusing otlpHTTPEndpoint would double-append and 404.
+*/}}
+{{- define "neuraltrust-platform.clickstackEgress.otlpHTTPBaseEndpoint" -}}
+{{- printf "http://%s:4318" (include "neuraltrust-platform.clickstackEgress.endpointHost" .) -}}
+{{- end }}
+
+{{/*
+Signal-neutral OTLP/HTTP base for the in-release ClickStack collector (external).
+*/}}
+{{- define "neuraltrust-platform.clickstack.externalOtlpHTTPBaseEndpoint" -}}
+{{- printf "http://clickstack-collector.%s.svc.cluster.local:4318" .Release.Namespace -}}
+{{- end }}
+
+{{/*
 Loopback OAuth broker on the DataAgent container. Not overridable — trust is
 pod-local; public DataCore token URLs are intentionally unsupported.
 */}}
@@ -1920,14 +1983,14 @@ is the DataAgent loopback broker + enrolment on the DataAgent gRPC connection.
 {{- end }}
 
 {{/*
-OTLP/HTTP base for the egress exporter (no /v1/logs). Default
-https://telemetry.neuraltrust.ai; override via global.clickstack.egress.endpoint
+OTLP/HTTP base for the egress exporter (no /v1/logs). Defaults to the
+global.saasRegion telemetry host; override via global.clickstack.egress.endpoint
 or legacy global.clickstack.endpoint (path stripped if present).
 */}}
 {{- define "neuraltrust-platform.clickstackEgress.saasEndpoint" -}}
 {{- $clickstack := default dict (default dict .Values.global).clickstack -}}
 {{- $cfg := default dict $clickstack.egress -}}
-{{- $raw := $cfg.endpoint | default ($clickstack.endpoint | default "https://telemetry.neuraltrust.ai") -}}
+{{- $raw := $cfg.endpoint | default ($clickstack.endpoint | default (include "neuraltrust-platform.saas.telemetryEndpoint" .)) -}}
 {{- trimSuffix "/v1/logs" (trimSuffix "/" $raw) -}}
 {{- end }}
 

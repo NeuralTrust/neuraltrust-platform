@@ -83,7 +83,9 @@ configSync:
   #   external: in-cluster control-plane Service
   endpoint: ""
   # Hybrid DNS suffix for the mode-derived endpoint. Ignored in external.
-  saasDomain: "neuraltrust.ai"
+  # Empty => global.saasRegion (eu → neuraltrust.ai, us → us.neuraltrust.ai).
+  # Set only to pin a suffix the region map does not cover.
+  saasDomain: ""
   # External plaintext dial. App rejects TLS insecure when APP_ENV is
   # staging/production — use config.appEnv=dev/local. Ignored in hybrid.
   tlsInsecure: true

@@ -267,7 +267,12 @@ assert_env_value() {
         next unless c["name"] == want_c
         seen = true
         e = (c["env"] || []).find { |x| x["name"] == want_n }
-        found = e["value"].to_s if e && e.key?("value")
+        next unless e
+        if e.key?("value")
+          found = e["value"].to_s
+        elsif (ref = e.dig("valueFrom", "secretKeyRef"))
+          found = "secretKeyRef:#{ref["name"]}/#{ref["key"]}"
+        end
       end
     end
     abort "container #{want_w}/#{want_c} not found" unless seen
@@ -1151,6 +1156,15 @@ out6wd="$TMP/scenario-watchdog-names.yaml"
 render_default "$out6wd" --set global.deploymentMode=external --set watchdog.enabled=true
 assert_contains "$out6wd" 'name: neuraltrust-watchdog' \
   "stable name preserved after rename: neuraltrust-watchdog"
+# AUT-346: external watchdog → in-cluster ClickStack (signal-neutral base + headers).
+assert_env_value "$out6wd" neuraltrust-watchdog watchdog OTEL_EXPORTER_OTLP_ENDPOINT \
+  'http://clickstack-collector.default.svc.cluster.local:4318' \
+  "watchdog external: OTLP is signal-neutral clickstack-collector :4318"
+assert_env_value "$out6wd" neuraltrust-watchdog watchdog OTEL_EXPORTER_OTLP_HEADERS \
+  'secretKeyRef:clickstack-collector-secrets/OTEL_EXPORTER_OTLP_HEADERS' \
+  "watchdog external: mounts OTEL_EXPORTER_OTLP_HEADERS from clickstack-collector-secrets"
+assert_env_value "$out6wd" neuraltrust-watchdog watchdog OPENTELEMETRY_AUTH_TOKEN ABSENT \
+  "watchdog external: no hosted OPENTELEMETRY_AUTH_TOKEN"
 
 # ---------------------------------------------------------------------------
 # 7. Retired helpers / values must not appear in the values contract or rendered output
@@ -1380,6 +1394,31 @@ assert_not_contains "$out10" 'url: http://opentelemetry-collector.opentelemetry:
 # Hybrid render must not enable the clickhouse check by default.
 assert_contains "$out10" 'enabled: false'$'\n''        id: clickhouse' \
   "watchdog: clickhouse check stays off in hybrid defaults"
+# AUT-346: hybrid ClickStack egress + hostedExport.enabled=false honoured.
+assert_env_value "$out10" neuraltrust-watchdog watchdog OTEL_EXPORTER_OTLP_ENDPOINT \
+  'http://clickstack-egress-collector.default.svc.cluster.local:4318' \
+  "watchdog hybrid: OTLP is signal-neutral ClickStack egress :4318"
+assert_env_value "$out10" neuraltrust-watchdog watchdog OPENTELEMETRY_AUTH_TOKEN ABSENT \
+  "watchdog hybrid: no hosted OPENTELEMETRY_AUTH_TOKEN"
+assert_not_contains "$out10" 'name: neuraltrust-observability-token' \
+  "hostedExport false: observability token Secret is omitted"
+assert_not_contains "$out10" 'collector\.neuraltrust\.ai' \
+  "hostedExport false: no collector.neuraltrust.ai default on watchdog path"
+
+blue "==> Scenario 10e: watchdog telemetry.otlp.endpoint override wins"
+out10e="$TMP/scenario-watchdog-otlp-override.yaml"
+render_default "$out10e" \
+  --set watchdog.enabled=true \
+  --set watchdog.telemetry.otlp.endpoint=https://otel.example.com:4318 \
+  --set watchdog.telemetry.otlp.headers='authorization=test-token'
+assert_env_value "$out10e" neuraltrust-watchdog watchdog OTEL_EXPORTER_OTLP_ENDPOINT \
+  'https://otel.example.com:4318' \
+  "watchdog override: explicit otlp.endpoint wins over ClickStack default"
+assert_env_value "$out10e" neuraltrust-watchdog watchdog OTEL_EXPORTER_OTLP_HEADERS \
+  'authorization=test-token' \
+  "watchdog override: explicit otlp.headers wins over collector secret mount"
+assert_env_value "$out10e" neuraltrust-watchdog watchdog OPENTELEMETRY_AUTH_TOKEN ABSENT \
+  "watchdog override: no hosted auth token alongside break-glass headers"
 
 blue "==> Scenario 10b: Firewall follows the TrustGuard product gate"
 out10b="$TMP/scenario-firewall-disabled.yaml"
@@ -1473,6 +1512,11 @@ assert_resource_count "$out11a" Service dataagent 1 "trustgate-only: health Serv
 assert_resource_count "$out11a" Service dataagent-trustguard 0 "trustgate-only: TrustGuard health Service absent"
 assert_contains "$out11a" 'id: dataagent-trustgate-(readyz|deployment-health)' "trustgate-only: applicable watchdog checks render"
 assert_not_contains "$out11a" 'id: dataagent-trustguard-(readyz|deployment-health)' "trustgate-only: TrustGuard watchdog checks omitted"
+assert_env_value "$out11a" neuraltrust-watchdog watchdog OTEL_EXPORTER_OTLP_ENDPOINT \
+  'http://clickstack-egress-collector.default.svc.cluster.local:4318' \
+  "trustgate-only: watchdog OTLP via local egress :4318"
+assert_env_value "$out11a" neuraltrust-watchdog watchdog OPENTELEMETRY_AUTH_TOKEN ABSENT \
+  "trustgate-only: watchdog has no hosted auth token"
 
 blue "==> Scenario 11b: trustguard-only hybrid"
 out11b="$TMP/scenario-trustguard-only.yaml"
@@ -1491,6 +1535,11 @@ assert_resource_count "$out11b" Service dataagent 0 "trustguard-only: TrustGate 
 assert_resource_count "$out11b" Service dataagent-trustguard 1 "trustguard-only: health Service present"
 assert_contains "$out11b" 'id: dataagent-trustguard-(readyz|deployment-health)' "trustguard-only: applicable watchdog checks render"
 assert_not_contains "$out11b" 'id: dataagent-trustgate-(readyz|deployment-health)' "trustguard-only: TrustGate watchdog checks omitted"
+assert_env_value "$out11b" neuraltrust-watchdog watchdog OTEL_EXPORTER_OTLP_ENDPOINT \
+  'http://clickstack-egress-collector.default.svc.cluster.local:4318' \
+  "trustguard-only: watchdog OTLP via local egress :4318"
+assert_env_value "$out11b" neuraltrust-watchdog watchdog OPENTELEMETRY_AUTH_TOKEN ABSENT \
+  "trustguard-only: watchdog has no hosted auth token"
 
 blue "==> Scenario 11c: data-plane-only (red-teaming) hybrid — no DataAgent"
 out11c="$TMP/scenario-red-teaming-only.yaml"
@@ -1508,6 +1557,11 @@ assert_not_contains "$out11c" 'name: trustguard-data-plane' \
 assert_resource_count "$out11c" Service dataagent 0 "red-teaming: TrustGate health Service absent"
 assert_resource_count "$out11c" Service dataagent-trustguard 0 "red-teaming: TrustGuard health Service absent"
 assert_not_contains "$out11c" 'id: dataagent-(trustgate|trustguard)-(readyz|deployment-health)' "red-teaming: no orphan DataAgent watchdog checks"
+# AUT-346: no egress → no fabricated OTLP default (override only).
+assert_env_value "$out11c" neuraltrust-watchdog watchdog OTEL_EXPORTER_OTLP_ENDPOINT ABSENT \
+  "red-teaming: watchdog has no default OTLP endpoint without egress"
+assert_env_value "$out11c" neuraltrust-watchdog watchdog OPENTELEMETRY_AUTH_TOKEN ABSENT \
+  "red-teaming: watchdog has no hosted auth token"
 
 blue "==> Scenario 11d: positive slices compose pairwise and all together"
 out11d1="$TMP/scenario-trustgate-trustguard.yaml"
@@ -1558,6 +1612,74 @@ assert_contains "$out11e" 'name: data-plane-api' \
   "external no-products: data-plane-api renders"
 assert_contains "$out11e" 'name: firewall$' \
   "external no-products: Firewall renders"
+
+blue "==> Scenario 11f: global.saasRegion picks the SaaS behind a hybrid install"
+# EU is the default, so an install that never sets the knob must render the
+# historical hostnames byte-for-byte.
+out11f_eu="$TMP/scenario-saas-region-eu.yaml"
+render_product_slice "$out11f_eu" \
+  -f "$CHART_DIR/values-trustgate.yaml.example" \
+  -f "$CHART_DIR/values-trustguard.yaml.example" \
+  --set watchdog.enabled=true
+assert_contains "$out11f_eu" 'value: "agentgateway-configsync\.neuraltrust\.ai:443"' \
+  "saasRegion default: TrustGate config-sync stays EU"
+assert_contains "$out11f_eu" 'value: "trustguard-configsync\.neuraltrust\.ai:443"' \
+  "saasRegion default: TrustGuard config-sync stays EU"
+assert_contains "$out11f_eu" 'DATABRIDGE_ADDR: "databridge\.neuraltrust\.ai:443"' \
+  "saasRegion default: DataBridge stays EU"
+assert_contains "$out11f_eu" 'endpoint: "https://telemetry\.neuraltrust\.ai"' \
+  "saasRegion default: ClickStack egress stays EU"
+
+# One value moves config-sync, DataBridge and telemetry together — the bug was
+# that each had to be overridden separately, so US installs silently kept EU.
+out11f_us="$TMP/scenario-saas-region-us.yaml"
+render_product_slice "$out11f_us" \
+  -f "$CHART_DIR/values-trustgate.yaml.example" \
+  -f "$CHART_DIR/values-trustguard.yaml.example" \
+  --set watchdog.enabled=true \
+  --set global.saasRegion=us
+assert_contains "$out11f_us" 'value: "agentgateway-configsync\.us\.neuraltrust\.ai:443"' \
+  "saasRegion us: TrustGate config-sync targets US"
+assert_contains "$out11f_us" 'value: "agentgateway-configsync\.us\.neuraltrust\.ai"' \
+  "saasRegion us: TrustGate config-sync SNI targets US"
+assert_contains "$out11f_us" 'value: "trustguard-configsync\.us\.neuraltrust\.ai:443"' \
+  "saasRegion us: TrustGuard config-sync targets US"
+assert_contains "$out11f_us" 'DATABRIDGE_ADDR: "databridge\.us\.neuraltrust\.ai:443"' \
+  "saasRegion us: DataBridge targets US"
+assert_contains "$out11f_us" 'DATABRIDGE_SERVER_NAME: "databridge\.us\.neuraltrust\.ai"' \
+  "saasRegion us: DataBridge SNI follows the address"
+assert_contains "$out11f_us" 'endpoint: "https://telemetry\.us\.neuraltrust\.ai"' \
+  "saasRegion us: ClickStack egress targets US"
+assert_not_contains "$out11f_us" '(configsync|databridge|telemetry)\.neuraltrust\.ai' \
+  "saasRegion us: no EU SaaS hostname survives anywhere in the render"
+# AUT-346 regression guard: watchdog OTLP is in-cluster and must stay that way.
+# The region reaches it through the egress sidecar, not through its own endpoint.
+assert_env_value "$out11f_us" neuraltrust-watchdog watchdog OTEL_EXPORTER_OTLP_ENDPOINT \
+  'http://clickstack-egress-collector.default.svc.cluster.local:4318' \
+  "saasRegion us: watchdog OTLP stays in-cluster"
+assert_env_value "$out11f_us" neuraltrust-watchdog watchdog OPENTELEMETRY_AUTH_TOKEN ABSENT \
+  "saasRegion us: watchdog still has no hosted auth token"
+
+# Per-endpoint overrides predate the region knob and must keep winning.
+out11f_override="$TMP/scenario-saas-region-override.yaml"
+render_product_slice "$out11f_override" \
+  -f "$CHART_DIR/values-trustgate.yaml.example" \
+  --set global.saasRegion=us \
+  --set agentgateway.configSync.saasDomain=example.com \
+  --set dataagent.databridge.addr=databridge.example.com:9443 \
+  --set global.clickstack.egress.endpoint=https://telemetry.example.com
+assert_contains "$out11f_override" 'value: "agentgateway-configsync\.example\.com:443"' \
+  "saasRegion override: explicit saasDomain beats the region"
+assert_contains "$out11f_override" 'DATABRIDGE_ADDR: "databridge\.example\.com:9443"' \
+  "saasRegion override: explicit DataBridge address beats the region"
+assert_contains "$out11f_override" 'DATABRIDGE_SERVER_NAME: "databridge\.example\.com"' \
+  "saasRegion override: SNI derives from the overridden address"
+assert_contains "$out11f_override" 'endpoint: "https://telemetry\.example\.com"' \
+  "saasRegion override: explicit egress endpoint beats the region"
+
+assert_render_fails_with 'global.saasRegion must be "eu" or "us"' \
+  "saasRegion: an unknown region fails the render instead of quietly staying EU" \
+  --set global.saasRegion=emea
 
 # ---------------------------------------------------------------------------
 # Shared platform Secret (`platform-secrets`)

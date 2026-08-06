@@ -1,4 +1,8 @@
 {{- define "dataagent.envConfigMap" -}}
+{{- /* Empty addr derives the regional SaaS host from global.saasRegion; an
+       explicit addr keeps its own host as SNI unless serverName overrides. */ -}}
+{{- $addr := .Values.databridge.addr | default (include "neuraltrust-platform.saas.databridgeAddr" .) -}}
+{{- $serverName := .Values.databridge.serverName | default (regexReplaceAll ":[0-9]+$" $addr "") -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -6,8 +10,8 @@ metadata:
   labels:
     {{- include "dataagent.labels" . | nindent 4 }}
 data:
-  DATABRIDGE_ADDR: {{ .Values.databridge.addr | quote }}
-  DATABRIDGE_SERVER_NAME: {{ .Values.databridge.serverName | quote }}
+  DATABRIDGE_ADDR: {{ $addr | quote }}
+  DATABRIDGE_SERVER_NAME: {{ $serverName | quote }}
   TLS_MODE: {{ .Values.databridge.tlsMode | quote }}
   STORE_BACKEND: {{ .Values.store.backend | quote }}
   HEALTH_ADDR: {{ printf ":%v" .Values.ports.health | quote }}
