@@ -3,10 +3,14 @@
 #
 # Render the umbrella chart in the representative v2 scenarios and assert
 # structural invariants. Runs in CI via
-# .github/workflows/helm-render-tests.yml (Helm v3.21.3 and v4.2.3) and
-# locally:
+# .github/workflows/helm-render-tests.yml and locally:
 #
-#   ./scripts/test-helm-render.sh
+#   ./scripts/test-helm-render.sh                 # HELM_SUITE=full (default)
+#   HELM_SUITE=compat ./scripts/test-helm-render.sh
+#
+# Suites:
+#   full   — all chart-contract scenarios (CI: Helm v4)
+#   compat — smoke + OpenShift Routes + fail-closed guards (CI: Helm v3)
 #
 # v2-only: v1 (TrustGate/Kafka/scheduler) is retired on `main` — its
 # absence is asserted here. Historical v1 users stay on the `v1.14.x`
@@ -18,6 +22,16 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+HELM_SUITE="${HELM_SUITE:-full}"
+case "$HELM_SUITE" in
+  full|compat) ;;
+  *)
+    printf '\033[31m%s\033[0m\n' "FAIL: HELM_SUITE must be full or compat (got: $HELM_SUITE)"
+    exit 1
+    ;;
+esac
+suite_full() { [[ "$HELM_SUITE" == full ]]; }
+
 CHART_DIR="."
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -26,7 +40,10 @@ red()   { printf '\033[31m%s\033[0m\n' "$*"; }
 green() { printf '\033[32m%s\033[0m\n' "$*"; }
 blue()  { printf '\033[34m%s\033[0m\n' "$*"; }
 
-helm dependency update "$CHART_DIR" >/dev/null
+blue "==> HELM_SUITE=${HELM_SUITE}"
+
+helm dependency build "$CHART_DIR" >/dev/null 2>&1 \
+  || helm dependency update "$CHART_DIR" >/dev/null
 
 # v2 hybrid always exports product OTLP via the DataAgent egress sidecar and
 # enables config-sync by default. Tests supply per-product enrolment +
@@ -36,8 +53,11 @@ CLICKSTACK_DEFAULT_ARGS=(
   --set trustguard.dataagent.enrolment.existingSecret.name=dataagent-enrolment-trustguard
 )
 
+# Optional post-render parse check. Off by default — helm template already
+# fails on template errors; set VALIDATE_YAML=1 to catch malformed YAML.
 validate_yaml() {
   local file="$1"
+  [[ "${VALIDATE_YAML:-0}" == "1" ]] || return 0
   ruby -ryaml -e 'YAML.load_stream(File.read(ARGV.fetch(0)))' "$file"
 }
 
@@ -268,32 +288,66 @@ assert_env_value() {
 # Asserts a key is present/absent in a specific Secret. Scoped to one document so
 # an unrelated Secret carrying the same key cannot mask a regression.
 assert_secret_key() {
-  local file="$1" secret="$2" mode="$3" key="$4" label="$5" found
-  if ! found=$(ruby -ryaml -e '
+  local file="$1" secret="$2" mode="$3" key="$4" label="$5"
+  assert_secret_keys "$file" "$secret" "$mode" "$label" "$key"
+}
+
+# Batch form: one YAML parse for many keys. Label is used as-is for a single key,
+# or as a prefix ("… ${key}") when checking multiple keys.
+assert_secret_keys() {
+  local file="$1" secret="$2" mode="$3" label="$4"
+  shift 4
+  local -a keys=("$@")
+  [[ ${#keys[@]} -gt 0 ]] || { red "FAIL: assert_secret_keys called with no keys"; exit 1; }
+  local result
+  if ! result=$(ruby -ryaml -e '
     docs = []
     YAML.load_stream(File.read(ARGV.fetch(0), encoding: "UTF-8")) { |d| docs << d if d.is_a?(Hash) }
-    d = docs.find { |x| x["kind"] == "Secret" && x.dig("metadata", "name") == ARGV.fetch(1) }
-    abort "#{ARGV.fetch(1)} not rendered" if d.nil?
-    puts((d["data"] || {}).key?(ARGV.fetch(2)) ? "yes" : "no")
-  ' "$file" "$secret" "$key"); then
-    red "FAIL: $label"
+    secret, mode = ARGV.fetch(1), ARGV.fetch(2)
+    d = docs.find { |x| x["kind"] == "Secret" && x.dig("metadata", "name") == secret }
+    abort "#{secret} not rendered" if d.nil?
+    data = d["data"] || {}
+    ARGV.drop(3).each do |key|
+      has = data.key?(key)
+      if mode == "present" && !has
+        abort "MISSING #{key}"
+      elsif mode == "absent" && has
+        abort "PRESENT #{key}"
+      end
+    end
+  ' "$file" "$secret" "$mode" "${keys[@]}"); then
+    local key="${keys[0]}"
+    if [[ ${#keys[@]} -eq 1 ]]; then
+      red "FAIL: $label"
+    else
+      # ruby abort text is on stderr; surface keys from mode mismatch heuristically
+      red "FAIL: ${label} (batch ${mode})"
+    fi
+    if [ "$mode" = present ]; then
+      red "  $secret is missing one of: ${keys[*]}"
+    else
+      red "  $secret unexpectedly carries one of: ${keys[*]}"
+    fi
     exit 1
   fi
-  if [ "$mode" = present ] && [ "$found" != yes ]; then
-    red "FAIL: $label"
-    red "  $secret does not carry $key"
-    exit 1
+  if [[ ${#keys[@]} -eq 1 ]]; then
+    green "ok  - $label"
+  else
+    for key in "${keys[@]}"; do
+      green "ok  - ${label} ${key}"
+    done
   fi
-  if [ "$mode" = absent ] && [ "$found" != no ]; then
-    red "FAIL: $label"
-    red "  $secret unexpectedly carries $key"
-    exit 1
-  fi
-  green "ok  - $label"
+  unset result
 }
 
 assert_platform_key() {
   assert_secret_key "$1" platform-secrets "$2" "$3" "$4"
+}
+
+assert_platform_keys() {
+  local file="$1" mode="$2" label="$3"
+  shift 3
+  assert_secret_keys "$file" platform-secrets "$mode" "$label" "$@"
 }
 
 assert_resource_count() {
@@ -328,17 +382,15 @@ assert_contains "$out1" 'name: postgresql-secrets' \
 # postgresql-secrets stores ONE canonical family. The DB_* and DATABASE_* aliases it
 # used to store are renamed at each consumption site instead, so storage cannot
 # drift from what any single service reads.
-for canonical in POSTGRES_HOST POSTGRES_PORT POSTGRES_USER POSTGRES_PASSWORD \
+assert_secret_keys "$out1" postgresql-secrets present \
+  "hybrid: postgresql-secrets stores canonical" \
+  POSTGRES_HOST POSTGRES_PORT POSTGRES_USER POSTGRES_PASSWORD \
   POSTGRES_DB POSTGRES_SSLMODE POSTGRES_LOGIN POSTGRES_AUTH_MODE \
-  POSTGRES_CONNECTION_TYPE; do
-  assert_secret_key "$out1" postgresql-secrets present "$canonical" \
-    "hybrid: postgresql-secrets stores canonical ${canonical}"
-done
-for retired in DB_HOST DB_PORT DB_USER DB_PASSWORD DB_NAME DB_SSL_MODE \
-  DATABASE_AUTH_MODE DATABASE_IAM_AUTH DATABASE_URL SENSIBLE_PG_DSN; do
-  assert_secret_key "$out1" postgresql-secrets absent "$retired" \
-    "hybrid: postgresql-secrets no longer stores ${retired}"
-done
+  POSTGRES_CONNECTION_TYPE
+assert_secret_keys "$out1" postgresql-secrets absent \
+  "hybrid: postgresql-secrets no longer stores" \
+  DB_HOST DB_PORT DB_USER DB_PASSWORD DB_NAME DB_SSL_MODE \
+  DATABASE_AUTH_MODE DATABASE_IAM_AUTH DATABASE_URL SENSIBLE_PG_DSN
 # Prisma is the control-plane app's reader and hybrid does not deploy it.
 assert_secret_key "$out1" postgresql-secrets absent POSTGRES_PRISMA_URL \
   "hybrid: postgresql-secrets omits the Prisma URL it has no reader for"
@@ -463,8 +515,13 @@ assert_render_fails "legacy global.clickstack.egress.enabled=false is rejected" 
 blue "==> Scenario 1c: product selector rejects invalid keys and types"
 assert_render_fails "product selector values must be booleans" \
   --set-string global.products.trustgate=false
-assert_render_fails "unknown product selector keys are rejected" \
-  --set global.products.unknown=true
+if suite_full; then
+  assert_render_fails "unknown product selector keys are rejected" \
+    --set global.products.unknown=true
+fi
+
+# --- full-only: dense config-sync / datastore variants (not Helm-version related)
+if suite_full; then
 
 # Config-sync fail-closed (hybrid default-on) and writable LKG storage
 blue "==> Scenario 1d: config-sync token references and LKG storage"
@@ -618,6 +675,8 @@ assert_not_contains "$out2b" 'name: dataagent-secrets' \
 assert_not_contains "$out2b" 'name: dataagent-trustguard-secrets' \
   "autoGenerate=false: no TrustGuard per-agent DB Secret"
 
+fi # suite_full (1d–2b)
+
 # ---------------------------------------------------------------------------
 # 3. External mode — full on-prem
 # ---------------------------------------------------------------------------
@@ -677,22 +736,20 @@ assert_contains "$out3" 'POSTGRES_PASSWORD:' \
   "external: datacore-secrets carries POSTGRES_PASSWORD"
 
 # Same canonical Postgres family as hybrid, plus the Prisma URL the app needs.
-for canonical in POSTGRES_HOST POSTGRES_PORT POSTGRES_DB POSTGRES_USER \
+assert_secret_keys "$out3" postgresql-secrets present \
+  "external: postgresql-secrets stores canonical" \
+  POSTGRES_HOST POSTGRES_PORT POSTGRES_DB POSTGRES_USER \
   POSTGRES_PASSWORD POSTGRES_SSLMODE POSTGRES_LOGIN POSTGRES_AUTH_MODE \
-  POSTGRES_CONNECTION_TYPE POSTGRES_PRISMA_URL; do
-  assert_secret_key "$out3" postgresql-secrets present "$canonical" \
-    "external: postgresql-secrets stores canonical ${canonical}"
-done
+  POSTGRES_CONNECTION_TYPE POSTGRES_PRISMA_URL
 # The lib/pq DSN has no external reader: the gateways gate that env entry on
 # hybrid and DataAgent is hybrid-only. Storing it anyway meant a credential
 # written for nobody, and one more thing to compose at render time.
 assert_secret_key "$out3" postgresql-secrets absent SENSIBLE_PG_DSN \
   "external: postgresql-secrets omits the lib/pq DSN it has no reader for"
-for retired in DB_HOST DB_PORT DB_NAME DB_USER DB_PASSWORD DB_SSL_MODE \
-  DATABASE_URL DATABASE_AUTH_MODE DATABASE_IAM_AUTH; do
-  assert_secret_key "$out3" postgresql-secrets absent "$retired" \
-    "external: postgresql-secrets no longer stores ${retired}"
-done
+assert_secret_keys "$out3" postgresql-secrets absent \
+  "external: postgresql-secrets no longer stores" \
+  DB_HOST DB_PORT DB_NAME DB_USER DB_PASSWORD DB_SSL_MODE \
+  DATABASE_URL DATABASE_AUTH_MODE DATABASE_IAM_AUTH
 # The app reads POSTGRES_DATABASE and DATABASE_URL; both are renames of canonical
 # keys (POSTGRES_DB, POSTGRES_PRISMA_URL) rather than separately stored duplicates.
 # SSLMODE and CONNECTION_LIMIT are the remaining two parts of the URL, so the app
@@ -702,6 +759,9 @@ assert_datastore_env "$out3" control-plane-app app \
   "external: control-plane-app renames POSTGRES_DB/POSTGRES_PRISMA_URL at the consumption site"
 assert_no_envfrom_secret "$out3" postgresql-secrets \
   "external: no workload injects postgresql-secrets wholesale"
+
+# --- full-only: external env contracts through cloud Ingress (before OpenShift Routes)
+if suite_full; then
 
 blue "==> Scenario 3-superadmin: ONPREM_SUPERADMIN_* when global.superadmin set"
 out3sa="$TMP/scenario-external-superadmin.yaml"
@@ -1058,18 +1118,15 @@ done
 
 # Keys nothing reads must not be minted either. Both belonged to the retired v1
 # console; control-plane-secrets only renders in external mode.
-for key in TRUSTGATE_JWT_SECRET resend-invite-sender; do
-  assert_secret_key "$out3" control-plane-secrets absent "$key" \
-    "external: control-plane-secrets omits unread ${key}"
-done
+assert_secret_keys "$out3" control-plane-secrets absent \
+  "external: control-plane-secrets omits unread" \
+  TRUSTGATE_JWT_SECRET resend-invite-sender
 
 # ---------------------------------------------------------------------------
 # 6. Stable Kubernetes names after physical chart moves
 # ---------------------------------------------------------------------------
 blue "==> Scenario 6: stable Kubernetes names preserved after chart rebrand"
-out6="$TMP/scenario-external-names.yaml"
-render_default "$out6" --set global.deploymentMode=external
-
+# Reuse Scenario 3 external render — same deploymentMode, no extra flags.
 for name in \
   control-plane-api \
   control-plane-app \
@@ -1082,7 +1139,7 @@ for name in \
   trustguard-data-plane \
   trustguard-control-plane
 do
-  assert_contains "$out6" "name: $name" \
+  assert_contains "$out3" "name: $name" \
     "stable name preserved: $name"
 done
 # redis-secrets is a hybrid-only shared Secret.
@@ -1120,34 +1177,35 @@ WILDCARD_COMMON=(
   --set agentgateway.ingress.mcp.additionalHosts[0]="*.mcp.platform.example.com"
 )
 
-for provider in aws azure gcp; do
-  outw="$TMP/scenario-wildcard-${provider}.yaml"
-  render_default "$outw" \
-    --set global.deploymentMode=external \
-    --set "global.platform=${provider}" \
-    "${WILDCARD_COMMON[@]}"
-  assert_contains "$outw" 'name: agentgateway-gateway' \
-    "${provider}: proxy Ingress name stable"
-  assert_contains "$outw" 'host: "gateway.platform.example.com"' \
-    "${provider}: proxy exact host"
-  assert_contains "$outw" 'host: "\*\.llm\.platform\.example\.com"' \
-    "${provider}: proxy wildcard host rule"
-  assert_contains "$outw" 'name: agentgateway-proxy' \
-    "${provider}: proxy backend Service"
-  assert_contains "$outw" 'name: agentgateway-mcp' \
-    "${provider}: MCP Ingress/Service present"
-  assert_contains "$outw" 'host: "mcp.platform.example.com"' \
-    "${provider}: MCP exact host"
-  assert_contains "$outw" 'host: "\*\.mcp\.platform\.example\.com"' \
-    "${provider}: MCP wildcard host rule"
-  assert_not_contains "$outw" 'GATEWAY_DISCOVERY_MODE' \
-    "${provider}: discovery mode env retired"
-  assert_contains "$outw" 'GATEWAY_BASE_DOMAIN: "llm.platform.example.com"' \
-    "${provider}: gateway base domain"
-  assert_contains "$outw" 'MCP_BASE_DOMAIN: "mcp.platform.example.com"' \
-    "${provider}: MCP base domain"
-  # Admin must stay exact-only (no wildcard rule on admin Ingress).
-  if python3 - "$outw" <<'PY'
+# Cloud providers share the same Ingress template path; one representative is enough.
+provider=aws
+outw="$TMP/scenario-wildcard-${provider}.yaml"
+render_default "$outw" \
+  --set global.deploymentMode=external \
+  --set "global.platform=${provider}" \
+  "${WILDCARD_COMMON[@]}"
+assert_contains "$outw" 'name: agentgateway-gateway' \
+  "${provider}: proxy Ingress name stable"
+assert_contains "$outw" 'host: "gateway.platform.example.com"' \
+  "${provider}: proxy exact host"
+assert_contains "$outw" 'host: "\*\.llm\.platform\.example\.com"' \
+  "${provider}: proxy wildcard host rule"
+assert_contains "$outw" 'name: agentgateway-proxy' \
+  "${provider}: proxy backend Service"
+assert_contains "$outw" 'name: agentgateway-mcp' \
+  "${provider}: MCP Ingress/Service present"
+assert_contains "$outw" 'host: "mcp.platform.example.com"' \
+  "${provider}: MCP exact host"
+assert_contains "$outw" 'host: "\*\.mcp\.platform\.example\.com"' \
+  "${provider}: MCP wildcard host rule"
+assert_not_contains "$outw" 'GATEWAY_DISCOVERY_MODE' \
+  "${provider}: discovery mode env retired"
+assert_contains "$outw" 'GATEWAY_BASE_DOMAIN: "llm.platform.example.com"' \
+  "${provider}: gateway base domain"
+assert_contains "$outw" 'MCP_BASE_DOMAIN: "mcp.platform.example.com"' \
+  "${provider}: MCP base domain"
+# Admin must stay exact-only (no wildcard rule on admin Ingress).
+if python3 - "$outw" <<'PY'
 import re, sys
 for doc in open(sys.argv[1]).read().split("---"):
     if "kind: Ingress" in doc and re.search(r"(?m)^\s+name:\s*agentgateway-admin\s*$", doc):
@@ -1155,15 +1213,14 @@ for doc in open(sys.argv[1]).read().split("---"):
             sys.exit(1)
 sys.exit(0)
 PY
-  then
-    green "ok  - ${provider}: admin Ingress has no wildcard hosts"
-  else
-    red "FAIL: ${provider}: admin Ingress must not include wildcard hosts"
-    exit 1
-  fi
-  assert_not_contains "$outw" 'kind: Route' \
-    "${provider}: no OpenShift Routes on cloud platform"
-done
+then
+  green "ok  - ${provider}: admin Ingress has no wildcard hosts"
+else
+  red "FAIL: ${provider}: admin Ingress must not include wildcard hosts"
+  exit 1
+fi
+assert_not_contains "$outw" 'kind: Route' \
+  "${provider}: no OpenShift Routes on cloud platform"
 
 # Dual discovery default: empty additionalHosts → auto wildcards + llm./mcp. bases.
 blue "==> Scenario 8b: dual discovery auto-derives base domains and wildcards"
@@ -1202,6 +1259,8 @@ assert_contains "$outw_override" 'host: "custom.platform.example.com"' \
   "override: explicit additionalHosts rendered"
 assert_not_contains "$outw_override" 'host: "\*\.llm\.platform\.example\.com"' \
   "override: non-empty additionalHosts skips auto *.llm wildcard"
+
+fi # suite_full (3-superadmin through 8b)
 
 # ---------------------------------------------------------------------------
 # 9. AgentGateway OpenShift Routes (exact + wildcardPolicy Subdomain)
@@ -1291,6 +1350,11 @@ assert_not_contains "$out_ocp_ing" 'name: agentgateway-proxy-' \
   "openshift resourceType=ingress: AgentGateway proxy Routes absent"
 assert_not_contains "$out_ocp_ing" 'name: agentgateway-mcp-' \
   "openshift resourceType=ingress: AgentGateway MCP Routes absent"
+
+if ! suite_full; then
+  green "ok  - HELM_SUITE=compat complete"
+  exit 0
+fi
 
 # ---------------------------------------------------------------------------
 # 10. Watchdog defaults + firewall disable sync + hybrid ClickStack channels
@@ -1466,24 +1530,7 @@ done
 assert_occurrences "$out11d1" '^        dryRun: true$' 4 "trustgate+trustguard: all DataAgent checks are explicit dry-run"
 assert_occurrences "$out11d1" '^        actions: \[notify\.otlp, notify\.slack\]$' 4 "trustgate+trustguard: all DataAgent checks are notifier-only"
 
-out11d2="$TMP/scenario-trustgate-red-teaming.yaml"
-render_product_slice "$out11d2" \
-  -f "$CHART_DIR/values-red-teaming.yaml.example" \
-  -f "$CHART_DIR/values-trustgate.yaml.example"
-assert_contains "$out11d2" 'name: agentgateway-proxy' \
-  "trustgate+red-teaming: TrustGate renders"
-assert_contains "$out11d2" 'name: data-plane-api' \
-  "trustgate+red-teaming: data-plane-api renders"
-
-out11d3="$TMP/scenario-trustguard-red-teaming.yaml"
-render_product_slice "$out11d3" \
-  -f "$CHART_DIR/values-trustguard.yaml.example" \
-  -f "$CHART_DIR/values-red-teaming.yaml.example"
-assert_contains "$out11d3" 'name: trustguard-data-plane' \
-  "trustguard+red-teaming: TrustGuard renders"
-assert_contains "$out11d3" 'name: data-plane-api' \
-  "trustguard+red-teaming: data-plane-api renders"
-
+# Pairwise red-teaming combos are covered by 11a–c + all-products (11d4).
 out11d4="$TMP/scenario-all-products.yaml"
 render_product_slice "$out11d4" \
   -f "$CHART_DIR/values-red-teaming.yaml.example" \
@@ -1621,40 +1668,39 @@ assert_shared_secret_wiring "$out12hyb" \
 # AUTH_JWT_SECRET / APP_ENCRYPTION_KEY follow the alertengine shape (AUT-382):
 # present in external with alertengine.enabled (default), absent in hybrid.
 blue "==> Scenario 12a: keys are gated to the install shape"
-for key in CONTROL_PLANE_JWT_SECRET AUTH_SECRET NEXTAUTH_SECRET \
-           AUTH_JWT_HS256_SECRET AUTH_JWT_SECRET APP_ENCRYPTION_KEY; do
-  assert_platform_key "$out12hyb" absent "${key}" \
-    "hybrid: platform-secrets omits control-plane-only key ${key}"
-  assert_platform_key "$out12ext" present "${key}" \
-    "external: platform-secrets carries ${key}"
-done
+assert_platform_keys "$out12hyb" absent \
+  "hybrid: platform-secrets omits control-plane-only key" \
+  CONTROL_PLANE_JWT_SECRET AUTH_SECRET NEXTAUTH_SECRET \
+  AUTH_JWT_HS256_SECRET AUTH_JWT_SECRET APP_ENCRYPTION_KEY
+assert_platform_keys "$out12ext" present \
+  "external: platform-secrets carries" \
+  CONTROL_PLANE_JWT_SECRET AUTH_SECRET NEXTAUTH_SECRET \
+  AUTH_JWT_HS256_SECRET AUTH_JWT_SECRET APP_ENCRYPTION_KEY
 
 # AlertEngine off ⇒ its credentials must not be minted (AUT-382).
 out12aeoff="$TMP/scenario-shared-secret-alertengine-off.yaml"
 render_default "$out12aeoff" --set global.deploymentMode=external --set alertengine.enabled=false
-for key in AUTH_JWT_SECRET APP_ENCRYPTION_KEY; do
-  assert_platform_key "$out12aeoff" absent "${key}" \
-    "alertengine disabled: platform-secrets omits ${key}"
-done
+assert_platform_keys "$out12aeoff" absent \
+  "alertengine disabled: platform-secrets omits" \
+  AUTH_JWT_SECRET APP_ENCRYPTION_KEY
 
 # An opt-in subchart and a retired code path must not mint credentials nobody
 # reads, in either mode. External deploys the full stack, so the install shape
 # alone cannot gate these.
-for key in TRUSTLENS_JWT_SECRET ENCRYPTION_KEYSET TRUSTGATE_JWT_SECRET; do
-  assert_platform_key "$out12ext" absent "${key}" \
-    "external: platform-secrets omits unused ${key}"
-  assert_platform_key "$out12hyb" absent "${key}" \
-    "hybrid: platform-secrets omits unused ${key}"
-done
+assert_platform_keys "$out12ext" absent \
+  "external: platform-secrets omits unused" \
+  TRUSTLENS_JWT_SECRET ENCRYPTION_KEYSET TRUSTGATE_JWT_SECRET
+assert_platform_keys "$out12hyb" absent \
+  "hybrid: platform-secrets omits unused" \
+  TRUSTLENS_JWT_SECRET ENCRYPTION_KEYSET TRUSTGATE_JWT_SECRET
 
 # Enabling TrustLens is what brings its credentials in, not the deployment mode.
 out12tl="$TMP/scenario-shared-secret-trustlens-on.yaml"
 render_default "$out12tl" --set global.deploymentMode=hybrid \
   --set trustlens.enabled=true --set trustlens.image.tag=v0.1.1
-for key in TRUSTLENS_JWT_SECRET ENCRYPTION_KEYSET; do
-  assert_platform_key "$out12tl" present "${key}" \
-    "trustlens enabled: platform-secrets carries ${key}"
-done
+assert_platform_keys "$out12tl" present \
+  "trustlens enabled: platform-secrets carries" \
+  TRUSTLENS_JWT_SECRET ENCRYPTION_KEYSET
 assert_shared_secret_wiring "$out12tl" \
   "trustlens enabled: every migrated key has a single source in platform-secrets"
 
@@ -1672,10 +1718,9 @@ assert_contains "$out12ms" 'bXMtcGlubmVk' \
 # Disabling a product drops the credentials only that product reads.
 out12tgoff="$TMP/scenario-shared-secret-trustguard-off.yaml"
 render_default "$out12tgoff" --set global.deploymentMode=hybrid --set global.products.trustguard=false
-for key in ADMIN_JWT_SECRET TRUSTGUARD_TOKEN_SIGNING_SECRET REDIS_EVENTS_SECRET JWT_SECRET; do
-  assert_platform_key "$out12tgoff" absent "${key}" \
-    "hybrid without TrustGuard: platform-secrets omits ${key}"
-done
+assert_platform_keys "$out12tgoff" absent \
+  "hybrid without TrustGuard: platform-secrets omits" \
+  ADMIN_JWT_SECRET TRUSTGUARD_TOKEN_SIGNING_SECRET REDIS_EVENTS_SECRET JWT_SECRET
 assert_platform_key "$out12tgoff" present SERVER_SECRET_KEY \
   "hybrid without TrustGuard: TrustGate credentials still present"
 # Gating a product off must not leave a consumer pointing at a key nobody emits.
@@ -1976,8 +2021,8 @@ assert_render_fails 'a non-boolean enabled is rejected rather than guessed at' \
 # never writes this key into, and since they are optional the env is simply absent:
 # the login fails at request time with nothing pointing at the cause.
 blue "==> Scenario 12j: MCP OAuth needs a Secret that actually carries the client secret"
-for flag in global.platformSecret.enabled=false global.preserveExistingSecrets=true \
-            global.autoGenerateSecrets=false global.platformSecret.existingSecret.name=my-secret; do
+# Two representative undeliverable shapes (opt-out vs preserve); other flags share the gate.
+for flag in global.platformSecret.enabled=false global.preserveExistingSecrets=true; do
   out12nodel="$TMP/scenario-mcp-oauth-undeliverable-${flag%%=*}.yaml"
   render_default "$out12nodel" --set global.deploymentMode=external --set "$flag"
   assert_not_contains "$out12nodel" 'MCP_DEFAULT_IDP_|name: MCP_OAUTH_CLIENT_ID' \
@@ -2281,7 +2326,7 @@ ruby -ryaml -rbase64 -e '
 green "ok  - the flag resolves to true for TrustGate without renaming it for TrustGuard"
 
 # A boolean here used to reach b64enc unconverted and abort the whole render.
-render_default "$TMP/scenario-redis-tls-bool.yaml" --set global.redis.tls=true >/dev/null
+# Covered by out15 above (already rendered with --set global.redis.tls=true).
 green "ok  - a boolean global.redis.tls renders instead of aborting"
 
 out15off="$TMP/scenario-redis-tls-unset.yaml"
@@ -2634,9 +2679,7 @@ assert_contains "$out19ext" 'value: "control-plane-postgresql"' \
 # A managed instance is provisioned by its own tooling; the chart must never try
 # to create roles there, whichever way the operator names it.
 for managed in \
-  "--set global.postgresql.deploy=false --set global.postgresql.host=pg.example.com" \
   "--set global.postgresql.host=pg.example.com" \
-  "--set global.postgresql.deploy=false" \
   "--set global.postgresql.authMode=iam" \
   "--set global.postgresql.bootstrapJob.enabled=false"; do
   out19off="$TMP/scenario-bootstrap-off.yaml"

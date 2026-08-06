@@ -18,14 +18,18 @@ permissions:
 
 jobs:
   render:
-    name: helm template scenarios (${{ matrix.helm_version }})
+    name: helm template (${{ matrix.helm_version }}, ${{ matrix.suite }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        helm_version:
-          - v3.21.3
-          - v4.2.3
+        include:
+          # Full chart-contract suite — not Helm-version related; run once.
+          - helm_version: v4.2.3
+            suite: full
+          # Smoke + OpenShift Routes + fail-closed guards on the older engine.
+          - helm_version: v3.21.3
+            suite: compat
     steps:
       - uses: actions/checkout@v4
       - uses: azure/setup-helm@v4
@@ -34,4 +38,4 @@ jobs:
       - name: Run scenarios
         run: |
           helm version
-          ./scripts/test-helm-render.sh
+          /usr/bin/time -p env HELM_SUITE=${{ matrix.suite }} ./scripts/test-helm-render.sh
