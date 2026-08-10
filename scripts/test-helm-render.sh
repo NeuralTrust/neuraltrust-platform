@@ -3260,6 +3260,51 @@ for key in $HELPER_KEYS; do
 done
 green "ok  - create-secrets.sh materialises every registry key into platform-secrets"
 
+# The telemetry signing key is the first PEM this script stores. trim_value ends
+# in `tr -d '\n\r'`, which would flatten it into one line that no PEM parser
+# accepts — a Secret that looks correct in kubectl and 401s every OTLP batch at
+# runtime. Drive the real functions with a stubbed kubectl rather than grepping
+# for the guard, so the property is tested and not the implementation.
+pem_probe="$TMP/create-secrets-pem-probe.sh"
+{
+  sed -n '/^trim_value()/,/^}/p' create-secrets.sh
+  sed -n '/^add_secret_key()/,/^}/p' create-secrets.sh
+} > "$TMP/create-secrets-funcs.sh"
+cat > "$pem_probe" <<'PROBE'
+NAMESPACE=nt
+GREEN=''; RED=''; YELLOW=''; NC=''
+captured="$1"
+kubectl() {
+  [ "$1 $2" = "get secret" ] && return 1
+  if [ "$1" = "create" ]; then
+    for a in "$@"; do
+      case "$a" in --from-literal=*) printf '%s' "${a#--from-literal=}" > "$captured" ;; esac
+    done
+    return 0
+  fi
+  cat >/dev/null; return 0
+}
+. "$2"
+pem=$(openssl genrsa -traditional 2048 2>/dev/null || openssl genrsa 2048 2>/dev/null)
+add_secret_key nt-secrets TELEMETRY_JWT_PRIVATE_KEY_PEM "$pem" raw
+PROBE
+bash "$pem_probe" "$TMP/pem-captured" "$TMP/create-secrets-funcs.sh" >/dev/null 2>&1
+if ! sed 's/^TELEMETRY_JWT_PRIVATE_KEY_PEM=//' "$TMP/pem-captured" \
+     | openssl rsa -noout -check >/dev/null 2>&1; then
+  red "FAIL - create-secrets.sh stores TELEMETRY_JWT_PRIVATE_KEY_PEM as an unparseable PEM"
+  red "  stored $(wc -l < "$TMP/pem-captured" | tr -d ' ') line(s); a PEM needs its line structure intact"
+  exit 1
+fi
+green "ok  - create-secrets.sh stores the telemetry signing key as a parseable PEM"
+
+# The generated key must be shaped like the chart's own, or the two bootstrap
+# paths hand DataCore structurally different keys for one registry entry.
+if ! grep -q 'openssl genrsa -traditional 4096' create-secrets.sh; then
+  red "FAIL - create-secrets.sh should mint PKCS#1 4096 to match genPrivateKey \"rsa\""
+  exit 1
+fi
+green "ok  - create-secrets.sh matches the chart's own RSA key shape"
+
 for needle in POSTGRES_SSLMODE POSTGRES_LOGIN POSTGRES_AUTH_MODE POSTGRES_CONNECTION_TYPE; do
   if ! grep -q -- "--from-literal=${needle}=" create-secrets.sh; then
     red "FAIL - create-secrets.sh postgresql-secrets omits ${needle}"
@@ -3545,6 +3590,421 @@ if [ -z "$fw_e" ] || [ "$fw_e" = "$fw_f" ]; then
   exit 1
 fi
 green "ok  - AUT-403: firewall ConfigMap edit flips checksum/configmap"
+
+# ---------------------------------------------------------------------------
+# saas mode: a customer-owned central control plane serving data planes that
+# live in other clusters. external, plus DataBridge, the ClickStack ingest
+# gateway, DataCore in hybrid residency, and published config-sync listeners.
+# ---------------------------------------------------------------------------
+blue "==> Scenario 25: saas mode (central control plane for remote data planes)"
+
+# The three southbound listeners are dialled from outside the cluster, so each
+# one needs a cert the remote planes can verify. The chart refuses to publish
+# any of them otherwise; those refusals are asserted further down.
+SAAS_ARGS=(
+  --set global.deploymentMode=saas
+  --set global.controlPlane.domain=cp.example.com
+  --set databridge.tls.existingSecret=databridge-southbound-tls
+  --set agentgateway.configSync.grpcTls.existingSecret=ag-configsync-tls
+  --set trustguard.configSync.grpcTls.existingSecret=tg-configsync-tls
+)
+
+out25="$TMP/scenario-saas.yaml"
+render_default "$out25" "${SAAS_ARGS[@]}"
+
+# --- saas is external plus three additions -------------------------------
+assert_contains "$out25" '^  name: control-plane-api$' \
+  "saas: control-plane-api renders (saas is a superset of external)"
+assert_contains "$out25" '^          value: "external"$' \
+  "saas: DEPLOYMENT_MODE stays external for the apps"
+assert_contains "$out25" '^  name: databridge$' \
+  "saas: DataBridge Deployment renders"
+assert_contains "$out25" '^  name: databridge-northbound$' \
+  "saas: DataBridge northbound Service renders"
+assert_contains "$out25" '^  name: databridge-southbound$' \
+  "saas: DataBridge southbound Service renders"
+assert_contains "$out25" '^  name: clickstack-ingest-gateway$' \
+  "saas: ClickStack ingest gateway renders"
+
+# --- every image comes from one registry ----------------------------------
+# An air-gapped install mirrors what it is told to mirror. An image with no
+# registry host resolves to Docker Hub, which such a cluster cannot reach and
+# which no mirroring list mentions, so the pod only fails at pull time. Assert
+# the shape rather than a list of names so a component added later is covered.
+hub_images=$(grep -oE 'image: *"?[^"]+' "$out25" | sed 's/image: *"*//' | sort -u \
+  | awk -F/ '$1 !~ /[.:]/')
+if [[ -n "$hub_images" ]]; then
+  red "FAIL: saas: image(s) resolve to Docker Hub rather than a mirrorable registry:"
+  printf '  %s\n' $hub_images
+  exit 1
+fi
+green "ok  - saas: every image carries an explicit registry host"
+
+# The gateway runs the same upstream collector as the egress sidecars. Pulling
+# it from the NeuralTrust mirror keeps one registry, one pull secret, one entry
+# in the mirroring list.
+assert_contains "$out25" '^          image: "europe-west1-docker\.pkg\.dev/neuraltrust-app-prod/nt-docker/opentelemetry-collector-contrib:' \
+  "saas: ingest gateway pulls the collector from the NeuralTrust mirror"
+# Select by kind: the Deployment shares its name with the Service and the
+# ServiceAccount, and only the Deployment carries the pull secret.
+gw_pull=$(yq eval 'select(.kind == "Deployment" and .metadata.name == "clickstack-ingest-gateway")
+  | (.spec.template.spec.imagePullSecrets // []) | map(.name) | join(",")' "$out25")
+if [[ "$gw_pull" != *gcr-secret* ]]; then
+  red "FAIL: saas: ingest gateway has no pull secret for that private registry (got: ${gw_pull:-<none>})"
+  exit 1
+fi
+green "ok  - saas: ingest gateway carries a pull secret for that private registry"
+
+# A mirror has to replace the pinned registry, not be prepended to it: the naive
+# form yields <mirror>/europe-west1-docker.pkg.dev/... which exists nowhere.
+out25m="$TMP/scenario-saas-mirror.yaml"
+render_default "$out25m" "${SAAS_ARGS[@]}" \
+  --set global.imageRegistry=registry.internal.example.com/mirror
+assert_contains "$out25m" '^          image: "registry\.internal\.example\.com/mirror/opentelemetry-collector-contrib:' \
+  "saas: global.imageRegistry retargets the ingest gateway collector"
+assert_not_contains "$out25m" 'mirror/europe-west1-docker\.pkg\.dev' \
+  "saas: the mirror replaces the pinned registry instead of prefixing it"
+
+# --- DataCore drives the remote planes through DataBridge ----------------
+assert_contains "$out25" '^  RESIDENCY_BACKEND: "hybrid"$' \
+  "saas: DataCore runs hybrid residency, not direct ClickHouse"
+assert_contains "$out25" '^  DATABRIDGE_ADDR: "databridge-northbound\.default\.svc\.cluster\.local:50051"$' \
+  "saas: DataCore dials the northbound Service this chart renders"
+
+# The gateway verifies tokens DataCore mints. A mismatch on either the issuer
+# or the audience rejects every batch at runtime with a 401, so compare the two
+# sides instead of asserting each against a literal.
+dc_issuer=$(grep -m1 '^  TELEMETRY_JWT_ISSUER_URL: ' "$out25" | sed 's/.*: //' | tr -d '"')
+dc_aud=$(grep -m1 '^  TELEMETRY_JWT_AUDIENCE: ' "$out25" | sed 's/.*: //' | tr -d '"')
+gw_issuer=$(grep -m1 'issuer_url: ' "$out25" | sed 's/.*issuer_url: //' | tr -d '"')
+gw_aud=$(grep -m1 '^            audience: ' "$out25" | sed 's/.*: //' | tr -d '"')
+if [[ -z "$dc_issuer" || "$dc_issuer" != "$gw_issuer" ]]; then
+  red "FAIL: saas: ingest gateway OIDC issuer ($gw_issuer) does not match DataCore ($dc_issuer)"
+  exit 1
+fi
+if [[ -z "$dc_aud" || "$dc_aud" != "$gw_aud" ]]; then
+  red "FAIL: saas: ingest gateway audience ($gw_aud) does not match DataCore ($dc_aud)"
+  exit 1
+fi
+green "ok  - saas: ingest gateway verifies exactly the tokens DataCore mints"
+
+# OIDC identifies an issuer by its URL, and the gateway rejects any token whose
+# iss claim is a different string. DataCore's own default for iss is the bare
+# name "datacore", which never matches a URL, so the chart pins both to one
+# value — assert they agree rather than assert either against a literal.
+dc_iss=$(grep -m1 '^  TELEMETRY_JWT_ISSUER: ' "$out25" | sed 's/.*: //' | tr -d '"')
+if [[ -z "$dc_iss" || "$dc_iss" != "$dc_issuer" ]]; then
+  red "FAIL: saas: DataCore signs iss=$dc_iss but advertises issuer $dc_issuer; the ingest gateway would reject every batch"
+  exit 1
+fi
+green "ok  - saas: the iss DataCore signs matches the issuer it advertises"
+
+# --- published config-sync listeners --------------------------------------
+assert_contains "$out25" '^  name: agentgateway-admin-configsync$' \
+  "saas: AgentGateway config-sync Service is published"
+assert_contains "$out25" '^  name: trustguard-control-plane-configsync$' \
+  "saas: TrustGuard config-sync Service is published"
+assert_contains "$out25" 'neuraltrust\.ai/config-sync-host: "agentgateway-configsync\.cp\.example\.com"' \
+  "saas: AgentGateway config-sync published under the customer domain"
+assert_contains "$out25" 'neuraltrust\.ai/config-sync-host: "trustguard-configsync\.cp\.example\.com"' \
+  "saas: TrustGuard config-sync published under the customer domain"
+
+# Port 443 in, gRPC listener out. Getting targetPort wrong sends config-sync
+# traffic to the HTTP API, which answers, so this fails quietly in a cluster.
+cs_ag="$TMP/scenario-saas-cs-ag.yaml"
+document_named "$out25" agentgateway-admin-configsync "$cs_ag"
+assert_contains "$cs_ag" '^      port: 443$' \
+  "saas: AgentGateway config-sync listens on 443"
+assert_contains "$cs_ag" '^      targetPort: 8083$' \
+  "saas: AgentGateway config-sync forwards to the gRPC listener"
+assert_contains "$cs_ag" '^  type: LoadBalancer$' \
+  "saas: AgentGateway config-sync is L4, not an Ingress"
+
+# --- neither existing mode grows any of this ------------------------------
+out25ext="$TMP/scenario-saas-external-unchanged.yaml"
+render_default "$out25ext" --set global.deploymentMode=external
+for absent in '^  name: databridge$' '^  name: clickstack-ingest-gateway$' '\-configsync$'; do
+  assert_not_contains "$out25ext" "$absent" \
+    "external: no saas-only resource matching $absent"
+done
+assert_contains "$out25ext" '^  RESIDENCY_BACKEND: "saas"$' \
+  "external: DataCore keeps its own residency backend"
+
+# --- a remote data plane retargets onto the customer domain ---------------
+# hybrid is what the remote clusters run; they must dial the central cluster
+# rendered above rather than NeuralTrust.
+out25c="$TMP/scenario-saas-remote.yaml"
+render_default "$out25c" \
+  --set global.deploymentMode=hybrid \
+  --set global.controlPlane.domain=cp.example.com \
+  --set agentgateway.configSync.token=cs-trustgate \
+  --set trustguard.configSync.token=cs-trustguard
+assert_contains "$out25c" '^          value: "agentgateway-configsync\.cp\.example\.com:443"$' \
+  "remote: AgentGateway dials the central config-sync listener"
+assert_contains "$out25c" '^          value: "trustguard-configsync\.cp\.example\.com:443"$' \
+  "remote: TrustGuard dials the central config-sync listener"
+assert_contains "$out25c" 'databridge\.cp\.example\.com:443' \
+  "remote: DataAgent enrols against the central DataBridge"
+assert_contains "$out25c" 'telemetry\.cp\.example\.com' \
+  "remote: telemetry egress targets the central ingest gateway"
+assert_not_contains "$out25c" 'neuraltrust\.ai:443' \
+  "remote: nothing still points at NeuralTrust SaaS"
+
+# The region map must keep working untouched for everyone not setting a domain.
+out25r="$TMP/scenario-saas-region-default.yaml"
+render_default "$out25r" \
+  --set global.deploymentMode=hybrid \
+  --set agentgateway.configSync.token=cs-trustgate
+assert_contains "$out25r" '^          value: "agentgateway-configsync\.neuraltrust\.ai:443"$' \
+  "hybrid: no controlPlane.domain still resolves through saasRegion"
+
+# --- fail-closed guards ---------------------------------------------------
+# Both rejected auth modes authenticate every data plane with one shared
+# credential, then believe whatever tenant each agent claims.
+assert_render_fails_with 'is not allowed with global.deploymentMode=saas' \
+  "saas: shared-token DataBridge auth mode rejected" \
+  "${SAAS_ARGS[@]}" --set databridge.auth.mode=token
+assert_render_fails_with 'is not allowed with global.deploymentMode=saas' \
+  "saas: dev DataBridge auth mode rejected" \
+  "${SAAS_ARGS[@]}" --set databridge.auth.mode=dev
+assert_render_fails_with 'databridge.auth.mode must be one of' \
+  "saas: unknown DataBridge auth mode rejected" \
+  "${SAAS_ARGS[@]}" --set databridge.auth.mode=mtls
+
+# Southbound endpoints with no verifiable cert. Each guard is isolated, because
+# whichever template renders first wins and the message would then be asserted
+# against the wrong one.
+assert_render_fails_with 'southbound TLS cert for DataBridge' \
+  "saas: DataBridge without a southbound cert rejected" \
+  --set global.deploymentMode=saas \
+  --set global.controlPlane.domain=cp.example.com \
+  --set agentgateway.configSync.expose.enabled=false \
+  --set trustguard.configSync.expose.enabled=false
+assert_render_fails_with 'configSync.expose needs a certificate the data planes will accept' \
+  "saas: publishing config-sync on a self-signed cert rejected" \
+  --set global.deploymentMode=saas \
+  --set global.controlPlane.domain=cp.example.com \
+  --set databridge.tls.existingSecret=databridge-southbound-tls \
+  --set trustguard.configSync.expose.enabled=false
+# Both guards must name the escape hatch, or an operator on a private network has
+# no way to discover the option that fits them.
+assert_render_fails_with 'export-controlplane-ca.sh' \
+  "saas: the DataBridge cert guard points at the CA export path" \
+  --set global.deploymentMode=saas \
+  --set global.controlPlane.domain=cp.example.com \
+  --set agentgateway.configSync.expose.enabled=false \
+  --set trustguard.configSync.expose.enabled=false
+
+# Opting out is how you keep a listener private, not by leaving it uncertified.
+out25priv="$TMP/scenario-saas-configsync-private.yaml"
+render_default "$out25priv" \
+  --set global.deploymentMode=saas \
+  --set global.controlPlane.domain=cp.example.com \
+  --set databridge.tls.existingSecret=databridge-southbound-tls \
+  --set agentgateway.configSync.expose.enabled=false \
+  --set trustguard.configSync.expose.enabled=false
+assert_not_contains "$out25priv" '\-configsync$' \
+  "saas: configSync.expose.enabled=false keeps both listeners ClusterIP"
+
+# Chart-minted certificates: the path that makes the mode installable with no
+# manual openssl step. Assert the names inside the certificates, not just that
+# the Secrets exist — a keypair covering the wrong host fails only at the
+# handshake, which is exactly the failure these guards exist to prevent.
+out25gen="$TMP/scenario-saas-selfsigned.yaml"
+render_default "$out25gen" \
+  --set global.deploymentMode=saas \
+  --set global.controlPlane.domain=cp.example.com \
+  --set databridge.tls.autoGenerate=true \
+  --set agentgateway.configSync.expose.selfSignedTls=true \
+  --set trustguard.configSync.expose.selfSignedTls=true \
+  --set clickstack-ingest-gateway.ingress.enabled=true \
+  --set clickstack-ingest-gateway.ingress.tls.autoGenerate=true
+assert_contains "$out25gen" '^  name: databridge-southbound-tls$' \
+  "saas: databridge.tls.autoGenerate mints the southbound keypair"
+assert_contains "$out25gen" '^  name: clickstack-ingest-gateway-tls$' \
+  "saas: ingress.tls.autoGenerate mints the telemetry keypair"
+assert_contains "$out25gen" '^      secretName: "clickstack-ingest-gateway-tls"$' \
+  "saas: the telemetry Ingress serves the generated keypair"
+
+# Every generated CA has to be discoverable by scripts/export-controlplane-ca.sh,
+# which selects on this label. An unlabelled secret silently drops out of the
+# bundle and only that one leg fails the handshake.
+for component in southbound-tls configsync-tls telemetry-ingress-tls; do
+  count="$(yq -N "select(.kind==\"Secret\" and .metadata.labels.\"app.kubernetes.io/component\"==\"$component\" and (.data | has(\"ca.crt\"))) | .metadata.name" "$out25gen" | grep -c . || true)"
+  if [[ "$count" -eq 0 ]]; then
+    red "FAIL: saas: no ca.crt-bearing Secret labelled $component, so the CA export script would miss it"
+    exit 1
+  fi
+  green "ok  - saas: $component secrets are labelled for CA export ($count)"
+done
+
+cert_sans() {
+  yq -N "select(.kind==\"Secret\" and .metadata.name==\"$2\") | .data.\"tls.crt\"" "$1" \
+    | base64 -d 2>/dev/null | openssl x509 -noout -ext subjectAltName 2>/dev/null
+}
+for pair in "databridge-southbound-tls:databridge.cp.example.com" \
+            "agentgateway-configsync-tls:agentgateway-configsync.cp.example.com" \
+            "trustguard-configsync-tls:trustguard-configsync.cp.example.com" \
+            "clickstack-ingest-gateway-tls:telemetry.cp.example.com"; do
+  secret="${pair%%:*}"; host="${pair##*:}"
+  if ! cert_sans "$out25gen" "$secret" | grep -q "DNS:$host"; then
+    red "FAIL: saas: $secret does not cover $host, so remote planes fail the handshake on the name"
+    exit 1
+  fi
+  green "ok  - saas: $secret covers $host"
+done
+
+# External keeps an in-cluster-only certificate: publishing is what adds the
+# public name, so a mode that publishes nothing must not carry one.
+if cert_sans "$out13" agentgateway-configsync-tls | grep -q 'configsync\.'; then
+  red "FAIL: external: config-sync certificate carries a public name it never serves"
+  exit 1
+fi
+green "ok  - external: config-sync certificate stays in-cluster only"
+
+# --- remote side: trusting a private control plane ------------------------
+# The three legs a remote data plane dials. Each reads its trust store
+# differently, and two of them silently used system roots before this existed:
+# the handshake fails at runtime with nothing wrong in the rendered manifest.
+out25ca="$TMP/scenario-hybrid-private-ca.yaml"
+render_default "$out25ca" \
+  --set global.deploymentMode=hybrid \
+  --set global.controlPlane.domain=cp.example.com \
+  --set agentgateway.configSync.token=cs-trustgate \
+  --set trustguard.configSync.token=cs-trustguard \
+  --set global.customCaCert.enabled=true \
+  --set global.customCaCert.secretName=controlplane-ca \
+  --set dataagent.databridge.tlsCa=/etc/ssl/certs/custom-ca.crt \
+  --set agentgateway.configSync.tlsCa=/etc/ssl/certs/custom-ca.crt \
+  --set trustguard.configSync.tlsCa=/etc/ssl/certs/custom-ca.crt \
+  --set global.clickstack.egress.tlsCaSecretName=controlplane-ca
+assert_contains "$out25ca" '^  TLS_CA_FILE: "/etc/ssl/certs/custom-ca\.crt"$' \
+  "remote: DataAgent verifies DataBridge against the supplied CA"
+assert_contains "$out25ca" '^          value: "/etc/ssl/certs/custom-ca\.crt"$' \
+  "remote: config-sync clients verify against the supplied CA"
+assert_contains "$out25ca" '^          ca_file: /etc/otelcol/ca/ca\.crt$' \
+  "remote: telemetry egress verifies the ingest gateway against the supplied CA"
+assert_contains "$out25ca" '^      - name: egress-ca-bundle$' \
+  "remote: the egress CA bundle is mounted, not just referenced in config"
+
+# Defaults must stay on system roots. Emitting an empty TLS_CA_FILE would replace
+# the system pool with nothing and break every hybrid install against NeuralTrust.
+out25noca="$TMP/scenario-hybrid-system-roots.yaml"
+render_default "$out25noca" \
+  --set global.deploymentMode=hybrid \
+  --set agentgateway.configSync.token=cs-trustgate
+assert_not_contains "$out25noca" 'TLS_CA_FILE' \
+  "hybrid: no tlsCa leaves DataAgent on the system trust store"
+assert_not_contains "$out25noca" 'ca_file' \
+  "hybrid: no tlsCaSecretName leaves the egress collector on the system trust store"
+assert_not_contains "$out25noca" 'ALLOW_INSECURE_TRANSPORT' \
+  "hybrid: TLS stays on unless insecure is asked for explicitly"
+
+# tlsMode=insecure was unusable before: the binary refuses to start on insecure
+# transport without this opt-in, so the value produced a crash loop.
+out25insec="$TMP/scenario-hybrid-insecure.yaml"
+render_default "$out25insec" \
+  --set global.deploymentMode=hybrid \
+  --set agentgateway.configSync.token=cs-trustgate \
+  --set dataagent.databridge.tlsMode=insecure
+assert_contains "$out25insec" '^  ALLOW_INSECURE_TRANSPORT: "true"$' \
+  "remote: tlsMode=insecure carries the opt-in the binary demands"
+
+# A bare DNS suffix is the only accepted shape; the others produce endpoints
+# that only fail once an agent tries to dial them.
+for bad in https://cp.example.com cp.example.com:443 cp.example.com/api localhost; do
+  assert_render_fails_with 'global.controlPlane.domain must be a' \
+    "domain: $bad rejected" \
+    --set global.deploymentMode=hybrid \
+    --set "global.controlPlane.domain=$bad"
+done
+
+# --- saas without a domain of its own -------------------------------------
+# The one fail-open in the mode: every derived endpoint falls back through
+# saasRegion to NeuralTrust's own domain, so the install would mint certificates
+# and publish load balancers for hostnames it does not own and aim the operator's
+# data planes at NeuralTrust SaaS.
+assert_render_fails_with 'global.deploymentMode=saas requires global.controlPlane.domain' \
+  "saas: no controlPlane.domain rejected" \
+  --set global.deploymentMode=saas \
+  --set databridge.tls.autoGenerate=true \
+  --set agentgateway.configSync.expose.selfSignedTls=true \
+  --set trustguard.configSync.expose.selfSignedTls=true
+# Both existing modes still resolve the regional domain.
+out25reg="$TMP/scenario-region-us.yaml"
+render_default "$out25reg" \
+  --set global.deploymentMode=hybrid --set global.saasRegion=us \
+  --set agentgateway.configSync.token=cs-trustgate
+assert_contains "$out25reg" 'databridge\.us\.neuraltrust\.ai' \
+  "hybrid: saasRegion=us still resolves without a controlPlane.domain"
+
+# --- string-typed booleans ------------------------------------------------
+# Flux valuesFrom, Helmfile and --set-string all deliver "false" rather than
+# false, and a Go template reads any non-empty string as true. For a flag that
+# decides whether a config-sync listener goes on a public load balancer, that
+# default is the unsafe one.
+out25sf="$TMP/scenario-saas-stringflag.yaml"
+render_default "$out25sf" "${SAAS_ARGS[@]}" \
+  --set-string agentgateway.configSync.expose.enabled=false \
+  --set-string trustguard.configSync.expose.enabled=false
+assert_not_contains "$out25sf" '^  name: .*-configsync$' \
+  "saas: expose.enabled=\"false\" as a string still keeps both listeners private"
+
+# --- telemetry token drift ------------------------------------------------
+# DataCore mints what the gateway verifies, from two independent values blocks.
+# They agree on their defaults, so drift needs an override — and it is invisible
+# in the manifest, showing up only as a 401 on every batch.
+assert_render_fails_with 'telemetry audience mismatch' \
+  "saas: audience drift between DataCore and the gateway rejected" \
+  "${SAAS_ARGS[@]}" --set datacore.telemetryJwt.audience=other-aud
+assert_render_fails_with 'telemetry issuer mismatch' \
+  "saas: issuer drift between DataCore and the gateway rejected" \
+  "${SAAS_ARGS[@]}" --set datacore.telemetryJwt.issuerUrl=https://datacore.internal
+out25aud="$TMP/scenario-saas-aud-agree.yaml"
+render_default "$out25aud" "${SAAS_ARGS[@]}" \
+  --set datacore.telemetryJwt.audience=other-aud \
+  --set clickstack-ingest-gateway.auth.audience=other-aud
+assert_contains "$out25aud" '^  TELEMETRY_JWT_AUDIENCE: "other-aud"$' \
+  "saas: overriding both sides together is still allowed"
+
+# --- a reissued certificate reaches the listener --------------------------
+# These processes read their keypair off disk at startup. Reissue happens when
+# the names the certificate covers change, which is what retargeting the domain
+# does, so without a checksum the Secret updates and the listener keeps serving
+# a certificate the remote clusters no longer accept.
+# Only the chart-generated path can reissue, so assert on that scenario. An
+# operator-supplied or cert-manager Secret rotates outside the chart's knowledge
+# and a template checksum could not see it either way.
+for dep in databridge agentgateway-admin trustguard-control-plane; do
+  ann=$(yq eval "select(.kind == \"Deployment\" and .metadata.name == \"$dep\")
+    | .spec.template.metadata.annotations | keys | join(\",\")" "$out25gen")
+  case "$ann" in
+    *checksum/southbound-tls*|*checksum/configsync-tls*) ;;
+    *)
+      red "FAIL: saas: $dep is not rolled when its certificate is reissued (annotations: ${ann:-none})"
+      exit 1 ;;
+  esac
+done
+green "ok  - saas: a reissued certificate rolls the pod that serves it"
+# Nothing new on the existing modes: they never reissue, and a fresh annotation
+# would restart every control plane on upgrade for no reason.
+assert_not_contains "$out25ext" 'checksum/configsync-tls' \
+  "external: no certificate checksum annotation appears"
+assert_not_contains "$out25" 'checksum/southbound-tls' \
+  "saas: an operator-supplied DataBridge cert gets no chart checksum"
+
+# --- the broker's budget must not deadlock a drain -----------------------
+# minAvailable against a single replica makes disruptionsAllowed 0: no
+# replacement can be Ready before the only pod is evicted, and the eviction is
+# what the budget refuses, so `kubectl drain` blocks forever on that node.
+pdb_spec=$(yq eval 'select(.kind == "PodDisruptionBudget" and .metadata.name == "databridge")
+  | (.spec.minAvailable // "unset") | tostring' "$out25")
+if [[ "$pdb_spec" != "unset" ]]; then
+  red "FAIL: saas: DataBridge PDB sets minAvailable=$pdb_spec against one replica, which blocks every node drain"
+  exit 1
+fi
+assert_contains "$out25" '^  maxUnavailable: 1$' \
+  "saas: DataBridge budget allows a node drain to proceed"
 
 green ""
 green "All v2 render scenarios passed."

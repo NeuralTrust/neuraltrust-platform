@@ -1,0 +1,45 @@
+{{- if eq (include "databridge.deploy" .) "true" }}
+{{- $sb := .Values.service.southbound }}
+{{- /* Public entry point. DataAgents in other clusters dial in over TLS and
+       hold a bidirectional gRPC stream open for as long as they run.
+
+       This has to stay L4 passthrough on every cloud: an L7 proxy would cut the
+       streams on its idle timeout and terminate the TLS the agents authenticate
+       against. A plain type: LoadBalancer gives that on GKE; on EKS add the
+       aws-load-balancer-type: nlb annotation, which is why annotations here are
+       free-form rather than a fixed set the chart writes.
+
+       Point a DNS A record for databridge.<control-plane domain> at whatever
+       address this Service gets. */}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "databridge.fullname" . }}-southbound
+  labels:
+    {{- include "databridge.labels" . | nindent 4 }}
+    app.kubernetes.io/component: southbound
+  {{- with $sb.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $sb.type | default "LoadBalancer" }}
+  {{- with $sb.loadBalancerIP }}
+  loadBalancerIP: {{ . | quote }}
+  {{- end }}
+  {{- with $sb.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with $sb.externalTrafficPolicy }}
+  externalTrafficPolicy: {{ . | quote }}
+  {{- end }}
+  ports:
+    - name: grpc
+      port: {{ $sb.port | default 443 }}
+      targetPort: southbound
+      protocol: TCP
+  selector:
+    {{- include "databridge.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: broker
+{{- end }}

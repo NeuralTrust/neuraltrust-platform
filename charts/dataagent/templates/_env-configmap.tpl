@@ -13,6 +13,14 @@ data:
   DATABRIDGE_ADDR: {{ $addr | quote }}
   DATABRIDGE_SERVER_NAME: {{ $serverName | quote }}
   TLS_MODE: {{ .Values.databridge.tlsMode | quote }}
+{{- with .Values.databridge.tlsCa }}
+  TLS_CA_FILE: {{ . | quote }}
+{{- end }}
+{{- if eq .Values.databridge.tlsMode "insecure" }}
+  {{- /* The binary refuses to start on insecure transport without this explicit
+         opt-in, so omitting it would make tlsMode=insecure a crash loop. */}}
+  ALLOW_INSECURE_TRANSPORT: "true"
+{{- end }}
   STORE_BACKEND: {{ .Values.store.backend | quote }}
   HEALTH_ADDR: {{ printf ":%v" .Values.ports.health | quote }}
   BACKOFF_MIN: {{ .Values.supervisor.backoffMin | quote }}

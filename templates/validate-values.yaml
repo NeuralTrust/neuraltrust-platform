@@ -4,9 +4,12 @@ no Kubernetes resource when validation succeeds.
 */ -}}
 {{- $global := default dict .Values.global -}}
 {{- $mode := $global.deploymentMode | default "hybrid" -}}
-{{- if not (has $mode (list "hybrid" "external")) -}}
-  {{- fail (printf "global.deploymentMode must be one of: hybrid, external (got %q)" $mode) -}}
+{{- if not (has $mode (list "hybrid" "external" "saas")) -}}
+  {{- fail (printf "global.deploymentMode must be one of: hybrid, external, saas (got %q)" $mode) -}}
 {{- end -}}
+{{- /* saas is external plus the remote-data-plane pieces, so every rule below
+       that guards the in-cluster control plane has to cover both. */ -}}
+{{- $controlPlaneInCluster := has $mode (list "external" "saas") -}}
 
 {{- /* Reject a bad region even when nothing in the release resolves a SaaS
        hostname (external mode), so the typo is caught before it matters. */ -}}
@@ -41,8 +44,8 @@ no Kubernetes resource when validation succeeds.
        (what Flux valuesFrom and Helmfile produce) is truthy either way, so a plain
        truthiness test here would reject a hybrid install for turning the feature
        OFF while the gate helper read the same value as disabled. */ -}}
-{{- if and (eq (include "neuraltrust-platform.mcpOAuth.intent" .) "on") (ne $mode "external") -}}
-  {{- fail "global.mcpOAuth.enabled requires global.deploymentMode=external: the MCP OAuth authorization server is the control-plane app, which a hybrid install does not deploy." -}}
+{{- if and (eq (include "neuraltrust-platform.mcpOAuth.intent" .) "on") (not $controlPlaneInCluster) -}}
+  {{- fail "global.mcpOAuth.enabled requires global.deploymentMode=external or saas: the MCP OAuth authorization server is the control-plane app, which a hybrid install does not deploy." -}}
 {{- end -}}
 
 {{- /* The issuer is derived from global.domain as app.<domain>, because a subchart
@@ -168,7 +171,7 @@ no Kubernetes resource when validation succeeds.
 {{- if hasKey $global "autoGenerateSecrets" -}}{{- $autoGenerate = $global.autoGenerateSecrets -}}{{- end -}}
 {{- $preserveExisting := false -}}
 {{- if hasKey $global "preserveExistingSecrets" -}}{{- $preserveExisting = $global.preserveExistingSecrets -}}{{- end -}}
-{{- if and (eq $mode "external") $preserveExisting -}}
+{{- if and $controlPlaneInCluster $preserveExisting -}}
   {{- $existingControlPlane := lookup "v1" "Secret" .Release.Namespace "control-plane-secrets" -}}
   {{- if and $existingControlPlane (kindIs "map" $existingControlPlane) $existingControlPlane.data -}}
     {{- if or (not (hasKey $existingControlPlane.data "AUTH_SECRET")) (not (hasKey $existingControlPlane.data "NEXTAUTH_SECRET")) -}}
@@ -256,7 +259,7 @@ cleartext. Under a deployed APP_ENV the control plane will not construct its
 listener without a cert/key, so turning generation off without supplying a
 Secret produces a pod that cannot start. Fail at render instead.
 */ -}}
-{{- if eq $mode "external" -}}
+{{- if $controlPlaneInCluster -}}
   {{- range $chart := list "agentgateway" "trustguard" -}}
     {{- $sub := default dict (index $.Values $chart) -}}
     {{- if eq (include "neuraltrust-platform.product.enabled" (dict "ctx" $ "product" (ternary "trustgate" "trustguard" (eq $chart "agentgateway")))) "true" -}}
@@ -270,5 +273,75 @@ Secret produces a pod that cannot start. Fail at render instead.
         {{- end -}}
       {{- end -}}
     {{- end -}}
+  {{- end -}}
+{{- end -}}
+
+{{- /* ---------------------------------------------------------------------
+       saas mode: this cluster is a control plane for data planes elsewhere.
+       --------------------------------------------------------------------- */ -}}
+{{- if eq $mode "saas" -}}
+  {{- /* Without a domain every derived hostname falls back through saasRegion to
+         NeuralTrust's own, and the mode fails open in the worst way: the chart
+         mints a certificate for databridge.neuraltrust.ai and publishes load
+         balancers as {product}-configsync.neuraltrust.ai, so the operator's own
+         data planes are pointed at NeuralTrust SaaS with tokens NeuralTrust
+         never issued. Every other cross-cluster requirement here is fail-closed;
+         this is the one that decides whose control plane this even is. */ -}}
+  {{- $cpDomain := (default dict $.Values.global.controlPlane).domain | default "" | toString | trim -}}
+  {{- if not $cpDomain -}}
+    {{- fail "global.deploymentMode=saas requires global.controlPlane.domain: it is the value that makes this a control plane of your own. Left empty, DataBridge, telemetry and both config-sync endpoints resolve to NeuralTrust's hosted domain through global.saasRegion, so this install would mint certificates and publish load balancers for hostnames it does not own, and your data planes would be configured to dial NeuralTrust SaaS. Set it to the bare domain your remote clusters reach this cluster on, e.g. global.controlPlane.domain=platform.example.com (no scheme, port or path). A private DNS zone is fine." -}}
+  {{- end -}}
+  {{- $databridge := default dict $.Values.databridge -}}
+  {{- $dbAuth := default dict $databridge.auth -}}
+  {{- $authMode := $dbAuth.mode | default "introspect" | toString | trim | lower -}}
+  {{- if not (has $authMode (list "dev" "token" "introspect" "jwt")) -}}
+    {{- fail (printf "databridge.auth.mode must be one of: dev, token, introspect, jwt (got %q)" $authMode) -}}
+  {{- end -}}
+  {{- /* `token` compares one shared secret and then trusts whatever tenant the
+         agent claims in its Hello, so every data plane that holds the token can
+         read every other tenant's data. That is fine for the 1:1 hybrid install
+         it was built for and wrong for a control plane serving several data
+         planes, which is the whole point of this mode. `dev` skips signature
+         checks entirely. Both are refused here rather than left as a footgun. */ -}}
+  {{- if has $authMode (list "token" "dev") -}}
+    {{- fail (printf "databridge.auth.mode=%q is not allowed with global.deploymentMode=saas: it authenticates every data plane with one shared credential and then trusts the tenant each agent claims for itself, so any enrolled data plane could read another's data. Use \"introspect\" (default — DataBridge asks the in-cluster DataCore about each token) or \"jwt\" (DataBridge verifies DataCore-signed enrolment JWTs locally)." $authMode) -}}
+  {{- end -}}
+
+  {{- /* Southbound terminates TLS itself: it is a raw gRPC listener behind an L4
+         load balancer, so there is no ingress in front to terminate for it. The
+         binary refuses to start without a cert outside dev mode, and dev mode is
+         already rejected above. */ -}}
+  {{- $dbTls := default dict $databridge.tls -}}
+  {{- $dbCertManager := default dict $dbTls.certManager -}}
+  {{- if and (not ($dbTls.existingSecret | default "")) (ne (include "neuraltrust-platform.boolish" (dict "value" $dbCertManager.enabled "default" false)) "true") (ne (include "neuraltrust-platform.boolish" (dict "value" $dbTls.autoGenerate "default" false)) "true") -}}
+    {{- fail "saas mode needs a southbound TLS cert for DataBridge: remote DataAgents dial it directly over TLS with no ingress in front, and the binary refuses to start without one. It must cover databridge.<your control-plane domain>. Pick one:\n  (a) databridge.tls.existingSecret — a kubernetes.io/tls Secret you provide, issued by a CA your data planes already trust.\n  (b) databridge.tls.certManager.enabled=true — cert-manager issues it from an Issuer you already run.\n  (c) databridge.tls.autoGenerate=true — the chart mints a self-signed CA and keypair, and you distribute the CA as configuration. This is the route for a control plane reached over a private network: run scripts/export-controlplane-ca.sh and set dataagent.databridge.tlsCa on each data plane to the mounted bundle." -}}
+  {{- end -}}
+
+  {{- /* The enrolment and telemetry credentials are minted into the shared
+         platform Secret. When that Secret is out of play the chart writes
+         nothing, and the failure is silent and late: DataCore crash-loops on a
+         missing ENROLMENT_INTROSPECTION_TOKEN, or comes up with telemetry
+         signing off so the ingest gateway rejects every agent's OTLP. */ -}}
+  {{- /* DataCore mints the telemetry tokens and the ingest gateway verifies them,
+         from two independent values blocks. They agree on their defaults, so a
+         render only drifts when one side is overridden — and the consequence is
+         invisible in the manifest: the gateway 401s every batch and telemetry
+         from every remote data plane is dropped. Compare them here, since the
+         umbrella is the only place that can see both. */ -}}
+  {{- $dcJwt := default dict (default dict $.Values.datacore).telemetryJwt -}}
+  {{- $gwAuth := default dict (default dict (index $.Values "clickstack-ingest-gateway")).auth -}}
+  {{- $dcAud := $dcJwt.audience | default "otlp-ingest" | toString | trim -}}
+  {{- $gwAud := $gwAuth.audience | default "otlp-ingest" | toString | trim -}}
+  {{- if ne $dcAud $gwAud -}}
+    {{- fail (printf "telemetry audience mismatch: DataCore signs aud=%q (datacore.telemetryJwt.audience) while the ingest gateway only accepts %q (clickstack-ingest-gateway.auth.audience). The gateway would reject every OTLP batch from every remote data plane with a 401. Set both to the same value, or leave both unset." $dcAud $gwAud) -}}
+  {{- end -}}
+  {{- $dcIssuer := $dcJwt.issuerUrl | default (include "neuraltrust-platform.datacore.internalUrl" .) | toString | trim | trimSuffix "/" -}}
+  {{- $gwIssuer := $gwAuth.issuerUrl | default (include "neuraltrust-platform.datacore.internalUrl" .) | toString | trim | trimSuffix "/" -}}
+  {{- if ne $dcIssuer $gwIssuer -}}
+    {{- fail (printf "telemetry issuer mismatch: DataCore advertises and signs iss=%q (datacore.telemetryJwt.issuerUrl) while the ingest gateway builds its OIDC verifier from %q (clickstack-ingest-gateway.auth.issuerUrl). OIDC identifies an issuer by its exact URL, so every batch would be rejected. Set both to the same value, or leave both unset to derive the in-cluster DataCore URL." $dcIssuer $gwIssuer) -}}
+  {{- end -}}
+
+  {{- if not (include "neuraltrust-platform.platformSecret.name" .) -}}
+    {{- fail "saas mode requires the shared platform Secret, which is currently out of play (global.platformSecret.enabled=false, an operator-owned global.platformSecret.existingSecret, global.preserveExistingSecrets=true, or global.autoGenerateSecrets=false). It carries ENROLMENT_INTROSPECTION_TOKEN and its DATACORE_SERVICE_TOKEN alias — which must hold one identical value or every agent connection 401s — plus ENROLMENT_SIGNING_SECRET and the RS256 TELEMETRY_JWT_PRIVATE_KEY_PEM. Re-enable it, or supply all four in your own Secret and point global.platformSecret.existingSecret at it." -}}
   {{- end -}}
 {{- end -}}

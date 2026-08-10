@@ -1,0 +1,28 @@
+{{- if and (eq (include "databridge.deploy" .) "true") (not .Values.tls.existingSecret) .Values.tls.certManager.enabled }}
+{{- $cm := .Values.tls.certManager }}
+{{- if not $cm.issuerRef.name }}
+{{- fail "databridge.tls.certManager.enabled=true requires databridge.tls.certManager.issuerRef.name — cert-manager cannot issue a certificate without an issuer." }}
+{{- end }}
+{{- /* Agents verify this certificate against the hostname they dial, so it has
+       to cover databridge.<control-plane domain>. Derived from the same helper
+       the DataAgent side uses rather than restated, so the two cannot drift. */}}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "databridge.fullname" . }}-southbound
+  labels:
+    {{- include "databridge.labels" . | nindent 4 }}
+    app.kubernetes.io/component: southbound
+spec:
+  secretName: {{ include "databridge.tlsSecretName" . | quote }}
+  dnsNames:
+    {{- if $cm.dnsNames }}
+    {{- toYaml $cm.dnsNames | nindent 4 }}
+    {{- else }}
+    - {{ include "databridge.southboundHost" . | quote }}
+    {{- end }}
+  issuerRef:
+    name: {{ $cm.issuerRef.name | quote }}
+    kind: {{ $cm.issuerRef.kind | default "ClusterIssuer" }}
+    group: {{ $cm.issuerRef.group | default "cert-manager.io" }}
+{{- end }}

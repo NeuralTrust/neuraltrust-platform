@@ -26,6 +26,12 @@ dependencies:
 - name: datacore
   repository: file://./charts/datacore
   version: 0.1.18
+- name: databridge
+  repository: file://./charts/databridge
+  version: 0.1.0
+- name: clickstack-ingest-gateway
+  repository: file://./charts/clickstack-ingest-gateway
+  version: 0.1.0
 - name: clickstack-otel-collector
   repository: file://./charts/clickstack-otel-collector
   version: 0.1.5
@@ -38,5 +44,5 @@ dependencies:
 - name: watchdog
   repository: file://./charts/watchdog
   version: 0.3.5
-digest: sha256:409930a2b279f09fad5a5b5e0d841d3bfee8f034885687aeeacc5cae9d475239
-generated: "2026-08-07T14:47:52.695064698Z"
+digest: sha256:2043c066239f89069fceeee20d644a24923cda125bc0e92e086446eb50a52bd8
+generated: "2026-08-10T08:38:24.209884+02:00"

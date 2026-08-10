@@ -1,0 +1,161 @@
+{{- if eq (include "databridge.deploy" .) "true" }}
+{{- $tlsSecret := include "databridge.tlsSecretName" . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "databridge.fullname" . }}
+  labels:
+    {{- include "databridge.labels" . | nindent 4 }}
+    app.kubernetes.io/component: broker
+spec:
+  replicas: {{ .Values.replicas | default 1 }}
+  minReadySeconds: 10
+  progressDeadlineSeconds: 300
+  revisionHistoryLimit: 3
+  {{- /* Recreate, not RollingUpdate: the agent registry is per-pod and in
+         memory, so two pods behind one Service would each answer for only the
+         agents that happened to reach them. Agents reconnect on their own, so
+         the cost is a short gap rather than a wrong answer. */}}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "databridge.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: broker
+  template:
+    metadata:
+      labels:
+        {{- include "databridge.labels" . | nindent 8 }}
+        app.kubernetes.io/component: broker
+      annotations:
+        {{- /* Roll the pod when its configuration changes; otherwise an
+               `envFrom` ConfigMap edit applies only on the next unrelated
+               restart. */}}
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if eq (include "databridge.tlsAutoGenerate" .) "true" }}
+        {{- /* DataBridge reads the keypair off disk at startup, and nothing in
+               the ConfigMap moves when the certificate is reissued, so the
+               southbound listener would keep presenting the old one — on the
+               exact name the reissue exists to cover. */}}
+        checksum/southbound-tls: {{ include (print $.Template.BasePath "/southbound-tls-secret.yaml") . | sha256sum }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . | quote }}
+      {{- end }}
+      enableServiceLinks: false
+      {{- /* Agents hold long-lived streams; this gives them time to drain and
+             reconnect elsewhere instead of being cut at SIGTERM. Must exceed
+             config.shutdownTimeout. */}}
+      terminationGracePeriodSeconds: 120
+      serviceAccountName: {{ include "databridge.serviceAccountName" . }}
+      {{- include "databridge.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        {{- /* The distroless image runs as uid/gid 65532. The kubelet mounts
+               Secret volumes root:root, so without fsGroup the process cannot
+               read the TLS keypair no matter what defaultMode says. */}}
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: databridge
+          image: {{ include "databridge.image" (dict "repository" .Values.image.repository "tag" (.Values.image.tag | default .Chart.AppVersion) "global" .Values.global) | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: northbound
+              containerPort: {{ .Values.ports.northbound }}
+              protocol: TCP
+            - name: southbound
+              containerPort: {{ .Values.ports.southbound }}
+              protocol: TCP
+            - name: health
+              containerPort: {{ .Values.ports.health }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "databridge.fullname" . }}-config
+          env:
+            {{- /* Presented to DataCore as X-Service-Token and compared there
+                   against ENROLMENT_INTROSPECTION_TOKEN. The shared platform
+                   Secret keeps both names on one value. */}}
+            {{- if has (.Values.auth.mode | default "introspect") (list "introspect" "jwt") }}
+            - name: DATACORE_SERVICE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.auth.existingSecret.name }}
+                  name: {{ .Values.auth.existingSecret.name | quote }}
+                  key: {{ .Values.auth.existingSecret.key | default "DATACORE_SERVICE_TOKEN" | quote }}
+                  {{- else }}
+                  {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "DATACORE_SERVICE_TOKEN") | nindent 18 }}
+                  {{- end }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- with $tlsSecret }}
+          volumeMounts:
+            - name: southbound-tls
+              mountPath: /etc/southbound-tls
+              readOnly: true
+          {{- end }}
+      {{- with $tlsSecret }}
+      volumes:
+        - name: southbound-tls
+          secret:
+            secretName: {{ . | quote }}
+            {{- /* 0440 — owner and group read, nothing for "other". Readable by
+                   the container only because of the fsGroup above. */}}
+            defaultMode: 288
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

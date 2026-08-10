@@ -1,0 +1,157 @@
+# DataBridge subchart.
+# Renders ONLY when global.deploymentMode=saas.
+#
+# Two gRPC listeners, opposite directions:
+#   southbound :50052 — DataAgents in other clusters dial IN over TLS and hold a
+#                       long-lived bidirectional stream. Public.
+#   northbound :50051 — DataCore calls IN to run a query across those agents.
+#                       Cluster-internal only.
+# DataBridge itself is stateless: it routes, it does not store.
+nameOverride: ""
+# Pinned: DataCore addresses the northbound Service by name, and a
+# release-prefixed name would silently stop matching.
+fullnameOverride: "databridge"
+image:
+  repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/databridge
+  tag: "v0.1.3"
+  pullPolicy: IfNotPresent
+imagePullSecrets: "gcr-secret"
+serviceAccount:
+  create: true
+  name: "databridge"
+  annotations: {}
+
+# Single replica on purpose. The agent registry lives in memory, so a second
+# replica would only know the agents that happen to have dialled it, and a query
+# routed to the wrong one finds nothing. Recreate for the same reason: two pods
+# briefly sharing the Service would split the registry.
+# Raising this needs a shared registry in DataBridge first.
+replicas: 1
+
+auth:
+  # How DataBridge authenticates a DataAgent at connect time:
+  #   introspect — ask DataCore about each token (default; the only mode that
+  #                gets an authoritative tenant/instance identity per agent)
+  #   jwt        — verify DataCore-signed enrolment JWTs locally, no round trip
+  #   token      — one shared secret for every agent. REJECTED in saas mode:
+  #                it trusts the tenant each agent claims for itself.
+  #   dev        — no verification. REJECTED in saas mode.
+  mode: "introspect"
+  # Empty ⇒ derived from the in-cluster DataCore Service. Set only when DataCore
+  # runs somewhere this chart does not deploy it.
+  datacoreIntrospectionURL: ""
+  # Empty ⇒ derived from the introspection URL by swapping the trailing
+  # /enrolment/introspect for /telemetry/exchange, which is DataBridge's own
+  # default. Set it when the two live behind different hosts.
+  datacoreTelemetryExchangeURL: ""
+  # DataBridge presents this to DataCore as X-Service-Token, and DataCore
+  # compares it against ENROLMENT_INTROSPECTION_TOKEN. The chart keeps the two
+  # in sync through the shared platform Secret, so leave this alone unless you
+  # own that Secret yourself.
+  existingSecret:
+    name: "" # Empty ⇒ the shared platform Secret
+    key: "" # Empty ⇒ "DATACORE_SERVICE_TOKEN"
+
+# Southbound TLS. Terminated by DataBridge itself: agents dial the L4 load
+# balancer directly, so nothing in front of it can terminate on its behalf.
+# The certificate must cover databridge.<global.controlPlane.domain>.
+tls:
+  # A kubernetes.io/tls Secret you created (tls.crt + tls.key). This is the
+  # production path: agents in other clusters verify what this listener presents
+  # against their own trust store, so the certificate has to come from a CA they
+  # already trust.
+  existingSecret: ""
+  # Have the chart mint a self-signed CA and keypair instead. Ignored when
+  # existingSecret is set.
+  #
+  # The route for a control plane reached over a private network (VPC peering,
+  # Direct Connect, a private link), where no public trust store is involved.
+  # It does NOT by itself make remote agents trust the listener: export the CA
+  # with scripts/export-controlplane-ca.sh and set dataagent.databridge.tlsCa on
+  # each data plane. The keypair is preserved across upgrades and only reissued
+  # when the names it covers change.
+  autoGenerate: false
+  durationDays: 3650
+  # Or have cert-manager issue one. Ignored when existingSecret is set.
+  certManager:
+    enabled: false
+    issuerRef:
+      name: ""
+      kind: "ClusterIssuer"
+      group: "cert-manager.io"
+    # Empty ⇒ databridge.<global.controlPlane.domain>
+    dnsNames: []
+
+service:
+  northbound:
+    # Cluster-internal: only DataCore calls it.
+    type: ClusterIP
+    port: 50051
+    annotations: {}
+  southbound:
+    # Public. Agents hold long-lived bidirectional gRPC streams, so this has to
+    # be an L4 passthrough — an L7 proxy in front would cut them on its idle
+    # timeout and break TLS client identity.
+    # EKS: annotate for an NLB, e.g.
+    #   service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    #   service.beta.kubernetes.io/aws-load-balancer-scheme: "internal"
+    # Use "internal" when the data-plane clusters reach this over VPC peering,
+    # Direct Connect or a private link, and "internet-facing" only when they
+    # genuinely traverse the internet. GKE gives an L4 passthrough NLB for a
+    # plain LoadBalancer already; add
+    #   networking.gke.io/load-balancer-type: "Internal"
+    # for the private equivalent.
+    type: LoadBalancer
+    port: 443
+    annotations: {}
+    # Pin the LB address when your DNS record already exists.
+    loadBalancerIP: ""
+    # Narrow the public surface to the egress ranges of your data-plane
+    # clusters. Empty means the whole internet can open a TCP connection
+    # (authentication still applies).
+    loadBalancerSourceRanges: []
+    externalTrafficPolicy: ""
+
+ports:
+  northbound: 50051
+  southbound: 50052
+  health: 8080
+
+config:
+  logLevel: "info"
+  # Leaves 30s of the pod's 120s grace period for kubelet cleanup after the
+  # application's own shutdown deadline expires.
+  shutdownTimeout: "90s"
+  northbound:
+    maxInflightPerTenant: 128
+    requestTimeout: "30s"
+  southbound:
+    sendBuffer: 64
+    pingInterval: "15s"
+    keepaliveTime: "30s"
+    keepaliveTimeout: "10s"
+    # gRPC closes a connection that pings more often than this. Keep it below
+    # the agents' own keepalive interval or they get dropped as abusive.
+    keepaliveMinTime: "5s"
+
+# minAvailable: 1 against a single replica would make disruptionsAllowed 0 and
+# block `kubectl drain` forever: no replacement can become Ready before the only
+# pod is evicted, and the eviction is what the budget refuses. maxUnavailable: 1
+# lets the drain proceed — the agents reconnect, which they are built to do —
+# while still declaring the workload to anything that reads a budget. Switch to
+# minAvailable once replicas > 1 is safe (AUT-495: the registry is in memory).
+podDisruptionBudget:
+  enabled: true
+  minAvailable: null
+  maxUnavailable: 1
+
+resources:
+  requests: {cpu: 100m, memory: 128Mi}
+  limits: {cpu: 500m, memory: 256Mi}
+
+priorityClassName: ""
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}
+extraEnv: []

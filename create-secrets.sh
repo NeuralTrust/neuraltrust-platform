@@ -146,9 +146,15 @@ add_secret_key() {
     local secret_name=$1
     local key=$2
     local value=$3
-    
-    # Trim whitespace from value
-    value=$(trim_value "$value")
+    # Pass "raw" as the fourth argument to store the value byte-exact. trim_value
+    # ends in `tr -d '\n\r'`, which collapses a PEM into one line that no PEM
+    # parser accepts — the Secret looks right and the consumer fails at runtime.
+    local mode=${4:-trim}
+
+    if [ "$mode" != "raw" ]; then
+        # Trim whitespace from value
+        value=$(trim_value "$value")
+    fi
     
     # Check if secret exists
     if kubectl get secret "$secret_name" -n "$NAMESPACE" &>/dev/null; then
@@ -350,6 +356,10 @@ PLATFORM_SECRET_REGISTRY_KEYS=(
     MCP_OAUTH_CLIENT_SECRET
     MCP_OAUTH_SIGNING_KEY
     AUTH_SECRET_KEY
+    ENROLMENT_INTROSPECTION_TOKEN
+    DATACORE_SERVICE_TOKEN
+    ENROLMENT_SIGNING_SECRET
+    TELEMETRY_JWT_PRIVATE_KEY_PEM
 )
 # PLATFORM_SECRET_REGISTRY_KEYS_END
 
@@ -424,17 +434,38 @@ ensure_platform_secret_key() {
             random|install)
                 value=$(openssl rand -base64 48 | tr -d '\n\r')
                 ;;
+            rsa)
+                # Signing key, not a shared secret: the verifier side reads the
+                # public half off DataCore's JWKS, so only the PEM is stored.
+                # PKCS#1 at 4096 to match what the chart's own genPrivateKey
+                # "rsa" produces, so the two bootstrap paths agree. OpenSSL 3.x
+                # defaults to PKCS#8 and needs -traditional asked for by name.
+                value=$(openssl genrsa -traditional 4096 2>/dev/null \
+                    || openssl genrsa 4096 2>/dev/null)
+                ;;
             adopt)
                 echo -e "${YELLOW}Skipping ${key} in ${PLATFORM_SECRET_NAME} (adopt-only; supply ${env_name:-$key})${NC}"
                 return 0
                 ;;
             *)
+                if [ -n "$alias_of" ]; then
+                    # An alias with no generator of its own. Skipping quietly
+                    # would leave DataBridge without the credential it presents
+                    # to DataCore, which 401s every agent that tries to enrol.
+                    echo -e "${RED}Error: ${key} mirrors ${alias_of}, which could not be resolved${NC}" >&2
+                    return 1
+                fi
                 return 0
                 ;;
         esac
     fi
 
-    add_secret_key "$PLATFORM_SECRET_NAME" "$key" "$value"
+    # A PEM must reach the consumer with its line structure intact.
+    local store_mode="trim"
+    case "$value" in
+        *"-----BEGIN"*) store_mode="raw" ;;
+    esac
+    add_secret_key "$PLATFORM_SECRET_NAME" "$key" "$value" "$store_mode"
 }
 
 echo "=========================================="
@@ -468,7 +499,7 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Environment variables:"
             echo "  All secret values can be provided via environment variables:"
-            echo "  - DEPLOYMENT_MODE       hybrid|external (default: external)"
+            echo "  - DEPLOYMENT_MODE       hybrid|external|saas (default: external)"
             echo "  - ENABLE_TRUSTGATE / ENABLE_TRUSTGUARD / ENABLE_DATAPLANE"
             echo "  - ENABLE_TRUSTLENS / ENABLE_MCP_OAUTH / ENABLE_WATCHDOG"
             echo "  - ENABLE_CONFIG_SYNC (default: on for hybrid, off for external)"
@@ -523,12 +554,12 @@ echo ""
 # DEPLOYMENT SHAPE (drives which platform-secrets keys are created)
 # ============================================================================
 echo -e "${BLUE}=== Deployment shape ===${NC}"
-DEPLOYMENT_MODE=$(prompt_secret "DEPLOYMENT_MODE" "Enter deployment mode (hybrid|external, default: external)")
+DEPLOYMENT_MODE=$(prompt_secret "DEPLOYMENT_MODE" "Enter deployment mode (hybrid|external|saas, default: external)")
 DEPLOYMENT_MODE=$(printf '%s' "${DEPLOYMENT_MODE:-external}" | tr '[:upper:]' '[:lower:]')
 case "$DEPLOYMENT_MODE" in
-    hybrid|external) ;;
+    hybrid|external|saas) ;;
     *)
-        echo -e "${RED}Error: DEPLOYMENT_MODE must be hybrid or external${NC}"
+        echo -e "${RED}Error: DEPLOYMENT_MODE must be hybrid, external or saas${NC}"
         exit 1
         ;;
 esac
@@ -559,8 +590,12 @@ prompt_yes_default() {
     [ "$default_yes" = "true" ]
 }
 
-if [ "$DEPLOYMENT_MODE" = "external" ]; then
+if [ "$DEPLOYMENT_MODE" = "external" ] || [ "$DEPLOYMENT_MODE" = "saas" ]; then
     PLATFORM_SHAPES+=(external trustgate trustguard dataPlane)
+    # saas is external plus the credentials its remote data planes enrol with.
+    if [ "$DEPLOYMENT_MODE" = "saas" ]; then
+        PLATFORM_SHAPES+=(saas)
+    fi
 else
     if prompt_yes_default "ENABLE_TRUSTGATE" "Enable TrustGate product secrets?" "true"; then
         PLATFORM_SHAPES+=(trustgate)
@@ -575,7 +610,7 @@ fi
 if prompt_yes_default "ENABLE_TRUSTLENS" "Enable TrustLens secrets?" "false"; then
     PLATFORM_SHAPES+=(trustlens)
 fi
-if [ "$DEPLOYMENT_MODE" = "external" ] && prompt_yes_default "ENABLE_MCP_OAUTH" "Enable MCP OAuth client secret?" "true"; then
+if shape_enabled external && prompt_yes_default "ENABLE_MCP_OAUTH" "Enable MCP OAuth client secret?" "true"; then
     PLATFORM_SHAPES+=(mcpOAuth)
 fi
 if prompt_yes_default "ENABLE_WATCHDOG" "Enable Watchdog usage-export JWT secrets?" "false"; then
@@ -1163,6 +1198,13 @@ ensure_platform_secret_key "MODEL_SCANNER_SECRET" "control-plane-secrets" "MODEL
 ensure_platform_secret_key "MCP_OAUTH_CLIENT_SECRET" "control-plane-secrets" "MCP_OAUTH_CLIENT_SECRET" "random" "MCP_OAUTH_CLIENT_SECRET" "mcpOAuth"
 ensure_platform_secret_key "MCP_OAUTH_SIGNING_KEY" "control-plane-secrets" "MCP_OAUTH_SIGNING_KEY" "adopt" "MCP_OAUTH_SIGNING_KEY" "mcpOAuth"
 ensure_platform_secret_key "AUTH_SECRET_KEY" "control-plane-secrets" "AUTH_SECRET_KEY" "install" "AUTH_SECRET_KEY" "external"
+# saas only: credentials shared between DataCore and DataBridge so data planes
+# in other clusters can enrol. DATACORE_SERVICE_TOKEN aliases the introspection
+# token because DataBridge presents exactly what DataCore compares against.
+ensure_platform_secret_key "ENROLMENT_INTROSPECTION_TOKEN" "datacore-secrets" "ENROLMENT_INTROSPECTION_TOKEN" "random" "ENROLMENT_INTROSPECTION_TOKEN" "saas"
+ensure_platform_secret_key "DATACORE_SERVICE_TOKEN" "databridge-secrets" "DATACORE_SERVICE_TOKEN" "" "ENROLMENT_INTROSPECTION_TOKEN" "saas" "ENROLMENT_INTROSPECTION_TOKEN"
+ensure_platform_secret_key "ENROLMENT_SIGNING_SECRET" "datacore-secrets" "ENROLMENT_SIGNING_SECRET" "random" "ENROLMENT_SIGNING_SECRET" "saas"
+ensure_platform_secret_key "TELEMETRY_JWT_PRIVATE_KEY_PEM" "datacore-secrets" "TELEMETRY_JWT_PRIVATE_KEY_PEM" "rsa" "TELEMETRY_JWT_PRIVATE_KEY_PEM" "saas"
 echo -e "${GREEN}✓ ${PLATFORM_SECRET_NAME} keys ready for shapes: ${PLATFORM_SHAPES[*]:-none}${NC}"
 echo ""
 

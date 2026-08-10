@@ -1,0 +1,24 @@
+{{- if eq (include "agentgateway.enabled" .) "true" }}
+{{- /*
+Publishes the AgentGateway control plane's config-sync gRPC listener so data
+planes in other clusters can reach it. saas only — see
+neuraltrust-platform.configSync.expose.
+*/ -}}
+{{- if eq (include "neuraltrust-platform.configSync.expose" (dict "ctx" .)) "true" }}
+{{- $host := include "neuraltrust-platform.configSync.publicHost" (dict "ctx" . "product" "agentgateway") }}
+{{- if ne (include "agentgateway.configSyncTls.active" .) "true" }}
+{{- fail (printf "configSync.expose would publish the AgentGateway config-sync listener at %s with TLS switched off, sending every data plane's config-sync token across the internet in the clear. Config-sync TLS only activates under a deployed config.appEnv (prod/staging) with a cert available; either set one, or set agentgateway.configSync.expose.enabled=false and reach the listener over a private link." $host) }}
+{{- end }}
+{{- if and (not ((default dict .Values.configSync.grpcTls).existingSecret | default "")) (ne (include "neuraltrust-platform.configSync.publicSelfSigned" (dict "ctx" .)) "true") }}
+{{- fail (printf "configSync.expose needs a certificate the data planes will accept: they dial %s:443 and verify it against their own trust store, which does not contain the self-signed CA that grpcTls.autoGenerate mints. Pick one:\n  (a) agentgateway.configSync.grpcTls.existingSecret — a kubernetes.io/tls Secret covering that name, issued by a CA those clusters already trust (a public CA, or your own PKI).\n  (b) agentgateway.configSync.expose.selfSignedTls=true — the chart mints the certificate and you distribute its CA as configuration. Intended for a control plane reached over a private network. Run scripts/export-controlplane-ca.sh and set agentgateway.configSync.tlsCa on each data plane to the mounted bundle." $host) }}
+{{- end }}
+{{- $selector := printf "%s\napp.kubernetes.io/component: control-plane" (include "agentgateway.selectorLabels" .) }}
+{{- include "neuraltrust-platform.configSync.publicService" (dict
+      "ctx" .
+      "product" "agentgateway"
+      "name" .Values.controlPlane.name
+      "labels" (include "agentgateway.labels" .)
+      "selectorLabels" $selector
+      "targetPort" .Values.controlPlane.ports.grpc) }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,112 @@
+# ClickStack ingest gateway subchart.
+# Renders ONLY when global.deploymentMode=saas.
+#
+# The public OTLP door for data planes in other clusters. Everything it accepts
+# is untrusted until the JWT verifies, which is what makes it a separate
+# deployment from clickstack-collector: that one holds the ClickHouse
+# credentials and only ever listens to callers already inside the cluster.
+#
+# Per batch: verify a DataCore-signed RS256 JWT (aud=otlp-ingest), overwrite the
+# tenant attributes from the verified claim so a sender cannot label its data as
+# someone else's, drop anything without otlp:write scope, forward the rest.
+nameOverride: ""
+fullnameOverride: "clickstack-ingest-gateway"
+image:
+  # The contrib distribution — the OIDC authenticator and the OTTL filters below
+  # are contrib components, not core — served from the NeuralTrust mirror rather
+  # than Docker Hub, so an install pulls every image from one registry and stays
+  # clear of Docker Hub rate limits. Keep the tag in step with
+  # global.observability.collector and global.clickstack.egress: all three are
+  # the same upstream image and bump-images.yml moves them together.
+  repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/opentelemetry-collector-contrib
+  tag: "0.156.0"
+  pullPolicy: IfNotPresent
+# Empty falls back to global.imagePullSecrets; "none" suppresses it entirely
+# (a mirror in the same project needs no credentials).
+imagePullSecrets: "gcr-secret"
+serviceAccount:
+  create: true
+  name: "clickstack-ingest-gateway"
+  annotations: {}
+
+replicas: 2
+
+auth:
+  # Must equal datacore.telemetryJwt.audience. They share this default, and the
+  # umbrella refuses to render if the two are overridden to differ — a mismatch
+  # is invisible in the manifest and 401s every batch.
+  audience: "otlp-ingest"
+  # Empty ⇒ the in-cluster DataCore Service. This is an OIDC issuer URL: the
+  # collector appends /.well-known/openid-configuration to discover the JWKS,
+  # and the `iss` claim on every token must equal it exactly.
+  issuerUrl: ""
+  # Scope a token must carry for its batch to be accepted.
+  requiredScope: "otlp:write"
+
+# Where verified telemetry goes next: the trusted in-cluster collector that owns
+# the ClickHouse credentials. Cleartext because it never leaves the cluster.
+downstream:
+  endpoint: "" # Empty ⇒ clickstack-collector.<namespace>.svc.cluster.local:4317
+  tlsInsecure: true
+
+ports:
+  otlpGrpc: 4317
+  otlpHttp: 4318
+  health: 13133
+
+service:
+  type: ClusterIP
+  annotations: {}
+
+# Public exposure. Unlike DataBridge this one is plain OTLP/HTTP and terminates
+# TLS at the ingress, so an ordinary L7 Ingress works on any cloud.
+# Hostname is telemetry.<global.controlPlane.domain>, the same value the
+# DataAgent egress sidecar exports to.
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  # Empty ⇒ telemetry.<global.controlPlane.domain>
+  host: ""
+  tls:
+    enabled: true
+    # A kubernetes.io/tls Secret you created, or one cert-manager writes via an
+    # annotation above. Empty leaves TLS config to the ingress controller's
+    # default certificate, unless autoGenerate below is on.
+    secretName: ""
+    # Mint a self-signed CA and a leaf covering the host above. For a control
+    # plane reached over a private network, where nothing needs a publicly
+    # trusted certificate. Remote data planes must trust the CA: point
+    # global.clickstack.egress.tlsCaSecretName at a bundle carrying it
+    # (scripts/export-controlplane-ca.sh collects it).
+    #
+    # Ignored when secretName is set. Preserved across upgrades and reissued only
+    # when the host changes, so retargeting the domain reaches the certificate.
+    autoGenerate: false
+    durationDays: 3650
+
+processors:
+  memoryLimiter:
+    checkInterval: "1s"
+    limitPercentage: 65
+    spikeLimitPercentage: 20
+  batch:
+    sendBatchSize: 200
+    sendBatchMaxSize: 200
+    timeout: "1s"
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+resources:
+  requests: {cpu: 100m, memory: 256Mi}
+  limits: {cpu: 500m, memory: 512Mi}
+
+logLevel: "info"
+priorityClassName: ""
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}
+extraEnv: []

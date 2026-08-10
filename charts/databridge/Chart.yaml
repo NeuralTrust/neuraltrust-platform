@@ -1,0 +1,6 @@
+apiVersion: v2
+name: databridge
+description: DataBridge — southbound broker for data planes running outside this cluster. DataAgents dial in over TLS with an enrolment token and hold a bidirectional gRPC stream; DataCore calls northbound to run queries across them. Stores nothing. Deployed only when global.deploymentMode=saas.
+type: application
+version: 0.1.0
+appVersion: "v0.1.3"

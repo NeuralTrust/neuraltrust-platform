@@ -1,0 +1,21 @@
+{{- if and (eq (include "clickstack-ingest-gateway.deploy" .) "true") .Values.podDisruptionBudget.enabled }}
+{{- /* Losing this gateway stops telemetry from every remote data plane at once,
+       and the senders retry for a bounded window before dropping batches. */}}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "clickstack-ingest-gateway.fullname" . }}
+  labels:
+    {{- include "clickstack-ingest-gateway.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ingest-gateway
+spec:
+  {{- if .Values.podDisruptionBudget.minAvailable }}
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  {{- else if .Values.podDisruptionBudget.maxUnavailable }}
+  maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "clickstack-ingest-gateway.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: ingest-gateway
+{{- end }}

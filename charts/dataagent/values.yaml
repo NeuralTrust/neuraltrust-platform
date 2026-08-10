@@ -30,6 +30,15 @@ databridge:
   addr: ""
   serverName: ""
   tlsMode: "tls"
+  # CA bundle that signs the DataBridge southbound certificate. Empty trusts the
+  # system roots, which is what you want against NeuralTrust's own DataBridge.
+  # Set it when the control plane presents a private or chart-generated cert.
+  #
+  # This REPLACES the system roots rather than adding to them, so the file must
+  # carry every CA this agent needs. It is a path, not PEM: mount the bundle
+  # with global.customCaCert (default /etc/ssl/certs/custom-ca.crt) or any other
+  # volume. Required by the binary when tlsMode is mtls.
+  tlsCa: ""
 store:
   backend: "postgres"
 database:

@@ -42,6 +42,8 @@ DAGENT=charts/dataagent/values.yaml
 DCORE=charts/datacore/values.yaml
 CSCOL=charts/clickstack-otel-collector/values.yaml
 AENG=charts/alertengine/values.yaml
+DBRIDGE=charts/databridge/values.yaml
+CSGW=charts/clickstack-ingest-gateway/values.yaml
 
 CH_REPO=$(yq_get "$V" '.clickhouse.image.repository')
 CH_TAG=$(yq_get "$V" '.clickhouse.image.tag')
@@ -63,6 +65,9 @@ emit_row "clickstack-otel-collector (external)" "$(yq_get "$CSCOL" '.image.repos
 emit_row "alertengine (external)" "$(yq_get "$AENG" '.image.repository')" "$(yq_get "$V" '.alertengine.image.tag')"
 emit_row "trustlens (optional)" "$(yq_get "$TLENS" '.image.repository')" "$(yq_get "$V" '.trustlens.image.tag')"
 
+# Central control plane (saas) only: serve remote data planes in other clusters.
+emit_row "databridge (saas)" "$(yq_get "$DBRIDGE" '.image.repository')" "$(yq_get "$V" '.databridge.image.tag')"
+
 # Datastores.
 emit_row "clickhouse-server (external analytics)" "$CH_REPO" "$CH_TAG"
 emit_row "redis (in-cluster)" "$(yq_get "$V" '.infrastructure.redis.image.repository')" "$(yq_get "$V" '.infrastructure.redis.image.tag')"
@@ -73,5 +78,6 @@ emit_row "firewall-gateway (cpu)" "$(yq_get "$V" '.firewall.firewall.gateway.ima
 emit_row "firewall-worker (cpu default)" "$(yq_get "$V" '.firewall.firewall.workerDefaults.image.repository')" "$(yq_get "$V" '.firewall.firewall.workerDefaults.image.tag')"
 emit_row "opentelemetry-collector-contrib (umbrella)" "$(yq_get "$V" '.global.observability.collector.image.repository')" "$(yq_get "$V" '.global.observability.collector.image.tag')"
 emit_row "opentelemetry-collector-contrib (clickstack egress)" "$(yq_get "$V" '.global.clickstack.egress.image.repository')" "$(yq_get "$V" '.global.clickstack.egress.image.tag')"
+emit_row "opentelemetry-collector-contrib (clickstack ingest gateway, saas)" "$(yq_get "$CSGW" '.image.repository')" "$(yq_get "$V" '.["clickstack-ingest-gateway"].image.tag')"
 emit_row "neuraltrust-watchdog" "$(yq_get "$WD" '.image.repository')" "$(yq_get "$WD" '.image.tag')"
 emit_row "watchdog-prometheus" "$(yq_get "$WD" '.prometheus.image.repository')" "$(yq_get "$WD" '.prometheus.image.tag')"

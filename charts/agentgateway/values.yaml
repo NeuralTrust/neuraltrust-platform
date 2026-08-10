@@ -114,7 +114,10 @@ configSync:
   tlsInsecure: true
   # TLS SNI (empty => host of endpoint).
   serverName: ""
-  # Custom CA path for TLS-intercepting proxies (empty => system roots).
+  # Path to a CA bundle for the config-sync endpoint (empty => system roots).
+  # Two uses: a TLS-intercepting corporate proxy, or a customer-owned control
+  # plane whose listener presents a private or chart-generated certificate. Mount
+  # the PEM with global.customCaCert, or any other volume.
   tlsCa: ""
   # Must match the control plane. Never auto-generated.
   token: ""
@@ -139,6 +142,36 @@ configSync:
     autoGenerate: true # false + existingSecret to bring your own cert/key/ca
     existingSecret: "" # kubernetes.io/tls-style Secret with tls.crt, tls.key, ca.crt
     durationDays: 3650
+  # Publish the config-sync gRPC listener outside the cluster. Only rendered
+  # under global.deploymentMode=saas, where data planes in other clusters dial
+  # agentgateway-configsync.<global.controlPlane.domain>:443. Layer 4 — the
+  # control plane terminates TLS itself, the LB only forwards TCP.
+  #
+  # Once this is on the listener needs a certificate the remote planes accept:
+  # either grpcTls.existingSecret, or selfSignedTls below.
+  expose:
+    enabled: null # null => on in saas; false to keep it ClusterIP (private link)
+    # Publish with the certificate grpcTls.autoGenerate mints, and distribute its
+    # CA as configuration instead of relying on a trust store. The route for a
+    # control plane reached over a private network: export the CA with
+    # scripts/export-controlplane-ca.sh and set configSync.tlsCa on each data
+    # plane. Remote planes reject the handshake until you do.
+    selfSignedTls: false
+    type: LoadBalancer
+    port: 443
+    # Cloud-specific LB wiring goes here, e.g. on EKS:
+    #   service.beta.kubernetes.io/aws-load-balancer-type: nlb
+    #   service.beta.kubernetes.io/aws-load-balancer-scheme: internal
+    # "internal" for data planes arriving over VPC peering or a private link;
+    # "internet-facing" only when they genuinely traverse the internet. On GKE:
+    #   networking.gke.io/load-balancer-type: "Internal"
+    annotations: {}
+    # Restrict to the remote clusters' egress ranges. Empty means the listener
+    # is reachable from anywhere the LB is.
+    loadBalancerSourceRanges: []
+    loadBalancerClass: ""
+    loadBalancerIP: ""
+    externalTrafficPolicy: ""
 # TrustGuard integration (proxy → trustguard /v1/evaluate via client-credentials).
 trustguard:
   # Empty ⇒ auto-derived to the in-cluster data-plane Service

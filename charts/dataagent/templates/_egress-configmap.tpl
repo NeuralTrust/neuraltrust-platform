@@ -1,4 +1,5 @@
 {{- define "dataagent.egressConfigmapData" -}}
+{{- $egressCfg := default dict (default dict (default dict .Values.global).clickstack).egress -}}
 extensions:
   health_check:
     # Default global.clickstack.egress.listenHost "::" → [::]:port (dual-stack
@@ -36,6 +37,10 @@ exporters:
     auth:
       authenticator: oauth2client
     compression: gzip
+    {{- with $egressCfg.tlsCaSecretName }}
+    tls:
+      ca_file: /etc/otelcol/ca/ca.crt
+    {{- end }}
     retry_on_failure:
       enabled: true
       initial_interval: 5s
