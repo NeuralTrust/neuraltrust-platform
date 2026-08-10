@@ -1,0 +1,24 @@
+{{- if and (eq (include "databridge.deploy" .) "true") .Values.podDisruptionBudget.enabled }}
+{{- /* With one replica this cannot make a rollout seamless — Recreate already
+       drops the pod — and it must not pretend to: a budget that forbids the
+       last pod's eviction deadlocks every node drain on this node. It declares
+       the workload as disruption-sensitive so an operator draining a node sees
+       it, and allows the eviction. */}}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "databridge.fullname" . }}
+  labels:
+    {{- include "databridge.labels" . | nindent 4 }}
+    app.kubernetes.io/component: broker
+spec:
+  {{- if .Values.podDisruptionBudget.minAvailable }}
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  {{- else if .Values.podDisruptionBudget.maxUnavailable }}
+  maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "databridge.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: broker
+{{- end }}

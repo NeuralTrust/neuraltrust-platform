@@ -1,0 +1,41 @@
+{{- if eq (include "databridge.deploy" .) "true" }}
+{{- $tlsSecret := include "databridge.tlsSecretName" . }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "databridge.fullname" . }}-config
+  labels:
+    {{- include "databridge.labels" . | nindent 4 }}
+    app.kubernetes.io/component: broker
+data:
+  SERVICE_NAME: {{ include "databridge.fullname" . | quote }}
+  LOG_LEVEL: {{ .Values.config.logLevel | default "info" | quote }}
+  APPLICATION_VERSION: {{ .Chart.AppVersion | quote }}
+  SHUTDOWN_TIMEOUT: {{ .Values.config.shutdownTimeout | default "90s" | quote }}
+
+  AUTH_MODE: {{ .Values.auth.mode | default "introspect" | quote }}
+  {{- /* Only the modes that call DataCore need its address. */}}
+  {{- if has (.Values.auth.mode | default "introspect") (list "introspect" "jwt") }}
+  DATACORE_INTROSPECTION_URL: {{ include "databridge.introspectionURL" . | quote }}
+  {{- with .Values.auth.datacoreTelemetryExchangeURL }}
+  DATACORE_TELEMETRY_EXCHANGE_URL: {{ . | quote }}
+  {{- end }}
+  {{- end }}
+
+  NORTHBOUND_GRPC_ADDR: {{ printf ":%v" .Values.ports.northbound | quote }}
+  SOUTHBOUND_GRPC_ADDR: {{ printf ":%v" .Values.ports.southbound | quote }}
+  HEALTH_ADDR: {{ printf ":%v" .Values.ports.health | quote }}
+
+  NORTHBOUND_MAX_INFLIGHT_PER_TENANT: {{ .Values.config.northbound.maxInflightPerTenant | quote }}
+  NORTHBOUND_REQUEST_TIMEOUT: {{ .Values.config.northbound.requestTimeout | quote }}
+
+  SOUTHBOUND_SEND_BUFFER: {{ .Values.config.southbound.sendBuffer | quote }}
+  SOUTHBOUND_PING_INTERVAL: {{ .Values.config.southbound.pingInterval | quote }}
+  SOUTHBOUND_KEEPALIVE_TIME: {{ .Values.config.southbound.keepaliveTime | quote }}
+  SOUTHBOUND_KEEPALIVE_TIMEOUT: {{ .Values.config.southbound.keepaliveTimeout | quote }}
+  SOUTHBOUND_KEEPALIVE_MIN_TIME: {{ .Values.config.southbound.keepaliveMinTime | quote }}
+  {{- with $tlsSecret }}
+  SOUTHBOUND_TLS_CERT_FILE: "/etc/southbound-tls/tls.crt"
+  SOUTHBOUND_TLS_KEY_FILE: "/etc/southbound-tls/tls.key"
+  {{- end }}
+{{- end }}

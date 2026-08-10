@@ -1,0 +1,6 @@
+apiVersion: v2
+name: clickstack-ingest-gateway
+description: ClickStack ingest gateway — public OTLP edge for senders this cluster does not trust. Authenticates each batch against DataCore-issued RS256 JWTs, stamps the tenant from the verified claim, and forwards to the in-cluster ClickStack collector. Deployed only when global.deploymentMode=saas.
+type: application
+version: 0.1.0
+appVersion: "0.156.0"

@@ -48,7 +48,20 @@ spec:
         env:
         {{- /* Shared credentials come from platform-secrets; an explicit env
                entry outranks the legacy copy still arriving via envFrom. */}}
-        {{- include "neuraltrust-platform.platformSecretEnv" (dict "ctx" . "keys" (dict "AUTH_JWT_HS256_SECRET" "AUTH_JWT_HS256_SECRET") "skip" .Values.extraEnv) | nindent 8 }}
+        {{- $sharedKeys := dict "AUTH_JWT_HS256_SECRET" "AUTH_JWT_HS256_SECRET" }}
+        {{- /* saas only. The introspection token authenticates DataBridge's
+               callbacks and must equal the DATACORE_SERVICE_TOKEN DataBridge
+               presents; the signing secret signs the enrolment JWTs DataBridge
+               verifies; the RS256 key signs the OTLP access tokens the ingest
+               gateway verifies. DataCore fails closed without the first two in
+               hybrid residency, and turns telemetry signing on when it sees the
+               third. */}}
+        {{- if eq (include "neuraltrust-platform.isSaas" .) "true" }}
+        {{- $_ := set $sharedKeys "ENROLMENT_INTROSPECTION_TOKEN" "ENROLMENT_INTROSPECTION_TOKEN" }}
+        {{- $_ = set $sharedKeys "ENROLMENT_SIGNING_SECRET" "ENROLMENT_SIGNING_SECRET" }}
+        {{- $_ = set $sharedKeys "TELEMETRY_JWT_PRIVATE_KEY_PEM" "TELEMETRY_JWT_PRIVATE_KEY_PEM" }}
+        {{- end }}
+        {{- include "neuraltrust-platform.platformSecretEnv" (dict "ctx" . "keys" $sharedKeys "skip" .Values.extraEnv) | nindent 8 }}
         {{- if ne (include "neuraltrust-platform.postgres.iamAuth" (dict "ctx" . "database" .Values.database)) "true" }}
         {{- with include "neuraltrust-platform.datastore.credentialEnv" (dict "ref" .Values.database.existingSecret "envName" "POSTGRES_PASSWORD") }}
         {{- . | nindent 8 }}

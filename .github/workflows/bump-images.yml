@@ -58,6 +58,10 @@ on:
         description: "datacore tag (e.g. v0.1.0). Empty = latest from AR."
         required: false
         default: ""
+      databridge_tag:
+        description: "databridge tag (e.g. v0.1.0). Empty = latest from AR. saas mode only."
+        required: false
+        default: ""
       clickstack_otel_collector_tag:
         description: "clickstack-otel-collector tag (e.g. 2.30.1). Empty = latest from AR (bare X.Y.Z)."
         required: false
@@ -190,6 +194,7 @@ jobs:
           TRUSTLENS="${{ inputs.trustlens_tag }}"
           DATAAGENT=$(resolve_tag "dataagent" "${{ inputs.dataagent_tag }}")
           DATACORE=$(resolve_tag "datacore" "${{ inputs.datacore_tag }}")
+          DATABRIDGE=$(resolve_tag "databridge" "${{ inputs.databridge_tag }}")
           ALERTENGINE=$(resolve_tag "alertengine" "${{ inputs.alertengine_tag }}")
 
           # Infrastructure images (non-standard tag patterns, override default regex).
@@ -211,6 +216,7 @@ jobs:
           echo "trustlens=${TRUSTLENS}" >> "$GITHUB_OUTPUT"
           echo "dataagent=${DATAAGENT}" >> "$GITHUB_OUTPUT"
           echo "datacore=${DATACORE}" >> "$GITHUB_OUTPUT"
+          echo "databridge=${DATABRIDGE}" >> "$GITHUB_OUTPUT"
           echo "clickstack_otel_collector=${CLICKSTACK_OTEL_COLLECTOR}" >> "$GITHUB_OUTPUT"
           echo "opentelemetry_collector_contrib=${OTEL_COLLECTOR_CONTRIB}" >> "$GITHUB_OUTPUT"
           echo "alertengine=${ALERTENGINE}" >> "$GITHUB_OUTPUT"
@@ -231,6 +237,7 @@ jobs:
           echo "| trustlens | \`${TRUSTLENS:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| dataagent | \`${DATAAGENT:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| datacore | \`${DATACORE:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| databridge | \`${DATABRIDGE:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| clickstack-otel-collector | \`${CLICKSTACK_OTEL_COLLECTOR:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| opentelemetry-collector-contrib | \`${OTEL_COLLECTOR_CONTRIB:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| alertengine | \`${ALERTENGINE:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
@@ -252,6 +259,7 @@ jobs:
           BUMP_TRUSTLENS=false
           BUMP_DATAAGENT=false
           BUMP_DATACORE=false
+          BUMP_DATABRIDGE=false
           BUMP_CLICKSTACK_OTEL_COLLECTOR=false
           BUMP_ALERTENGINE=false
           BUMP_CLICKHOUSE=false
@@ -444,6 +452,13 @@ jobs:
             yq eval -i ".appVersion = \"${TAG}\"" charts/datacore/Chart.yaml
           fi
 
+          TAG="${{ steps.tags.outputs.databridge }}"
+          if update_values_tag '.databridge.image.tag' "$TAG" "databridge"; then
+            BUMP_DATABRIDGE=true
+            yq eval -i ".image.tag = \"${TAG}\"" charts/databridge/values.yaml
+            yq eval -i ".appVersion = \"${TAG}\"" charts/databridge/Chart.yaml
+          fi
+
           TAG="${{ steps.tags.outputs.clickstack_otel_collector }}"
           if update_values_tag '.["clickstack-otel-collector"].image.tag' "$TAG" "clickstack-otel-collector"; then
             BUMP_CLICKSTACK_OTEL_COLLECTOR=true
@@ -472,8 +487,11 @@ jobs:
 
           # =============================================
           # 9. Infrastructure: opentelemetry-collector-contrib
-          # Shared by the umbrella OTel Collector and the hybrid ClickStack
-          # egress sidecar. Keep both values paths + hardcoded fallbacks in sync.
+          # Shared by the umbrella OTel Collector, the hybrid ClickStack egress
+          # sidecar and the saas ClickStack ingest gateway. Keep every values
+          # path + hardcoded fallback in sync: a gateway left behind on an older
+          # tag than the egress sidecars is an untested combination on the hop
+          # that carries every remote data plane's telemetry.
           # =============================================
           TAG="${{ steps.tags.outputs.opentelemetry_collector_contrib }}"
           if [[ -n "$TAG" ]]; then
@@ -483,6 +501,19 @@ jobs:
             # Only sync egress when the hybrid ClickStack egress image block exists.
             if [[ -n "$(yq eval '.global.clickstack.egress.image.repository // ""' values.yaml)" ]]; then
               if update_values_tag '.global.clickstack.egress.image.tag' "$TAG" "opentelemetry-collector-contrib (clickstack egress)"; then
+                :
+              fi
+            fi
+            # Same image again for the saas ingest gateway: the umbrella pin the
+            # install actually resolves, then the subchart's own default so the
+            # two never disagree.
+            if [[ -n "$(yq eval '.["clickstack-ingest-gateway"].image.tag // ""' values.yaml)" ]]; then
+              if update_values_tag '.["clickstack-ingest-gateway"].image.tag' "$TAG" "opentelemetry-collector-contrib (clickstack ingest gateway)"; then
+                :
+              fi
+            fi
+            if [[ -f charts/clickstack-ingest-gateway/values.yaml ]]; then
+              if update_values_tag '.image.tag' "$TAG" "opentelemetry-collector-contrib (ingest gateway subchart default)" "charts/clickstack-ingest-gateway/values.yaml"; then
                 :
               fi
             fi
@@ -562,6 +593,7 @@ jobs:
           [[ "$BUMP_TRUSTLENS" == "true" ]] && bump_dep "trustlens" "trustlens"
           [[ "$BUMP_DATAAGENT" == "true" ]] && bump_dep "dataagent" "dataagent"
           [[ "$BUMP_DATACORE" == "true" ]] && bump_dep "datacore" "datacore"
+          [[ "$BUMP_DATABRIDGE" == "true" ]] && bump_dep "databridge" "databridge"
           [[ "$BUMP_CLICKSTACK_OTEL_COLLECTOR" == "true" ]] && bump_dep "clickstack-otel-collector" "clickstack-otel-collector"
           [[ "$BUMP_ALERTENGINE" == "true" ]] && bump_dep "alertengine" "alertengine"
           [[ "$BUMP_CLICKHOUSE" == "true" ]] && bump_dep "clickhouse" "clickhouse"
@@ -638,6 +670,9 @@ jobs:
             charts/dataagent/Chart.yaml \
             charts/datacore/values.yaml \
             charts/datacore/Chart.yaml \
+            charts/databridge/values.yaml \
+            charts/databridge/Chart.yaml \
+            charts/clickstack-ingest-gateway/values.yaml \
             charts/clickstack-otel-collector/values.yaml \
             charts/clickstack-otel-collector/Chart.yaml \
             charts/alertengine/values.yaml \

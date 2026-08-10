@@ -1,0 +1,26 @@
+{{- if eq (include "databridge.deploy" .) "true" }}
+{{- /* DataCore dials this to fan a query out across connected agents. Cluster
+       internal by design: nothing outside should be able to ask DataBridge to
+       query a data plane. */}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "databridge.fullname" . }}-northbound
+  labels:
+    {{- include "databridge.labels" . | nindent 4 }}
+    app.kubernetes.io/component: northbound
+  {{- with .Values.service.northbound.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.northbound.type | default "ClusterIP" }}
+  ports:
+    - name: grpc
+      port: {{ .Values.service.northbound.port | default 50051 }}
+      targetPort: northbound
+      protocol: TCP
+  selector:
+    {{- include "databridge.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: broker
+{{- end }}

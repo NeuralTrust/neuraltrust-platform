@@ -1,0 +1,112 @@
+{{- if eq (include "clickstack-ingest-gateway.deploy" .) "true" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "clickstack-ingest-gateway.fullname" . }}
+  labels:
+    {{- include "clickstack-ingest-gateway.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ingest-gateway
+spec:
+  replicas: {{ .Values.replicas | default 2 }}
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      {{- include "clickstack-ingest-gateway.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: ingest-gateway
+  template:
+    metadata:
+      labels:
+        {{- include "clickstack-ingest-gateway.labels" . | nindent 8 }}
+        app.kubernetes.io/component: ingest-gateway
+      annotations:
+        {{- /* The collector reads its config once at boot, so an edit to the
+               ConfigMap alone would sit unapplied until something else
+               restarted the pod. */}}
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . | quote }}
+      {{- end }}
+      enableServiceLinks: false
+      serviceAccountName: {{ include "clickstack-ingest-gateway.serviceAccountName" . }}
+      {{- include "clickstack-ingest-gateway.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: collector
+          image: {{ include "clickstack-ingest-gateway.image" (dict "repository" .Values.image.repository "tag" (.Values.image.tag | default .Chart.AppVersion) "global" .Values.global) | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
+          args:
+            - "--config=/conf/collector.yaml"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: otlp-grpc
+              containerPort: {{ .Values.ports.otlpGrpc }}
+              protocol: TCP
+            - name: otlp-http
+              containerPort: {{ .Values.ports.otlpHttp }}
+              protocol: TCP
+            - name: health
+              containerPort: {{ .Values.ports.health }}
+              protocol: TCP
+          env:
+            {{- /* The listeners bind the pod IP rather than 0.0.0.0, so the
+                   collector is reachable through the Service but not on
+                   loopback from a sidecar. */}}
+            - name: MY_POD_IP
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: status.podIP
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: health
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: collector-config
+              mountPath: /conf
+              readOnly: true
+      volumes:
+        - name: collector-config
+          configMap:
+            name: {{ include "clickstack-ingest-gateway.fullname" . }}-config
+            items:
+              - key: collector.yaml
+                path: collector.yaml
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

@@ -2,7 +2,7 @@ apiVersion: v2
 name: neuraltrust-platform
 description: NeuralTrust platform Helm chart (v2 hybrid + external)
 type: application
-version: 2.9.7
+version: 2.10.0
 appVersion: "2.0.0"
 icon: https://neuraltrust.ai/favicon.ico
 # For v1 clusters pin --version ~1.14.0.
@@ -68,6 +68,21 @@ dependencies:
   - name: datacore
     version: 0.1.18
     repository: file://./charts/datacore
+    tags:
+      - neuraltrust
+      - v2
+  # DataBridge — saas only. Brokers data planes running outside this cluster.
+  - name: databridge
+    version: 0.1.0
+    repository: file://./charts/databridge
+    tags:
+      - neuraltrust
+      - v2
+  # ClickStack ingest gateway — saas only. Public OTLP edge in front of the
+  # collector below, for senders outside this cluster.
+  - name: clickstack-ingest-gateway
+    version: 0.1.0
+    repository: file://./charts/clickstack-ingest-gateway
     tags:
       - neuraltrust
       - v2
