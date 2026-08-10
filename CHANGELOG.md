@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.9.8] — 2026-08-10
+
 ### Added
 
 - **AUT-488: `global.deploymentMode: saas` — a customer-owned central control
