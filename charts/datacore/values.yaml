@@ -26,11 +26,52 @@ autoscaling:
   targetCPUUtilizationPercentage: 80
   targetMemoryUtilizationPercentage: 90
 config:
-  # "saas" → ClickHouse residency (external/self-hosted). "hybrid" → DataBridge.
-  # Postgres still required unless RESIDENCY_ALLOW_STUB=true (dev only).
-  residencyBackend: "saas"
+  # Where DataCore reads residency data from. The names are DataCore's own and
+  # do NOT line up with global.deploymentMode:
+  #   "saas"   → query the local ClickHouse directly. Right for deploymentMode
+  #              external, where every data plane is in this cluster.
+  #   "hybrid" → fan the query out through DataBridge to data planes elsewhere.
+  #              Right for deploymentMode saas.
+  # Empty derives the correct one from deploymentMode, which is what you want
+  # unless you are doing something deliberately unusual. Set explicitly to
+  # override. Postgres is required either way unless RESIDENCY_ALLOW_STUB=true.
+  residencyBackend: ""
   logLevel: "info"
   httpAddr: ":8080"
+# DataBridge leg — only read when residencyBackend resolves to "hybrid".
+# DataCore refuses to start in that mode without an address, so the chart wires
+# it from the in-cluster northbound Service.
+databridge:
+  addr: "" # Empty ⇒ databridge-northbound.<namespace>.svc.cluster.local:50051
+  tls: false # In-cluster hop
+# Enrolment credentials DataCore issues to data planes, and the introspection
+# endpoint DataBridge calls back on. ENROLMENT_INTROSPECTION_TOKEN and
+# ENROLMENT_SIGNING_SECRET come from the shared platform Secret; the
+# introspection token must equal DataBridge's DATACORE_SERVICE_TOKEN, which the
+# chart guarantees by aliasing them to one value.
+enrolment:
+  jwt:
+    issuer: "datacore"
+    # DataBridge is the audience: these tokens authenticate an agent to it.
+    audience: "databridge"
+  tokenTTL: ""
+# RS256 OTLP access tokens. DataCore mints them and publishes the JWKS the
+# ClickStack ingest gateway validates against. Signing turns itself on as soon
+# as a private key is present, which in saas mode the shared platform Secret
+# provides — and DataCore then REQUIRES an issuer URL, so the chart always sets
+# both together.
+telemetryJwt:
+  # No pinning needed on the verifier side: the gateway resolves keys through
+  # JWKS rather than a fixed kid.
+  kid: "telemetry-v1"
+  # Must equal clickstack-ingest-gateway.auth.audience. Same default on both
+  # sides, and the umbrella refuses to render if they are overridden to differ.
+  audience: "otlp-ingest"
+  ttl: ""
+  # Empty ⇒ the in-cluster DataCore URL, which is where the ingest gateway
+  # discovers JWKS. Both sides default to one helper; overriding only one of them
+  # is refused at render, since OIDC compares issuer URLs byte for byte.
+  issuerUrl: ""
 ports:
   http: 8080
 # PostgreSQL connection (own "datacore" database + role; DataCore renders in

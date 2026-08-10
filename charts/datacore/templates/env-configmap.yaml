@@ -1,4 +1,15 @@
 {{- if eq (include "neuraltrust-platform.isExternal" .) "true" }}
+{{- $isSaas := eq (include "neuraltrust-platform.isSaas" .) "true" }}
+{{- /* DataCore's "hybrid" is the mode that reaches data planes through
+       DataBridge, which is exactly what deploymentMode=saas needs. The word
+       collision is unfortunate; the mapping is deliberate. */}}
+{{- $residency := .Values.config.residencyBackend | default (ternary "hybrid" "saas" $isSaas) }}
+{{- /* An overlay that resets one of these blocks writes `null` rather than
+       removing the key, and a bare dereference then aborts the render. */}}
+{{- $bridge := default dict .Values.databridge }}
+{{- $enrolment := default dict .Values.enrolment }}
+{{- $enrolmentJwt := default dict $enrolment.jwt }}
+{{- $telemetry := default dict .Values.telemetryJwt }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -6,7 +17,35 @@ metadata:
   labels:
     {{- include "datacore.labels" . | nindent 4 }}
 data:
-  RESIDENCY_BACKEND: {{ .Values.config.residencyBackend | quote }}
+  RESIDENCY_BACKEND: {{ $residency | quote }}
+  {{- if eq $residency "hybrid" }}
+  {{- /* DataCore refuses to start in this mode without an address. */}}
+  DATABRIDGE_ADDR: {{ $bridge.addr | default (include "neuraltrust-platform.databridge.northboundAddr" .) | quote }}
+  DATABRIDGE_TLS: {{ $bridge.tls | default false | quote }}
+  ENROLMENT_JWT_ISSUER: {{ $enrolmentJwt.issuer | default "datacore" | quote }}
+  ENROLMENT_JWT_AUDIENCE: {{ $enrolmentJwt.audience | default "databridge" | quote }}
+  {{- with $enrolment.tokenTTL }}
+  ENROLMENT_TOKEN_TTL: {{ . | quote }}
+  {{- end }}
+  {{- end }}
+  {{- /* Telemetry signing switches on the moment a private key is present, and
+         DataCore then hard-requires the issuer URL and audience. The key is
+         minted into the shared platform Secret in saas mode only, so these
+         travel with it — set one without the others and the pod never starts. */}}
+  {{- if $isSaas }}
+  {{- $issuerUrl := $telemetry.issuerUrl | default (include "neuraltrust-platform.datacore.internalUrl" .) }}
+  TELEMETRY_JWT_KID: {{ $telemetry.kid | default "telemetry-v1" | quote }}
+  TELEMETRY_JWT_AUDIENCE: {{ $telemetry.audience | default "otlp-ingest" | quote }}
+  {{- /* OIDC identifies an issuer by its URL, and the ingest gateway builds its
+         verifier from the issuer URL below: it rejects any token whose iss claim
+         is a different string. DataCore's own default for iss is the bare name
+         "datacore", which never matches, so the chart pins both to one value. */}}
+  TELEMETRY_JWT_ISSUER: {{ $issuerUrl | quote }}
+  TELEMETRY_JWT_ISSUER_URL: {{ $issuerUrl | quote }}
+  {{- with $telemetry.ttl }}
+  TELEMETRY_JWT_TTL: {{ . | quote }}
+  {{- end }}
+  {{- end }}
   LOG_LEVEL: {{ .Values.config.logLevel | quote }}
   HTTP_ADDR: {{ .Values.config.httpAddr | quote }}
   POSTGRES_HOST: {{ include "neuraltrust-platform.postgres.host" (dict "ctx" . "host" .Values.database.host) | quote }}

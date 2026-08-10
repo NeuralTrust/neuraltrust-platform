@@ -1,0 +1,118 @@
+{{- if eq (include "clickstack-ingest-gateway.deploy" .) "true" }}
+{{- $scope := .Values.auth.requiredScope | default "otlp:write" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "clickstack-ingest-gateway.fullname" . }}-config
+  labels:
+    {{- include "clickstack-ingest-gateway.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ingest-gateway
+data:
+  collector.yaml: |
+    # Public OTLP edge. Every sender here is untrusted until its JWT verifies.
+    # Data planes reach this over OTLP/HTTP; TLS is terminated by the ingress in
+    # front, so the listeners themselves are cleartext.
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: ${env:MY_POD_IP}:{{ .Values.ports.otlpGrpc }}
+            auth:
+              authenticator: oidc
+          http:
+            endpoint: ${env:MY_POD_IP}:{{ .Values.ports.otlpHttp }}
+            auth:
+              authenticator: oidc
+
+    processors:
+      memory_limiter:
+        check_interval: {{ .Values.processors.memoryLimiter.checkInterval | quote }}
+        limit_percentage: {{ .Values.processors.memoryLimiter.limitPercentage }}
+        spike_limit_percentage: {{ .Values.processors.memoryLimiter.spikeLimitPercentage }}
+
+      # Tenant comes from the verified claim and overwrites whatever the payload
+      # said. This is the whole reason the edge exists: without it a data plane
+      # holding a valid token could label its telemetry as another tenant's.
+      resource/tenant_from_claims:
+        attributes:
+          - key: nt.tenant_id
+            action: upsert
+            from_context: auth.claims.tenant_id
+          - key: trustgate.team_id
+            action: upsert
+            from_context: auth.claims.tenant_id
+          - key: nt.otlp_scope
+            action: upsert
+            from_context: auth.claims.scope
+
+      # Authenticated but unusable: no tenant on the token, or a token minted for
+      # something other than writing telemetry.
+      filter/require_tenant_and_scope:
+        error_mode: ignore
+        metrics:
+          datapoint:
+            - 'resource.attributes["nt.tenant_id"] == nil'
+            - 'resource.attributes["nt.tenant_id"] == ""'
+            - 'resource.attributes["nt.otlp_scope"] != "{{ $scope }}"'
+        traces:
+          span:
+            - 'resource.attributes["nt.tenant_id"] == nil'
+            - 'resource.attributes["nt.tenant_id"] == ""'
+            - 'resource.attributes["nt.otlp_scope"] != "{{ $scope }}"'
+        logs:
+          log_record:
+            - 'resource.attributes["nt.tenant_id"] == nil'
+            - 'resource.attributes["nt.tenant_id"] == ""'
+            - 'resource.attributes["nt.otlp_scope"] != "{{ $scope }}"'
+
+      # Scope was only needed for the filter above; it is not telemetry.
+      resource/drop_scope_attr:
+        attributes:
+          - key: nt.otlp_scope
+            action: delete
+
+      batch:
+        send_batch_max_size: {{ .Values.processors.batch.sendBatchMaxSize }}
+        send_batch_size: {{ .Values.processors.batch.sendBatchSize }}
+        timeout: {{ .Values.processors.batch.timeout | quote }}
+
+    exporters:
+      # The trusted collector next door — the only one holding ClickHouse
+      # credentials. This hop stays inside the cluster.
+      otlp/clickstack:
+        endpoint: {{ include "clickstack-ingest-gateway.downstreamEndpoint" . | quote }}
+        tls:
+          insecure: {{ .Values.downstream.tlsInsecure }}
+
+    extensions:
+      health_check:
+        endpoint: ${env:MY_POD_IP}:{{ .Values.ports.health }}
+        path: /health
+      # DataCore signs the telemetry tokens and publishes the JWKS. The audience
+      # must equal DataCore's TELEMETRY_JWT_AUDIENCE, and the issuer URL must
+      # equal its TELEMETRY_JWT_ISSUER_URL exactly — the collector rejects a
+      # token whose `iss` differs from the URL it discovered.
+      oidc:
+        providers:
+          - issuer_url: {{ include "clickstack-ingest-gateway.issuerUrl" . | quote }}
+            audience: {{ .Values.auth.audience | default "otlp-ingest" | quote }}
+
+    service:
+      extensions:
+        - health_check
+        - oidc
+      pipelines:
+        {{- range $signal := list "logs" "traces" "metrics" }}
+        {{ $signal }}:
+          receivers: [otlp]
+          processors: [memory_limiter, resource/tenant_from_claims, filter/require_tenant_and_scope, resource/drop_scope_attr, batch]
+          exporters: [otlp/clickstack]
+        {{- end }}
+      telemetry:
+        logs:
+          encoding: json
+          level: {{ .Values.logLevel | default "info" | quote }}
+          sampling:
+            initial: 2
+            thereafter: 500
+{{- end }}

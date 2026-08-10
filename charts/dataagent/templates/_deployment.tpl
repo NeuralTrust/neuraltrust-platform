@@ -50,6 +50,14 @@ spec:
       - name: egress-config
         configMap:
           name: {{ include "neuraltrust-platform.clickstackEgress.fullname" . }}-config
+      {{- with $egressCfg.tlsCaSecretName }}
+      - name: egress-ca-bundle
+        secret:
+          secretName: {{ . | quote }}
+          items:
+          - key: ca.crt
+            path: ca.crt
+      {{- end }}
       {{- end }}
       {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 6 }}
       containers:
@@ -184,6 +192,11 @@ spec:
           - name: egress-config
             mountPath: /etc/otelcol
             readOnly: true
+          {{- with $egressCfg.tlsCaSecretName }}
+          - name: egress-ca-bundle
+            mountPath: /etc/otelcol/ca
+            readOnly: true
+          {{- end }}
           {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 10 }}
         securityContext:
           allowPrivilegeEscalation: false

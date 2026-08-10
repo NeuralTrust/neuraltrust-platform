@@ -76,10 +76,24 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{/*
 deploymentMode: hybrid (default) → data planes + DataAgent; hosted control planes.
 external → control + data + in-cluster analytics; no DataAgent.
+saas     → everything external renders, plus the pieces that let this cluster act
+           as a control plane for data planes running somewhere else: DataBridge,
+           the ClickStack ingest gateway, and DataCore in hybrid residency.
+
+isExternal answers "does this release run the control plane in-cluster", which is
+true of both external and saas, so every control-plane template keeps its single
+gate. isSaas answers the narrower "does it also serve remote data planes" and is
+what the three additions hang off. Read the pair as a superset, not as siblings:
+saas without external would mean duplicating ~40 conditionals.
 */}}
 {{- define "neuraltrust-platform.isExternal" -}}
 {{- $global := default dict .Values.global }}
-{{- if eq ($global.deploymentMode | default "hybrid") "external" }}true{{- end }}
+{{- if has ($global.deploymentMode | default "hybrid") (list "external" "saas") }}true{{- end }}
+{{- end }}
+
+{{- define "neuraltrust-platform.isSaas" -}}
+{{- $global := default dict .Values.global }}
+{{- if eq ($global.deploymentMode | default "hybrid") "saas" }}true{{- end }}
 {{- end }}
 
 {{- define "neuraltrust-platform.isHybrid" -}}
@@ -106,10 +120,41 @@ there.
 {{- end }}
 
 {{/*
-Public DNS suffix of the selected SaaS region.
+DNS suffix every control-plane endpoint hangs off: DataBridge, ClickStack
+telemetry and both config-sync channels.
+
+`global.controlPlane.domain` wins when set, which is what points a data plane at
+a control plane somebody else runs — a customer's own `saas` install rather than
+NeuralTrust's. Unset, it falls back to the regional NeuralTrust domain, so every
+existing install keeps the endpoints it had.
+
+One knob for all four endpoints on purpose: a data plane that reached DataBridge
+on the customer's domain but still dialled NeuralTrust for config-sync would
+half-work, and the half that broke would be silent.
 */}}
 {{- define "neuraltrust-platform.saas.domain" -}}
-{{- if eq (include "neuraltrust-platform.saas.region" .) "us" -}}
+{{- $cp := default dict (default dict .Values.global).controlPlane -}}
+{{- $custom := $cp.domain | default "" | toString | trim | lower -}}
+{{- if $custom -}}
+{{- /* Callers build "databridge.%s" and "https://telemetry.%s" from this, so a
+       scheme, port or path here produces a malformed endpoint that only fails
+       once an agent tries to dial it. Reject the shapes people actually paste. */ -}}
+{{- if or (contains "://" $custom) (contains "/" $custom) (contains ":" $custom) -}}
+{{- fail (printf "global.controlPlane.domain must be a bare DNS suffix such as \"nt.example.com\" — no scheme, port or path (got %q). The chart derives databridge.<domain>:443, https://telemetry.<domain> and <product>-configsync.<domain>:443 from it." $custom) -}}
+{{- end -}}
+{{- if not (contains "." $custom) -}}
+{{- fail (printf "global.controlPlane.domain must be a fully qualified DNS suffix such as \"nt.example.com\" (got %q): the endpoints derived from it are dialled from other clusters, where a single label does not resolve." $custom) -}}
+{{- end -}}
+{{- $custom -}}
+{{- else if eq (include "neuraltrust-platform.isSaas" .) "true" -}}
+{{- /* This install *is* the control plane, so the regional fallback below is
+       never the right answer here: it would mint certificates and publish load
+       balancers for NeuralTrust's own hostnames and point the operator's data
+       planes at NeuralTrust SaaS. validate-values.yaml says the same thing, but
+       a subchart template reaches this helper first, and an error about
+       certificates would send the reader after the wrong problem. */ -}}
+{{- fail "global.deploymentMode=saas requires global.controlPlane.domain: it is the value that makes this a control plane of your own. Left empty, DataBridge, telemetry and both config-sync endpoints fall back to NeuralTrust's hosted domain, so this install would serve certificates for hostnames it does not own and your data planes would dial NeuralTrust SaaS. Set it to the bare domain your remote clusters reach this cluster on, e.g. global.controlPlane.domain=platform.example.com (no scheme, port or path). A private DNS zone is fine." -}}
+{{- else if eq (include "neuraltrust-platform.saas.region" .) "us" -}}
 us.neuraltrust.ai
 {{- else -}}
 neuraltrust.ai
@@ -132,6 +177,31 @@ Regional ClickStack ingest endpoint the DataAgent egress sidecar exports to.
 */}}
 {{- define "neuraltrust-platform.saas.telemetryEndpoint" -}}
 {{- printf "https://telemetry.%s" (include "neuraltrust-platform.saas.domain" .) -}}
+{{- end }}
+
+{{/*
+In-cluster base URL of DataCore, and the OIDC issuer for telemetry tokens.
+
+Defined once here because three parties must agree on the exact string: DataCore
+advertises it as `iss` (TELEMETRY_JWT_ISSUER_URL), the ClickStack ingest gateway
+discovers JWKS at <url>/.well-known/openid-configuration, and the gateway then
+rejects any token whose `iss` is not character-for-character what it discovered.
+A trailing slash or a different spelling of the same Service is enough to reject
+every batch, so neither side derives its own.
+
+The DataCore subchart pins fullnameOverride to "datacore", and its Service
+listens on :80, so no port appears here.
+*/}}
+{{- define "neuraltrust-platform.datacore.internalUrl" -}}
+{{- printf "http://datacore.%s.svc.cluster.local" .Release.Namespace -}}
+{{- end }}
+
+{{/*
+Northbound DataBridge address DataCore dials to reach data planes in other
+clusters. Cluster-internal, so no TLS.
+*/}}
+{{- define "neuraltrust-platform.databridge.northboundAddr" -}}
+{{- printf "databridge-northbound.%s.svc.cluster.local:50051" .Release.Namespace -}}
 {{- end }}
 
 {{/*
@@ -1749,6 +1819,139 @@ true
 {{- end }}
 
 {{/*
+Public config-sync hostname for a product, without port.
+
+The single source of truth for both ends of the same wire: a hybrid data plane
+builds its CONFIG_SYNC_GRPC_ENDPOINT from this (below), and a saas control plane
+puts it in the listener certificate's SANs and publishes a Service for it. Both
+sides resolve global.controlPlane.domain the same way, so retargeting a customer
+domain moves client and server together.
+
+Usage: {{ include "neuraltrust-platform.configSync.publicHost" (dict "ctx" . "product" "trustguard") }}
+*/}}
+{{- define "neuraltrust-platform.configSync.publicHost" -}}
+{{- $ctx := .ctx -}}
+{{- $cs := default dict $ctx.Values.configSync -}}
+{{- $domain := $cs.saasDomain | default (include "neuraltrust-platform.saas.domain" $ctx) -}}
+{{- printf "%s-configsync.%s" .product $domain -}}
+{{- end }}
+
+{{/*
+Read a value that should be a boolean but may arrive as a string.
+
+Flux `valuesFrom`, Helmfile and `--set-string` all deliver "false" rather than
+false, and a Go template treats any non-empty string as true. For a flag that
+puts a listener on a public load balancer or decides whether a certificate is
+trusted, guessing wrong in that direction is the unsafe one. Absent, nil and ""
+fall back to the supplied default; "false", "0", "no" and "off" are false.
+
+Emits "true" or nothing, so callers compare against "true".
+
+Usage: {{ include "neuraltrust-platform.boolish" (dict "value" $v "default" false) }}
+*/}}
+{{- define "neuraltrust-platform.boolish" -}}
+{{- $s := "" -}}
+{{- if not (kindIs "invalid" .value) -}}
+{{- $s = .value | toString | trim | lower -}}
+{{- end -}}
+{{- if not $s -}}
+{{- if .default }}true{{- end -}}
+{{- else if not (has $s (list "false" "0" "no" "off")) -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/*
+Whether a product's config-sync gRPC listener gets published outside the cluster.
+
+Only saas has a reason to: hybrid dials someone else's control plane, and
+external keeps its data planes in the same cluster, so ClusterIP is enough there
+and stays that way. Opt out per product with configSync.expose.enabled=false when
+a remote cluster reaches the listener over a private link instead.
+
+Usage: {{ include "neuraltrust-platform.configSync.expose" (dict "ctx" .) }}
+*/}}
+{{- define "neuraltrust-platform.configSync.expose" -}}
+{{- $ctx := .ctx -}}
+{{- if eq (include "neuraltrust-platform.isSaas" $ctx) "true" -}}
+{{- $expose := default dict (default dict $ctx.Values.configSync).expose -}}
+{{- include "neuraltrust-platform.boolish" (dict "value" $expose.enabled "default" true) -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Whether a published config-sync listener may present the self-signed certificate
+the chart generates for it.
+
+The default demands an operator-supplied certificate, because a data plane in
+another cluster verifies the listener against its own trust store and nothing
+puts a chart-minted CA there by itself. Opting in here is the supported route for
+a control plane reached over a private network — VPC peering, Direct Connect, a
+private link — where no public trust store is involved and the CA travels to the
+data planes as configuration. Distribute it with
+scripts/export-controlplane-ca.sh and point configSync.tlsCa at the mounted
+bundle; until then the handshake will fail.
+
+Usage: {{ include "neuraltrust-platform.configSync.publicSelfSigned" (dict "ctx" .) }}
+*/}}
+{{- define "neuraltrust-platform.configSync.publicSelfSigned" -}}
+{{- $ctx := .ctx -}}
+{{- if eq (include "neuraltrust-platform.configSync.expose" (dict "ctx" $ctx)) "true" -}}
+{{- $expose := default dict (default dict $ctx.Values.configSync).expose -}}
+{{- include "neuraltrust-platform.boolish" (dict "value" $expose.selfSignedTls "default" false) -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+The published config-sync Service, shared by both products so the two cannot
+drift. Layer 4 on purpose: the control plane already terminates TLS on its own
+listener (configSync.grpcTls), and an Ingress in front would have to re-terminate
+it and re-encrypt gRPC with controller-specific annotations that differ on every
+cloud. A LoadBalancer passing TCP through behaves the same on EKS, GKE and AKS.
+
+Usage: {{ include "neuraltrust-platform.configSync.publicService" (dict "ctx" . "product" "trustguard" "name" ... "labels" ... "selectorLabels" ... "targetPort" ...) }}
+*/}}
+{{- define "neuraltrust-platform.configSync.publicService" -}}
+{{- $ctx := .ctx -}}
+{{- $expose := default dict (default dict $ctx.Values.configSync).expose -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ printf "%s-configsync" .name }}
+  namespace: {{ $ctx.Release.Namespace }}
+  labels:
+    {{- .labels | nindent 4 }}
+    app.kubernetes.io/component: configsync-public
+  annotations:
+    neuraltrust.ai/config-sync-host: {{ include "neuraltrust-platform.configSync.publicHost" (dict "ctx" $ctx "product" .product) | quote }}
+    {{- with $expose.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  type: {{ $expose.type | default "LoadBalancer" }}
+  {{- with $expose.loadBalancerClass }}
+  loadBalancerClass: {{ . | quote }}
+  {{- end }}
+  {{- with $expose.loadBalancerIP }}
+  loadBalancerIP: {{ . | quote }}
+  {{- end }}
+  {{- with $expose.externalTrafficPolicy }}
+  externalTrafficPolicy: {{ . | quote }}
+  {{- end }}
+  {{- with $expose.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  selector:
+    {{- .selectorLabels | nindent 4 }}
+  ports:
+    - name: grpc
+      port: {{ $expose.port | default 443 }}
+      targetPort: {{ .targetPort }}
+      protocol: TCP
+{{- end }}
+
+{{/*
 Config-sync env. Hybrid: public config-sync host:443. External: in-cluster Service.
 Usage: {{- include "neuraltrust-platform.configSyncEnv" (dict "ctx" . "product" "trustguard") | nindent 8 }}
 */}}
@@ -1773,10 +1976,9 @@ Usage: {{- include "neuraltrust-platform.configSyncEnv" (dict "ctx" . "product" 
     {{- $endpoint = printf "%s.%s.svc.cluster.local:%v" $ctx.Values.controlPlane.name $ctx.Release.Namespace $ctx.Values.controlPlane.ports.grpc -}}
   {{- end -}}
 {{- else -}}
-  {{- $saasDomain := $cs.saasDomain | default (include "neuraltrust-platform.saas.domain" $ctx) -}}
   {{- $caPath = $cs.tlsCa -}}
   {{- if not $endpoint -}}
-    {{- $endpoint = printf "%s-configsync.%s:443" $product $saasDomain -}}
+    {{- $endpoint = printf "%s:443" (include "neuraltrust-platform.configSync.publicHost" (dict "ctx" $ctx "product" $product)) -}}
   {{- end -}}
 {{- end -}}
 - name: CONFIG_SYNC_DATA_PLANE_ENABLED
@@ -2299,6 +2501,8 @@ legacy Secret it adopts from on upgrade, and to a `generate` policy:
             fresh install gets a real credential, while an upgrade leaves the
             key absent rather than rotating it out from under data already
             encrypted with that default (AUTH_SECRET_KEY).
+  rsa     → like `random`, but emits a PEM RSA private key instead of an
+            alphanumeric string, for keys an application parses as a keypair.
 
 `requires` lists the install shapes that consume the key, and a key is emitted
 when any of them is in play:
@@ -2317,6 +2521,9 @@ when any of them is in play:
                hosted platform instead.
   watchdog   → watchdog usage export is on. It calls the control-plane and
                data-plane APIs, so it needs their keys even in hybrid.
+  saas       → deploymentMode=saas: this cluster serves data planes that live
+               elsewhere, so it needs the enrolment and telemetry credentials
+               that a purely in-cluster external install never issues.
 A hybrid install therefore carries only the credentials its in-cluster services
 actually read. Keys already present in a live `platform-secrets` are always
 kept, so an upgrade never drops one an existing install may depend on.
@@ -2351,6 +2558,19 @@ AUTH_SECRET_KEY — encrypts SSO client secrets and SMTP credentials at rest
 sessions: one value for both signing and encryption is key reuse. Uses the
 `install` policy because the app has a committed default, and replacing that
 default on a live install would make every already-encrypted row undecryptable.
+
+DATACORE_SERVICE_TOKEN — DataBridge presents it as X-Service-Token on every
+enrolment introspection and telemetry exchange, and DataCore compares it against
+ENROLMENT_INTROSPECTION_TOKEN with a constant-time equality check. The two names
+must therefore hold one value, which is what the alias guarantees; drifting them
+apart 401s every agent connection with nothing wrong on either side.
+
+TELEMETRY_JWT_PRIVATE_KEY_PEM — RS256 key DataCore mints aud=otlp-ingest access
+tokens with, and publishes as JWKS for the ingest gateway to validate against.
+Generated as PKCS#1, which is what `genPrivateKey "rsa"` emits and what
+DataCore's parser accepts alongside PKCS#8 (unlike MCP_OAUTH_SIGNING_KEY, whose
+consumer is PKCS#8-only and therefore needs a hook Job). Rotating it invalidates
+every access token still in flight, so it is only ever generated when absent.
 */}}
 {{- define "neuraltrust-platform.platformSecret.registry" -}}
 SERVER_SECRET_KEY: {legacyName: agentgateway-secrets, legacyKey: SERVER_SECRET_KEY, generate: random, length: 64, requires: external trustgate}
@@ -2371,6 +2591,10 @@ MODEL_SCANNER_SECRET: {legacyName: control-plane-secrets, legacyKey: MODEL_SCANN
 MCP_OAUTH_CLIENT_SECRET: {legacyName: control-plane-secrets, legacyKey: MCP_OAUTH_CLIENT_SECRET, generate: random, length: 64, requires: mcpOAuth}
 MCP_OAUTH_SIGNING_KEY: {legacyName: control-plane-secrets, legacyKey: MCP_OAUTH_SIGNING_KEY, generate: adopt, requires: mcpOAuth}
 AUTH_SECRET_KEY: {legacyName: control-plane-secrets, legacyKey: AUTH_SECRET_KEY, generate: install, length: 64, requires: external}
+ENROLMENT_INTROSPECTION_TOKEN: {legacyName: datacore-secrets, legacyKey: ENROLMENT_INTROSPECTION_TOKEN, generate: random, length: 64, requires: saas}
+DATACORE_SERVICE_TOKEN: {legacyName: databridge-secrets, legacyKey: DATACORE_SERVICE_TOKEN, aliasOf: ENROLMENT_INTROSPECTION_TOKEN, requires: saas}
+ENROLMENT_SIGNING_SECRET: {legacyName: datacore-secrets, legacyKey: ENROLMENT_SIGNING_SECRET, generate: random, length: 64, requires: saas}
+TELEMETRY_JWT_PRIVATE_KEY_PEM: {legacyName: datacore-secrets, legacyKey: TELEMETRY_JWT_PRIVATE_KEY_PEM, generate: rsa, requires: saas}
 {{- end }}
 
 {{/*

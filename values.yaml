@@ -5,6 +5,10 @@ global:
   platform: "gcp"
   # "hybrid" (default) → data planes in-cluster; control planes hosted.
   # "external" → control + data planes + in-cluster analytics (no DataAgent).
+  # "saas" → everything external renders, plus DataBridge, the ClickStack ingest
+  #   gateway and DataCore in hybrid residency, so this cluster can serve data
+  #   planes that live somewhere else. Point those at it with
+  #   global.controlPlane.domain below.
   deploymentMode: "hybrid"
   # Which NeuralTrust SaaS the hybrid control-plane traffic goes to:
   #   "eu" (default) → *.neuraltrust.ai
@@ -14,6 +18,21 @@ global:
   # The config-sync token and DataAgent enrolment token must be issued by that
   # same region; per-endpoint overrides below still win when set.
   saasRegion: "eu"
+  controlPlane:
+    # Point this data plane at a control plane that is not NeuralTrust's — a
+    # customer running their own global.deploymentMode=saas install, typically
+    # one central cluster with data planes in several other clusters.
+    #
+    # A bare DNS suffix, no scheme/port/path. Set it and the chart derives
+    # every control-plane endpoint from it, replacing the saasRegion map:
+    #   databridge.<domain>:443            DataAgent enrolment + query stream
+    #   https://telemetry.<domain>         ClickStack egress
+    #   <product>-configsync.<domain>:443  TrustGate / TrustGuard config-sync
+    # Leave empty to keep using NeuralTrust SaaS per saasRegion above.
+    #
+    # Enrolment and config-sync tokens must then be issued by that control
+    # plane, not by the NeuralTrust console.
+    domain: ""
   # External-only bootstrap admin for control-plane-app. Ignored in hybrid
   # (app does not render). Prefer existingSecret (avoids Helm release history);
   # inline email+password is the escape hatch when both are non-empty.
@@ -91,6 +110,12 @@ global:
       endpoint: "" # OTLP/HTTP base; default https://telemetry.neuraltrust.ai
       # Sidecar bind host. Override to "0.0.0.0" only for IPv4-only kernels.
       listenHost: "::"
+      # Secret (key ca.crt) holding the CA bundle that signs the endpoint above.
+      # Empty trusts the system roots. Set it when the telemetry endpoint belongs
+      # to a customer-owned control plane presenting a private or chart-generated
+      # certificate. The collector reads its trust store from config, not from
+      # global.customCaCert, so that setting alone does not cover this hop.
+      tlsCaSecretName: ""
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/opentelemetry-collector-contrib
         tag: "0.156.0"
@@ -807,6 +832,64 @@ datacore:
     nativePort: 9000
     database: "default"
     otelDatabase: "otel"
+# DataBridge (v2 saas only): brokers data planes running outside this cluster.
+# Their DataAgents dial the southbound Service over TLS and hold a gRPC stream;
+# DataCore queries across them northbound. Ignored in hybrid and external.
+databridge:
+  image:
+    tag: "v0.1.3"
+  auth:
+    # introspect (default) or jwt. "token" and "dev" are refused in saas mode:
+    # both let any enrolled data plane assert its own tenant.
+    mode: "introspect"
+  # Required in saas mode. Agents dial this Service directly over TLS with no
+  # ingress in front, so DataBridge terminates it itself and the certificate
+  # must cover databridge.<global.controlPlane.domain>.
+  tls:
+    existingSecret: ""
+    # Let the chart mint a self-signed CA and keypair. The route for a control
+    # plane reached over a private network; export the CA to the data planes with
+    # scripts/export-controlplane-ca.sh.
+    autoGenerate: false
+    certManager:
+      enabled: false
+      issuerRef:
+        name: ""
+  service:
+    southbound:
+      # Must stay L4 passthrough: the streams are long-lived and the agents
+      # authenticate against the certificate DataBridge itself serves.
+      # EKS needs an explicit NLB annotation; GKE gives one by default.
+      #   annotations:
+      #     service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+      #     service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+      type: LoadBalancer
+      annotations: {}
+      # Restrict to your data-plane clusters' egress ranges when you know them.
+      loadBalancerSourceRanges: []
+# ClickStack ingest gateway (v2 saas only): public OTLP door for data planes in
+# other clusters. Verifies a DataCore-signed RS256 JWT per batch, stamps the
+# tenant from the verified claim, forwards to clickstack-collector below.
+clickstack-ingest-gateway:
+  # Same upstream contrib collector as global.observability.collector and
+  # global.clickstack.egress, served from the NeuralTrust mirror. Bump all three
+  # together.
+  image:
+    tag: "0.156.0"
+  # Exposed at telemetry.<global.controlPlane.domain>, which is exactly what the
+  # data planes' egress sidecars export to. TLS terminates here, so unlike
+  # DataBridge an ordinary ingress controller is enough.
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    tls:
+      enabled: true
+      secretName: ""
+      # Mint a self-signed CA and leaf for the host above, for a control plane
+      # reached over a private network. Remote data planes must then trust the CA
+      # via global.clickstack.egress.tlsCaSecretName.
+      autoGenerate: false
 # ClickStack OTel collector (v2 external only): OTLP-to-ClickHouse pipeline.
 clickstack-otel-collector:
   image:

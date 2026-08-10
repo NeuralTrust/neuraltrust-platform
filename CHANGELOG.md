@@ -4,6 +4,110 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Added
+
+- **AUT-488: `global.deploymentMode: saas` — a customer-owned central control
+  plane.** A superset of `external` that additionally serves data planes running
+  in *other* clusters, for an organisation that wants one control plane and
+  several independently deployed data planes. Adds two subcharts: `databridge`
+  (the gRPC broker DataCore reaches remote planes through) and
+  `clickstack-ingest-gateway` (authenticated OTLP edge that verifies a
+  DataCore-signed RS256 JWT per batch and stamps the tenant from the verified
+  claim). DataCore switches to `RESIDENCY_BACKEND=hybrid` so reads route through
+  DataBridge instead of straight to ClickHouse, and the AgentGateway and
+  TrustGuard config-sync listeners — ClusterIP-only in `external` — are published
+  as layer-4 Services. `external` and `hybrid` renders are byte-identical to
+  before; the new mode is opt-in.
+
+- **`global.controlPlane.domain` retargets every cross-cluster endpoint.** One
+  value moves DataBridge, telemetry and both config-sync listeners off
+  `*.neuraltrust.ai` onto the customer's own domain, on the central cluster and on
+  each remote data plane alike. Empty keeps the existing `global.saasRegion`
+  behaviour. Bare hostnames only — a scheme, port or path is rejected at render.
+
+- **Chart-generated TLS for a control plane on a private network.**
+  `databridge.tls.autoGenerate`, `clickstack-ingest-gateway.ingress.tls.autoGenerate`
+  and `{agentgateway,trustguard}.configSync.expose.selfSignedTls` let the chart
+  mint the certificates for endpoints reached over VPC peering, Direct Connect or
+  a private link, where no publicly trusted certificate is possible or needed.
+  Keypairs are preserved across upgrades and reissued only when the names they
+  cover change. Each option is off by default and the render fails closed with
+  the alternatives spelled out, because a certificate no remote cluster trusts
+  fails at handshake time rather than at install time.
+  `scripts/export-controlplane-ca.sh` collects the resulting CAs into one
+  `kubectl apply`-able Secret for the remote clusters, refusing to bundle
+  anything that is not a parseable certificate.
+
+- **`saas` refuses to render without `global.controlPlane.domain`.** It is the
+  value that makes the install a control plane of its own; left empty every
+  endpoint fell back through `global.saasRegion` to NeuralTrust's hosted domain,
+  so the chart would mint certificates and publish load balancers for hostnames
+  the operator does not own and point their own data planes at NeuralTrust SaaS.
+  `hybrid` and `external` keep the regional fallback.
+
+- **Telemetry token drift between DataCore and the ingest gateway is refused.**
+  The issuer and audience live in two independent values blocks that agree only
+  on their defaults. Overriding one alone rendered a manifest with nothing visibly
+  wrong and a gateway that 401s every batch, so the umbrella — the only place that
+  can see both — now compares them.
+
+- **Remote data planes can trust a private control plane.**
+  `dataagent.databridge.tlsCa` emits `TLS_CA_FILE` for the DataAgent, and
+  `global.clickstack.egress.tlsCaSecretName` gives the egress collector a
+  `tls.ca_file` plus the volume and mount to back it. Previously a data plane had
+  no supported way to verify a control plane presenting a private certificate:
+  the DataAgent value did not exist and the collector reads its trust store from
+  its own config, so `global.customCaCert` alone never covered that hop.
+
+### Fixed
+
+- **`dataagent.databridge.tlsMode: insecure` no longer crash-loops.** The binary
+  refuses to start on an insecure transport without an explicit
+  `ALLOW_INSECURE_TRANSPORT`, which the chart never emitted, so the one value
+  documented for a plaintext DataBridge hop was unusable.
+
+- **`create-secrets.sh` no longer flattens a PEM into one line.** Values went
+  through a trim that ends in `tr -d '\n\r'`, which is harmless for a token and
+  destroys a private key: the new RS256 telemetry key was stored unparseable, so
+  DataCore came up with signing off and the ingest gateway rejected every OTLP
+  batch — from a Secret that looks correct in `kubectl`. Multi-line values are now
+  stored byte-exact, and the generated key matches the shape the chart's own
+  `genPrivateKey "rsa"` produces (PKCS#1, 4096) instead of OpenSSL 3.x's PKCS#8
+  default at 2048.
+
+- **A reissued certificate now reaches the listener that serves it.** DataBridge
+  and both config-sync control planes read their keypair off disk at startup, and
+  nothing they mount by `envFrom` changes when a certificate is reissued, so
+  retargeting `global.controlPlane.domain` updated the Secret while the listeners
+  kept presenting the old certificate — failing the handshake on exactly the name
+  the reissue existed to cover. Only the chart-generated path is annotated; an
+  operator-supplied or cert-manager Secret rotates where a template checksum
+  cannot see it.
+
+- **A string-typed `false` no longer switches flags on.** Flux `valuesFrom`,
+  Helmfile and `--set-string` all deliver `"false"` rather than `false`, and a Go
+  template reads any non-empty string as true, so
+  `configSync.expose.enabled="false"` published a config-sync listener on a public
+  load balancer — the unsafe direction. `expose.enabled`, `expose.selfSignedTls`,
+  the two `tls.autoGenerate` flags and `tls.certManager.enabled` now coerce.
+
+- **The DataBridge budget no longer deadlocks a node drain.** `minAvailable: 1`
+  against a single replica makes `disruptionsAllowed` permanently 0: no
+  replacement can be Ready before the only pod is evicted, and the eviction is
+  what the budget refuses, so `kubectl drain` blocked forever on that node.
+
+### Changed
+
+- **The saas ingest gateway pulls its collector from the NeuralTrust registry**
+  (`europe-west1-docker.pkg.dev/.../opentelemetry-collector-contrib`) rather than
+  Docker Hub, so an install pulls every image from one registry, under the
+  `gcr-secret` pull secret it already has, and an air-gapped cluster has one more
+  entry to mirror rather than a second registry to reach. It is the same image
+  and tag the hybrid egress sidecars run; `bump-images.yml` now moves all three
+  together, and `scripts/release-images-markdown.sh` lists `databridge` and the
+  gateway for mirroring runs. Unlike the two older collector copies,
+  `global.imageRegistry` retargets this one.
+
 ## [v2.9.6] — 2026-08-06
 
 Chart `2.9.5` → `2.9.6`. Watchdog subchart `0.3.4` → `0.3.5`.
