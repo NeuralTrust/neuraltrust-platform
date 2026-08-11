@@ -19,7 +19,7 @@ image:
   # global.observability.collector and global.clickstack.egress: all three are
   # the same upstream image and bump-images.yml moves them together.
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/opentelemetry-collector-contrib
-  tag: "0.156.0"
+  tag: "0.158.0"
   pullPolicy: IfNotPresent
 # Empty falls back to global.imagePullSecrets; "none" suppresses it entirely
 # (a mirror in the same project needs no credentials).
@@ -28,9 +28,7 @@ serviceAccount:
   create: true
   name: "clickstack-ingest-gateway"
   annotations: {}
-
 replicas: 2
-
 auth:
   # Must equal datacore.telemetryJwt.audience. They share this default, and the
   # umbrella refuses to render if the two are overridden to differ — a mismatch
@@ -42,22 +40,18 @@ auth:
   issuerUrl: ""
   # Scope a token must carry for its batch to be accepted.
   requiredScope: "otlp:write"
-
 # Where verified telemetry goes next: the trusted in-cluster collector that owns
 # the ClickHouse credentials. Cleartext because it never leaves the cluster.
 downstream:
   endpoint: "" # Empty ⇒ clickstack-collector.<namespace>.svc.cluster.local:4317
   tlsInsecure: true
-
 ports:
   otlpGrpc: 4317
   otlpHttp: 4318
   health: 13133
-
 service:
   type: ClusterIP
   annotations: {}
-
 # Public exposure. Unlike DataBridge this one is plain OTLP/HTTP and terminates
 # TLS at the ingress, so an ordinary L7 Ingress works on any cloud.
 # Hostname is telemetry.<global.controlPlane.domain>, the same value the
@@ -84,7 +78,6 @@ ingress:
     # when the host changes, so retargeting the domain reaches the certificate.
     autoGenerate: false
     durationDays: 3650
-
 processors:
   memoryLimiter:
     checkInterval: "1s"
@@ -94,15 +87,12 @@ processors:
     sendBatchSize: 200
     sendBatchMaxSize: 200
     timeout: "1s"
-
 podDisruptionBudget:
   enabled: true
   minAvailable: 1
-
 resources:
   requests: {cpu: 100m, memory: 256Mi}
   limits: {cpu: 500m, memory: 512Mi}
-
 logLevel: "info"
 priorityClassName: ""
 nodeSelector: {}

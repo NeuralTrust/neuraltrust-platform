@@ -55,6 +55,43 @@ Service account name
 {{- end }}
 
 {{/*
+Peer discovery mode, validated. "off" or "headless".
+
+Fails closed on replicas > 1 with discovery off. An agent's stream lives in the
+memory of exactly one pod and DataCore pins one pod per channel, so without
+forwarding most raw reads land on a pod holding no stream — a per-tenant,
+intermittent failure that looks like a broken data plane rather than a
+misconfigured chart. Refusing the render is the only place this is cheap to see.
+*/}}
+{{- define "databridge.peerDiscovery" -}}
+{{- $peers := default dict .Values.peers -}}
+{{- $mode := $peers.discovery | default "off" | toString | trim | lower -}}
+{{- if not (has $mode (list "off" "headless")) -}}
+{{- fail (printf "databridge.peers.discovery must be \"off\" or \"headless\" (got %q)" $mode) -}}
+{{- end -}}
+{{- $replicas := int (.Values.replicas | default 1) -}}
+{{- if and (gt $replicas 1) (eq $mode "off") -}}
+{{- fail (printf "databridge.replicas=%d requires databridge.peers.discovery=headless. A DataAgent's stream is a live connection held in one pod's memory: it cannot be shared or moved between replicas. DataCore opens one channel per pod and pins it, so with several replicas and no forwarding roughly (N-1)/N of raw reads reach a pod that holds no stream for that tenant and fail with agent_unavailable — intermittently, per tenant, and only for tenants whose agent happened to connect elsewhere. Set databridge.peers.discovery=headless so a replica that misses locally asks its siblings, or keep databridge.replicas=1." $replicas) -}}
+{{- end -}}
+{{- $mode -}}
+{{- end }}
+
+{{/*
+Whether peer forwarding is on. Gates the headless Service and the peer env.
+*/}}
+{{- define "databridge.peersEnabled" -}}
+{{- if eq (include "databridge.peerDiscovery" .) "headless" -}}true{{- end -}}
+{{- end }}
+
+{{/*
+FQDN of the headless Service replicas resolve to enumerate their siblings.
+Fully qualified so the lookup does not depend on the pod's search domains.
+*/}}
+{{- define "databridge.peerServiceFQDN" -}}
+{{- printf "%s-peers.%s.svc.cluster.local" (include "databridge.fullname" .) .Release.Namespace -}}
+{{- end }}
+
+{{/*
 Whether this release deploys DataBridge at all. Only saas mode has data planes
 outside the cluster for it to broker, so nothing else renders it.
 */}}

@@ -1,0 +1,28 @@
+{{- if and (eq (include "databridge.deploy" .) "true") (eq (include "databridge.peersEnabled" .) "true") }}
+{{- /* Peer discovery. Headless (clusterIP: None) so DNS answers with one address
+       per pod instead of a single virtual IP: a replica needs the identity of
+       each sibling to ask it whether it holds an agent's stream, and a ClusterIP
+       would load-balance that question to an arbitrary pod — including back to
+       the asker. Nothing outside DataBridge uses this Service. */}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "databridge.fullname" . }}-peers
+  labels:
+    {{- include "databridge.labels" . | nindent 4 }}
+    app.kubernetes.io/component: peers
+spec:
+  clusterIP: None
+  {{- /* A pod's agents connect to it while it is still starting, so it can hold
+         streams before it reports ready. Excluding not-ready pods here would make
+         siblings answer "agent unavailable" for exactly those tenants. */}}
+  publishNotReadyAddresses: true
+  ports:
+    - name: grpc
+      port: {{ .Values.ports.northbound }}
+      targetPort: northbound
+      protocol: TCP
+  selector:
+    {{- include "databridge.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: broker
+{{- end }}

@@ -2200,7 +2200,7 @@ or legacy global.clickstack.endpoint (path stripped if present).
 {{- $cfg := default dict (default dict (default dict .Values.global).clickstack).egress -}}
 {{- $img := default dict $cfg.image -}}
 {{- $repo := $img.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/opentelemetry-collector-contrib" -}}
-{{- $tag := $img.tag | default "0.156.0" -}}
+{{- $tag := $img.tag | default "0.158.0" -}}
 {{- printf "%s:%s" $repo $tag -}}
 {{- end }}
 

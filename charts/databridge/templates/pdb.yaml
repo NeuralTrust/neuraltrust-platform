@@ -1,9 +1,23 @@
 {{- if and (eq (include "databridge.deploy" .) "true") .Values.podDisruptionBudget.enabled }}
-{{- /* With one replica this cannot make a rollout seamless — Recreate already
-       drops the pod — and it must not pretend to: a budget that forbids the
-       last pod's eviction deadlocks every node drain on this node. It declares
-       the workload as disruption-sensitive so an operator draining a node sees
-       it, and allows the eviction. */}}
+{{- $replicas := int (.Values.replicas | default 1) }}
+{{- $minAvailable := .Values.podDisruptionBudget.minAvailable }}
+{{- $maxUnavailable := .Values.podDisruptionBudget.maxUnavailable }}
+{{- /* With several replicas, minAvailable: 1 lets a node drain take one pod at a
+       time while the survivors keep serving — including for agents whose streams
+       they do not hold, because a missed query is forwarded to the pod that does.
+
+       With one replica the same setting makes disruptionsAllowed 0 and deadlocks
+       every drain on this node: no replacement can become Ready before the only
+       pod is evicted, and the eviction is what the budget refuses. maxUnavailable:
+       1 allows it — the agents reconnect, which they are built to do — while still
+       declaring the workload to anything that reads a budget. */}}
+{{- if and (not $minAvailable) (not $maxUnavailable) }}
+  {{- if gt $replicas 1 }}
+    {{- $minAvailable = 1 }}
+  {{- else }}
+    {{- $maxUnavailable = 1 }}
+  {{- end }}
+{{- end }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -12,10 +26,10 @@ metadata:
     {{- include "databridge.labels" . | nindent 4 }}
     app.kubernetes.io/component: broker
 spec:
-  {{- if .Values.podDisruptionBudget.minAvailable }}
-  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
-  {{- else if .Values.podDisruptionBudget.maxUnavailable }}
-  maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable }}
+  {{- if $minAvailable }}
+  minAvailable: {{ $minAvailable }}
+  {{- else if $maxUnavailable }}
+  maxUnavailable: {{ $maxUnavailable }}
   {{- end }}
   selector:
     matchLabels:
