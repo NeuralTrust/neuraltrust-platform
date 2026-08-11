@@ -123,28 +123,15 @@ configSync:
     existingSecret: "" # kubernetes.io/tls-style Secret with tls.crt, tls.key, ca.crt
     durationDays: 3650
   # Publish the config-sync gRPC listener outside the cluster. Only rendered
-  # under global.deploymentMode=saas, where data planes in other clusters dial
-  # trustguard-configsync.<global.controlPlane.domain>:443. Layer 4 — the
-  # control plane terminates TLS itself, the LB only forwards TCP.
-  #
-  # Once this is on the listener needs a certificate the remote planes accept:
-  # either grpcTls.existingSecret, or selfSignedTls below.
+  # under global.deploymentMode=saas. Layer 4 — control plane terminates TLS.
   expose:
     enabled: null # null => on in saas; false to keep it ClusterIP (private link)
-    # Publish with the certificate grpcTls.autoGenerate mints, and distribute its
-    # CA as configuration instead of relying on a trust store. The route for a
-    # control plane reached over a private network: export the CA with
-    # scripts/export-controlplane-ca.sh and set configSync.tlsCa on each data
-    # plane. Remote planes reject the handshake until you do.
-    selfSignedTls: false
+    # Happy path: true when no grpcTls.existingSecret (chart CA + export script).
+    # Set false only with a BYO existingSecret. Explicit false without a secret fails.
+    selfSignedTls: true
     type: LoadBalancer
     port: 443
-    # Cloud-specific LB wiring goes here, e.g. on EKS:
-    #   service.beta.kubernetes.io/aws-load-balancer-type: nlb
-    #   service.beta.kubernetes.io/aws-load-balancer-scheme: internal
-    # "internal" for data planes arriving over VPC peering or a private link;
-    # "internet-facing" only when they genuinely traverse the internet. On GKE:
-    #   networking.gke.io/load-balancer-type: "Internal"
+    # Empty ⇒ AWS NLB defaults from global.controlPlane.loadBalancerScheme.
     annotations: {}
     # Restrict to the remote clusters' egress ranges. Empty means the listener
     # is reachable from anywhere the LB is.

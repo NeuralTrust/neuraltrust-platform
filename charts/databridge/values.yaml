@@ -20,19 +20,15 @@ serviceAccount:
   create: true
   name: "databridge"
   annotations: {}
-# Replicas. More than one requires peer forwarding (see `peers` below), because a
-# DataAgent's stream lives in the memory of exactly one pod: without forwarding, a
-# query routed to any other pod finds nothing. The chart refuses replicas > 1 with
-# peers.discovery=off rather than letting that fail per-tenant at runtime.
-replicas: 1
-# Peer forwarding. When a northbound query lands on a replica that does not hold
-# the agent's stream, that replica asks its siblings instead of answering "agent
-# unavailable". Siblings are found through a headless Service that resolves to one
-# address per pod.
-#   off      — single-replica behaviour, no headless Service, no cross-pod calls.
-#   headless — required for replicas > 1.
+# HA by default. A DataAgent's stream lives in one pod's memory; peer forwarding
+# lets any replica answer by asking siblings over the headless Service.
+# Singleton escape hatch: set replicas: 1 (forces discovery off).
+replicas: 2
+# Peer forwarding. Effective mode:
+#   replicas >= 2 → headless (default); explicit discovery=off fails the render
+#   replicas < 2  → off (singleton; peer Service / POD_IP omitted)
 peers:
-  discovery: "off"
+  discovery: "headless"
   # How long a replica waits for a sibling to answer before giving up on it.
   forwardTimeout: "10s"
   # How long the resolved sibling list is reused before DNS is consulted again.
@@ -76,16 +72,12 @@ tls:
   # against their own trust store, so the certificate has to come from a CA they
   # already trust.
   existingSecret: ""
-  # Have the chart mint a self-signed CA and keypair instead. Ignored when
-  # existingSecret is set.
-  #
-  # The route for a control plane reached over a private network (VPC peering,
-  # Direct Connect, a private link), where no public trust store is involved.
-  # It does NOT by itself make remote agents trust the listener: export the CA
-  # with scripts/export-controlplane-ca.sh and set dataagent.databridge.tlsCa on
-  # each data plane. The keypair is preserved across upgrades and only reissued
-  # when the names it covers change.
-  autoGenerate: false
+  # Happy path: mint a self-signed CA + keypair when existingSecret is empty and
+  # cert-manager is off. Export the CA with scripts/export-controlplane-ca.sh
+  # (or set global.controlPlane.caSecretName on hybrid planes). BYO:
+  # existingSecret or certManager.enabled. Explicit autoGenerate: false without
+  # either source fails render.
+  autoGenerate: true
   durationDays: 3650
   # Or have cert-manager issue one. Ignored when existingSecret is set.
   certManager:
@@ -103,18 +95,9 @@ service:
     port: 50051
     annotations: {}
   southbound:
-    # Public. Agents hold long-lived bidirectional gRPC streams, so this has to
-    # be an L4 passthrough — an L7 proxy in front would cut them on its idle
-    # timeout and break TLS client identity.
-    # EKS: annotate for an NLB, e.g.
-    #   service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
-    #   service.beta.kubernetes.io/aws-load-balancer-scheme: "internal"
-    # Use "internal" when the data-plane clusters reach this over VPC peering,
-    # Direct Connect or a private link, and "internet-facing" only when they
-    # genuinely traverse the internet. GKE gives an L4 passthrough NLB for a
-    # plain LoadBalancer already; add
-    #   networking.gke.io/load-balancer-type: "Internal"
-    # for the private equivalent.
+    # Public L4 passthrough. Empty annotations ⇒ AWS NLB defaults from
+    # global.controlPlane.loadBalancerScheme (internal). Override annotations
+    # or scheme when data planes reach you over the public internet.
     type: LoadBalancer
     port: 443
     annotations: {}

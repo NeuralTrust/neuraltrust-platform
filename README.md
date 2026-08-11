@@ -8,7 +8,7 @@ Deploy NeuralTrust on Kubernetes with one Helm umbrella chart.
 |---|---|---|---|
 | **`hybrid`** (default) | Hosted by NeuralTrust | The data path: TrustGate, TrustGuard, Firewall, data-plane API, one DataAgent per product | [Quick start](#quick-start-hybrid) below |
 | **`external`** | Yours | Everything, including the console, ClickHouse analytics, DataCore, and AlertEngine | [README-EXTERNAL.md](./README-EXTERNAL.md) |
-| **`saas`** | Yours, and it also serves data planes in other clusters | `external` plus DataBridge and a public telemetry ingest gateway | [docs/saas-mode.md](./docs/saas-mode.md) |
+| **`saas`** | Yours, and it also serves data planes in other clusters | `external` plus DataBridge and a public telemetry ingest gateway | [docs/saas-mode.md](./docs/saas-mode.md#quick-start) |
 
 On OpenShift, all modes work but ingress differs — use
 [README-OPENSHIFT.md](./README-OPENSHIFT.md) instead of the quick start below.
@@ -225,7 +225,7 @@ Full contract: [`docs/architecture.md`](./docs/architecture.md) and
 |---|---:|---|---|
 | `hybrid` (default) | Yes | TrustGate / TrustGuard / data-plane-api via positive `global.products` (at least one); Firewall follows TrustGuard; per-product DataAgent when TrustGate/TrustGuard is on | Hosted analytics via enrolment-backed ClickStack OTLP; DataAgent also bridges entitled reads. No in-cluster ClickHouse |
 | `external` | No | Full product stack (product flags ignored) plus control planes, product API/app, DataCore, AlertEngine | ClickStack OTel Collector writes to ClickHouse; data-plane API reads ClickHouse |
-| `saas` | No — this cluster *is* one, for `hybrid` clusters elsewhere | Everything `external` renders, plus DataBridge and the ClickStack ingest gateway | Local ClickHouse for central telemetry; DataCore runs `RESIDENCY_BACKEND=hybrid` and reaches remote data planes through DataBridge |
+| `saas` | No — this cluster *is* one, for `hybrid` clusters elsewhere | Everything `external` renders, plus DataBridge (HA by default) and the ClickStack ingest gateway | Local ClickHouse for central telemetry; DataCore runs `RESIDENCY_BACKEND=hybrid` and reaches remote data planes through DataBridge. Operator path: [saas-mode quick start](./docs/saas-mode.md#quick-start) |
 
 ## Cluster sizing (defaults)
 
@@ -337,7 +337,7 @@ Scenario walkthroughs: [VALUES_SCENARIOS.md](./VALUES_SCENARIOS.md).
 In this repo:
 
 - [External (self-hosted) guide](./README-EXTERNAL.md)
-- [`saas` mode](./docs/saas-mode.md) — your own control plane for data planes in other clusters
+- [`saas` mode](./docs/saas-mode.md#quick-start) — your own control plane for data planes in other clusters
 - [OpenShift guide](./README-OPENSHIFT.md)
 - [Deployment guide](./DEPLOYMENT.md) — step-by-step across both modes
 - [Secrets management](./SECRETS.md)

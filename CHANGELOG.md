@@ -4,6 +4,19 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Changed
+
+- **Slim saas operator path.** Common control-plane installs need only
+  `global.deploymentMode: saas` and `global.domain`. Dial names fall back from
+  `global.controlPlane.domain` → `global.domain` (split-DNS still overrides).
+  DataBridge defaults to HA (`replicas: 2` + peer headless); set `replicas: 1`
+  for singleton. Self-signed TLS is the default for DataBridge and published
+  config-sync when no `existingSecret` is set — export the CA with
+  `scripts/export-controlplane-ca.sh`. On AWS, empty L4 annotations get internal
+  NLB defaults via `global.controlPlane.loadBalancerScheme` (flip to
+  `internet-facing` for public hybrids). Telemetry Ingress remains on by default.
+  Operator runbook: [`docs/saas-mode.md` quick start](./docs/saas-mode.md#quick-start).
+
 ## [v2.9.8] — 2026-08-10
 
 ### Added

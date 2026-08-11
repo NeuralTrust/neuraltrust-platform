@@ -281,15 +281,12 @@ Secret produces a pod that cannot start. Fail at render instead.
        --------------------------------------------------------------------- */ -}}
 {{- if eq $mode "saas" -}}
   {{- /* Without a domain every derived hostname falls back through saasRegion to
-         NeuralTrust's own, and the mode fails open in the worst way: the chart
-         mints a certificate for databridge.neuraltrust.ai and publishes load
-         balancers as {product}-configsync.neuraltrust.ai, so the operator's own
-         data planes are pointed at NeuralTrust SaaS with tokens NeuralTrust
-         never issued. Every other cross-cluster requirement here is fail-closed;
-         this is the one that decides whose control plane this even is. */ -}}
+         NeuralTrust's own. Happy path: global.domain alone. Split-DNS override:
+         global.controlPlane.domain. saas.domain helper enforces the same rule. */ -}}
   {{- $cpDomain := (default dict $.Values.global.controlPlane).domain | default "" | toString | trim -}}
-  {{- if not $cpDomain -}}
-    {{- fail "global.deploymentMode=saas requires global.controlPlane.domain: it is the value that makes this a control plane of your own. Left empty, DataBridge, telemetry and both config-sync endpoints resolve to NeuralTrust's hosted domain through global.saasRegion, so this install would mint certificates and publish load balancers for hostnames it does not own, and your data planes would be configured to dial NeuralTrust SaaS. Set it to the bare domain your remote clusters reach this cluster on, e.g. global.controlPlane.domain=platform.example.com (no scheme, port or path). A private DNS zone is fine." -}}
+  {{- $uiDomain := $.Values.global.domain | default "" | toString | trim -}}
+  {{- if and (not $cpDomain) (not $uiDomain) -}}
+    {{- fail "global.deploymentMode=saas requires a bare domain: set global.domain (UI + hybrid dial hosts) or global.controlPlane.domain (split-DNS override). Left empty, DataBridge, telemetry and both config-sync endpoints resolve to NeuralTrust's hosted domain through global.saasRegion. Example: global.domain=platform.example.com (no scheme, port or path)." -}}
   {{- end -}}
   {{- $databridge := default dict $.Values.databridge -}}
   {{- $dbAuth := default dict $databridge.auth -}}
@@ -307,14 +304,14 @@ Secret produces a pod that cannot start. Fail at render instead.
     {{- fail (printf "databridge.auth.mode=%q is not allowed with global.deploymentMode=saas: it authenticates every data plane with one shared credential and then trusts the tenant each agent claims for itself, so any enrolled data plane could read another's data. Use \"introspect\" (default — DataBridge asks the in-cluster DataCore about each token) or \"jwt\" (DataBridge verifies DataCore-signed enrolment JWTs locally)." $authMode) -}}
   {{- end -}}
 
-  {{- /* Southbound terminates TLS itself: it is a raw gRPC listener behind an L4
-         load balancer, so there is no ingress in front to terminate for it. The
-         binary refuses to start without a cert outside dev mode, and dev mode is
-         already rejected above. */ -}}
+  {{- /* Southbound terminates TLS itself. Default autoGenerate=true mints a
+         self-signed CA when no existingSecret/cert-manager. Explicit
+         autoGenerate: false without a secret still fails. */ -}}
   {{- $dbTls := default dict $databridge.tls -}}
   {{- $dbCertManager := default dict $dbTls.certManager -}}
-  {{- if and (not ($dbTls.existingSecret | default "")) (ne (include "neuraltrust-platform.boolish" (dict "value" $dbCertManager.enabled "default" false)) "true") (ne (include "neuraltrust-platform.boolish" (dict "value" $dbTls.autoGenerate "default" false)) "true") -}}
-    {{- fail "saas mode needs a southbound TLS cert for DataBridge: remote DataAgents dial it directly over TLS with no ingress in front, and the binary refuses to start without one. It must cover databridge.<your control-plane domain>. Pick one:\n  (a) databridge.tls.existingSecret — a kubernetes.io/tls Secret you provide, issued by a CA your data planes already trust.\n  (b) databridge.tls.certManager.enabled=true — cert-manager issues it from an Issuer you already run.\n  (c) databridge.tls.autoGenerate=true — the chart mints a self-signed CA and keypair, and you distribute the CA as configuration. This is the route for a control plane reached over a private network: run scripts/export-controlplane-ca.sh and set dataagent.databridge.tlsCa on each data plane to the mounted bundle." -}}
+  {{- $autoOn := eq (include "neuraltrust-platform.boolish" (dict "value" $dbTls.autoGenerate "default" true)) "true" -}}
+  {{- if and (not ($dbTls.existingSecret | default "")) (ne (include "neuraltrust-platform.boolish" (dict "value" $dbCertManager.enabled "default" false)) "true") (not $autoOn) -}}
+    {{- fail "saas mode needs a southbound TLS cert for DataBridge: remote DataAgents dial it directly over TLS with no ingress in front. Pick one:\n  (a) databridge.tls.existingSecret — a kubernetes.io/tls Secret issued by a CA your data planes trust.\n  (b) databridge.tls.certManager.enabled=true.\n  (c) leave defaults (chart mints self-signed; export CA with scripts/export-controlplane-ca.sh)." -}}
   {{- end -}}
 
   {{- /* The enrolment and telemetry credentials are minted into the shared

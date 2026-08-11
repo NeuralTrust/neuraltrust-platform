@@ -123,37 +123,43 @@ there.
 DNS suffix every control-plane endpoint hangs off: DataBridge, ClickStack
 telemetry and both config-sync channels.
 
-`global.controlPlane.domain` wins when set, which is what points a data plane at
-a control plane somebody else runs — a customer's own `saas` install rather than
-NeuralTrust's. Unset, it falls back to the regional NeuralTrust domain, so every
-existing install keeps the endpoints it had.
+Resolution order:
+  1. global.controlPlane.domain when set (split-DNS / hybrid retarget)
+  2. saas mode only: global.domain (same bare suffix as UI/API hosts — happy path)
+  3. hybrid: regional NeuralTrust domain from saasRegion
+  4. saas with neither domain: fail (never mint NeuralTrust hostnames)
 
 One knob for all four endpoints on purpose: a data plane that reached DataBridge
 on the customer's domain but still dialled NeuralTrust for config-sync would
 half-work, and the half that broke would be silent.
 */}}
 {{- define "neuraltrust-platform.saas.domain" -}}
-{{- $cp := default dict (default dict .Values.global).controlPlane -}}
+{{- $global := default dict .Values.global -}}
+{{- $cp := default dict $global.controlPlane -}}
 {{- $custom := $cp.domain | default "" | toString | trim | lower -}}
+{{- if not $custom -}}
+  {{- /* Saas happy path: one domain for UI ALB hosts and hybrid dial names. */ -}}
+  {{- if eq (include "neuraltrust-platform.isSaas" .) "true" -}}
+    {{- $custom = $global.domain | default "" | toString | trim | lower -}}
+  {{- end -}}
+{{- end -}}
 {{- if $custom -}}
 {{- /* Callers build "databridge.%s" and "https://telemetry.%s" from this, so a
        scheme, port or path here produces a malformed endpoint that only fails
        once an agent tries to dial it. Reject the shapes people actually paste. */ -}}
 {{- if or (contains "://" $custom) (contains "/" $custom) (contains ":" $custom) -}}
-{{- fail (printf "global.controlPlane.domain must be a bare DNS suffix such as \"nt.example.com\" — no scheme, port or path (got %q). The chart derives databridge.<domain>:443, https://telemetry.<domain> and <product>-configsync.<domain>:443 from it." $custom) -}}
+{{- fail (printf "control-plane domain must be a bare DNS suffix such as \"nt.example.com\" — no scheme, port or path (got %q). Set global.controlPlane.domain or global.domain. The chart derives databridge.<domain>:443, https://telemetry.<domain> and <product>-configsync.<domain>:443 from it." $custom) -}}
 {{- end -}}
 {{- if not (contains "." $custom) -}}
-{{- fail (printf "global.controlPlane.domain must be a fully qualified DNS suffix such as \"nt.example.com\" (got %q): the endpoints derived from it are dialled from other clusters, where a single label does not resolve." $custom) -}}
+{{- fail (printf "control-plane domain must be a fully qualified DNS suffix such as \"nt.example.com\" (got %q): the endpoints derived from it are dialled from other clusters, where a single label does not resolve." $custom) -}}
 {{- end -}}
 {{- $custom -}}
 {{- else if eq (include "neuraltrust-platform.isSaas" .) "true" -}}
 {{- /* This install *is* the control plane, so the regional fallback below is
        never the right answer here: it would mint certificates and publish load
        balancers for NeuralTrust's own hostnames and point the operator's data
-       planes at NeuralTrust SaaS. validate-values.yaml says the same thing, but
-       a subchart template reaches this helper first, and an error about
-       certificates would send the reader after the wrong problem. */ -}}
-{{- fail "global.deploymentMode=saas requires global.controlPlane.domain: it is the value that makes this a control plane of your own. Left empty, DataBridge, telemetry and both config-sync endpoints fall back to NeuralTrust's hosted domain, so this install would serve certificates for hostnames it does not own and your data planes would dial NeuralTrust SaaS. Set it to the bare domain your remote clusters reach this cluster on, e.g. global.controlPlane.domain=platform.example.com (no scheme, port or path). A private DNS zone is fine." -}}
+       planes at NeuralTrust SaaS. */ -}}
+{{- fail "global.deploymentMode=saas requires a bare domain for hybrid dial names: set global.domain (UI + dial hosts, happy path) or global.controlPlane.domain (split-DNS override). Left empty, DataBridge, telemetry and both config-sync endpoints would fall back to NeuralTrust's hosted domain. Example: global.domain=platform.example.com (no scheme, port or path). A private DNS zone is fine." -}}
 {{- else if eq (include "neuraltrust-platform.saas.region" .) "us" -}}
 us.neuraltrust.ai
 {{- else -}}
@@ -2056,22 +2062,60 @@ Usage: {{ include "neuraltrust-platform.configSync.expose" (dict "ctx" .) }}
 Whether a published config-sync listener may present the self-signed certificate
 the chart generates for it.
 
-The default demands an operator-supplied certificate, because a data plane in
-another cluster verifies the listener against its own trust store and nothing
-puts a chart-minted CA there by itself. Opting in here is the supported route for
-a control plane reached over a private network — VPC peering, Direct Connect, a
-private link — where no public trust store is involved and the CA travels to the
-data planes as configuration. Distribute it with
-scripts/export-controlplane-ca.sh and point configSync.tlsCa at the mounted
-bundle; until then the handshake will fail.
+Happy path (saas, no BYO secret): default true — chart mints the leaf and the
+operator distributes the CA via scripts/export-controlplane-ca.sh. Bring your
+own with grpcTls.existingSecret (selfSignedTls is then ignored). Explicit
+selfSignedTls: false without a secret still fails at the public Service render.
 
 Usage: {{ include "neuraltrust-platform.configSync.publicSelfSigned" (dict "ctx" .) }}
 */}}
 {{- define "neuraltrust-platform.configSync.publicSelfSigned" -}}
 {{- $ctx := .ctx -}}
 {{- if eq (include "neuraltrust-platform.configSync.expose" (dict "ctx" $ctx)) "true" -}}
-{{- $expose := default dict (default dict $ctx.Values.configSync).expose -}}
-{{- include "neuraltrust-platform.boolish" (dict "value" $expose.selfSignedTls "default" false) -}}
+{{- $cs := default dict $ctx.Values.configSync -}}
+{{- $expose := default dict $cs.expose -}}
+{{- $grpcTls := default dict $cs.grpcTls -}}
+{{- if $grpcTls.existingSecret | default "" -}}
+false
+{{- else -}}
+{{- include "neuraltrust-platform.boolish" (dict "value" $expose.selfSignedTls "default" true) -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+L4 load-balancer scheme for saas southbound listeners (DataBridge, config-sync).
+global.controlPlane.loadBalancerScheme: "internal" (default) | "internet-facing".
+*/}}
+{{- define "neuraltrust-platform.controlPlane.loadBalancerScheme" -}}
+{{- $cp := default dict (default dict .Values.global).controlPlane -}}
+{{- $scheme := $cp.loadBalancerScheme | default "internal" | toString | trim | lower -}}
+{{- if not (has $scheme (list "internal" "internet-facing")) -}}
+{{- fail (printf "global.controlPlane.loadBalancerScheme must be \"internal\" or \"internet-facing\" (got %q)" $scheme) -}}
+{{- end -}}
+{{- $scheme -}}
+{{- end }}
+
+{{/*
+Default annotations for saas L4 Services when the operator left annotations
+empty. AWS only (NLB); GKE/AKS get a plain LoadBalancer without extra keys.
+Local annotations always win when non-empty.
+
+Usage: {{ include "neuraltrust-platform.controlPlane.l4Annotations" (dict "ctx" . "local" $annotations) }}
+*/}}
+{{- define "neuraltrust-platform.controlPlane.l4Annotations" -}}
+{{- $ctx := .ctx -}}
+{{- $local := default dict .local -}}
+{{- if $local -}}
+{{- toYaml $local -}}
+{{- else -}}
+{{- $platform := (default dict $ctx.Values.global).platform | default "kubernetes" | toString | trim | lower -}}
+{{- if eq $platform "aws" -}}
+{{- $scheme := include "neuraltrust-platform.controlPlane.loadBalancerScheme" $ctx -}}
+service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+service.beta.kubernetes.io/aws-load-balancer-scheme: {{ $scheme | quote }}
+service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "ip"
+{{- end -}}
 {{- end -}}
 {{- end }}
 
@@ -2087,6 +2131,7 @@ Usage: {{ include "neuraltrust-platform.configSync.publicService" (dict "ctx" . 
 {{- define "neuraltrust-platform.configSync.publicService" -}}
 {{- $ctx := .ctx -}}
 {{- $expose := default dict (default dict $ctx.Values.configSync).expose -}}
+{{- $annos := include "neuraltrust-platform.controlPlane.l4Annotations" (dict "ctx" $ctx "local" $expose.annotations) -}}
 apiVersion: v1
 kind: Service
 metadata:
@@ -2097,8 +2142,8 @@ metadata:
     app.kubernetes.io/component: configsync-public
   annotations:
     neuraltrust.ai/config-sync-host: {{ include "neuraltrust-platform.configSync.publicHost" (dict "ctx" $ctx "product" .product) | quote }}
-    {{- with $expose.annotations }}
-    {{- toYaml . | nindent 4 }}
+    {{- with $annos }}
+    {{- . | nindent 4 }}
     {{- end }}
 spec:
   type: {{ $expose.type | default "LoadBalancer" }}

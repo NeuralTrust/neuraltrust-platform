@@ -1,5 +1,5 @@
 {{- if and (eq (include "databridge.deploy" .) "true") .Values.podDisruptionBudget.enabled }}
-{{- $replicas := int (.Values.replicas | default 1) }}
+{{- $replicas := int (.Values.replicas | default 2) }}
 {{- $minAvailable := .Values.podDisruptionBudget.minAvailable }}
 {{- $maxUnavailable := .Values.podDisruptionBudget.maxUnavailable }}
 {{- /* With several replicas, minAvailable: 1 lets a node drain take one pod at a

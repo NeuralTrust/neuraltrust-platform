@@ -3,14 +3,10 @@
 {{- /* Public entry point. DataAgents in other clusters dial in over TLS and
        hold a bidirectional gRPC stream open for as long as they run.
 
-       This has to stay L4 passthrough on every cloud: an L7 proxy would cut the
-       streams on its idle timeout and terminate the TLS the agents authenticate
-       against. A plain type: LoadBalancer gives that on GKE; on EKS add the
-       aws-load-balancer-type: nlb annotation, which is why annotations here are
-       free-form rather than a fixed set the chart writes.
-
-       Point a DNS A record for databridge.<control-plane domain> at whatever
-       address this Service gets. */}}
+       L4 passthrough on every cloud. When annotations are empty, saas AWS
+       installs get NLB defaults from global.controlPlane.loadBalancerScheme
+       (internal by default). Local annotations always win. */}}
+{{- $annos := include "neuraltrust-platform.controlPlane.l4Annotations" (dict "ctx" . "local" $sb.annotations) }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -18,9 +14,9 @@ metadata:
   labels:
     {{- include "databridge.labels" . | nindent 4 }}
     app.kubernetes.io/component: southbound
-  {{- with $sb.annotations }}
+  {{- with $annos }}
   annotations:
-    {{- toYaml . | nindent 4 }}
+    {{- . | nindent 4 }}
   {{- end }}
 spec:
   type: {{ $sb.type | default "LoadBalancer" }}

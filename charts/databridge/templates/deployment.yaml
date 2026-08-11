@@ -8,7 +8,7 @@ metadata:
     {{- include "databridge.labels" . | nindent 4 }}
     app.kubernetes.io/component: broker
 spec:
-  replicas: {{ .Values.replicas | default 1 }}
+  replicas: {{ .Values.replicas | default 2 }}
   minReadySeconds: 10
   progressDeadlineSeconds: 300
   revisionHistoryLimit: 3
@@ -173,7 +173,7 @@ spec:
       {{- if .Values.affinity }}
       affinity:
         {{- toYaml .Values.affinity | nindent 8 }}
-      {{- else if gt (int (.Values.replicas | default 1)) 1 }}
+      {{- else if gt (int (.Values.replicas | default 2)) 1 }}
       {{- /* Replicas exist to survive losing one of them, which a single node
              taking them all down would defeat. Preferred rather than required so
              a small or single-node pool still schedules. Any explicit

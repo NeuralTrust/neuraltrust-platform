@@ -102,13 +102,15 @@ Details and tuning tips: [`docs/sizing.md`](./docs/sizing.md).
 
 ## 3. Open hybrid network paths
 
-Hybrid needs outbound TCP 443 to NeuralTrust config-sync and DataBridge hosts,
-plus inbound allow from a NeuralTrust source IP to your published entry points.
-Hostnames and IPs: [`docs/hybrid-network.md`](./docs/hybrid-network.md).
+Hybrid needs outbound TCP 443 to the control plane it dials:
 
-Those hostnames depend on `global.saasRegion` (`eu` default, `us` for
-Americas). Set it before requesting firewall rules — it moves config-sync,
-DataBridge, and telemetry together.
+- **NeuralTrust-hosted** (`global.saasRegion`): config-sync, DataBridge, and
+  telemetry hosts, plus inbound allow from a NeuralTrust source IP —
+  [`docs/hybrid-network.md`](./docs/hybrid-network.md). Set `saasRegion` before
+  requesting firewall rules — it moves all four endpoints together.
+- **Customer-owned** (`global.controlPlane.domain` pointing at a
+  `deploymentMode: saas` install): allowlist *that* operator's four endpoints
+  instead — [`docs/saas-mode.md`](./docs/saas-mode.md#quick-start).
 
 ## 4. Configure cluster integration
 
