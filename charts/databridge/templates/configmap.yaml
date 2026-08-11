@@ -34,6 +34,18 @@ data:
   SOUTHBOUND_KEEPALIVE_TIME: {{ .Values.config.southbound.keepaliveTime | quote }}
   SOUTHBOUND_KEEPALIVE_TIMEOUT: {{ .Values.config.southbound.keepaliveTimeout | quote }}
   SOUTHBOUND_KEEPALIVE_MIN_TIME: {{ .Values.config.southbound.keepaliveMinTime | quote }}
+  {{- $peers := default dict .Values.peers }}
+  PEER_DISCOVERY: {{ include "databridge.peerDiscovery" . | quote }}
+  {{- if eq (include "databridge.peersEnabled" .) "true" }}
+  PEER_SERVICE_NAME: {{ include "databridge.peerServiceFQDN" . | quote }}
+  PEER_PORT: {{ .Values.ports.northbound | quote }}
+  PEER_FORWARD_TIMEOUT: {{ $peers.forwardTimeout | default "10s" | quote }}
+  PEER_REFRESH_INTERVAL: {{ $peers.refreshInterval | default "10s" | quote }}
+  PEER_NEGATIVE_TTL: {{ $peers.negativeTTL | default "2s" | quote }}
+  {{- /* Only useful with a survivor to reconnect to; with one replica the delay
+         would just lengthen every restart. */}}
+  DRAIN_DELAY: {{ $peers.drainDelay | default "5s" | quote }}
+  {{- end }}
   {{- with $tlsSecret }}
   SOUTHBOUND_TLS_CERT_FILE: "/etc/southbound-tls/tls.crt"
   SOUTHBOUND_TLS_KEY_FILE: "/etc/southbound-tls/tls.key"

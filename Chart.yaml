@@ -30,7 +30,7 @@ dependencies:
       - v2
   # Control-plane App/UI — external only.
   - name: control-plane-app
-    version: 0.1.26
+    version: 0.1.27
     repository: file://./charts/control-plane-app
     tags:
       - neuraltrust
@@ -38,14 +38,14 @@ dependencies:
   # TrustGate (values: agentgateway; K8s: agentgateway-*). Hybrid gated by
   # global.products.trustgate.
   - name: agentgateway
-    version: 0.1.40
+    version: 0.1.41
     repository: file://./charts/agentgateway
     tags:
       - neuraltrust
       - v2
   # TrustGuard. Hybrid gated by global.products.trustguard.
   - name: trustguard
-    version: 0.1.36
+    version: 0.1.37
     repository: file://./charts/trustguard
     tags:
       - neuraltrust
@@ -66,14 +66,14 @@ dependencies:
       - v2
   # DataCore — v2 external only.
   - name: datacore
-    version: 0.1.18
+    version: 0.1.19
     repository: file://./charts/datacore
     tags:
       - neuraltrust
       - v2
   # DataBridge — saas only. Brokers data planes running outside this cluster.
   - name: databridge
-    version: 0.1.0
+    version: 0.1.1
     repository: file://./charts/databridge
     tags:
       - neuraltrust
@@ -88,7 +88,7 @@ dependencies:
       - v2
   # ClickStack OTel collector — v2 external only.
   - name: clickstack-otel-collector
-    version: 0.1.5
+    version: 0.1.6
     repository: file://./charts/clickstack-otel-collector
     tags:
       - neuraltrust

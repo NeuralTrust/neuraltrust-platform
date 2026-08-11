@@ -12,12 +12,18 @@ spec:
   minReadySeconds: 10
   progressDeadlineSeconds: 300
   revisionHistoryLimit: 3
-  {{- /* Recreate, not RollingUpdate: the agent registry is per-pod and in
-         memory, so two pods behind one Service would each answer for only the
-         agents that happened to reach them. Agents reconnect on their own, so
-         the cost is a short gap rather than a wrong answer. */}}
+  {{- /* RollingUpdate with maxUnavailable 0: the replacement must be ready before
+         the pod it replaces goes away, so agents always have a listener to
+         reconnect to. With peer forwarding on, the overlap is fully served —
+         whichever pod DataCore reaches asks the other. With one replica and
+         forwarding off it is still an improvement on Recreate: queries can only
+         miss in the brief window where DataCore reaches the new pod before the
+         agents have moved, instead of failing for the whole restart. */}}
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       {{- include "databridge.selectorLabels" . | nindent 6 }}
@@ -89,6 +95,16 @@ spec:
             - configMapRef:
                 name: {{ include "databridge.fullname" . }}-config
           env:
+            {{- if eq (include "databridge.peersEnabled" .) "true" }}
+            {{- /* A replica needs its own address to recognise itself among the
+                   headless Service's answers; without it, every local miss would
+                   also fan out to itself and waste a round trip. DataBridge
+                   refuses to start with headless discovery and no POD_IP. */}}
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            {{- end }}
             {{- /* Presented to DataCore as X-Service-Token and compared there
                    against ENROLMENT_INTROSPECTION_TOKEN. The shared platform
                    Secret keeps both names on one value. */}}
@@ -154,8 +170,23 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.affinity }}
+      {{- if .Values.affinity }}
       affinity:
-        {{- toYaml . | nindent 8 }}
+        {{- toYaml .Values.affinity | nindent 8 }}
+      {{- else if gt (int (.Values.replicas | default 1)) 1 }}
+      {{- /* Replicas exist to survive losing one of them, which a single node
+             taking them all down would defeat. Preferred rather than required so
+             a small or single-node pool still schedules. Any explicit
+             .Values.affinity replaces this wholesale. */}}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    {{- include "databridge.selectorLabels" . | nindent 20 }}
+                    app.kubernetes.io/component: broker
       {{- end }}
 {{- end }}
