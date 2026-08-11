@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.11.1] — 2026-08-11
+
 ### Changed
 
 - **Slim saas operator path.** Common control-plane installs need only
