@@ -292,6 +292,8 @@ assert_env_value() {
           found = e["value"].to_s
         elsif (ref = e.dig("valueFrom", "secretKeyRef"))
           found = "secretKeyRef:#{ref["name"]}/#{ref["key"]}"
+        elsif (ref = e.dig("valueFrom", "fieldRef"))
+          found = "fieldRef:#{ref["fieldPath"]}"
         end
       end
     end
@@ -3770,6 +3772,119 @@ assert_render_fails_with 'is not allowed with global.deploymentMode=saas' \
 assert_render_fails_with 'databridge.auth.mode must be one of' \
   "saas: unknown DataBridge auth mode rejected" \
   "${SAAS_ARGS[@]}" --set databridge.auth.mode=mtls
+
+# --- DataBridge peer forwarding (AUT-495) ---------------------------------
+# A DataAgent's stream is a live connection in one pod's memory, and DataCore
+# pins one pod per channel. Scaling out therefore only works if a pod that does
+# not hold the stream forwards to the one that does. The chart's job is to make
+# the two settings inseparable: replicas > 1 without forwarding is refused, and
+# forwarding brings the headless Service and POD_IP with it.
+assert_render_fails_with 'requires databridge.peers.discovery=headless' \
+  "saas: replicas > 1 with peer discovery off is refused" \
+  "${SAAS_ARGS[@]}" --set databridge.replicas=2
+assert_render_fails_with 'databridge.peers.discovery must be' \
+  "saas: an unknown peer discovery mode fails the render" \
+  "${SAAS_ARGS[@]}" --set databridge.peers.discovery=redis
+
+# Default install: forwarding off, and nothing about it rendered.
+assert_contains "$out25" '^  PEER_DISCOVERY: "off"$' \
+  "saas: DataBridge defaults to no peer forwarding"
+assert_not_contains "$out25" '^  name: databridge-peers$' \
+  "saas: no headless peer Service when forwarding is off"
+assert_env_value "$out25" databridge databridge POD_IP ABSENT \
+  "saas: no POD_IP when forwarding is off"
+
+out25peers="$TMP/scenario-saas-databridge-peers.yaml"
+render_default "$out25peers" "${SAAS_ARGS[@]}" \
+  --set databridge.replicas=2 \
+  --set databridge.peers.discovery=headless
+assert_contains "$out25peers" '^  name: databridge-peers$' \
+  "peers: the headless discovery Service renders"
+# A ClusterIP here would load-balance "who holds agent X?" to an arbitrary pod,
+# including back to the asker, which is the one answer that is never useful.
+peers_clusterip=$(yq eval 'select(.kind == "Service" and .metadata.name == "databridge-peers")
+  | .spec.clusterIP' "$out25peers")
+if [[ "$peers_clusterip" != "None" ]]; then
+  red "FAIL: peers: the discovery Service must be headless (clusterIP: ${peers_clusterip:-<unset>})"
+  exit 1
+fi
+green "ok  - peers: the discovery Service is headless"
+# A pod holds streams before it reports ready, so excluding not-ready addresses
+# would make siblings answer agent_unavailable for exactly those tenants.
+peers_notready=$(yq eval 'select(.kind == "Service" and .metadata.name == "databridge-peers")
+  | .spec.publishNotReadyAddresses' "$out25peers")
+if [[ "$peers_notready" != "true" ]]; then
+  red "FAIL: peers: the discovery Service hides not-ready pods (got: $peers_notready)"
+  exit 1
+fi
+green "ok  - peers: the discovery Service publishes not-ready addresses"
+
+# The name DataBridge resolves must be the Service the chart renders, in this
+# release's namespace: a mismatch resolves to nothing and every cross-pod query
+# fails, while the render still looks correct.
+assert_contains "$out25peers" '^  PEER_SERVICE_NAME: "databridge-peers\.default\.svc\.cluster\.local"$' \
+  "peers: replicas resolve the headless Service this chart renders"
+# Siblings are dialled on the northbound listener, so the discovery port has to
+# follow it rather than a second hardcoded default.
+assert_contains "$out25peers" '^  PEER_PORT: "50051"$' \
+  "peers: siblings are dialled on the northbound port"
+# DataBridge refuses to start with headless discovery and no POD_IP, because
+# without it a replica cannot tell itself apart from its siblings.
+assert_env_value "$out25peers" databridge databridge POD_IP fieldRef:status.podIP \
+  "peers: POD_IP comes from the pod's own status"
+# Replicas exist to survive losing one; one node holding both would defeat that.
+peers_affinity=$(yq eval 'select(.kind == "Deployment" and .metadata.name == "databridge")
+  | .spec.template.spec.affinity.podAntiAffinity
+  | (.preferredDuringSchedulingIgnoredDuringExecution[0].podAffinityTerm.topologyKey // "")' "$out25peers")
+if [[ "$peers_affinity" != "kubernetes.io/hostname" ]]; then
+  red "FAIL: peers: replicas are not spread across nodes (topologyKey: ${peers_affinity:-<none>})"
+  exit 1
+fi
+green "ok  - peers: replicas prefer separate nodes"
+
+# The budget must follow the replica count. minAvailable: 1 against a single
+# replica deadlocks every drain; maxUnavailable: 1 against several gives up a pod
+# the survivors could have covered for.
+assert_pdb_shape() {
+  local file="$1" field="$2" want="$3" msg="$4" got
+  got=$(yq eval "select(.kind == \"PodDisruptionBudget\" and .metadata.name == \"databridge\") | .spec.$field" "$file")
+  if [[ "$got" != "$want" ]]; then
+    red "FAIL: $msg"
+    red "  expected spec.$field=$want, got $got"
+    exit 1
+  fi
+  green "ok  - $msg"
+}
+assert_pdb_shape "$out25" maxUnavailable 1 \
+  "saas: a single-replica DataBridge lets a node drain evict its only pod"
+assert_pdb_shape "$out25" minAvailable null \
+  "saas: a single-replica DataBridge does not deadlock the drain with minAvailable"
+assert_pdb_shape "$out25peers" minAvailable 1 \
+  "peers: several replicas keep one available through a drain"
+assert_pdb_shape "$out25peers" maxUnavailable null \
+  "peers: several replicas do not fall back to maxUnavailable"
+
+# An explicit budget must keep winning, or an operator cannot loosen it.
+out25pdb="$TMP/scenario-saas-databridge-pdb-override.yaml"
+render_default "$out25pdb" "${SAAS_ARGS[@]}" \
+  --set databridge.replicas=2 \
+  --set databridge.peers.discovery=headless \
+  --set databridge.podDisruptionBudget.maxUnavailable=1
+assert_pdb_shape "$out25pdb" maxUnavailable 1 \
+  "peers: an explicit maxUnavailable overrides the replica-derived default"
+
+# Recreate guaranteed a gap on every deploy: the only pod went away before its
+# replacement existed. maxUnavailable 0 is what makes the replacement ready first.
+# sed strips the blank line yq emits for every document that fails the select;
+# without it the comparison sees "\n\n\nRollingUpdate,0" and never matches.
+db_strategy=$(yq eval 'select(.kind == "Deployment" and .metadata.name == "databridge")
+  | [.spec.strategy.type, (.spec.strategy.rollingUpdate.maxUnavailable | tostring)] | join(",")' "$out25" \
+  | sed '/^$/d')
+if [[ "$db_strategy" != "RollingUpdate,0" ]]; then
+  red "FAIL: saas: DataBridge does not roll without taking its pod down first (got: $db_strategy)"
+  exit 1
+fi
+green "ok  - saas: DataBridge replaces a pod before removing the old one"
 
 # Southbound endpoints with no verifiable cert. Each guard is isolated, because
 # whichever template renders first wins and the message would then be asserted

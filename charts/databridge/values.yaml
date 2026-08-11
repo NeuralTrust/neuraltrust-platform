@@ -13,21 +13,37 @@ nameOverride: ""
 fullnameOverride: "databridge"
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/databridge
-  tag: "v0.1.3"
+  tag: "v0.4.2"
   pullPolicy: IfNotPresent
 imagePullSecrets: "gcr-secret"
 serviceAccount:
   create: true
   name: "databridge"
   annotations: {}
-
-# Single replica on purpose. The agent registry lives in memory, so a second
-# replica would only know the agents that happen to have dialled it, and a query
-# routed to the wrong one finds nothing. Recreate for the same reason: two pods
-# briefly sharing the Service would split the registry.
-# Raising this needs a shared registry in DataBridge first.
+# Replicas. More than one requires peer forwarding (see `peers` below), because a
+# DataAgent's stream lives in the memory of exactly one pod: without forwarding, a
+# query routed to any other pod finds nothing. The chart refuses replicas > 1 with
+# peers.discovery=off rather than letting that fail per-tenant at runtime.
 replicas: 1
-
+# Peer forwarding. When a northbound query lands on a replica that does not hold
+# the agent's stream, that replica asks its siblings instead of answering "agent
+# unavailable". Siblings are found through a headless Service that resolves to one
+# address per pod.
+#   off      — single-replica behaviour, no headless Service, no cross-pod calls.
+#   headless — required for replicas > 1.
+peers:
+  discovery: "off"
+  # How long a replica waits for a sibling to answer before giving up on it.
+  forwardTimeout: "10s"
+  # How long the resolved sibling list is reused before DNS is consulted again.
+  refreshInterval: "10s"
+  # How long "no sibling holds this instance" is remembered, so a genuinely
+  # disconnected agent does not make every retry fan out across all replicas.
+  negativeTTL: "2s"
+  # Pause between failing readiness and closing agent streams at shutdown, so
+  # endpoints drop this pod first and agents reconnect to a survivor rather than
+  # racing back into a pod that is going away.
+  drainDelay: "5s"
 auth:
   # How DataBridge authenticates a DataAgent at connect time:
   #   introspect — ask DataCore about each token (default; the only mode that
@@ -51,7 +67,6 @@ auth:
   existingSecret:
     name: "" # Empty ⇒ the shared platform Secret
     key: "" # Empty ⇒ "DATACORE_SERVICE_TOKEN"
-
 # Southbound TLS. Terminated by DataBridge itself: agents dial the L4 load
 # balancer directly, so nothing in front of it can terminate on its behalf.
 # The certificate must cover databridge.<global.controlPlane.domain>.
@@ -81,7 +96,6 @@ tls:
       group: "cert-manager.io"
     # Empty ⇒ databridge.<global.controlPlane.domain>
     dnsNames: []
-
 service:
   northbound:
     # Cluster-internal: only DataCore calls it.
@@ -111,12 +125,10 @@ service:
     # (authentication still applies).
     loadBalancerSourceRanges: []
     externalTrafficPolicy: ""
-
 ports:
   northbound: 50051
   southbound: 50052
   health: 8080
-
 config:
   logLevel: "info"
   # Leaves 30s of the pod's 120s grace period for kubelet cleanup after the
@@ -133,22 +145,22 @@ config:
     # gRPC closes a connection that pings more often than this. Keep it below
     # the agents' own keepalive interval or they get dropped as abusive.
     keepaliveMinTime: "5s"
-
-# minAvailable: 1 against a single replica would make disruptionsAllowed 0 and
-# block `kubectl drain` forever: no replacement can become Ready before the only
-# pod is evicted, and the eviction is what the budget refuses. maxUnavailable: 1
-# lets the drain proceed — the agents reconnect, which they are built to do —
-# while still declaring the workload to anything that reads a budget. Switch to
-# minAvailable once replicas > 1 is safe (AUT-495: the registry is in memory).
+# Defaults are derived from `replicas`, so leave both null unless you have a
+# reason:
+#   replicas: 1  ⇒ maxUnavailable: 1. minAvailable: 1 against a single replica
+#     makes disruptionsAllowed 0 and deadlocks every `kubectl drain`: no
+#     replacement can become Ready before the only pod is evicted, and the
+#     eviction is what the budget refuses. Agents reconnect, which they are built
+#     to do, so allowing it is the lesser cost.
+#   replicas > 1 ⇒ minAvailable: 1. A drain then evicts one pod at a time and the
+#     survivors keep serving, including for agents whose streams they do not hold.
 podDisruptionBudget:
   enabled: true
   minAvailable: null
-  maxUnavailable: 1
-
+  maxUnavailable: null
 resources:
   requests: {cpu: 100m, memory: 128Mi}
   limits: {cpu: 500m, memory: 256Mi}
-
 priorityClassName: ""
 nodeSelector: {}
 tolerations: []

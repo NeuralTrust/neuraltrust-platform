@@ -9,7 +9,7 @@ fullnameOverride: "clickstack-collector"
 securityHardening: true
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickstack-otel-collector
-  tag: "2.32.0"
+  tag: "2.34.0"
   pullPolicy: IfNotPresent
 # Private AR image — default pull secret (set "none" to opt out for Workload Identity).
 imagePullSecrets: "gcr-secret"
