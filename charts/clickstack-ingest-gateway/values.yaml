@@ -53,11 +53,15 @@ service:
   type: ClusterIP
   annotations: {}
 # Public exposure. Unlike DataBridge this one is plain OTLP/HTTP and terminates
-# TLS at the ingress, so an ordinary L7 Ingress works on any cloud.
+# TLS at the ingress (ALB/nginx/…), so an ordinary L7 Ingress works on any cloud.
 # Hostname is telemetry.<global.controlPlane.domain>, the same value the
 # DataAgent egress sidecar exports to.
+#
+# Default ON in saas — hybrid telemetry is a product path, not optional. className
+# and annotations inherit global.ingress (same shared ALB + ACM as app/api). Set
+# enabled: false only to deliberately hide the public door.
 ingress:
-  enabled: false
+  enabled: true
   className: ""
   annotations: {}
   # Empty ⇒ telemetry.<global.controlPlane.domain>
@@ -65,8 +69,9 @@ ingress:
   tls:
     enabled: true
     # A kubernetes.io/tls Secret you created, or one cert-manager writes via an
-    # annotation above. Empty leaves TLS config to the ingress controller's
-    # default certificate, unless autoGenerate below is on.
+    # annotation above. Empty + ACM/managed cert on global.ingress ⇒ controller
+    # terminates TLS (no secretName). Empty without cloud TLS ⇒ shared
+    # neuraltrust-ingress-tls (same as other HTTP ingresses), unless autoGenerate.
     secretName: ""
     # Mint a self-signed CA and a leaf covering the host above. For a control
     # plane reached over a private network, where nothing needs a publicly

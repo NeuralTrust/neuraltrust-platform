@@ -3,15 +3,22 @@
 This is the topology contract: what each mode deploys, how the pieces talk to
 each other, and which values govern them. It assumes you have already installed
 the chart — for a first install, start with the
-[hybrid quick start](../README.md#quick-start-hybrid) or
-[README-EXTERNAL.md](../README-EXTERNAL.md).
+[hybrid quick start](../README.md#quick-start-hybrid),
+[README-EXTERNAL.md](../README-EXTERNAL.md), or the
+[saas quick start](./saas-mode.md#quick-start).
 
 One global value selects the topology:
 
 ```yaml
 global:
-  deploymentMode: "hybrid" # hybrid | external
+  deploymentMode: "hybrid" # hybrid | external | saas
 ```
+
+| Mode | Doc |
+|---|---|
+| `hybrid` | this page + [hybrid-network.md](./hybrid-network.md) |
+| `external` | [README-EXTERNAL.md](../README-EXTERNAL.md) |
+| `saas` (your control plane for remote hybrids) | [saas-mode.md](./saas-mode.md) — start with the [quick start](./saas-mode.md#quick-start) |
 
 ## Hybrid: default split-plane
 
@@ -57,12 +64,19 @@ initiated by the customer cluster over TLS:
    `https://telemetry.<saas domain>` after exchanging the DataAgent
    enrolment JWT for a short-lived OTLP access token.
 
-`<saas domain>` comes from `global.saasRegion`: `neuraltrust.ai` for `eu`
-(default) or `us.neuraltrust.ai` for `us`. All four channels move together, so
-an Americas install flips one value instead of four endpoints.
+`<saas domain>` is resolved in this order:
 
-Firewall / security-group allowlist (hostnames, IPs, and the NeuralTrust
-inbound source IP): [hybrid-network.md](./hybrid-network.md).
+1. `global.controlPlane.domain` when set (customer-owned control plane, or split-DNS)
+2. else NeuralTrust hosted domain from `global.saasRegion`: `neuraltrust.ai` (`eu`)
+   or `us.neuraltrust.ai` (`us`)
+
+All four channels move together. Pointing a hybrid at a customer `saas` install
+is one knob (`controlPlane.domain` + optional dial hosts / CA) — see
+[saas-mode.md](./saas-mode.md#remote-clusters).
+
+Firewall / security-group allowlist for **NeuralTrust-hosted** hybrid:
+[hybrid-network.md](./hybrid-network.md). For a **customer saas** control plane,
+allowlist that operator's four endpoints instead.
 
 There is no in-cluster `clickstack-collector` product collector in hybrid — the
 `clickstack-otel-collector` subchart is external-mode only. The hybrid egress
@@ -150,9 +164,10 @@ Top-level `dataagent` contains shared runtime defaults only. Product enrolment
 lives under each product. data-plane-only hybrid skips DataAgent.
 
 Each agent opens an outbound-only gRPC connection to
-`databridge.neuraltrust.ai:443`. TrustGate preserves the existing `dataagent`
-resource name; TrustGuard uses `dataagent-trustguard`. The selected primary
-(TrustGate when enabled, otherwise TrustGuard) co-locates the
+`databridge.<saas domain>:443` (NeuralTrust hosted by default; override with
+`global.controlPlane.domain` / `databridgeAddr`). TrustGate preserves the
+existing `dataagent` resource name; TrustGuard uses `dataagent-trustguard`. The
+selected primary (TrustGate when enabled, otherwise TrustGuard) co-locates the
 `clickstack-egress-collector` sidecar and owns that ClusterIP Service name.
 
 ### Hybrid ClickStack OTLP (mandatory when TrustGate/TrustGuard on)
@@ -203,23 +218,33 @@ findings to configured SIEM/integration destinations.
 Set `global.observability.hostedExport.enabled: false` for a deployment with no
 hosted telemetry egress.
 
+## SaaS: customer-owned control plane
+
+`saas` is a superset of `external`: same control-plane stack, plus DataBridge
+(HA by default), the ClickStack ingest gateway, and published config-sync
+listeners so **other clusters** can run `hybrid` against *this* install.
+Operator runbook: [saas-mode.md quick start](./saas-mode.md#quick-start).
+
 ## Components
 
 In hybrid, "opt-in" means the product flag is `false` by default and you must set
-it. External ignores the flags and deploys everything.
+it. External and saas ignore the flags and deploy the full product stack.
 
-| Component | Hybrid | External | Purpose |
-|---|:---:|:---:|---|
-| TrustGate proxy/MCP (`agentgateway:`; product `global.products.trustgate`; K8s `agentgateway-*`) | opt-in | yes | AI gateway data path |
-| TrustGate admin | hosted | yes | Gateway administration |
-| TrustGuard data plane | opt-in | yes | Runtime safety evaluation |
-| TrustGuard control plane | hosted | yes | Policy administration |
-| data-plane API | opt-in (PostgreSQL) | yes (ClickHouse) | Analytics / evaluation API — PostgreSQL by default in hybrid, ClickHouse in external |
-| DataAgent | one per enabled TrustGate/TrustGuard | no | Outbound entitled-query bridge; primary also powers ClickStack egress |
-| ClickStack OTel Collector | no | yes | OTLP to ClickHouse |
-| DataCore | no | yes | Residency query API (ClickHouse + Postgres metadata) |
-| AlertEngine | no | yes | Alert evaluation and SIEM/integration forwarding |
-| Firewall | with TrustGuard | with TrustGuard | Prompt and response safety |
+| Component | Hybrid | External | SaaS | Purpose |
+|---|:---:|:---:|:---:|---|
+| TrustGate proxy/MCP (`agentgateway:`; product `global.products.trustgate`; K8s `agentgateway-*`) | opt-in | yes | yes | AI gateway data path |
+| TrustGate admin | hosted | yes | yes | Gateway administration |
+| TrustGuard data plane | opt-in | yes | yes | Runtime safety evaluation |
+| TrustGuard control plane | hosted | yes | yes | Policy administration |
+| data-plane API | opt-in (PostgreSQL) | yes (ClickHouse) | yes (ClickHouse) | Analytics / evaluation API |
+| DataAgent | one per enabled TrustGate/TrustGuard | no | no | Outbound entitled-query bridge; primary also powers ClickStack egress |
+| ClickStack OTel Collector | no | yes | yes | OTLP to ClickHouse |
+| DataCore | no | yes | yes (`RESIDENCY_BACKEND=hybrid`) | Residency query API |
+| AlertEngine | no | yes | yes | Alert evaluation and SIEM/integration forwarding |
+| Firewall | with TrustGuard | with TrustGuard | with TrustGuard | Prompt and response safety |
+| DataBridge | no | no | yes (HA default) | Southbound broker for remote DataAgents |
+| ClickStack ingest gateway | no | no | yes | Authenticated OTLP edge for remote planes |
+| Config-sync public LB | no | no | yes (default) | Remote planes dial `*-configsync.<domain>` |
 
 ## Cluster sizing
 

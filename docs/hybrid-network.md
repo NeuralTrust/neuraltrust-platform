@@ -1,9 +1,14 @@
 # Hybrid network allowlist
 
-Hybrid data planes initiate outbound connections to NeuralTrust for
-configuration sync and DataBridge. Your firewall / security group rules must
-allow the destinations below from cluster worker nodes (and from any egress
-NAT / proxy that fronts them).
+Hybrid data planes initiate outbound connections for configuration sync,
+DataBridge, and telemetry. Your firewall / security group rules must allow the
+destinations below from cluster worker nodes (and from any egress NAT / proxy
+that fronts them).
+
+This page is for hybrids that dial **NeuralTrust-hosted** control planes
+(`global.saasRegion`). If the control plane is **yours**
+(`global.deploymentMode: saas` on another cluster), allowlist *that* operator's
+four endpoints instead — see [saas-mode.md](./saas-mode.md#endpoints).
 
 Prefer **hostname** rules when your firewall supports DNS-based allowlists.
 The IPs are provided for static ACLs. If DNS resolves differently in your
@@ -70,4 +75,5 @@ they do not require opening inbound ports for those services.
 ## Related
 
 - [docs/architecture.md](./architecture.md) — hybrid control and data channels
+- [docs/saas-mode.md](./saas-mode.md) — customer-owned control plane (different allowlist)
 - [DEPLOYMENT.md](../DEPLOYMENT.md) — install paths

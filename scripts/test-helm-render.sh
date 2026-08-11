@@ -3600,12 +3600,17 @@ green "ok  - AUT-403: firewall ConfigMap edit flips checksum/configmap"
 # ---------------------------------------------------------------------------
 blue "==> Scenario 25: saas mode (central control plane for remote data planes)"
 
-# The three southbound listeners are dialled from outside the cluster, so each
-# one needs a cert the remote planes can verify. The chart refuses to publish
-# any of them otherwise; those refusals are asserted further down.
+# Happy path: deploymentMode + domain only. Chart defaults mint self-signed TLS,
+# HA DataBridge, AWS L4 annotations (when platform=aws), and publish config-sync.
 SAAS_ARGS=(
   --set global.deploymentMode=saas
-  --set global.controlPlane.domain=cp.example.com
+  --set global.domain=cp.example.com
+)
+
+# BYO-cert path (existingSecret) still supported for production PKI tests below.
+SAAS_BYO_ARGS=(
+  --set global.deploymentMode=saas
+  --set global.domain=cp.example.com
   --set databridge.tls.existingSecret=databridge-southbound-tls
   --set agentgateway.configSync.grpcTls.existingSecret=ag-configsync-tls
   --set trustguard.configSync.grpcTls.existingSecret=tg-configsync-tls
@@ -3627,6 +3632,25 @@ assert_contains "$out25" '^  name: databridge-southbound$' \
   "saas: DataBridge southbound Service renders"
 assert_contains "$out25" '^  name: clickstack-ingest-gateway$' \
   "saas: ClickStack ingest gateway renders"
+# Ingress is the product path (hybrid OTLP/HTTP). Default ON; inherits
+# global.ingress like app/api. Host is telemetry.<controlPlane.domain>.
+assert_contains "$out25" '^  name: clickstack-ingest-gateway$' \
+  "saas: ingest gateway resource name present"
+# The Ingress shares the Deployment name; select by kind.
+gw_ing_host=$(yq -N 'select(.kind == "Ingress" and .metadata.name == "clickstack-ingest-gateway")
+  | .spec.rules[0].host' "$out25" | sed '/^$/d' | head -1)
+if [[ "$gw_ing_host" != "telemetry.cp.example.com" ]]; then
+  red "FAIL: saas: ingest gateway Ingress host want telemetry.cp.example.com got: ${gw_ing_host:-<none>}"
+  exit 1
+fi
+green "ok  - saas: ingest gateway Ingress is enabled by default (telemetry.<domain>)"
+gw_ing_backend=$(yq -N 'select(.kind == "Ingress" and .metadata.name == "clickstack-ingest-gateway")
+  | .spec.rules[0].http.paths[0].backend.service.port.name' "$out25" | sed '/^$/d' | head -1)
+if [[ "$gw_ing_backend" != "otlp-http" ]]; then
+  red "FAIL: saas: ingest gateway Ingress must target otlp-http (got: ${gw_ing_backend:-<none>})"
+  exit 1
+fi
+green "ok  - saas: ingest gateway Ingress backends OTLP/HTTP"
 
 # --- every image comes from one registry ----------------------------------
 # An air-gapped install mirrors what it is told to mirror. An image with no
@@ -3773,78 +3797,70 @@ assert_render_fails_with 'databridge.auth.mode must be one of' \
   "saas: unknown DataBridge auth mode rejected" \
   "${SAAS_ARGS[@]}" --set databridge.auth.mode=mtls
 
-# --- DataBridge peer forwarding (AUT-495) ---------------------------------
-# A DataAgent's stream is a live connection in one pod's memory, and DataCore
-# pins one pod per channel. Scaling out therefore only works if a pod that does
-# not hold the stream forwards to the one that does. The chart's job is to make
-# the two settings inseparable: replicas > 1 without forwarding is refused, and
-# forwarding brings the headless Service and POD_IP with it.
-assert_render_fails_with 'requires databridge.peers.discovery=headless' \
-  "saas: replicas > 1 with peer discovery off is refused" \
-  "${SAAS_ARGS[@]}" --set databridge.replicas=2
+# --- DataBridge peer forwarding (AUT-495) — HA is the default --------------
+# replicas >= 2 requires headless (default). Explicit discovery=off fails.
+# Singleton escape hatch: replicas=1 forces discovery off.
+assert_render_fails_with 'requires peer forwarding' \
+  "saas: replicas >= 2 with peer discovery off is refused" \
+  "${SAAS_ARGS[@]}" --set databridge.peers.discovery=off
 assert_render_fails_with 'databridge.peers.discovery must be' \
   "saas: an unknown peer discovery mode fails the render" \
   "${SAAS_ARGS[@]}" --set databridge.peers.discovery=redis
 
-# Default install: forwarding off, and nothing about it rendered.
-assert_contains "$out25" '^  PEER_DISCOVERY: "off"$' \
-  "saas: DataBridge defaults to no peer forwarding"
-assert_not_contains "$out25" '^  name: databridge-peers$' \
-  "saas: no headless peer Service when forwarding is off"
-assert_env_value "$out25" databridge databridge POD_IP ABSENT \
-  "saas: no POD_IP when forwarding is off"
+# Default install: HA (replicas=2 + headless peer Service + POD_IP).
+assert_contains "$out25" '^  PEER_DISCOVERY: "headless"$' \
+  "saas: DataBridge defaults to headless peer forwarding"
+assert_contains "$out25" '^  name: databridge-peers$' \
+  "saas: headless peer Service renders by default"
+assert_env_value "$out25" databridge databridge POD_IP fieldRef:status.podIP \
+  "saas: POD_IP is injected when peer forwarding is on"
+db_replicas=$(yq eval 'select(.kind == "Deployment" and .metadata.name == "databridge") | .spec.replicas' "$out25" | sed '/^$/d' | head -1)
+if [[ "$db_replicas" != "2" ]]; then
+  red "FAIL: saas: DataBridge default replicas want 2 got: ${db_replicas:-<none>}"
+  exit 1
+fi
+green "ok  - saas: DataBridge defaults to 2 replicas"
 
-out25peers="$TMP/scenario-saas-databridge-peers.yaml"
-render_default "$out25peers" "${SAAS_ARGS[@]}" \
-  --set databridge.replicas=2 \
-  --set databridge.peers.discovery=headless
-assert_contains "$out25peers" '^  name: databridge-peers$' \
-  "peers: the headless discovery Service renders"
 # A ClusterIP here would load-balance "who holds agent X?" to an arbitrary pod,
 # including back to the asker, which is the one answer that is never useful.
 peers_clusterip=$(yq eval 'select(.kind == "Service" and .metadata.name == "databridge-peers")
-  | .spec.clusterIP' "$out25peers")
+  | .spec.clusterIP' "$out25")
 if [[ "$peers_clusterip" != "None" ]]; then
   red "FAIL: peers: the discovery Service must be headless (clusterIP: ${peers_clusterip:-<unset>})"
   exit 1
 fi
 green "ok  - peers: the discovery Service is headless"
-# A pod holds streams before it reports ready, so excluding not-ready addresses
-# would make siblings answer agent_unavailable for exactly those tenants.
 peers_notready=$(yq eval 'select(.kind == "Service" and .metadata.name == "databridge-peers")
-  | .spec.publishNotReadyAddresses' "$out25peers")
+  | .spec.publishNotReadyAddresses' "$out25")
 if [[ "$peers_notready" != "true" ]]; then
   red "FAIL: peers: the discovery Service hides not-ready pods (got: $peers_notready)"
   exit 1
 fi
 green "ok  - peers: the discovery Service publishes not-ready addresses"
 
-# The name DataBridge resolves must be the Service the chart renders, in this
-# release's namespace: a mismatch resolves to nothing and every cross-pod query
-# fails, while the render still looks correct.
-assert_contains "$out25peers" '^  PEER_SERVICE_NAME: "databridge-peers\.default\.svc\.cluster\.local"$' \
+assert_contains "$out25" '^  PEER_SERVICE_NAME: "databridge-peers\.default\.svc\.cluster\.local"$' \
   "peers: replicas resolve the headless Service this chart renders"
-# Siblings are dialled on the northbound listener, so the discovery port has to
-# follow it rather than a second hardcoded default.
-assert_contains "$out25peers" '^  PEER_PORT: "50051"$' \
+assert_contains "$out25" '^  PEER_PORT: "50051"$' \
   "peers: siblings are dialled on the northbound port"
-# DataBridge refuses to start with headless discovery and no POD_IP, because
-# without it a replica cannot tell itself apart from its siblings.
-assert_env_value "$out25peers" databridge databridge POD_IP fieldRef:status.podIP \
-  "peers: POD_IP comes from the pod's own status"
-# Replicas exist to survive losing one; one node holding both would defeat that.
 peers_affinity=$(yq eval 'select(.kind == "Deployment" and .metadata.name == "databridge")
   | .spec.template.spec.affinity.podAntiAffinity
-  | (.preferredDuringSchedulingIgnoredDuringExecution[0].podAffinityTerm.topologyKey // "")' "$out25peers")
+  | (.preferredDuringSchedulingIgnoredDuringExecution[0].podAffinityTerm.topologyKey // "")' "$out25")
 if [[ "$peers_affinity" != "kubernetes.io/hostname" ]]; then
   red "FAIL: peers: replicas are not spread across nodes (topologyKey: ${peers_affinity:-<none>})"
   exit 1
 fi
 green "ok  - peers: replicas prefer separate nodes"
 
-# The budget must follow the replica count. minAvailable: 1 against a single
-# replica deadlocks every drain; maxUnavailable: 1 against several gives up a pod
-# the survivors could have covered for.
+# Singleton opt-down: replicas < 2 forces discovery off.
+out25single="$TMP/scenario-saas-databridge-singleton.yaml"
+render_default "$out25single" "${SAAS_ARGS[@]}" --set databridge.replicas=1
+assert_contains "$out25single" '^  PEER_DISCOVERY: "off"$' \
+  "saas: replicas=1 forces peer discovery off"
+assert_not_contains "$out25single" '^  name: databridge-peers$' \
+  "saas: no headless peer Service in singleton mode"
+assert_env_value "$out25single" databridge databridge POD_IP ABSENT \
+  "saas: no POD_IP in singleton mode"
+
 assert_pdb_shape() {
   local file="$1" field="$2" want="$3" msg="$4" got
   got=$(yq eval "select(.kind == \"PodDisruptionBudget\" and .metadata.name == \"databridge\") | .spec.$field" "$file")
@@ -3855,28 +3871,21 @@ assert_pdb_shape() {
   fi
   green "ok  - $msg"
 }
-assert_pdb_shape "$out25" maxUnavailable 1 \
+assert_pdb_shape "$out25single" maxUnavailable 1 \
   "saas: a single-replica DataBridge lets a node drain evict its only pod"
-assert_pdb_shape "$out25" minAvailable null \
+assert_pdb_shape "$out25single" minAvailable null \
   "saas: a single-replica DataBridge does not deadlock the drain with minAvailable"
-assert_pdb_shape "$out25peers" minAvailable 1 \
+assert_pdb_shape "$out25" minAvailable 1 \
   "peers: several replicas keep one available through a drain"
-assert_pdb_shape "$out25peers" maxUnavailable null \
+assert_pdb_shape "$out25" maxUnavailable null \
   "peers: several replicas do not fall back to maxUnavailable"
 
-# An explicit budget must keep winning, or an operator cannot loosen it.
 out25pdb="$TMP/scenario-saas-databridge-pdb-override.yaml"
 render_default "$out25pdb" "${SAAS_ARGS[@]}" \
-  --set databridge.replicas=2 \
-  --set databridge.peers.discovery=headless \
   --set databridge.podDisruptionBudget.maxUnavailable=1
 assert_pdb_shape "$out25pdb" maxUnavailable 1 \
   "peers: an explicit maxUnavailable overrides the replica-derived default"
 
-# Recreate guaranteed a gap on every deploy: the only pod went away before its
-# replacement existed. maxUnavailable 0 is what makes the replacement ready first.
-# sed strips the blank line yq emits for every document that fails the select;
-# without it the comparison sees "\n\n\nRollingUpdate,0" and never matches.
 db_strategy=$(yq eval 'select(.kind == "Deployment" and .metadata.name == "databridge")
   | [.spec.strategy.type, (.spec.strategy.rollingUpdate.maxUnavailable | tostring)] | join(",")' "$out25" \
   | sed '/^$/d')
@@ -3886,27 +3895,25 @@ if [[ "$db_strategy" != "RollingUpdate,0" ]]; then
 fi
 green "ok  - saas: DataBridge replaces a pod before removing the old one"
 
-# Southbound endpoints with no verifiable cert. Each guard is isolated, because
-# whichever template renders first wins and the message would then be asserted
-# against the wrong one.
+# Explicit opt-out of auto TLS without BYO secret still fails.
 assert_render_fails_with 'southbound TLS cert for DataBridge' \
-  "saas: DataBridge without a southbound cert rejected" \
+  "saas: DataBridge with autoGenerate=false and no secret rejected" \
   --set global.deploymentMode=saas \
-  --set global.controlPlane.domain=cp.example.com \
+  --set global.domain=cp.example.com \
+  --set databridge.tls.autoGenerate=false \
   --set agentgateway.configSync.expose.enabled=false \
   --set trustguard.configSync.expose.enabled=false
 assert_render_fails_with 'configSync.expose needs a certificate the data planes will accept' \
-  "saas: publishing config-sync on a self-signed cert rejected" \
+  "saas: publishing config-sync with selfSignedTls=false and no secret rejected" \
   --set global.deploymentMode=saas \
-  --set global.controlPlane.domain=cp.example.com \
-  --set databridge.tls.existingSecret=databridge-southbound-tls \
+  --set global.domain=cp.example.com \
+  --set agentgateway.configSync.expose.selfSignedTls=false \
   --set trustguard.configSync.expose.enabled=false
-# Both guards must name the escape hatch, or an operator on a private network has
-# no way to discover the option that fits them.
 assert_render_fails_with 'export-controlplane-ca.sh' \
   "saas: the DataBridge cert guard points at the CA export path" \
   --set global.deploymentMode=saas \
-  --set global.controlPlane.domain=cp.example.com \
+  --set global.domain=cp.example.com \
+  --set databridge.tls.autoGenerate=false \
   --set agentgateway.configSync.expose.enabled=false \
   --set trustguard.configSync.expose.enabled=false
 
@@ -3914,36 +3921,26 @@ assert_render_fails_with 'export-controlplane-ca.sh' \
 out25priv="$TMP/scenario-saas-configsync-private.yaml"
 render_default "$out25priv" \
   --set global.deploymentMode=saas \
-  --set global.controlPlane.domain=cp.example.com \
-  --set databridge.tls.existingSecret=databridge-southbound-tls \
+  --set global.domain=cp.example.com \
   --set agentgateway.configSync.expose.enabled=false \
   --set trustguard.configSync.expose.enabled=false
 assert_not_contains "$out25priv" '\-configsync$' \
   "saas: configSync.expose.enabled=false keeps both listeners ClusterIP"
 
-# Chart-minted certificates: the path that makes the mode installable with no
-# manual openssl step. Assert the names inside the certificates, not just that
-# the Secrets exist — a keypair covering the wrong host fails only at the
-# handshake, which is exactly the failure these guards exist to prevent.
+# Default saas render mints DataBridge + config-sync CAs (happy path).
+# Telemetry ingress CA still needs ingress.tls.autoGenerate (HTTP edge often uses ACM).
 out25gen="$TMP/scenario-saas-selfsigned.yaml"
 render_default "$out25gen" \
   --set global.deploymentMode=saas \
-  --set global.controlPlane.domain=cp.example.com \
-  --set databridge.tls.autoGenerate=true \
-  --set agentgateway.configSync.expose.selfSignedTls=true \
-  --set trustguard.configSync.expose.selfSignedTls=true \
-  --set clickstack-ingest-gateway.ingress.enabled=true \
+  --set global.domain=cp.example.com \
   --set clickstack-ingest-gateway.ingress.tls.autoGenerate=true
 assert_contains "$out25gen" '^  name: databridge-southbound-tls$' \
-  "saas: databridge.tls.autoGenerate mints the southbound keypair"
+  "saas: default autoGenerate mints the DataBridge southbound keypair"
 assert_contains "$out25gen" '^  name: clickstack-ingest-gateway-tls$' \
   "saas: ingress.tls.autoGenerate mints the telemetry keypair"
 assert_contains "$out25gen" '^      secretName: "clickstack-ingest-gateway-tls"$' \
   "saas: the telemetry Ingress serves the generated keypair"
 
-# Every generated CA has to be discoverable by scripts/export-controlplane-ca.sh,
-# which selects on this label. An unlabelled secret silently drops out of the
-# bundle and only that one leg fails the handshake.
 for component in southbound-tls configsync-tls telemetry-ingress-tls; do
   count="$(yq -N "select(.kind==\"Secret\" and .metadata.labels.\"app.kubernetes.io/component\"==\"$component\" and (.data | has(\"ca.crt\"))) | .metadata.name" "$out25gen" | grep -c . || true)"
   if [[ "$count" -eq 0 ]]; then
@@ -3968,6 +3965,54 @@ for pair in "databridge-southbound-tls:databridge.cp.example.com" \
   fi
   green "ok  - saas: $secret covers $host"
 done
+
+# AWS L4 defaults: empty annotations ⇒ internal NLB on platform=aws.
+out25aws="$TMP/scenario-saas-aws-l4.yaml"
+render_default "$out25aws" \
+  --set global.deploymentMode=saas \
+  --set global.domain=cp.example.com \
+  --set global.platform=aws
+sb_scheme=$(yq -N 'select(.kind == "Service" and .metadata.name == "databridge-southbound")
+  | .metadata.annotations["service.beta.kubernetes.io/aws-load-balancer-scheme"]' "$out25aws" | sed '/^$/d' | head -1)
+if [[ "$sb_scheme" != "internal" ]]; then
+  red "FAIL: saas aws: DataBridge southbound want scheme internal got: ${sb_scheme:-<none>}"
+  exit 1
+fi
+green "ok  - saas aws: DataBridge southbound gets internal NLB by default"
+cs_type=$(yq -N 'select(.kind == "Service" and .metadata.name == "agentgateway-admin-configsync")
+  | .metadata.annotations["service.beta.kubernetes.io/aws-load-balancer-type"]' "$out25aws" | sed '/^$/d' | head -1)
+if [[ "$cs_type" != "nlb" ]]; then
+  red "FAIL: saas aws: config-sync want nlb got: ${cs_type:-<none>}"
+  exit 1
+fi
+green "ok  - saas aws: config-sync expose gets NLB annotations by default"
+out25aws_pub="$TMP/scenario-saas-aws-l4-public.yaml"
+render_default "$out25aws_pub" \
+  --set global.deploymentMode=saas \
+  --set global.domain=cp.example.com \
+  --set global.platform=aws \
+  --set global.controlPlane.loadBalancerScheme=internet-facing
+sb_pub=$(yq -N 'select(.kind == "Service" and .metadata.name == "databridge-southbound")
+  | .metadata.annotations["service.beta.kubernetes.io/aws-load-balancer-scheme"]' "$out25aws_pub" | sed '/^$/d' | head -1)
+if [[ "$sb_pub" != "internet-facing" ]]; then
+  red "FAIL: saas aws: loadBalancerScheme=internet-facing want internet-facing got: ${sb_pub:-<none>}"
+  exit 1
+fi
+green "ok  - saas aws: one global knob flips L4 scheme to internet-facing"
+
+# controlPlane.domain still wins over global.domain (split-DNS).
+out25split="$TMP/scenario-saas-split-dns.yaml"
+render_default "$out25split" \
+  --set global.deploymentMode=saas \
+  --set global.domain=ui.example.com \
+  --set global.controlPlane.domain=dial.example.com
+split_host=$(yq -N 'select(.kind == "Ingress" and .metadata.name == "clickstack-ingest-gateway")
+  | .spec.rules[0].host' "$out25split" | sed '/^$/d' | head -1)
+if [[ "$split_host" != "telemetry.dial.example.com" ]]; then
+  red "FAIL: saas split-DNS: telemetry host want telemetry.dial.example.com got: ${split_host:-<none>}"
+  exit 1
+fi
+green "ok  - saas: controlPlane.domain overrides global.domain for dial names"
 
 # External keeps an in-cluster-only certificate: publishing is what adds the
 # public name, so a mode that publishes nothing must not carry one.
@@ -4078,23 +4123,20 @@ assert_contains "$out25insec" '^  ALLOW_INSECURE_TRANSPORT: "true"$' \
 # A bare DNS suffix is the only accepted shape; the others produce endpoints
 # that only fail once an agent tries to dial them.
 for bad in https://cp.example.com cp.example.com:443 cp.example.com/api localhost; do
-  assert_render_fails_with 'global.controlPlane.domain must be a' \
+  assert_render_fails_with 'control-plane domain must be a' \
     "domain: $bad rejected" \
     --set global.deploymentMode=hybrid \
     --set "global.controlPlane.domain=$bad"
 done
 
 # --- saas without a domain of its own -------------------------------------
-# The one fail-open in the mode: every derived endpoint falls back through
-# saasRegion to NeuralTrust's own domain, so the install would mint certificates
-# and publish load balancers for hostnames it does not own and aim the operator's
-# data planes at NeuralTrust SaaS.
-assert_render_fails_with 'global.deploymentMode=saas requires global.controlPlane.domain' \
-  "saas: no controlPlane.domain rejected" \
+# Neither global.domain nor controlPlane.domain → refuse (would mint NeuralTrust hosts).
+# values-required.yaml ships a domain for other scenarios; clear both knobs here.
+assert_render_fails_with 'global.deploymentMode=saas requires a bare domain' \
+  "saas: no domain rejected" \
   --set global.deploymentMode=saas \
-  --set databridge.tls.autoGenerate=true \
-  --set agentgateway.configSync.expose.selfSignedTls=true \
-  --set trustguard.configSync.expose.selfSignedTls=true
+  --set global.domain= \
+  --set global.controlPlane.domain=
 # Both existing modes still resolve the regional domain.
 out25reg="$TMP/scenario-region-us.yaml"
 render_default "$out25reg" \
@@ -4155,21 +4197,22 @@ green "ok  - saas: a reissued certificate rolls the pod that serves it"
 # would restart every control plane on upgrade for no reason.
 assert_not_contains "$out25ext" 'checksum/configsync-tls' \
   "external: no certificate checksum annotation appears"
-assert_not_contains "$out25" 'checksum/southbound-tls' \
+# Happy-path saas mints the leaf, so checksum is present on out25. BYO path
+# must not annotate — rotation is outside the chart.
+out25byo="$TMP/scenario-saas-byo-tls.yaml"
+render_default "$out25byo" "${SAAS_BYO_ARGS[@]}"
+assert_not_contains "$out25byo" 'checksum/southbound-tls' \
   "saas: an operator-supplied DataBridge cert gets no chart checksum"
+assert_contains "$out25" 'checksum/southbound-tls' \
+  "saas: chart-minted DataBridge cert rolls the pod on reissue"
 
 # --- the broker's budget must not deadlock a drain -----------------------
-# minAvailable against a single replica makes disruptionsAllowed 0: no
-# replacement can be Ready before the only pod is evicted, and the eviction is
-# what the budget refuses, so `kubectl drain` blocks forever on that node.
-pdb_spec=$(yq eval 'select(.kind == "PodDisruptionBudget" and .metadata.name == "databridge")
-  | (.spec.minAvailable // "unset") | tostring' "$out25")
-if [[ "$pdb_spec" != "unset" ]]; then
-  red "FAIL: saas: DataBridge PDB sets minAvailable=$pdb_spec against one replica, which blocks every node drain"
-  exit 1
-fi
-assert_contains "$out25" '^  maxUnavailable: 1$' \
-  "saas: DataBridge budget allows a node drain to proceed"
+# Default HA (replicas=2): minAvailable 1 lets a drain take one pod at a time.
+# Singleton (replicas=1): maxUnavailable 1 — already asserted on out25single above.
+assert_pdb_shape "$out25" minAvailable 1 \
+  "saas: default HA DataBridge PDB keeps one pod through a drain"
+assert_pdb_shape "$out25single" maxUnavailable 1 \
+  "saas: singleton DataBridge PDB allows a node drain to proceed"
 
 green ""
 green "All v2 render scenarios passed."

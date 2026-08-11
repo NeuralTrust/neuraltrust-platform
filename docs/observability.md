@@ -33,10 +33,11 @@ There is no direct bearer on apps and no hybrid opt-out
 (`global.clickstack.enabled` / `egress.enabled` are rejected). Air-gapped or
 local-only product telemetry requires `global.deploymentMode: external`.
 
-The sidecar's destination follows `global.saasRegion`:
-`https://telemetry.neuraltrust.ai` for `eu` (default) and
-`https://telemetry.us.neuraltrust.ai` for `us`. Override a single install with
-`global.clickstack.egress.endpoint`.
+The sidecar's destination is `https://telemetry.<domain>` where `<domain>` is
+`global.controlPlane.domain` when set, otherwise the NeuralTrust host for
+`global.saasRegion` (`telemetry.neuraltrust.ai` / `telemetry.us.neuraltrust.ai`).
+Override a single install with `global.clickstack.egress.endpoint` or
+`global.controlPlane.telemetryUrl`.
 
 Watchdog follows the same topology with a **signal-neutral** `:4318` base
 (products use a `/v1/logs` URL because their SDK uses `WithEndpointURL`). In

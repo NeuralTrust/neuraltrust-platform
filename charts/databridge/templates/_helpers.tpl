@@ -57,23 +57,28 @@ Service account name
 {{/*
 Peer discovery mode, validated. "off" or "headless".
 
-Fails closed on replicas > 1 with discovery off. An agent's stream lives in the
-memory of exactly one pod and DataCore pins one pod per channel, so without
-forwarding most raw reads land on a pod holding no stream — a per-tenant,
-intermittent failure that looks like a broken data plane rather than a
-misconfigured chart. Refusing the render is the only place this is cheap to see.
+HA is the product default (replicas=2, headless). Singleton escape hatch:
+  databridge.replicas: 1  →  forces discovery off (no peer Service / POD_IP).
+
+Fails closed when replicas >= 2 and the operator explicitly sets discovery=off
+(unsafe multi-replica without forwarding).
 */}}
 {{- define "databridge.peerDiscovery" -}}
+{{- $replicas := int (.Values.replicas | default 2) -}}
+{{- /* Singleton opt-down: ignore peer knobs entirely. */ -}}
+{{- if lt $replicas 2 -}}
+off
+{{- else -}}
 {{- $peers := default dict .Values.peers -}}
-{{- $mode := $peers.discovery | default "off" | toString | trim | lower -}}
+{{- $mode := $peers.discovery | default "headless" | toString | trim | lower -}}
 {{- if not (has $mode (list "off" "headless")) -}}
 {{- fail (printf "databridge.peers.discovery must be \"off\" or \"headless\" (got %q)" $mode) -}}
 {{- end -}}
-{{- $replicas := int (.Values.replicas | default 1) -}}
-{{- if and (gt $replicas 1) (eq $mode "off") -}}
-{{- fail (printf "databridge.replicas=%d requires databridge.peers.discovery=headless. A DataAgent's stream is a live connection held in one pod's memory: it cannot be shared or moved between replicas. DataCore opens one channel per pod and pins it, so with several replicas and no forwarding roughly (N-1)/N of raw reads reach a pod that holds no stream for that tenant and fail with agent_unavailable — intermittently, per tenant, and only for tenants whose agent happened to connect elsewhere. Set databridge.peers.discovery=headless so a replica that misses locally asks its siblings, or keep databridge.replicas=1." $replicas) -}}
+{{- if eq $mode "off" -}}
+{{- fail (printf "databridge.replicas=%d requires peer forwarding (peers.discovery=headless, the default). A DataAgent's stream lives in one pod's memory; without forwarding most raw reads hit a pod with no stream and fail agent_unavailable. Keep the default, or set databridge.replicas=1 for a singleton." $replicas) -}}
 {{- end -}}
 {{- $mode -}}
+{{- end -}}
 {{- end }}
 
 {{/*
@@ -156,12 +161,13 @@ imagePullSecrets:
 Name of the Secret holding the southbound TLS keypair. Operator-supplied wins;
 otherwise cert-manager or the chart's own generator writes to a chart-named
 Secret — only one of those two can be active, so they can share the name.
-Empty when none is configured, which validate-values.yaml already refuses.
+Empty only when autoGenerate is explicitly false and no other source is set.
 */}}
 {{- define "databridge.tlsSecretName" -}}
 {{- $tls := default dict .Values.tls -}}
 {{- $certManager := include "neuraltrust-platform.boolish" (dict "value" (default dict $tls.certManager).enabled "default" false) -}}
-{{- $auto := include "neuraltrust-platform.boolish" (dict "value" $tls.autoGenerate "default" false) -}}
+{{- /* Happy path: mint self-signed when no BYO secret / cert-manager. */ -}}
+{{- $auto := include "neuraltrust-platform.boolish" (dict "value" $tls.autoGenerate "default" true) -}}
 {{- if $tls.existingSecret -}}
 {{- $tls.existingSecret -}}
 {{- else if or (eq $certManager "true") (eq $auto "true") -}}
@@ -170,14 +176,14 @@ Empty when none is configured, which validate-values.yaml already refuses.
 {{- end }}
 
 {{/*
-Whether the chart mints the southbound keypair itself. An operator-supplied
-Secret and cert-manager both take precedence, so this only fires when neither
-is configured and the operator opted in.
+Whether the chart mints the southbound keypair itself. Default true when no
+existingSecret and cert-manager is off (private-network happy path). BYO secret
+or cert-manager always wins.
 */}}
 {{- define "databridge.tlsAutoGenerate" -}}
 {{- $tls := default dict .Values.tls -}}
 {{- $certManager := include "neuraltrust-platform.boolish" (dict "value" (default dict $tls.certManager).enabled "default" false) -}}
-{{- $auto := include "neuraltrust-platform.boolish" (dict "value" $tls.autoGenerate "default" false) -}}
+{{- $auto := include "neuraltrust-platform.boolish" (dict "value" $tls.autoGenerate "default" true) -}}
 {{- if and (not $tls.existingSecret) (ne $certManager "true") (eq $auto "true") -}}
 true
 {{- end -}}

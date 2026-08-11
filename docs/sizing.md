@@ -11,17 +11,20 @@ Leave headroom for those.
 
 ## Recommended worker profile
 
-| | Hybrid (full products) | External (self-hosted) |
-|---|---|---|
-| Approx. chart requests | ~10 vCPU / ~28 GiB | ~15 vCPU / ~38 GiB |
-| Comfortable cluster shape | **3–4** workers at **8 vCPU / 16–32 GiB** each | **4–5** workers at **8 vCPU / 16–32 GiB** each |
-| Example cloud shapes | AWS `m6i.2xlarge` × 3 · Azure `Standard_D8s_v5` × 3 · GCP `e2-standard-8` × 3 (regional) | Same SKU class with **one extra node** |
+| | Hybrid (full products) | External (self-hosted) | SaaS (central control plane) |
+|---|---|---|---|
+| Approx. chart requests | ~10 vCPU / ~28 GiB | ~15 vCPU / ~38 GiB | ~external + DataBridge HA (2 pods) + ingest gateway |
+| Comfortable cluster shape | **3–4** workers at **8 vCPU / 16–32 GiB** each | **4–5** workers at **8 vCPU / 16–32 GiB** each | Same as external; plan for two DataBridge replicas |
+| Example cloud shapes | AWS `m6i.2xlarge` × 3 · Azure `Standard_D8s_v5` × 3 · GCP `e2-standard-8` × 3 (regional) | Same SKU class with **one extra node** | Same as external |
 
 Hybrid with fewer products (for example TrustGate only, no Firewall) needs
 substantially less memory — Firewall CPU workers are the largest consumers.
 
 External adds control-plane API/app, ClickHouse, ClickStack collector, DataCore,
-and AlertEngine on top of the data path.
+and AlertEngine on top of the data path. SaaS is external plus DataBridge
+(default `replicas: 2`) and the public telemetry ingest path — see
+[saas-mode.md](./saas-mode.md#quick-start). Opt down with `databridge.replicas: 1`
+on cheap central clusters.
 
 ## What drives capacity
 

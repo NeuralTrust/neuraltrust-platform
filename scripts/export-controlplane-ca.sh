@@ -20,25 +20,24 @@
 #       --name        name of the emitted Secret (default: controlplane-ca)
 #       --context     kubectl context of the control-plane cluster
 #
-# Apply the result in every remote data-plane cluster, then point the three
-# dialling legs at it:
+# Apply the result in every remote data-plane cluster (it is NOT a Secret on the
+# control plane). Preferred one-knob form — see docs/saas-mode.md#quick-start:
+#
+#   global:
+#     controlPlane:
+#       domain: platform.example.com
+#       caSecretName: controlplane-ca
+#
+# Equivalent long form (per-leg overrides still win when set):
 #
 #   global:
 #     customCaCert:
 #       enabled: true
-#       secretName: controlplane-ca        # DataAgent + config-sync read the file
+#       secretName: controlplane-ca
 #     clickstack:
 #       egress:
-#         tlsCaSecretName: controlplane-ca # collector reads its own trust store
-#   dataagent:
-#     databridge:
-#       tlsCa: /etc/ssl/certs/custom-ca.crt
-#   agentgateway:
-#     configSync:
-#       tlsCa: /etc/ssl/certs/custom-ca.crt
-#   trustguard:
-#     configSync:
-#       tlsCa: /etc/ssl/certs/custom-ca.crt
+#         tlsCaSecretName: controlplane-ca
+#   dataagent.databridge.tlsCa / *.configSync.tlsCa → /etc/ssl/certs/custom-ca.crt
 
 set -euo pipefail
 

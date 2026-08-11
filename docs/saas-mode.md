@@ -9,8 +9,139 @@ Use it when a single `external` install cannot work because the data must stay
 where it was produced, but the console, alerting and cross-cluster reporting
 have to be in one place.
 
-If every workload fits in one cluster, use [`external`](../README-EXTERNAL.md).
-If NeuralTrust hosts the control plane, use `hybrid`.
+| If you want… | Use |
+|---|---|
+| Everything in one cluster | [`external`](../README-EXTERNAL.md) |
+| NeuralTrust-hosted control plane | [`hybrid`](../README.md#quick-start-hybrid) |
+| Your control plane + remote data planes | **this doc** |
+
+---
+
+## Quick start
+
+Assumes you already know how to install **external** (datastores, ingress, image
+pull secret). SaaS is the same chart with one mode flip, then three out-of-band
+steps the chart cannot do for you.
+
+### Central cluster (control plane)
+
+1. **Values** — mode + domain. Everything else is chart default:
+
+   ```yaml
+   global:
+     deploymentMode: saas
+     domain: platform.example.com   # UI hosts + hybrid dial names
+     platform: aws                  # if EKS (ALB + default internal NLBs)
+   ```
+
+2. **Install / upgrade** like external (same release name and namespace):
+
+   ```bash
+   helm upgrade --install neuraltrust-platform . -n neuraltrust --create-namespace \
+     -f values-required.yaml \
+     -f your-external-or-saas-values.yaml
+   ```
+
+3. **Wait for L4 load balancers**, then create DNS (or skip DNS and use raw NLB
+   hostnames on hybrids — step 7):
+
+   ```bash
+   kubectl -n neuraltrust get svc \
+     databridge-southbound \
+     agentgateway-admin-configsync \
+     trustguard-control-plane-configsync
+   # Point A/AAAA (or CNAME) records:
+   #   databridge.<domain>              → databridge-southbound
+   #   agentgateway-configsync.<domain> → agentgateway-admin-configsync
+   #   trustguard-configsync.<domain>   → trustguard-control-plane-configsync
+   #   telemetry.<domain>               → ALB / Ingress (same as app/api)
+   ```
+
+4. **Export the chart CA** (default self-signed path). This does **not** create a
+   Secret on the control plane — it builds a bundle for remote clusters:
+
+   ```bash
+   # kubectl context = central cluster
+   ./scripts/export-controlplane-ca.sh -n neuraltrust -o controlplane-ca.yaml
+   # Expect something like:
+   #   bundled 3 CA certificate(s) from: databridge-southbound-tls …
+   ```
+
+   Skip this step only if every southbound leaf is from a CA the data planes
+   already trust (public CA or your PKI) — see [TLS](#tls).
+
+5. **Open the console** (`https://app.<domain>`) and create a **Private gateway**
+   per remote plane. Copy the **enrolment** and **config-sync** tokens (issued by
+   *your* DataCore, not NeuralTrust SaaS).
+
+### Each remote data plane (hybrid)
+
+6. **Apply the CA bundle** in the hybrid namespace:
+
+   ```bash
+   # kubectl context = remote cluster
+   kubectl create namespace neuraltrust --dry-run=client -o yaml | kubectl apply -f -
+   kubectl apply -f controlplane-ca.yaml -n neuraltrust
+   ```
+
+7. **Install hybrid** pointed at your control plane:
+
+   ```yaml
+   global:
+     deploymentMode: hybrid
+     platform: aws          # if EKS
+     products:
+       trustgate: true
+     controlPlane:
+       domain: platform.example.com
+       caSecretName: controlplane-ca
+       # Only when DNS for *.<domain> is not ready yet (SNI still uses domain):
+       # databridgeAddr: "<nlb-hostname>:443"
+       # configSyncAddr: "<nlb-hostname>:443"
+   agentgateway:
+     configSync:
+       token: "<from console>"
+     dataagent:
+       enrolment:
+         token: "<from console>"
+   ```
+
+   ```bash
+   helm upgrade --install neuraltrust-platform . -n neuraltrust --create-namespace \
+     -f values-required.yaml \
+     -f your-hybrid-values.yaml
+   ```
+
+8. **Verify** from inside the remote cluster that TCP 443 reaches all four
+   endpoints (blocked security groups look like a healthy plane serving stale
+   config). Check DataAgent and config-sync pods are Ready and not crash-looping
+   on TLS handshake errors.
+
+### Defaults you get without further knobs
+
+| Default | What |
+|---|---|
+| Dial names from `global.domain` | `databridge.`, `*-configsync.`, `telemetry.` |
+| DataBridge HA | `replicas: 2` + peer headless Service |
+| Self-signed TLS | DataBridge + published config-sync (export CA → step 4) |
+| AWS L4 NLBs | `internal` when `platform=aws` and annotations empty |
+| Telemetry Ingress | ON, inherits `global.ingress` (ACM/ALB) |
+
+### Common escape hatches
+
+| Need | Knob |
+|---|---|
+| Cheap / singleton DataBridge | `databridge.replicas: 1` |
+| Dial names ≠ UI domain | `global.controlPlane.domain` |
+| Hybrids over the public internet | `global.controlPlane.loadBalancerScheme: internet-facing` |
+| Corporate / ACM / PKI leaves | [TLS](#tls) BYO `existingSecret` |
+| Keep config-sync off the public LB | `*.configSync.expose.enabled: false` |
+
+Full detail below. Network allowlists for **NeuralTrust-hosted** hybrid are in
+[`hybrid-network.md`](./hybrid-network.md); for **customer saas**, allowlist
+*your* four endpoints instead.
+
+---
 
 ## Topology
 
@@ -52,9 +183,9 @@ instead of straight to the local ClickHouse.
 
 ## Endpoints
 
-Set `global.controlPlane.domain` on **both** the central cluster and every
-remote cluster. It is a bare DNS suffix — no scheme, port or path — and the
-chart derives every cross-cluster endpoint from it:
+On **saas**, the bare domain is `global.domain` (or `global.controlPlane.domain`
+when set). On **hybrid** remotes, set `global.controlPlane.domain` to that same
+suffix (or leave NeuralTrust SaaS via `global.saasRegion` when empty).
 
 | Endpoint | Served by | Dialled by |
 |---|---|---|
@@ -66,9 +197,6 @@ chart derives every cross-cluster endpoint from it:
 One knob drives all four on purpose. A remote cluster that reached DataBridge
 on your domain but still dialled NeuralTrust for config-sync would half-work,
 and the half that broke would be silent.
-
-Leave `global.controlPlane.domain` empty to keep using NeuralTrust SaaS via
-`global.saasRegion`.
 
 ## Prerequisites
 
@@ -105,31 +233,39 @@ set by hand.
 
 ## TLS
 
-All four endpoints are dialled from other clusters. Each one terminates TLS
-itself, so each needs a certificate covering its hostname, and each remote
-cluster needs to accept it. There are three ways to get there, and they can be
-mixed per endpoint.
+All four endpoints are dialled from other clusters. Each needs a certificate
+covering its hostname, and each remote cluster needs to accept it.
 
-| Endpoint | Bring your own | cert-manager | Chart-generated |
-|---|---|---|---|
-| `databridge.<domain>:443` | `databridge.tls.existingSecret` | `databridge.tls.certManager.enabled: true` | `databridge.tls.autoGenerate: true` |
-| `agentgateway-configsync.<domain>:443` | `agentgateway.configSync.grpcTls.existingSecret` | — | `agentgateway.configSync.expose.selfSignedTls: true` |
-| `trustguard-configsync.<domain>:443` | `trustguard.configSync.grpcTls.existingSecret` | — | `trustguard.configSync.expose.selfSignedTls: true` |
-| `https://telemetry.<domain>` | `clickstack-ingest-gateway.ingress.tls.secretName` | via `ingress.annotations` | `clickstack-ingest-gateway.ingress.tls.autoGenerate: true` |
+### Default: chart-generated (private network)
 
-The chart refuses to render an endpoint with no certificate at all, rather than
-publishing one nothing can verify. Which option to pick depends on how the remote
-clusters reach you.
+With no `existingSecret`, saas mints self-signed leaves for DataBridge and both
+config-sync listeners. Telemetry Ingress follows `global.ingress` (often ACM on
+the ALB); set `clickstack-ingest-gateway.ingress.tls.autoGenerate: true` only when
+you also need a chart CA on that host.
 
-### A certificate the data planes already trust
+Export the CAs from the central cluster and apply them on every remote plane:
 
-If your data planes traverse the public internet, or you already run an internal
-PKI whose root is in their trust stores, supply the certificates:
+```bash
+./scripts/export-controlplane-ca.sh -n neuraltrust -o controlplane-ca.yaml
+```
+
+Until you do, every remote handshake fails: minting a certificate does not make
+anyone trust it. Keypairs are preserved across upgrades and reissued only when
+the names they cover change.
+
+### Customize: bring your own
+
+| Endpoint | Bring your own | cert-manager |
+|---|---|---|
+| `databridge.<domain>:443` | `databridge.tls.existingSecret` | `databridge.tls.certManager.enabled: true` |
+| `*-configsync.<domain>:443` | `*.configSync.grpcTls.existingSecret` | — |
+| `https://telemetry.<domain>` | `ingress.tls.secretName` or ACM via `global.ingress` | via annotations |
 
 ```yaml
 databridge:
   tls:
-    existingSecret: databridge-southbound-tls   # or certManager.enabled: true
+    autoGenerate: false
+    existingSecret: databridge-southbound-tls
 agentgateway:
   configSync:
     grpcTls:
@@ -138,60 +274,10 @@ trustguard:
   configSync:
     grpcTls:
       existingSecret: trustguard-configsync-tls
-clickstack-ingest-gateway:
-  ingress:
-    tls:
-      secretName: telemetry-tls
 ```
 
-Nothing further is needed on the remote side: the default trust store already
-accepts them.
-
-On EKS an ACM certificate cannot serve the first three. TLS terminates in the
-pod and ACM does not export private keys. It can serve the telemetry endpoint,
-because that one terminates at the ALB. Use cert-manager or your own PKI for the
-rest.
-
-### Chart-generated, for a control plane on a private network
-
-When remote clusters arrive over VPC peering, Direct Connect or a private link,
-no public trust store is involved and there is nothing to buy. Let the chart mint
-everything and distribute the CA as configuration:
-
-```yaml
-databridge:
-  tls:
-    autoGenerate: true
-agentgateway:
-  configSync:
-    expose:
-      selfSignedTls: true
-trustguard:
-  configSync:
-    expose:
-      selfSignedTls: true
-clickstack-ingest-gateway:
-  ingress:
-    enabled: true
-    tls:
-      autoGenerate: true
-```
-
-Each component mints its own CA, so a remote cluster needs all four. Export them
-as one bundle from the central cluster:
-
-```bash
-./scripts/export-controlplane-ca.sh -n neuraltrust -o controlplane-ca.yaml
-```
-
-Apply that Secret in each remote cluster and point the three dialling legs at it
-— see [Remote clusters](#remote-clusters). Until you do, every remote handshake
-fails: minting a certificate does not make anyone trust it.
-
-Keypairs are preserved across upgrades — agents hold long-lived streams and a
-reissue drops all of them — and are reissued only when the names they cover
-change, which is what makes retargeting `global.controlPlane.domain` reach the
-certificates. Rerun the export script after any such change.
+On EKS, ACM cannot serve DataBridge or config-sync (TLS terminates in the pod).
+ACM can serve telemetry via the ALB.
 
 ### Keeping an endpoint off a load balancer entirely
 
@@ -200,22 +286,6 @@ To reach a config-sync listener over peering without publishing a Service, set
 
 For the endpoints that do get a LoadBalancer, prefer an internal scheme when the
 callers are on a private network — see [AWS / EKS](#aws--eks).
-
-## Manual steps
-
-The chart handles certificates, secrets and endpoint derivation. Three things it
-cannot do, because they live outside the cluster or outside this release:
-
-1. **Create the DNS records.** The chart cannot know the LB addresses before the
-   cloud assigns them.
-2. **Copy the CA bundle to the remote clusters**, if you chose chart-generated
-   certificates. One command per cluster, via
-   `scripts/export-controlplane-ca.sh`; a Helm release cannot write into a
-   cluster it is not installed in.
-3. **Issue one enrolment token per remote data plane** from your console.
-
-Everything else — keypairs, the shared platform secrets, the four endpoint
-hostnames, DataCore's residency wiring — is rendered.
 
 ## Authentication
 
@@ -236,78 +306,57 @@ query and audit trail.
 
 ## Secrets
 
-Four credentials come from the shared `platform-secrets` and are generated for
-you when the chart owns secrets:
+Credentials in the shared `platform-secrets` (generated when the chart owns
+secrets):
 
 | Key | Used by |
 |---|---|
 | `ENROLMENT_INTROSPECTION_TOKEN` | DataCore — compares what DataBridge presents |
 | `DATACORE_SERVICE_TOKEN` | DataBridge — alias of the above, must hold the identical value |
 | `ENROLMENT_SIGNING_SECRET` | DataCore — signs enrolment tokens |
+| `CONFIG_SYNC_SIGNING_SECRET` | DataCore mints private-gateway install JWTs; admin verifies as `CONFIG_SYNC_JWT_SECRET` |
 | `TELEMETRY_JWT_PRIVATE_KEY_PEM` | DataCore — RS256 key for `aud=otlp-ingest` tokens the ingest gateway verifies |
 
 If you pre-provision secrets yourself (`global.preserveExistingSecrets`,
 `global.autoGenerateSecrets: false`, or `global.platformSecret.existingSecret`),
-all four must be present, and the two token keys must hold one identical value —
-otherwise every agent connection returns 401 with nothing visibly wrong on
-either side. `./create-secrets.sh` with `DEPLOYMENT_MODE=saas` writes them
-correctly, including the alias.
+all of the above must be present, and the two token keys must hold one identical
+value — otherwise every agent connection returns 401 with nothing visibly wrong
+on either side. `./create-secrets.sh` with `DEPLOYMENT_MODE=saas` writes them
+correctly, including the alias. Full table: [SECRETS.md](../SECRETS.md).
 
 ## AWS / EKS
 
-Nothing in the chart is cloud-specific; the LoadBalancer Services take
-free-form annotations. On EKS with the AWS Load Balancer Controller:
+With `global.platform: aws`, empty L4 annotations get NLB defaults from one knob:
+
+```yaml
+global:
+  platform: aws
+  controlPlane:
+    loadBalancerScheme: internal   # default; or internet-facing
+```
+
+That covers DataBridge southbound and both config-sync expose Services. Local
+`annotations` on a service always win when set. Restrict source ranges when you
+know remote egress CIDRs:
 
 ```yaml
 databridge:
   service:
     southbound:
-      type: LoadBalancer
-      annotations:
-        service.beta.kubernetes.io/aws-load-balancer-type: nlb
-        # internal for peered/Direct Connect callers; internet-facing only when
-        # the data planes genuinely traverse the internet.
-        service.beta.kubernetes.io/aws-load-balancer-scheme: internal
-      # NAT egress ranges of the remote clusters. Without this the endpoint is
-      # reachable from anywhere the NLB is.
       loadBalancerSourceRanges: ["10.20.0.0/16"]
-
-agentgateway:
-  configSync:
-    expose:
-      annotations:
-        service.beta.kubernetes.io/aws-load-balancer-type: nlb
-        service.beta.kubernetes.io/aws-load-balancer-scheme: internal
-      loadBalancerSourceRanges: ["10.20.0.0/16"]
-
-clickstack-ingest-gateway:
-  ingress:
-    enabled: true
-    annotations:
-      kubernetes.io/ingress.class: alb
-      alb.ingress.kubernetes.io/scheme: internal
 ```
 
-Use the same shape for `trustguard.configSync.expose`. On GKE the private
-equivalent is `networking.gke.io/load-balancer-type: "Internal"`; on AKS,
-`service.beta.kubernetes.io/azure-load-balancer-internal: "true"`.
+On GKE use `networking.gke.io/load-balancer-type: "Internal"`; on AKS,
+`service.beta.kubernetes.io/azure-load-balancer-internal: "true"` (set as local
+annotations — chart defaults are AWS-only).
 
-An internal scheme keeps the whole topology off the public internet, which is
-also what makes chart-generated certificates a reasonable production choice
-rather than a rehearsal shortcut.
+Notes:
 
-Notes specific to this topology on AWS:
-
-- **NLB, not ALB.** DataBridge and config-sync are long-lived gRPC streams with
-  TLS terminated in the pod. An ALB would have to re-terminate, and gRPC support
-  there needs per-controller annotations that differ across clouds.
-- **The ingest gateway is HTTP**, so it goes through an Ingress and an ALB is
-  fine. It is the only one of the three that is not layer 4.
-- **DataBridge holds its agent registry in memory** at one replica with
-  `strategy: Recreate`. Every remote data plane's query path drops on restart.
-  Plan maintenance windows until that has an HA story.
-- **Central data stores** (RDS PostgreSQL, ElastiCache, ClickHouse) follow the
-  normal `external` guidance — see [Datastores](../README.md#datastores).
+- **NLB, not ALB** for DataBridge and config-sync (long-lived gRPC, TLS in-pod).
+- **Telemetry is HTTP** → Ingress / ALB via `global.ingress`.
+- **DataBridge HA** is default (`replicas: 2` + peer forwarding). Opt down with
+  `databridge.replicas: 1` for cheap dev clusters.
+- **Central data stores** follow `external` guidance — see [Datastores](../README.md#datastores).
 
 ## Remote clusters
 

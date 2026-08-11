@@ -1,9 +1,23 @@
 {{- if and (eq (include "clickstack-ingest-gateway.deploy" .) "true") .Values.ingress.enabled }}
 {{- $host := include "clickstack-ingest-gateway.host" . }}
-{{- /* A plain L7 Ingress rather than a Gateway API HTTPRoute: data planes send
-       OTLP/HTTP, which any ingress controller can terminate and forward, and
-       every cloud ships one. The gRPC receiver stays cluster-internal — routing
-       it would need per-controller backend-protocol annotations. */}}
+{{- /* Same L7 Ingress shape as control-plane-app / datacore: inherit
+       global.ingress (className, ALB group, ACM certificateArn, …). OTLP/HTTP
+       only — gRPC stays on the ClusterIP Service. */}}
+{{- $className := include "neuraltrust-platform.ingress.className" (dict "global" .Values.global "local" .Values.ingress.className) }}
+{{- $annotations := include "neuraltrust-platform.ingress.annotations" (dict "global" .Values.global "local" .Values.ingress.annotations) }}
+{{- $tlsEnabled := true }}
+{{- if and .Values.ingress.tls (hasKey .Values.ingress.tls "enabled") }}
+  {{- $tlsEnabled = .Values.ingress.tls.enabled }}
+{{- end }}
+{{- $renderTLS := and $tlsEnabled (include "neuraltrust-platform.ingress.renderTLS" (dict "global" .Values.global "tlsEnabled" $tlsEnabled)) }}
+{{- /* Prefer operator secret / chart autoGenerate; else shared neuraltrust-ingress-tls
+       (same as app/api). When ACM/managed cert is on global.ingress, renderTLS is
+       empty and the controller terminates TLS from annotations. */}}
+{{- $localSecret := include "clickstack-ingest-gateway.tlsSecretName" . }}
+{{- $tlsSecret := $localSecret }}
+{{- if and $renderTLS (not $tlsSecret) }}
+  {{- $tlsSecret = include "neuraltrust-platform.ingress.effectiveTLSSecretName" (dict "global" .Values.global "localSecretName" "") }}
+{{- end }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -11,20 +25,20 @@ metadata:
   labels:
     {{- include "clickstack-ingest-gateway.labels" . | nindent 4 }}
     app.kubernetes.io/component: ingest-gateway
-  {{- with .Values.ingress.annotations }}
+  {{- with $annotations }}
   annotations:
-    {{- toYaml . | nindent 4 }}
+    {{- . | nindent 4 }}
   {{- end }}
 spec:
-  {{- with .Values.ingress.className }}
-  ingressClassName: {{ . | quote }}
+  {{- if $className }}
+  ingressClassName: {{ $className | quote }}
   {{- end }}
-  {{- if .Values.ingress.tls.enabled }}
+  {{- if and $tlsEnabled (or $renderTLS $localSecret) }}
   tls:
     - hosts:
         - {{ $host | quote }}
-      {{- with include "clickstack-ingest-gateway.tlsSecretName" . }}
-      secretName: {{ . | quote }}
+      {{- if $tlsSecret }}
+      secretName: {{ $tlsSecret | quote }}
       {{- end }}
   {{- end }}
   rules:
