@@ -68,12 +68,28 @@ spec:
         env:
         {{- /* Shared credentials come from platform-secrets; an explicit env
                entry outranks the legacy copy still arriving via envFrom. */}}
-        {{- include "neuraltrust-platform.platformSecretEnv" (dict "ctx" . "keys" (dict "ADMIN_JWT_SECRET" "ADMIN_JWT_SECRET" "TRUSTGUARD_TOKEN_SIGNING_SECRET" "TRUSTGUARD_TOKEN_SIGNING_SECRET" "REDIS_EVENTS_SECRET" "REDIS_EVENTS_SECRET") "skip" .Values.controlPlane.extraEnv) | nindent 8 }}
+        {{- $tgShared := dict "ADMIN_JWT_SECRET" "ADMIN_JWT_SECRET" "TRUSTGUARD_TOKEN_SIGNING_SECRET" "TRUSTGUARD_TOKEN_SIGNING_SECRET" "REDIS_EVENTS_SECRET" "REDIS_EVENTS_SECRET" }}
+        {{- if eq (include "neuraltrust-platform.isSaas" .) "true" }}
+        {{- /* Same HS256 material DataCore signs config-sync credentials with. */}}
+        {{- $_ := set $tgShared "CONFIG_SYNC_JWT_SECRET" "CONFIG_SYNC_SIGNING_SECRET" }}
+        {{- end }}
+        {{- include "neuraltrust-platform.platformSecretEnv" (dict "ctx" . "keys" $tgShared "skip" .Values.controlPlane.extraEnv) | nindent 8 }}
         {{- with include "trustguard.datastoreCredentialEnv" . }}
         {{- . | nindent 8 }}
         {{- end }}
         {{- with .Values.controlPlane.extraEnv }}
         {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- /* Auth mode only on the control plane (gRPC server). Data plane shares
+               the env ConfigMap and must not see signed/composite without its own
+               JWT material. "signed" avoids requiring a shared CONFIG_SYNC_TOKEN. */}}
+        {{- if eq (include "neuraltrust-platform.isSaas" .) "true" }}
+        - name: CONFIG_SYNC_AUTH_MODE
+          value: "signed"
+        - name: CONFIG_SYNC_JWT_ISSUER
+          value: "datacore"
+        - name: CONFIG_SYNC_JWT_AUDIENCE
+          value: "config-sync"
         {{- end }}
         {{- if eq (include "trustguard.configSyncTls.active" .) "true" }}
         - name: CONFIG_SYNC_GRPC_TLS_CERT

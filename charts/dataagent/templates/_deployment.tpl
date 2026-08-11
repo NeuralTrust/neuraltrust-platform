@@ -50,7 +50,7 @@ spec:
       - name: egress-config
         configMap:
           name: {{ include "neuraltrust-platform.clickstackEgress.fullname" . }}-config
-      {{- with $egressCfg.tlsCaSecretName }}
+      {{- with (include "neuraltrust-platform.clickstackEgress.tlsCaSecretName" .) }}
       - name: egress-ca-bundle
         secret:
           secretName: {{ . | quote }}
@@ -192,7 +192,7 @@ spec:
           - name: egress-config
             mountPath: /etc/otelcol
             readOnly: true
-          {{- with $egressCfg.tlsCaSecretName }}
+          {{- with (include "neuraltrust-platform.clickstackEgress.tlsCaSecretName" .) }}
           - name: egress-ca-bundle
             mountPath: /etc/otelcol/ca
             readOnly: true

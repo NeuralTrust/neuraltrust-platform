@@ -37,7 +37,7 @@ exporters:
     auth:
       authenticator: oauth2client
     compression: gzip
-    {{- with $egressCfg.tlsCaSecretName }}
+    {{- with (include "neuraltrust-platform.clickstackEgress.tlsCaSecretName" .) }}
     tls:
       ca_file: /etc/otelcol/ca/ca.crt
     {{- end }}

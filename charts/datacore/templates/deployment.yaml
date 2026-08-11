@@ -59,6 +59,10 @@ spec:
         {{- if eq (include "neuraltrust-platform.isSaas" .) "true" }}
         {{- $_ := set $sharedKeys "ENROLMENT_INTROSPECTION_TOKEN" "ENROLMENT_INTROSPECTION_TOKEN" }}
         {{- $_ = set $sharedKeys "ENROLMENT_SIGNING_SECRET" "ENROLMENT_SIGNING_SECRET" }}
+        {{- /* Mint path for private/hybrid install tokens. DataCore refuses
+               POST /v1/admin/credentials with 501 "not implemented" when this
+               is absent (disabledSigner). Issuer/audience default in-binary. */}}
+        {{- $_ = set $sharedKeys "CONFIG_SYNC_SIGNING_SECRET" "CONFIG_SYNC_SIGNING_SECRET" }}
         {{- $_ = set $sharedKeys "TELEMETRY_JWT_PRIVATE_KEY_PEM" "TELEMETRY_JWT_PRIVATE_KEY_PEM" }}
         {{- end }}
         {{- include "neuraltrust-platform.platformSecretEnv" (dict "ctx" . "keys" $sharedKeys "skip" .Values.extraEnv) | nindent 8 }}

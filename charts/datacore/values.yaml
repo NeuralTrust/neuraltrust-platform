@@ -49,6 +49,11 @@ databridge:
 # ENROLMENT_SIGNING_SECRET come from the shared platform Secret; the
 # introspection token must equal DataBridge's DATACORE_SERVICE_TOKEN, which the
 # chart guarantees by aliasing them to one value.
+#
+# Config-sync credentials (POST /v1/admin/credentials) are signed with
+# CONFIG_SYNC_SIGNING_SECRET from the same Secret. Without it DataCore returns
+# 501 "not implemented" and the console cannot finish a private gateway create.
+# AgentGateway/TrustGuard admin verify that secret as CONFIG_SYNC_JWT_SECRET.
 enrolment:
   jwt:
     issuer: "datacore"

@@ -696,6 +696,13 @@ Resolution order per key: `global.platformSecret.values` → live `platform-secr
 | `AUTH_SECRET_KEY` | `control-plane-secrets` / `AUTH_SECRET_KEY` | generated on install only | external |
 | `MCP_OAUTH_CLIENT_SECRET` | `control-plane-secrets` / `MCP_OAUTH_CLIENT_SECRET` | generated | external, when MCP OAuth is on |
 | `MCP_OAUTH_SIGNING_KEY` | `control-plane-secrets` / `MCP_OAUTH_SIGNING_KEY` | adopted only — a key you supply. Otherwise generated into its own `mcp-oauth-signing` Secret by a hook Job | external, when you supply a key |
+| `ENROLMENT_INTROSPECTION_TOKEN` | `datacore-secrets` / `ENROLMENT_INTROSPECTION_TOKEN` | generated | **saas** |
+| `DATACORE_SERVICE_TOKEN` | `databridge-secrets` / `DATACORE_SERVICE_TOKEN` | **= `ENROLMENT_INTROSPECTION_TOKEN`** | **saas** |
+| `ENROLMENT_SIGNING_SECRET` | `datacore-secrets` / `ENROLMENT_SIGNING_SECRET` | generated | **saas** |
+| `CONFIG_SYNC_SIGNING_SECRET` | `datacore-secrets` / `CONFIG_SYNC_SIGNING_SECRET` | generated | **saas** — DataCore mints private-gateway install JWTs with it; AgentGateway/TrustGuard admin verify it as `CONFIG_SYNC_JWT_SECRET` |
+| `TELEMETRY_JWT_PRIVATE_KEY_PEM` | `datacore-secrets` / `TELEMETRY_JWT_PRIVATE_KEY_PEM` | RSA PKCS#1 | **saas** |
+
+Without `CONFIG_SYNC_SIGNING_SECRET`, DataCore's `POST /v1/admin/credentials` returns HTTP 501 `"not implemented"` and the console private-gateway wizard fails after creating the gateway row.
 
 **Adopted only** means the chart never invents the value — the key is omitted
 until you supply it, because an operator owns it.

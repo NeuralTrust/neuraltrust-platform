@@ -342,6 +342,6 @@ Secret produces a pod that cannot start. Fail at render instead.
   {{- end -}}
 
   {{- if not (include "neuraltrust-platform.platformSecret.name" .) -}}
-    {{- fail "saas mode requires the shared platform Secret, which is currently out of play (global.platformSecret.enabled=false, an operator-owned global.platformSecret.existingSecret, global.preserveExistingSecrets=true, or global.autoGenerateSecrets=false). It carries ENROLMENT_INTROSPECTION_TOKEN and its DATACORE_SERVICE_TOKEN alias — which must hold one identical value or every agent connection 401s — plus ENROLMENT_SIGNING_SECRET and the RS256 TELEMETRY_JWT_PRIVATE_KEY_PEM. Re-enable it, or supply all four in your own Secret and point global.platformSecret.existingSecret at it." -}}
+    {{- fail "saas mode requires the shared platform Secret, which is currently out of play (global.platformSecret.enabled=false, an operator-owned global.platformSecret.existingSecret, global.preserveExistingSecrets=true, or global.autoGenerateSecrets=false). It carries ENROLMENT_INTROSPECTION_TOKEN and its DATACORE_SERVICE_TOKEN alias — which must hold one identical value or every agent connection 401s — plus ENROLMENT_SIGNING_SECRET, CONFIG_SYNC_SIGNING_SECRET (private-gateway install tokens), and the RS256 TELEMETRY_JWT_PRIVATE_KEY_PEM. Re-enable it, or supply all five in your own Secret and point global.platformSecret.existingSecret at it." -}}
   {{- end -}}
 {{- end -}}

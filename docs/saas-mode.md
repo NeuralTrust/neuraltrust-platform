@@ -327,39 +327,67 @@ Its enrolment and config-sync tokens are issued by **your** console, not by the
 NeuralTrust one. Everything else in the
 [hybrid quick start](../README.md#quick-start-hybrid) applies unchanged.
 
-### Trusting a chart-generated control plane
+### One-knob retarget (domain + optional dial hosts + CA)
 
-Only needed if the central cluster serves chart-generated certificates. Apply the
-bundle from `scripts/export-controlplane-ca.sh`, then point all three dialling
-legs at it:
+`global.controlPlane` is the single place to point a hybrid install at a
+distinct control plane — the same model as the Docker bundle's
+`CONTROL_PLANE_*` env vars:
+
+| Values key | Expands to |
+|---|---|
+| `domain` | `databridge.<domain>:443`, `<product>-configsync.<domain>:443`, `https://telemetry.<domain>` |
+| `databridgeAddr` | DataAgent `DATABRIDGE_ADDR` (SNI stays `databridge.<domain>`) |
+| `configSyncAddr` | both products' `CONFIG_SYNC_GRPC_ENDPOINT` (SNI stays `<product>-configsync.<domain>`) |
+| `telemetryUrl` | egress collector OTLP/HTTP base |
+| `caSecretName` | mount + `TLS_CA_FILE` / `CONFIG_SYNC_TLS_CA` / egress `ca_file` |
 
 ```yaml
 global:
-  customCaCert:
-    enabled: true
-    secretName: controlplane-ca      # mounts ca.crt at /etc/ssl/certs/custom-ca.crt
-  clickstack:
-    egress:
-      tlsCaSecretName: controlplane-ca
-dataagent:
-  databridge:
-    tlsCa: /etc/ssl/certs/custom-ca.crt
-agentgateway:
-  configSync:
-    tlsCa: /etc/ssl/certs/custom-ca.crt
-trustguard:
-  configSync:
-    tlsCa: /etc/ssl/certs/custom-ca.crt
+  deploymentMode: hybrid
+  controlPlane:
+    domain: neuraltrust.es
+    # Optional: dial raw NLBs when DNS for *.<domain> is not ready yet.
+    # SNI still uses the domain-derived cert names above.
+    databridgeAddr: k8s-neuraltr-databrid-….elb.eu-west-1.amazonaws.com:443
+    configSyncAddr: k8s-neuraltr-agentgat-….elb.eu-west-1.amazonaws.com:443
+    # telemetryUrl: https://k8s-….elb.amazonaws.com   # only if telemetry is also on an NLB
+    caSecretName: controlplane-ca   # apply scripts/export-controlplane-ca.sh output first
+  products:
+    trustgate: true
 ```
 
-Three separate settings because the three clients read their trust store
-differently: DataAgent and the config-sync clients take a file path, while the
-telemetry collector configures TLS from its own config and ignores the mounted
-path — hence a Secret name rather than a path for that one.
+Per-product overrides (`dataagent.databridge.addr`, `agentgateway.configSync.endpoint`,
+`global.clickstack.egress.endpoint`, explicit `tlsCa` paths) still win when set.
 
-Note that `tlsCa` **replaces** the system roots for that connection rather than
-adding to them. One bundle carrying every CA the leg needs is the way to hold
-both a private control plane and a TLS-intercepting proxy.
+### Trusting a chart-generated control plane
+
+Only needed if the central cluster serves chart-generated certificates. Apply the
+bundle from `scripts/export-controlplane-ca.sh`, then either use the one-knob
+form above (`caSecretName`) or expand the three legs by hand:
+
+```yaml
+global:
+  controlPlane:
+    domain: nt.example.com
+    caSecretName: controlplane-ca   # preferred — expands all three legs
+# equivalent long form:
+#   customCaCert:
+#     enabled: true
+#     secretName: controlplane-ca
+#   clickstack:
+#     egress:
+#       tlsCaSecretName: controlplane-ca
+# dataagent:
+#   databridge:
+#     tlsCa: /etc/ssl/certs/custom-ca.crt
+# agentgateway / trustguard:
+#   configSync:
+#     tlsCa: /etc/ssl/certs/custom-ca.crt
+```
+
+`tlsCa` **replaces** the system roots for that connection rather than adding to
+them. One bundle carrying every CA the leg needs is the way to hold both a
+private control plane and a TLS-intercepting proxy.
 
 Before rolling out, confirm from inside a remote cluster that it can reach all
 four central endpoints — the failure mode for a blocked security group is a

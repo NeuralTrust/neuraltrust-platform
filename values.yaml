@@ -19,20 +19,41 @@ global:
   # same region; per-endpoint overrides below still win when set.
   saasRegion: "eu"
   controlPlane:
-    # Point this data plane at a control plane that is not NeuralTrust's — a
-    # customer running their own global.deploymentMode=saas install, typically
+    # Point this hybrid data plane at a control plane that is not NeuralTrust's
+    # — a customer (or internal) global.deploymentMode=saas install, typically
     # one central cluster with data planes in several other clusters.
     #
-    # A bare DNS suffix, no scheme/port/path. Set it and the chart derives
-    # every control-plane endpoint from it, replacing the saasRegion map:
+    # --- domain (one knob, DNS ready) ---------------------------------------
+    # Bare DNS suffix, no scheme/port/path. Replaces the saasRegion map for
+    # every outbound leg:
     #   databridge.<domain>:443            DataAgent enrolment + query stream
     #   https://telemetry.<domain>         ClickStack egress
     #   <product>-configsync.<domain>:443  TrustGate / TrustGuard config-sync
     # Leave empty to keep using NeuralTrust SaaS per saasRegion above.
     #
-    # Enrolment and config-sync tokens must then be issued by that control
-    # plane, not by the NeuralTrust console.
+    # Enrolment and config-sync tokens must be issued by that control plane.
     domain: ""
+    # --- dial hosts (DNS not ready yet / raw NLB) ---------------------------
+    # When Route53 / private DNS for *.<domain> is missing, dial the load
+    # balancer hostname directly and keep domain for TLS SNI (matches the
+    # chart-minted or BYO cert SANs). host:port; bare host gets :443.
+    # Empty → derived from domain / saasRegion. Per-product overrides
+    # (dataagent.databridge.addr, *.configSync.endpoint,
+    # global.clickstack.egress.endpoint) still win when set.
+    databridgeAddr: ""   # e.g. k8s-….elb.amazonaws.com:443
+    configSyncAddr: ""   # e.g. k8s-….elb.amazonaws.com:443 (both products)
+    telemetryUrl: ""     # e.g. https://k8s-….elb.amazonaws.com  (OTLP/HTTP base)
+    # --- private / chart-generated CA --------------------------------------
+    # Secret (key ca.crt) holding the control-plane CA bundle. One name wires
+    # all three dial legs + mounts the cert for general TLS egress:
+    #   global.customCaCert (mount at /etc/ssl/certs/custom-ca.crt)
+    #   dataagent.databridge.tlsCa / *.configSync.tlsCa
+    #   global.clickstack.egress.tlsCaSecretName
+    # Empty → system roots (NeuralTrust SaaS). Explicit per-leg tlsCa /
+    # customCaCert / egress.tlsCaSecretName still win when set.
+    # Produce the Secret with scripts/export-controlplane-ca.sh on the
+    # central cluster, then apply it in each remote cluster.
+    caSecretName: ""
   # External-only bootstrap admin for control-plane-app. Ignored in hybrid
   # (app does not render). Prefer existingSecret (avoids Helm release history);
   # inline email+password is the escape hatch when both are non-empty.
