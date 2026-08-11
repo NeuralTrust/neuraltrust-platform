@@ -180,6 +180,179 @@ Regional ClickStack ingest endpoint the DataAgent egress sidecar exports to.
 {{- end }}
 
 {{/*
+Hybrid control-plane retarget helpers.
+
+global.controlPlane.domain alone is enough when DNS for *.<domain> resolves.
+When it does not (raw NLB hostnames, phase-1 internal LBs), set the dial-host
+knobs and keep domain for SNI. global.controlPlane.caSecretName is the one-name
+CA path that expands into the three legs' trust stores.
+
+Mirrors dataplane-bundle CONTROL_PLANE_* so Docker and Helm hybrid installs
+share the same operator model. Per-product values (dataagent.databridge.*,
+*.configSync.*, global.clickstack.egress.*) always outrank these defaults.
+*/}}
+
+{{- /* Bare host:port. Accepts host, host:port, https://host, https://host:port/. */ -}}
+{{- define "neuraltrust-platform.controlPlane.normalizeHostPort" -}}
+{{- $raw := . | toString | trim -}}
+{{- $raw = trimPrefix "https://" (trimPrefix "http://" $raw) -}}
+{{- $raw = trimSuffix "/" $raw -}}
+{{- if not $raw -}}
+{{- else if contains ":" $raw -}}
+{{- $raw -}}
+{{- else -}}
+{{- printf "%s:443" $raw -}}
+{{- end -}}
+{{- end }}
+
+{{- define "neuraltrust-platform.controlPlane.hostOf" -}}
+{{- regexReplaceAll ":[0-9]+$" (. | toString | trim) "" -}}
+{{- end }}
+
+{{- /* Non-empty only when the operator set a custom domain (not saasRegion). */ -}}
+{{- define "neuraltrust-platform.controlPlane.customDomain" -}}
+{{- $cp := default dict (default dict .Values.global).controlPlane -}}
+{{- $cp.domain | default "" | toString | trim | lower -}}
+{{- end }}
+
+{{/*
+Secret name for the control-plane CA bundle.
+
+Precedence: global.customCaCert.secretName (when customCaCert.enabled) →
+global.controlPlane.caSecretName. One name is enough for hybrid remote installs
+against a self-signed central plane.
+*/}}
+{{- define "neuraltrust-platform.controlPlane.caSecretName" -}}
+{{- $cp := default dict (default dict .Values.global).controlPlane -}}
+{{- $ca := default dict (default dict .Values.global).customCaCert -}}
+{{- if and $ca.enabled ($ca.secretName | default "" | toString | trim) -}}
+{{- $ca.secretName | toString | trim -}}
+{{- else -}}
+{{- $cp.caSecretName | default "" | toString | trim -}}
+{{- end -}}
+{{- end }}
+
+{{- define "neuraltrust-platform.controlPlane.caActive" -}}
+{{- if ne (include "neuraltrust-platform.controlPlane.caSecretName" .) "" -}}true{{- end -}}
+{{- end }}
+
+{{- /* Path mounted into pods when a control-plane CA is active. */ -}}
+{{- define "neuraltrust-platform.controlPlane.caPath" -}}
+{{- if eq (include "neuraltrust-platform.controlPlane.caActive" .) "true" -}}
+{{- include "neuraltrust-platform.customCaCert.path" . -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+DataBridge dial address for a hybrid DataAgent.
+
+Precedence: dataagent.databridge.addr → global.controlPlane.databridgeAddr →
+databridge.<saas.domain>:443.
+*/}}
+{{- define "neuraltrust-platform.controlPlane.databridgeAddr" -}}
+{{- $cp := default dict (default dict .Values.global).controlPlane -}}
+{{- $db := default dict .Values.databridge -}}
+{{- $explicit := $db.addr | default "" | toString | trim -}}
+{{- if $explicit -}}
+{{- include "neuraltrust-platform.controlPlane.normalizeHostPort" $explicit -}}
+{{- else if ($cp.databridgeAddr | default "" | toString | trim) -}}
+{{- include "neuraltrust-platform.controlPlane.normalizeHostPort" $cp.databridgeAddr -}}
+{{- else -}}
+{{- include "neuraltrust-platform.saas.databridgeAddr" . -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+DataBridge TLS SNI. When dialling a raw LB against a custom control-plane
+domain, pin SNI to databridge.<domain> so the chart-minted cert still verifies.
+*/}}
+{{- define "neuraltrust-platform.controlPlane.databridgeServerName" -}}
+{{- $db := default dict .Values.databridge -}}
+{{- $explicit := $db.serverName | default "" | toString | trim -}}
+{{- if $explicit -}}
+{{- $explicit -}}
+{{- else -}}
+{{- $addr := include "neuraltrust-platform.controlPlane.databridgeAddr" . -}}
+{{- $dialHost := include "neuraltrust-platform.controlPlane.hostOf" $addr -}}
+{{- $certHost := include "neuraltrust-platform.saas.databridgeHost" . -}}
+{{- $custom := include "neuraltrust-platform.controlPlane.customDomain" . -}}
+{{- if and $custom (ne $dialHost $certHost) -}}
+{{- $certHost -}}
+{{- else -}}
+{{- $dialHost -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+DataAgent TLS_CA_FILE. Product tlsCa wins; else the shared control-plane CA path.
+*/}}
+{{- define "neuraltrust-platform.controlPlane.databridgeTlsCa" -}}
+{{- $db := default dict .Values.databridge -}}
+{{- $explicit := $db.tlsCa | default "" | toString | trim -}}
+{{- if $explicit -}}
+{{- $explicit -}}
+{{- else -}}
+{{- include "neuraltrust-platform.controlPlane.caPath" . -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Config-sync gRPC dial address for a hybrid product data plane.
+
+Precedence: configSync.endpoint → global.controlPlane.configSyncAddr →
+<product>-configsync.<domain>:443.
+Usage: {{ include "…configSyncAddr" (dict "ctx" . "product" "agentgateway") }}
+*/}}
+{{- define "neuraltrust-platform.controlPlane.configSyncAddr" -}}
+{{- $ctx := .ctx -}}
+{{- $product := .product -}}
+{{- $cs := default dict $ctx.Values.configSync -}}
+{{- $cp := default dict (default dict $ctx.Values.global).controlPlane -}}
+{{- $explicit := $cs.endpoint | default "" | toString | trim -}}
+{{- if $explicit -}}
+{{- include "neuraltrust-platform.controlPlane.normalizeHostPort" $explicit -}}
+{{- else if ($cp.configSyncAddr | default "" | toString | trim) -}}
+{{- include "neuraltrust-platform.controlPlane.normalizeHostPort" $cp.configSyncAddr -}}
+{{- else -}}
+{{- printf "%s:443" (include "neuraltrust-platform.configSync.publicHost" (dict "ctx" $ctx "product" $product)) -}}
+{{- end -}}
+{{- end }}
+
+{{- define "neuraltrust-platform.controlPlane.configSyncServerName" -}}
+{{- $ctx := .ctx -}}
+{{- $product := .product -}}
+{{- $cs := default dict $ctx.Values.configSync -}}
+{{- $explicit := $cs.serverName | default "" | toString | trim -}}
+{{- if $explicit -}}
+{{- $explicit -}}
+{{- else -}}
+{{- $addr := include "neuraltrust-platform.controlPlane.configSyncAddr" (dict "ctx" $ctx "product" $product) -}}
+{{- $dialHost := include "neuraltrust-platform.controlPlane.hostOf" $addr -}}
+{{- $certHost := include "neuraltrust-platform.configSync.publicHost" (dict "ctx" $ctx "product" $product) -}}
+{{- $custom := include "neuraltrust-platform.controlPlane.customDomain" $ctx -}}
+{{- if and $custom (ne $dialHost $certHost) -}}
+{{- $certHost -}}
+{{- else -}}
+{{- $dialHost -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Usage: {{ include "…configSyncTlsCa" $ctx }}  (root context, not dict).
+*/}}
+{{- define "neuraltrust-platform.controlPlane.configSyncTlsCa" -}}
+{{- $cs := default dict .Values.configSync -}}
+{{- $explicit := $cs.tlsCa | default "" | toString | trim -}}
+{{- if $explicit -}}
+{{- $explicit -}}
+{{- else -}}
+{{- include "neuraltrust-platform.controlPlane.caPath" . -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 In-cluster base URL of DataCore, and the OIDC issuer for telemetry tokens.
 
 Defined once here because three parties must agree on the exact string: DataCore
@@ -1962,7 +2135,8 @@ Usage: {{- include "neuraltrust-platform.configSyncEnv" (dict "ctx" . "product" 
 {{- $cs := default dict $ctx.Values.configSync -}}
 {{- if eq (include "neuraltrust-platform.configSync.enabled" $ctx) "true" -}}
 {{- $isExternal := eq (include "neuraltrust-platform.isExternal" $ctx) "true" -}}
-{{- $endpoint := $cs.endpoint -}}
+{{- $endpoint := "" -}}
+{{- $serverName := "" -}}
 {{- $insecure := false -}}
 {{- $caPath := "" -}}
 {{- if $isExternal -}}
@@ -1972,13 +2146,19 @@ Usage: {{- include "neuraltrust-platform.configSyncEnv" (dict "ctx" . "product" 
     {{- $insecure = ternary $cs.tlsInsecure true (hasKey $cs "tlsInsecure") -}}
     {{- $caPath = $cs.tlsCa -}}
   {{- end -}}
+  {{- $endpoint = $cs.endpoint | default "" | toString | trim -}}
   {{- if not $endpoint -}}
     {{- $endpoint = printf "%s.%s.svc.cluster.local:%v" $ctx.Values.controlPlane.name $ctx.Release.Namespace $ctx.Values.controlPlane.ports.grpc -}}
   {{- end -}}
+  {{- $serverName = $cs.serverName | default (regexReplaceAll ":[0-9]+$" $endpoint "") -}}
 {{- else -}}
-  {{- $caPath = $cs.tlsCa -}}
-  {{- if not $endpoint -}}
-    {{- $endpoint = printf "%s:443" (include "neuraltrust-platform.configSync.publicHost" (dict "ctx" $ctx "product" $product)) -}}
+  {{- /* Hybrid / saas-as-client: domain + optional raw NLB dial + shared CA. */ -}}
+  {{- $endpoint = include "neuraltrust-platform.controlPlane.configSyncAddr" (dict "ctx" $ctx "product" $product) -}}
+  {{- $serverName = include "neuraltrust-platform.controlPlane.configSyncServerName" (dict "ctx" $ctx "product" $product) -}}
+  {{- if $tlsCaPath -}}
+    {{- $caPath = $tlsCaPath -}}
+  {{- else -}}
+    {{- $caPath = include "neuraltrust-platform.controlPlane.configSyncTlsCa" $ctx -}}
   {{- end -}}
 {{- end -}}
 - name: CONFIG_SYNC_DATA_PLANE_ENABLED
@@ -1992,7 +2172,7 @@ Usage: {{- include "neuraltrust-platform.configSyncEnv" (dict "ctx" . "product" 
 - name: CONFIG_SYNC_TLS_INSECURE
   value: "false"
 - name: CONFIG_SYNC_TLS_SERVER_NAME
-  value: {{ $cs.serverName | default (regexReplaceAll ":[0-9]+$" $endpoint "") | quote }}
+  value: {{ $serverName | quote }}
 {{- with $caPath }}
 - name: CONFIG_SYNC_TLS_CA
   value: {{ . | quote }}
@@ -2192,8 +2372,34 @@ or legacy global.clickstack.endpoint (path stripped if present).
 {{- define "neuraltrust-platform.clickstackEgress.saasEndpoint" -}}
 {{- $clickstack := default dict (default dict .Values.global).clickstack -}}
 {{- $cfg := default dict $clickstack.egress -}}
-{{- $raw := $cfg.endpoint | default ($clickstack.endpoint | default (include "neuraltrust-platform.saas.telemetryEndpoint" .)) -}}
+{{- $cp := default dict (default dict .Values.global).controlPlane -}}
+{{- $raw := $cfg.endpoint | default "" | toString | trim -}}
+{{- if not $raw -}}
+  {{- $raw = $cp.telemetryUrl | default "" | toString | trim -}}
+{{- end -}}
+{{- if not $raw -}}
+  {{- $raw = $clickstack.endpoint | default "" | toString | trim -}}
+{{- end -}}
+{{- if not $raw -}}
+  {{- $raw = include "neuraltrust-platform.saas.telemetryEndpoint" . -}}
+{{- end -}}
 {{- trimSuffix "/v1/logs" (trimSuffix "/" $raw) -}}
+{{- end }}
+
+{{/*
+Secret name the egress collector mounts as its OTLP exporter CA.
+
+Precedence: global.clickstack.egress.tlsCaSecretName → controlPlane.caSecretName
+(via controlPlane.caSecretName helper, which also honours customCaCert).
+*/}}
+{{- define "neuraltrust-platform.clickstackEgress.tlsCaSecretName" -}}
+{{- $cfg := default dict (default dict (default dict .Values.global).clickstack).egress -}}
+{{- $explicit := $cfg.tlsCaSecretName | default "" | toString | trim -}}
+{{- if $explicit -}}
+{{- $explicit -}}
+{{- else -}}
+{{- include "neuraltrust-platform.controlPlane.caSecretName" . -}}
+{{- end -}}
 {{- end }}
 
 {{- define "neuraltrust-platform.clickstackEgress.image" -}}
@@ -2231,8 +2437,9 @@ clickstack-collector-secrets
 Custom corporate CA certificate trust helpers.
 */}}
 {{- define "neuraltrust-platform.customCaCert.enabled" -}}
-{{- $ca := (default dict (default dict .Values.global).customCaCert) -}}
-{{- if and $ca.enabled $ca.secretName -}}true{{- end -}}
+{{- /* Active when customCaCert is explicitly enabled with a Secret, or when
+       global.controlPlane.caSecretName alone is set (hybrid one-knob CA). */ -}}
+{{- if ne (include "neuraltrust-platform.controlPlane.caSecretName" .) "" -}}true{{- end -}}
 {{- end }}
 
 {{- define "neuraltrust-platform.customCaCert.path" -}}
@@ -2241,11 +2448,12 @@ Custom corporate CA certificate trust helpers.
 {{- end }}
 
 {{- define "neuraltrust-platform.customCaCert.volume" -}}
+{{- $secret := include "neuraltrust-platform.controlPlane.caSecretName" . -}}
 {{- $ca := (default dict (default dict .Values.global).customCaCert) -}}
-{{- if and $ca.enabled $ca.secretName }}
+{{- if $secret }}
 - name: custom-ca-cert
   secret:
-    secretName: {{ $ca.secretName | quote }}
+    secretName: {{ $secret | quote }}
     items:
     - key: {{ $ca.key | default "ca.crt" | quote }}
       path: ca.crt
@@ -2253,8 +2461,7 @@ Custom corporate CA certificate trust helpers.
 {{- end }}
 
 {{- define "neuraltrust-platform.customCaCert.volumeMount" -}}
-{{- $ca := (default dict (default dict .Values.global).customCaCert) -}}
-{{- if and $ca.enabled $ca.secretName }}
+{{- if ne (include "neuraltrust-platform.controlPlane.caSecretName" .) "" }}
 - name: custom-ca-cert
   mountPath: {{ include "neuraltrust-platform.customCaCert.path" . | quote }}
   subPath: ca.crt
@@ -2264,8 +2471,7 @@ Custom corporate CA certificate trust helpers.
 
 {{- define "neuraltrust-platform.customCaCert.env" -}}
 {{- $ctx := .ctx -}}
-{{- $ca := (default dict (default dict $ctx.Values.global).customCaCert) -}}
-{{- if and $ca.enabled $ca.secretName }}
+{{- if ne (include "neuraltrust-platform.controlPlane.caSecretName" $ctx) "" }}
 {{- $path := include "neuraltrust-platform.customCaCert.path" $ctx }}
 {{- $runtime := .runtime | default "go" }}
 {{- if eq $runtime "node" }}
@@ -2594,6 +2800,12 @@ AUTH_SECRET_KEY: {legacyName: control-plane-secrets, legacyKey: AUTH_SECRET_KEY,
 ENROLMENT_INTROSPECTION_TOKEN: {legacyName: datacore-secrets, legacyKey: ENROLMENT_INTROSPECTION_TOKEN, generate: random, length: 64, requires: saas}
 DATACORE_SERVICE_TOKEN: {legacyName: databridge-secrets, legacyKey: DATACORE_SERVICE_TOKEN, aliasOf: ENROLMENT_INTROSPECTION_TOKEN, requires: saas}
 ENROLMENT_SIGNING_SECRET: {legacyName: datacore-secrets, legacyKey: ENROLMENT_SIGNING_SECRET, generate: random, length: 64, requires: saas}
+{{- /* HS256 secret DataCore uses to mint config-sync credentials (POST
+       /v1/admin/credentials). AgentGateway/TrustGuard admin verify the same
+       value as CONFIG_SYNC_JWT_SECRET under AUTH_MODE=composite|signed. Without
+       it the console's private-gateway wizard gets HTTP 501 "not implemented"
+       the moment it asks DataCore for install tokens. */}}
+CONFIG_SYNC_SIGNING_SECRET: {legacyName: datacore-secrets, legacyKey: CONFIG_SYNC_SIGNING_SECRET, generate: random, length: 64, requires: saas}
 TELEMETRY_JWT_PRIVATE_KEY_PEM: {legacyName: datacore-secrets, legacyKey: TELEMETRY_JWT_PRIVATE_KEY_PEM, generate: rsa, requires: saas}
 {{- end }}
 

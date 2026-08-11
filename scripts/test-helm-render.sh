@@ -4002,6 +4002,56 @@ assert_contains "$out25ca" '^          ca_file: /etc/otelcol/ca/ca\.crt$' \
 assert_contains "$out25ca" '^      - name: egress-ca-bundle$' \
   "remote: the egress CA bundle is mounted, not just referenced in config"
 
+# One-knob form: domain + raw NLB dial hosts + caSecretName. Mirrors the
+# dataplane-bundle CONTROL_PLANE_* model so Docker and Helm hybrid installs
+# share the same operator surface. SNI must stay on the cert name (domain),
+# not the NLB hostname.
+out25one="$TMP/scenario-hybrid-controlplane-one-knob.yaml"
+render_default "$out25one" \
+  --set global.deploymentMode=hybrid \
+  --set global.controlPlane.domain=neuraltrust.es \
+  --set global.controlPlane.databridgeAddr=k8s-databrid.elb.eu-west-1.amazonaws.com:443 \
+  --set global.controlPlane.configSyncAddr=k8s-agentgat.elb.eu-west-1.amazonaws.com:443 \
+  --set global.controlPlane.telemetryUrl=https://k8s-telemetry.elb.eu-west-1.amazonaws.com \
+  --set global.controlPlane.caSecretName=controlplane-ca \
+  --set agentgateway.configSync.token=cs-trustgate \
+  --set trustguard.configSync.token=cs-trustguard
+assert_contains "$out25one" '^  DATABRIDGE_ADDR: "k8s-databrid\.elb\.eu-west-1\.amazonaws\.com:443"$' \
+  "one-knob: DataAgent dials the raw DataBridge NLB"
+assert_contains "$out25one" '^  DATABRIDGE_SERVER_NAME: "databridge\.neuraltrust\.es"$' \
+  "one-knob: DataBridge SNI stays on the domain cert name"
+assert_contains "$out25one" '^  TLS_CA_FILE: "/etc/ssl/certs/custom-ca\.crt"$' \
+  "one-knob: caSecretName expands into DataAgent TLS_CA_FILE"
+assert_contains "$out25one" '^          value: "k8s-agentgat\.elb\.eu-west-1\.amazonaws\.com:443"$' \
+  "one-knob: config-sync dials the raw NLB"
+assert_contains "$out25one" '^          value: "agentgateway-configsync\.neuraltrust\.es"$' \
+  "one-knob: config-sync SNI stays on the domain cert name"
+assert_contains "$out25one" '^          value: "/etc/ssl/certs/custom-ca\.crt"$' \
+  "one-knob: caSecretName expands into CONFIG_SYNC_TLS_CA"
+assert_contains "$out25one" '^        endpoint: "https://k8s-telemetry\.elb\.eu-west-1\.amazonaws\.com"$' \
+  "one-knob: egress exporter dials the telemetry URL override"
+assert_contains "$out25one" '^          ca_file: /etc/otelcol/ca/ca\.crt$' \
+  "one-knob: caSecretName expands into the egress collector CA"
+assert_contains "$out25one" '^            secretName: "controlplane-ca"$' \
+  "one-knob: custom-ca-cert volume mounts caSecretName"
+
+# Product-level overrides still beat the umbrella controlPlane dial hosts.
+out25ovr="$TMP/scenario-hybrid-controlplane-override.yaml"
+render_default "$out25ovr" \
+  --set global.deploymentMode=hybrid \
+  --set global.controlPlane.domain=neuraltrust.es \
+  --set global.controlPlane.databridgeAddr=k8s-databrid.elb.amazonaws.com:443 \
+  --set global.controlPlane.configSyncAddr=k8s-agentgat.elb.amazonaws.com:443 \
+  --set dataagent.databridge.addr=custom-bridge.internal:9443 \
+  --set dataagent.databridge.serverName=databridge.neuraltrust.es \
+  --set agentgateway.configSync.endpoint=custom-sync.internal:8443 \
+  --set agentgateway.configSync.serverName=agentgateway-configsync.neuraltrust.es \
+  --set agentgateway.configSync.token=cs-trustgate
+assert_contains "$out25ovr" '^  DATABRIDGE_ADDR: "custom-bridge\.internal:9443"$' \
+  "override: dataagent.databridge.addr beats controlPlane.databridgeAddr"
+assert_contains "$out25ovr" '^          value: "custom-sync\.internal:8443"$' \
+  "override: configSync.endpoint beats controlPlane.configSyncAddr"
+
 # Defaults must stay on system roots. Emitting an empty TLS_CA_FILE would replace
 # the system pool with nothing and break every hybrid install against NeuralTrust.
 out25noca="$TMP/scenario-hybrid-system-roots.yaml"

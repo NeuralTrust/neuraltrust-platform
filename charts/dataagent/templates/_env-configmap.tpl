@@ -1,8 +1,10 @@
 {{- define "dataagent.envConfigMap" -}}
-{{- /* Empty addr derives the regional SaaS host from global.saasRegion; an
-       explicit addr keeps its own host as SNI unless serverName overrides. */ -}}
-{{- $addr := .Values.databridge.addr | default (include "neuraltrust-platform.saas.databridgeAddr" .) -}}
-{{- $serverName := .Values.databridge.serverName | default (regexReplaceAll ":[0-9]+$" $addr "") -}}
+{{- /* Dial + SNI + CA come from neuraltrust-platform.controlPlane.* so a hybrid
+       install can retarget with global.controlPlane.{domain,databridgeAddr,
+       caSecretName} alone. Product-level dataagent.databridge.* still wins. */ -}}
+{{- $addr := include "neuraltrust-platform.controlPlane.databridgeAddr" . -}}
+{{- $serverName := include "neuraltrust-platform.controlPlane.databridgeServerName" . -}}
+{{- $tlsCa := include "neuraltrust-platform.controlPlane.databridgeTlsCa" . -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -13,7 +15,7 @@ data:
   DATABRIDGE_ADDR: {{ $addr | quote }}
   DATABRIDGE_SERVER_NAME: {{ $serverName | quote }}
   TLS_MODE: {{ .Values.databridge.tlsMode | quote }}
-{{- with .Values.databridge.tlsCa }}
+{{- with $tlsCa }}
   TLS_CA_FILE: {{ . | quote }}
 {{- end }}
 {{- if eq .Values.databridge.tlsMode "insecure" }}

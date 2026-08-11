@@ -738,6 +738,19 @@ spec:
           valueFrom:
             secretKeyRef:
               {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "TRUSTLENS_JWT_SECRET" "optional" true) | nindent 14 }}
+        {{- /* saas console: publish this plane's public endpoints so the private
+               gateway wizard can emit global.controlPlane.domain (and dial hosts)
+               into hybrid Helm / Docker install snippets. Without these the app
+               falls back to NeuralTrust production SaaS defaults and remote
+               planes dial the wrong control plane. extraEnv still wins. */}}
+        {{- if and (eq (include "neuraltrust-platform.isSaas" .) "true") (not (has "CONFIG_SYNC_GRPC_ENDPOINT" $ownEnv)) }}
+        - name: CONFIG_SYNC_GRPC_ENDPOINT
+          value: {{ printf "%s:443" (include "neuraltrust-platform.configSync.publicHost" (dict "ctx" . "product" "agentgateway")) | quote }}
+        {{- end }}
+        {{- if and (eq (include "neuraltrust-platform.isSaas" .) "true") (not (has "DATABRIDGE_ADDR" $ownEnv)) }}
+        - name: DATABRIDGE_ADDR
+          value: {{ include "neuraltrust-platform.saas.databridgeAddr" . | quote }}
+        {{- end }}
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.extraEnv }}
         {{- toYaml .Values.controlPlane.components.app.extraEnv | nindent 8 }}
         {{- end }}

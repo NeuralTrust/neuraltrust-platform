@@ -68,12 +68,32 @@ spec:
         env:
         {{- /* Shared credentials come from platform-secrets; an explicit env
                entry outranks the legacy copy still arriving via envFrom. */}}
-        {{- include "neuraltrust-platform.platformSecretEnv" (dict "ctx" . "keys" (dict "SERVER_SECRET_KEY" "SERVER_SECRET_KEY") "skip" .Values.controlPlane.extraEnv) | nindent 8 }}
+        {{- /* SERVER_SECRET_KEY always. In saas the same CONFIG_SYNC_SIGNING_SECRET
+               DataCore mints with is verified here as CONFIG_SYNC_JWT_SECRET so
+               private/hybrid data planes can dial with a per-tenant JWT. */}}
+        {{- $agShared := dict "SERVER_SECRET_KEY" "SERVER_SECRET_KEY" }}
+        {{- if eq (include "neuraltrust-platform.isSaas" .) "true" }}
+        {{- $_ := set $agShared "CONFIG_SYNC_JWT_SECRET" "CONFIG_SYNC_SIGNING_SECRET" }}
+        {{- end }}
+        {{- include "neuraltrust-platform.platformSecretEnv" (dict "ctx" . "keys" $agShared "skip" .Values.controlPlane.extraEnv) | nindent 8 }}
         {{- with include "agentgateway.datastoreCredentialEnv" . }}
         {{- . | nindent 8 }}
         {{- end }}
         {{- with .Values.controlPlane.extraEnv }}
         {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- /* Auth mode only on admin (the gRPC server). Proxy/MCP share the
+               env ConfigMap and would crash if they saw signed/composite without
+               their own JWT secret and shared token. "signed" — not composite —
+               because this chart does not mint CONFIG_SYNC_TOKEN for an
+               in-cluster fleet pull. */}}
+        {{- if eq (include "neuraltrust-platform.isSaas" .) "true" }}
+        - name: CONFIG_SYNC_AUTH_MODE
+          value: "signed"
+        - name: CONFIG_SYNC_JWT_ISSUER
+          value: "datacore"
+        - name: CONFIG_SYNC_JWT_AUDIENCE
+          value: "config-sync"
         {{- end }}
         {{- if eq (include "agentgateway.configSyncTls.active" .) "true" }}
         - name: CONFIG_SYNC_GRPC_TLS_CERT
