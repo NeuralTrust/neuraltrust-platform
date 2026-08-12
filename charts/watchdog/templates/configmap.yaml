@@ -12,8 +12,21 @@ data:
       defaultInterval: {{ .Values.runner.defaultInterval }}
       defaultTimeout: {{ .Values.runner.defaultTimeout }}
       failureThreshold: {{ .Values.runner.failureThreshold }}
-      {{- with .Values.runner.prometheusQueryEnv }}
-      prometheusQueryEnv: {{ . | quote }}
+      {{- /* ClickStack sink for red / otlp_freshness. external+saas get the
+             in-cluster ClickHouse native address when the operator left
+             runner.clickstack.address empty; hybrid stays empty (no local CH).
+             Credentials always reuse CLICKHOUSE_* from clickhouse-secrets. */ -}}
+      {{- $cs := default dict .Values.runner.clickstack -}}
+      {{- $csAddr := default "" $cs.address -}}
+      {{- if and (eq $csAddr "") (eq (include "neuraltrust-platform.isExternal" .) "true") -}}
+      {{- $csAddr = "clickhouse:9000" -}}
+      {{- end -}}
+      {{- if $csAddr }}
+      clickstack:
+        address: {{ $csAddr | quote }}
+        database: {{ default "otel" $cs.database | quote }}
+        usernameEnv: {{ default "CLICKHOUSE_USER" $cs.usernameEnv | quote }}
+        passwordEnv: {{ default "CLICKHOUSE_PASSWORD" $cs.passwordEnv | quote }}
       {{- end }}
     server:
       listenAddr: "{{ .Values.server.listenAddr }}"

@@ -4,6 +4,23 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Changed
+
+- **Watchdog: drop bundled Prometheus; RED/freshness query ClickStack.** The
+  chart no longer renders `neuraltrust-watchdog-prometheus` or injects
+  `PROMETHEUS_QUERY_URL`. `runner.prometheusQueryEnv` is replaced by
+  `runner.clickstack` (`address`, `database`, `usernameEnv`, `passwordEnv`).
+  In `external` / `saas`, an empty address defaults to `clickhouse:9000` /
+  database `otel` (same `CLICKHOUSE_*` secrets as the clickhouse health check).
+  In `hybrid` the block stays empty — there is no in-cluster ClickHouse; the
+  central SaaS watchdog evaluates tenant RED. Default `red-*` rows no longer
+  carry `endpointEnv`; `watchdog-self-staleness` (`scrape_staleness`) is
+  replaced by disabled `watchdog-self-freshness` (`otlp_freshness`).
+  **Upgrade:** if you enabled `red-*` against the old bundled Prometheus, set
+  `watchdog.runner.clickstack.address` (or rely on the external default) before
+  or with the image bump that removes PromQL support — otherwise the new binary
+  rejects checks that have no ClickStack address.
+
 ## [v2.11.1] — 2026-08-11
 
 ### Changed
