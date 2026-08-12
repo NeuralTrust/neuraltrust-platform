@@ -1187,6 +1187,34 @@ assert_env_value "$out6wd" neuraltrust-watchdog watchdog OTEL_EXPORTER_OTLP_HEAD
   "watchdog external: mounts OTEL_EXPORTER_OTLP_HEADERS from clickstack-collector-secrets"
 assert_env_value "$out6wd" neuraltrust-watchdog watchdog OPENTELEMETRY_AUTH_TOKEN ABSENT \
   "watchdog external: no hosted OPENTELEMETRY_AUTH_TOKEN"
+# AUT-519: bundled Prometheus is gone; RED inherits runner.clickstack.
+if grep -qE 'name: .*-prometheus|PROMETHEUS_QUERY_URL|prometheusQueryEnv|scrape_staleness|kind: promql' "$out6wd"; then
+  red "FAIL: watchdog external render still ships Prometheus / PromQL symbols"
+  grep -nE 'name: .*-prometheus|PROMETHEUS_QUERY_URL|prometheusQueryEnv|scrape_staleness|kind: promql' "$out6wd" | head -20
+  exit 1
+fi
+green "ok  - watchdog external: no bundled Prometheus / PROMETHEUS_QUERY_URL / scrape_staleness"
+assert_contains "$out6wd" 'clickstack:' \
+  "watchdog external: runner.clickstack block present"
+assert_contains "$out6wd" 'address: "clickhouse:9000"' \
+  "watchdog external: runner.clickstack defaults to in-cluster ClickHouse native port"
+assert_contains "$out6wd" 'database: "otel"' \
+  "watchdog external: runner.clickstack database is otel"
+assert_contains "$out6wd" 'kind: otlp_freshness' \
+  "watchdog external: self-freshness is otlp_freshness (not scrape_staleness)"
+# hybrid must NOT wire a local ClickStack address (no in-cluster CH).
+out6wd_h="$TMP/scenario-watchdog-hybrid-clickstack.yaml"
+render_product_slice "$out6wd_h" -f "$CHART_DIR/values-trustgate.yaml.example" --set watchdog.enabled=true
+if grep -qE 'name: .*-prometheus|PROMETHEUS_QUERY_URL|prometheusQueryEnv' "$out6wd_h"; then
+  red "FAIL: watchdog hybrid render still ships Prometheus symbols"
+  exit 1
+fi
+if awk '/name: neuraltrust-watchdog-config/,/^---/' "$out6wd_h" | grep -q 'clickstack:'; then
+  red "FAIL: watchdog hybrid must not default runner.clickstack (no local ClickHouse)"
+  awk '/name: neuraltrust-watchdog-config/,/^---/' "$out6wd_h" | head -40
+  exit 1
+fi
+green "ok  - watchdog hybrid: no runner.clickstack default (central SaaS evaluates RED)"
 
 # ---------------------------------------------------------------------------
 # 7. Retired helpers / values must not appear in the values contract or rendered output

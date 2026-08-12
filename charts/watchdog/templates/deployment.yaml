@@ -104,8 +104,6 @@ spec:
                   fieldPath: metadata.namespace
             - name: NT_ENVIRONMENT
               value: {{ default "unknown" (default "" (default dict .Values.global).environment) | quote }}
-            - name: PROMETHEUS_QUERY_URL
-              value: {{ include "neuraltrust-watchdog.prometheusEndpoint" . | quote }}
             {{- if $tenantID }}
             - name: NT_TENANT_ID
               value: {{ $tenantID | quote }}

@@ -80,4 +80,3 @@ emit_row "opentelemetry-collector-contrib (umbrella)" "$(yq_get "$V" '.global.ob
 emit_row "opentelemetry-collector-contrib (clickstack egress)" "$(yq_get "$V" '.global.clickstack.egress.image.repository')" "$(yq_get "$V" '.global.clickstack.egress.image.tag')"
 emit_row "opentelemetry-collector-contrib (clickstack ingest gateway, saas)" "$(yq_get "$CSGW" '.image.repository')" "$(yq_get "$V" '.["clickstack-ingest-gateway"].image.tag')"
 emit_row "neuraltrust-watchdog" "$(yq_get "$WD" '.image.repository')" "$(yq_get "$WD" '.image.tag')"
-emit_row "watchdog-prometheus" "$(yq_get "$WD" '.prometheus.image.repository')" "$(yq_get "$WD" '.prometheus.image.tag')"

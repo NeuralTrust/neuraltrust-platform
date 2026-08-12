@@ -15,7 +15,7 @@ image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/watchdog
   tag: v0.13.5 # defaults to .Chart.AppVersion
   pullPolicy: IfNotPresent
-# Pull secret(s) for private nt-docker images (watchdog + bundled Prometheus).
+# Pull secret(s) for private nt-docker images.
 # Defaults to gcr-secret like the rest of the chart. Set to [] on clusters that
 # pull via IAM / Workload Identity and have no pull Secret.
 imagePullSecrets:
@@ -77,64 +77,13 @@ service:
   type: ClusterIP
   port: 8080
   metricsPort: 8080
-# Bundled short-retention Prometheus. Customer-minimal installs do NOT render it:
-# watchdog now pushes check-status gauges over OTLP directly, and direct-probe
-# checks do not need a local query engine. It renders only when:
-#   - prometheus.enabled=true, OR
-#   - an enabled check has kind red/promql/scrape_staleness.
-# It is alerting-only: no Alertmanager, no rules, no remote_write.
-prometheus:
-  enabled: false
-  reuseExisting: "" # Set to an existing in-cluster Prometheus URL to skip the bundled instance.
-  # Optional host:port override for the Collector Prometheus exporter. When
-  # empty, bundled Prometheus discovers the in-chart Collector in the release
-  # namespace by label/port name.
-  collectorTarget: ""
-  image:
-    # Mirrored from prom/prometheus via crane into nt-docker (not Docker Hub).
-    repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/prometheus
-    tag: v3.12.0
-    pullPolicy: IfNotPresent
-  retentionTime: 3h
-  retentionSize: 512MB
-  scrapeInterval: 30s
-  scrapeTimeout: 10s
-  service:
-    port: 9090
-  resources:
-    requests:
-      cpu: 50m
-      memory: 128Mi
-    limits:
-      cpu: 500m
-      memory: 256Mi
-  serviceAccount:
-    name: ""
-    annotations: {}
-  podAnnotations: {}
-  podLabels: {}
-  podSecurityContext:
-    runAsNonRoot: true
-    runAsUser: 65534
-    runAsGroup: 65534
-    fsGroup: 65534
-    seccompProfile:
-      type: RuntimeDefault
-  securityContext:
-    allowPrivilegeEscalation: false
-    readOnlyRootFilesystem: true
-    capabilities:
-      drop: [ALL]
-  nodeSelector: {}
-  tolerations: []
-  affinity: {}
-# Monitoring resources. Five independent capability-gated toggles, so
-# every cluster can pick the combination its stack supports. The
-# annotation baseline is universal; the rest are opt-in CRD-bound
-# resources that only render when both the chart toggle is true AND the
-# matching CRD exists.
+# Monitoring resources for watchdog's own /metrics endpoint. These are
+# scrape contracts only — RED and freshness checks query ClickStack over
+# SQL (runner.clickstack), not a bundled Prometheus. The annotation
+# baseline is universal; the rest are opt-in CRD-bound resources that only
+# render when both the chart toggle is true AND the matching CRD exists.
 monitoring:
-  # Pod scrape annotations on the Deployment. Universal contract — works
+  # Pod scrape annotations on the StatefulSet. Universal contract — works
   # with Prometheus Operator additionalScrapeConfigs, Google Managed
   # Prometheus, Amazon Managed Prometheus agent in annotation mode,
   # Azure Monitor for Containers, and the in-chart OTel collector.
@@ -424,14 +373,24 @@ runner:
   defaultInterval: 60s
   defaultTimeout: 15s
   failureThreshold: 3
-  # Env var holding the Prometheus query-API base URL. Applied as the default
-  # target.endpointEnv for red/promql/scrape_staleness checks that omit it, so
-  # the address is declared once. The bundled local Prometheus sets this.
-  prometheusQueryEnv: PROMETHEUS_QUERY_URL
-# Customer-minimal default: direct probes only (no local Prometheus required).
-# These checks answer "are the main services running?" and the watchdog pushes
-# their status over OTLP metrics. Adding any red/promql/scrape_staleness id here
-# later renders the bundled local Prometheus.
+  # ClickStack (ClickHouse) sink for RED + otlp_freshness. red / otlp_freshness
+  # rows inherit this block when they omit target.address.
+  #
+  # Per deploymentMode:
+  #   external / saas (customer central) — in-cluster ClickHouse + ClickStack
+  #     collector write OTLP into database `otel`. Defaults below reuse the
+  #     same CLICKHOUSE_* secrets as the clickhouse health check (native :9000).
+  #   hybrid — no in-cluster ClickHouse. Leave address empty and keep red /
+  #     otlp_freshness disabled; the central SaaS watchdog evaluates tenant
+  #     RED with target.tenantId against the hosted sink.
+  clickstack:
+    address: ""
+    database: otel
+    usernameEnv: CLICKHOUSE_USER
+    passwordEnv: CLICKHOUSE_PASSWORD
+# Customer-minimal default: direct probes only. RED / freshness need a reachable
+# ClickStack sink (runner.clickstack) — enable them only in external/saas where
+# ClickHouse is deployed, never on hybrid (no local ClickHouse).
 # Topology-neutral defaults. Add `clickhouse` explicitly in external overlays
 # (hybrid does not deploy ClickHouse).
 enabledCheckIds:
@@ -470,12 +429,12 @@ checks:
       maxLongQueries: 0
       queryLogLookbackSeconds: 900
       queryLogExceptionsMax: 0
-  # The three red-* checks use the built-in `red` kind: the PromQL is compiled
-  # in the watchdog binary from `target.signal` (requestRate | errorRatio |
-  # latencyP95), so there is no hand-written query to drift or mistype, and the
-  # query always groups by service_name so the alert names the offending
-  # service. Tune thresholds and the "for duration" (failureThreshold) here;
-  # the query itself is not customer-editable by design.
+  # The three red-* checks use the built-in `red` kind: SQL over ClickStack
+  # OTLP histograms, compiled in the watchdog binary from `target.signal`
+  # (requestRate | errorRatio | latencyP95). They inherit runner.clickstack
+  # when target.address is omitted. Keep disabled until runner.clickstack.address
+  # is set (external/saas with in-cluster ClickHouse). Hybrid must stay off —
+  # there is no local ClickHouse; central SaaS evaluates tenant RED instead.
   - id: red-request-rate
     kind: red
     enabled: false
@@ -484,7 +443,6 @@ checks:
     # never alerts.
     failureThreshold: 5
     target:
-      endpointEnv: PROMETHEUS_QUERY_URL
       signal: requestRate
     thresholds:
       operator: ">"
@@ -496,7 +454,6 @@ checks:
     enabled: false
     failureThreshold: 5 # ~5 min sustained before paging (see red-request-rate)
     target:
-      endpointEnv: PROMETHEUS_QUERY_URL
       signal: errorRatio
     thresholds:
       operator: ">"
@@ -508,25 +465,22 @@ checks:
     enabled: false
     failureThreshold: 5 # ~5 min sustained before paging (see red-request-rate)
     target:
-      endpointEnv: PROMETHEUS_QUERY_URL
       signal: latencyP95
     thresholds:
       operator: ">"
       warning: 1
       critical: 3
       noDataStatus: unknown
-  # Watchdog self-metric staleness. The bundled local Prometheus
-  # scrapes watchdog's own /metrics (job watchdog-self), so an absent
-  # watchdog_checks_runs_total means the monitor itself has gone silent — the
-  # one signal a process-local liveness probe can never catch. Observe-only:
-  # notify actions only, never a self-restart. Disable only if you point
-  # prometheus.reuseExisting at a Prometheus that does not scrape watchdog.
-  - id: watchdog-self-staleness
-    kind: scrape_staleness
+  # End-to-end freshness of watchdog's own metrics in ClickStack. Stronger than
+  # the old scrape_staleness path: proves instrumentation → exporter → collector
+  # → ClickHouse write. Disabled until the process emits metrics into the sink
+  # (keep off on hybrid; external/saas can enable once runner.clickstack is set
+  # and otel metrics from neuraltrust-watchdog are confirmed).
+  - id: watchdog-self-freshness
+    kind: otlp_freshness
     enabled: false
     target:
-      endpointEnv: PROMETHEUS_QUERY_URL
-      series: watchdog_checks_runs_total
+      services: [neuraltrust-watchdog]
       window: 10m
     thresholds:
       staleStatus: critical
