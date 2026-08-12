@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.11.2] — 2026-08-12
+
 ### Changed
 
 - **Watchdog: drop bundled Prometheus; RED/freshness query ClickStack.** The
