@@ -3753,6 +3753,48 @@ if [[ -z "$dc_iss" || "$dc_iss" != "$dc_issuer" ]]; then
 fi
 green "ok  - saas: the iss DataCore signs matches the issuer it advertises"
 
+# --- gateway -> collector hop is authenticated -----------------------------
+# Verifying the sender's JWT only proves who called the gateway; it does not
+# authenticate the gateway to clickstack-collector, which enforces its own
+# OTLP_AUTH_TOKEN. Without this the batch is accepted at the edge and dropped
+# on the last hop with "Unauthenticated: missing or empty authorization
+# header" — every upstream check green while telemetry silently disappears.
+gw_auth=$(yq -N 'select(.kind == "ConfigMap" and .metadata.name == "clickstack-ingest-gateway-config")
+  | .data["collector.yaml"]' "$out25" 2>/dev/null \
+  | yq -N '.exporters["otlphttp/clickstack"].auth.authenticator' 2>/dev/null)
+if [[ "$gw_auth" != "bearertokenauth/downstream" ]]; then
+  red "FAIL: saas: gateway forwards to clickstack-collector unauthenticated (got: ${gw_auth:-<none>})"
+  exit 1
+fi
+green "ok  - saas: gateway authenticates itself to the downstream collector"
+
+# scheme must stay empty: the collector compares the Authorization header
+# against the raw OTLP_AUTH_TOKEN, so a default "Bearer " prefix 401s.
+gw_scheme=$(yq -N 'select(.kind == "ConfigMap" and .metadata.name == "clickstack-ingest-gateway-config")
+  | .data["collector.yaml"]' "$out25" 2>/dev/null \
+  | yq -N '.extensions["bearertokenauth/downstream"].scheme' 2>/dev/null)
+if [[ -n "$gw_scheme" && "$gw_scheme" != '""' ]]; then
+  red "FAIL: saas: downstream bearer scheme must be empty to match OTLP_AUTH_TOKEN (got: $gw_scheme)"
+  exit 1
+fi
+green "ok  - saas: downstream bearer token is sent raw, no Bearer prefix"
+
+# The token comes from the Secret, never inlined into the ConfigMap.
+assert_contains "$out25" '^                  key: OTLP_AUTH_TOKEN$' \
+  "saas: gateway reads OTLP_AUTH_TOKEN from the collector Secret"
+
+# OTLP/HTTP, not gRPC: gRPC refuses per-RPC credentials on a cleartext
+# connection ("credentials require transport level security") and the
+# collector crashloops at startup.
+gw_ds=$(yq -N 'select(.kind == "ConfigMap" and .metadata.name == "clickstack-ingest-gateway-config")
+  | .data["collector.yaml"]' "$out25" 2>/dev/null \
+  | yq -N '.exporters["otlphttp/clickstack"].endpoint' 2>/dev/null)
+if [[ "$gw_ds" != http://clickstack-collector.*:4318 ]]; then
+  red "FAIL: saas: downstream must be OTLP/HTTP :4318 or the bearer hop crashloops (got: ${gw_ds:-<none>})"
+  exit 1
+fi
+green "ok  - saas: downstream hop uses OTLP/HTTP so bearer auth can attach"
+
 # --- published config-sync listeners --------------------------------------
 assert_contains "$out25" '^  name: agentgateway-admin-configsync$' \
   "saas: AgentGateway config-sync Service is published"
@@ -4028,6 +4070,70 @@ if [[ "$sb_pub" != "internet-facing" ]]; then
 fi
 green "ok  - saas aws: one global knob flips L4 scheme to internet-facing"
 
+# --- local annotations must MERGE over the scheme, not replace it ------------
+# Regression: l4Annotations used to return local annotations verbatim, so a
+# values file that set any annotation at all silently dropped the scheme derived
+# from loadBalancerScheme. The Service came up internal, a remote data plane in
+# another VPC dialled an RFC1918 address, and the resulting `i/o timeout` read as
+# an application fault. Every published L4 Service is checked: they are reached
+# from other clusters, so a silent internal is an outage on each one.
+out25merge="$TMP/scenario-saas-aws-l4-merge.yaml"
+render_default "$out25merge" \
+  --set global.deploymentMode=saas \
+  --set global.domain=cp.example.com \
+  --set global.platform=aws \
+  --set global.controlPlane.loadBalancerScheme=internet-facing \
+  --set 'databridge.service.southbound.annotations.service\.beta\.kubernetes\.io/aws-load-balancer-nlb-target-type=ip' \
+  --set 'agentgateway.configSync.expose.annotations.service\.beta\.kubernetes\.io/aws-load-balancer-type=nlb' \
+  --set 'trustguard.configSync.expose.annotations.service\.beta\.kubernetes\.io/aws-load-balancer-type=nlb'
+for svc in databridge-southbound agentgateway-admin-configsync trustguard-control-plane-configsync; do
+  merged=$(yq -N "select(.kind == \"Service\" and .metadata.name == \"$svc\")
+    | .metadata.annotations[\"service.beta.kubernetes.io/aws-load-balancer-scheme\"]" "$out25merge" | sed '/^$/d' | head -1)
+  if [[ "$merged" != "internet-facing" ]]; then
+    red "FAIL: saas aws: $svc local annotations dropped the global scheme (got: ${merged:-<none>})"
+    exit 1
+  fi
+done
+green "ok  - saas aws: local L4 annotations merge over the global scheme instead of replacing it"
+
+# An explicit local scheme is still authoritative — merging must not take away
+# the operator's ability to override one Service.
+out25override="$TMP/scenario-saas-aws-l4-override.yaml"
+render_default "$out25override" \
+  --set global.deploymentMode=saas \
+  --set global.domain=cp.example.com \
+  --set global.platform=aws \
+  --set global.controlPlane.loadBalancerScheme=internet-facing \
+  --set 'databridge.service.southbound.annotations.service\.beta\.kubernetes\.io/aws-load-balancer-scheme=internal'
+sb_override=$(yq -N 'select(.kind == "Service" and .metadata.name == "databridge-southbound")
+  | .metadata.annotations["service.beta.kubernetes.io/aws-load-balancer-scheme"]' "$out25override" | sed '/^$/d' | head -1)
+if [[ "$sb_override" != "internal" ]]; then
+  red "FAIL: saas aws: an explicit local scheme must win over the global knob (got: ${sb_override:-<none>})"
+  exit 1
+fi
+green "ok  - saas aws: an explicit local scheme still overrides the global knob"
+
+# An internet-facing control plane without source ranges is open to the world,
+# so the allowlist has to survive templating on every published Service.
+out25ranges="$TMP/scenario-saas-aws-l4-ranges.yaml"
+render_default "$out25ranges" \
+  --set global.deploymentMode=saas \
+  --set global.domain=cp.example.com \
+  --set global.platform=aws \
+  --set global.controlPlane.loadBalancerScheme=internet-facing \
+  --set 'databridge.service.southbound.loadBalancerSourceRanges[0]=203.0.113.10/32' \
+  --set 'agentgateway.configSync.expose.loadBalancerSourceRanges[0]=203.0.113.10/32' \
+  --set 'trustguard.configSync.expose.loadBalancerSourceRanges[0]=203.0.113.10/32'
+for svc in databridge-southbound agentgateway-admin-configsync trustguard-control-plane-configsync; do
+  cidr=$(yq -N "select(.kind == \"Service\" and .metadata.name == \"$svc\")
+    | .spec.loadBalancerSourceRanges[0]" "$out25ranges" | sed '/^$/d' | head -1)
+  if [[ "$cidr" != "203.0.113.10/32" ]]; then
+    red "FAIL: saas aws: $svc dropped loadBalancerSourceRanges (got: ${cidr:-<none>})"
+    exit 1
+  fi
+done
+green "ok  - saas aws: loadBalancerSourceRanges fence every published L4 Service"
+
 # controlPlane.domain still wins over global.domain (split-DNS).
 out25split="$TMP/scenario-saas-split-dns.yaml"
 render_default "$out25split" \
@@ -4105,8 +4211,31 @@ assert_contains "$out25one" '^        endpoint: "https://k8s-telemetry\.elb\.eu-
   "one-knob: egress exporter dials the telemetry URL override"
 assert_contains "$out25one" '^          ca_file: /etc/otelcol/ca/ca\.crt$' \
   "one-knob: caSecretName expands into the egress collector CA"
+assert_contains "$out25one" '^          include_system_ca_certs_pool: true$' \
+  "one-knob: egress CA keeps system roots (public telemetry + chart L4)"
+# Go's crypto/x509 treats SSL_CERT_FILE as a REPLACEMENT for the system bundle,
+# which would empty SystemCertPool() and silently defeat the flag asserted above.
+# The collector must trust its private anchor via exporter tls.ca_file only.
+assert_env_value "$out25one" dataagent clickstack-egress-collector SSL_CERT_FILE ABSENT \
+  "one-knob: egress collector has no SSL_CERT_FILE (would void the system pool)"
+# The DataAgent binary is a different story: it wants an explicit CA file.
+assert_env_value "$out25one" dataagent dataagent SSL_CERT_FILE '/etc/ssl/certs/custom-ca.crt' \
+  "one-knob: DataAgent still gets the custom CA via SSL_CERT_FILE"
 assert_contains "$out25one" '^            secretName: "controlplane-ca"$' \
   "one-knob: custom-ca-cert volume mounts caSecretName"
+
+# Air-gapped operators may close the trust store to private PKI only.
+out25nosys="$TMP/scenario-hybrid-egress-no-system-ca.yaml"
+render_default "$out25nosys" \
+  --set global.deploymentMode=hybrid \
+  --set global.controlPlane.domain=platform.example.com \
+  --set global.controlPlane.caSecretName=controlplane-ca \
+  --set global.clickstack.egress.tlsIncludeSystemCaCerts=false \
+  --set agentgateway.configSync.token=cs-trustgate
+assert_contains "$out25nosys" '^          ca_file: /etc/otelcol/ca/ca\.crt$' \
+  "closed trust store: ca_file still mounts when CA is set"
+assert_not_contains "$out25nosys" 'include_system_ca_certs_pool' \
+  "closed trust store: tlsIncludeSystemCaCerts=false omits system roots"
 
 # Product-level overrides still beat the umbrella controlPlane dial hosts.
 out25ovr="$TMP/scenario-hybrid-controlplane-override.yaml"
@@ -4135,6 +4264,8 @@ assert_not_contains "$out25noca" 'TLS_CA_FILE' \
   "hybrid: no tlsCa leaves DataAgent on the system trust store"
 assert_not_contains "$out25noca" 'ca_file' \
   "hybrid: no tlsCaSecretName leaves the egress collector on the system trust store"
+assert_not_contains "$out25noca" 'include_system_ca_certs_pool' \
+  "hybrid: no CA means no include_system_ca_certs_pool either"
 assert_not_contains "$out25noca" 'ALLOW_INSECURE_TRANSPORT' \
   "hybrid: TLS stays on unless insecure is asked for explicitly"
 

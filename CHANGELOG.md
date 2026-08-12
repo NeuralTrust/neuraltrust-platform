@@ -4,6 +4,55 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Local L4 annotations no longer silently discard `loadBalancerScheme`.**
+  `neuraltrust-platform.controlPlane.l4Annotations` returned a service's local
+  `annotations` verbatim whenever the map was non-empty, so setting any single
+  key — even the `nlb` type it was already defaulting to — dropped the scheme
+  derived from `global.controlPlane.loadBalancerScheme`. The Service fell back to
+  an `internal` NLB, AWS published only RFC1918 addresses, and a data plane in
+  another VPC failed with `dial tcp 10.x.x.x:443: i/o timeout`; the DataAgent
+  reported itself unready, which reads as an application fault rather than a
+  values one. Local annotations are now merged *over* the provider defaults, the
+  same way `neuraltrust-platform.ingress.annotations` already worked. An explicit
+  local `service.beta.kubernetes.io/aws-load-balancer-scheme` still wins, so
+  existing overrides keep their meaning.
+
+- **SaaS telemetry no longer dies on the last hop.** The clickstack-ingest-gateway
+  verified each sender's OIDC token and then forwarded to clickstack-collector
+  with no credential of its own, so the collector — which enforces
+  `OTLP_AUTH_TOKEN` on its receivers — rejected every batch with
+  `Unauthenticated: missing or empty authorization header`. Nothing upstream
+  noticed: senders got 200s, the gateway logged success, and the data was
+  dropped after the last check passed. The exporter now authenticates with a
+  `bearertokenauth` extension reading `OTLP_AUTH_TOKEN` from
+  `clickstack-collector-secrets` (`scheme: ""`, because the collector compares
+  the raw token). The hop also moved from OTLP/gRPC :4317 to OTLP/HTTP :4318:
+  gRPC refuses per-RPC credentials on a cleartext connection
+  (`credentials require transport level security`) and crashloops at startup.
+  `clickstack-ingest-gateway.downstream.tlsInsecure` is gone — set
+  `downstream.endpoint` with an explicit scheme to override.
+
+- **Hybrid egress CA no longer drops publicly-trusted telemetry.** When
+  `global.controlPlane.caSecretName` (or `global.clickstack.egress.tlsCaSecretName`)
+  is set, the clickstack-egress-collector exporter used `tls.ca_file` alone,
+  which replaces the system root pool in otelcol. Mixed topologies — chart-
+  signed DataBridge/config-sync plus a publicly signed certificate on
+  `telemetry.<domain>` — then failed with `x509: certificate signed by unknown
+  authority` and silently dropped OTLP batches. The exporter now emits
+  `include_system_ca_certs_pool: true` by default; set
+  `global.clickstack.egress.tlsIncludeSystemCaCerts: false` only for a closed
+  private-PKI trust store.
+- **Egress collector no longer inherits `SSL_CERT_FILE`.** The sidecar received
+  the `global.customCaCert` Go env var, and Go's `crypto/x509` treats
+  `SSL_CERT_FILE` as a *replacement* for the system bundle, so
+  `x509.SystemCertPool()` came back holding only the private CA. That voided
+  `include_system_ca_certs_pool` and reproduced the same x509 failure from a
+  second direction. The collector now trusts its private anchor solely through
+  the exporter's `tls.ca_file` (still mounted from `caSecretName`), while the
+  DataAgent container keeps `SSL_CERT_FILE` as before.
+
 ## [v2.11.2] — 2026-08-12
 
 ### Changed

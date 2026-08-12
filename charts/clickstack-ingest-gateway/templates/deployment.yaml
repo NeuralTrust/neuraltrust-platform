@@ -68,6 +68,15 @@ spec:
                 fieldRef:
                   apiVersion: v1
                   fieldPath: status.podIP
+            {{- /* The downstream collector enforces this token on its OTLP
+                   receivers. Same Secret every other in-cluster sender reads;
+                   referenced rather than templated so the credential never
+                   lands in the ConfigMap. */}}
+            - name: OTLP_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "neuraltrust-platform.clickstack.externalCollectorSecretName" . | quote }}
+                  key: OTLP_AUTH_TOKEN
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

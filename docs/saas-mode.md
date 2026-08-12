@@ -124,16 +124,14 @@ steps the chart cannot do for you.
 | Dial names from `global.domain` | `databridge.`, `*-configsync.`, `telemetry.` |
 | DataBridge HA | `replicas: 2` + peer headless Service |
 | Self-signed TLS | DataBridge + published config-sync (export CA → step 4) |
-| AWS L4 NLBs | `internal` when `platform=aws` and annotations empty |
+| AWS L4 NLBs | `internal` when `platform=aws`; local annotations merge over it |
 | Telemetry Ingress | ON, inherits `global.ingress` (ACM/ALB) |
 
 ### Common escape hatches
 
 | Need | Knob |
 |---|---|
-| Cheap / singleton DataBridge | `databridge.replicas: 1` |
-| Dial names ≠ UI domain | `global.controlPlane.domain` |
-| Hybrids over the public internet | `global.controlPlane.loadBalancerScheme: internet-facing` |
+| Hybrids over the public internet | `global.controlPlane.loadBalancerScheme: internet-facing` + `loadBalancerSourceRanges` |
 | Corporate / ACM / PKI leaves | [TLS](#tls) BYO `existingSecret` |
 | Keep config-sync off the public LB | `*.configSync.expose.enabled: false` |
 
@@ -326,7 +324,7 @@ correctly, including the alias. Full table: [SECRETS.md](../SECRETS.md).
 
 ## AWS / EKS
 
-With `global.platform: aws`, empty L4 annotations get NLB defaults from one knob:
+With `global.platform: aws`, the L4 Services get NLB defaults from one knob:
 
 ```yaml
 global:
@@ -336,8 +334,10 @@ global:
 ```
 
 That covers DataBridge southbound and both config-sync expose Services. Local
-`annotations` on a service always win when set. Restrict source ranges when you
-know remote egress CIDRs:
+`annotations` are **merged over** these defaults, so adding one custom key keeps
+the scheme; set `service.beta.kubernetes.io/aws-load-balancer-scheme` locally to
+override a single Service. Restrict source ranges whenever the scheme is
+`internet-facing`:
 
 ```yaml
 databridge:
@@ -345,6 +345,41 @@ databridge:
     southbound:
       loadBalancerSourceRanges: ["10.20.0.0/16"]
 ```
+
+### Choosing a scheme
+
+`internal` is the safe default, but it only publishes RFC1918 addresses. A data
+plane that cannot route to those gets `dial tcp 10.x.x.x:443: i/o timeout` — the
+DataAgent stays unready and looks broken while the real fault is routing.
+
+| Data plane location | Scheme | Also needed |
+|---|---|---|
+| Same VPC as the control plane | `internal` | nothing |
+| Peered VPC / Transit Gateway / VPN | `internal` | routes + SGs both ways |
+| Another VPC or account, no peering | `internet-facing` | `loadBalancerSourceRanges` pinned to the remote NAT egress IPs |
+
+Find the remote egress addresses with:
+
+```bash
+aws ec2 describe-nat-gateways --region <region> \
+  --filter Name=vpc-id,Values=<data-plane-vpc> Name=state,Values=available \
+  --query 'NatGateways[].NatGatewayAddresses[].PublicIp' --output text
+```
+
+### DNS for the L4 endpoints
+
+Raw NLB hostnames are not stable: an upgrade that recreates a Service mints a new
+one and every data plane pinned to the old name fails with
+`name resolver error: produced zero addresses`. Give the endpoints DNS names
+(`databridge.<domain>`, `<product>-configsync.<domain>`) — the chart already mints
+certificates for exactly those hosts.
+
+If the zone sits behind a CDN or TLS-terminating reverse proxy, these two records
+must bypass it and resolve straight to the load balancers — including any
+wildcard that would otherwise cover them. Such a proxy terminates TLS and
+re-signs with its own certificate, which the data plane rejects because it pins
+the control-plane CA. Only the telemetry endpoint — plain HTTPS against a public
+certificate — can sit behind a proxy.
 
 On GKE use `networking.gke.io/load-balancer-type: "Internal"`; on AKS,
 `service.beta.kubernetes.io/azure-load-balancer-internal: "true"` (set as local
@@ -388,18 +423,18 @@ distinct control plane — the same model as the Docker bundle's
 | `databridgeAddr` | DataAgent `DATABRIDGE_ADDR` (SNI stays `databridge.<domain>`) |
 | `configSyncAddr` | both products' `CONFIG_SYNC_GRPC_ENDPOINT` (SNI stays `<product>-configsync.<domain>`) |
 | `telemetryUrl` | egress collector OTLP/HTTP base |
-| `caSecretName` | mount + `TLS_CA_FILE` / `CONFIG_SYNC_TLS_CA` / egress `ca_file` |
+| `caSecretName` | mount + `TLS_CA_FILE` / `CONFIG_SYNC_TLS_CA` / egress `ca_file` (egress keeps system roots by default — see TLS) |
 
 ```yaml
 global:
   deploymentMode: hybrid
   controlPlane:
-    domain: neuraltrust.es
-    # Optional: dial raw NLBs when DNS for *.<domain> is not ready yet.
-    # SNI still uses the domain-derived cert names above.
-    databridgeAddr: k8s-neuraltr-databrid-….elb.eu-west-1.amazonaws.com:443
-    configSyncAddr: k8s-neuraltr-agentgat-….elb.eu-west-1.amazonaws.com:443
-    # telemetryUrl: https://k8s-….elb.amazonaws.com   # only if telemetry is also on an NLB
+    domain: platform.example.com
+    # Optional: dial the load balancers directly when DNS for *.<domain> is not
+    # ready yet. SNI still uses the domain-derived cert names above.
+    databridgeAddr: <databridge-lb-hostname>:443
+    configSyncAddr: <configsync-lb-hostname>:443
+    # telemetryUrl: https://<telemetry-lb-hostname>   # only if telemetry is also on an L4 LB
     caSecretName: controlplane-ca   # apply scripts/export-controlplane-ca.sh output first
   products:
     trustgate: true
@@ -412,7 +447,15 @@ Per-product overrides (`dataagent.databridge.addr`, `agentgateway.configSync.end
 
 Only needed if the central cluster serves chart-generated certificates. Apply the
 bundle from `scripts/export-controlplane-ca.sh`, then either use the one-knob
-form above (`caSecretName`) or expand the three legs by hand:
+form above (`caSecretName`) or expand the three legs by hand.
+
+The telemetry hop is often **publicly signed** (a CDN edge, a cloud-managed
+certificate on the load balancer, cert-manager + ACME) even when DataBridge and
+config-sync use the chart CA. With `caSecretName` set, the egress collector
+mounts that CA **and** keeps the system root pool
+(`include_system_ca_certs_pool: true`). Air-gapped operators who want a closed
+private-PKI trust store only can set
+`global.clickstack.egress.tlsIncludeSystemCaCerts: false`.
 
 ```yaml
 global:
@@ -437,6 +480,43 @@ global:
 `tlsCa` **replaces** the system roots for that connection rather than adding to
 them. One bundle carrying every CA the leg needs is the way to hold both a
 private control plane and a TLS-intercepting proxy.
+
+### Certificate topologies (all opt-in)
+
+Nothing below is mandatory. The default hybrid install trusts public roots only;
+every private-CA knob is something you turn **on**.
+
+| Control-plane TLS | What to set | Egress trust store |
+|---|---|---|
+| Public edge only — publicly trusted certificates on all legs | nothing | system roots |
+| Chart-generated / self-signed on all legs | `controlPlane.caSecretName` | private CA + system roots |
+| **Mixed**: chart-signed L4 (DataBridge, config-sync) + public edge on `telemetry.<domain>` | `controlPlane.caSecretName` | private CA + system roots (this is why the pool is additive) |
+| Closed private PKI, no public egress at all | `caSecretName` + `clickstack.egress.tlsIncludeSystemCaCerts: false` | private CA only |
+| Corporate root / TLS-intercepting proxy | `global.customCaCert.{enabled,secretName,key}` | that bundle + system roots |
+
+The mixed row is the common one and used to be the broken one: a public edge in
+front of telemetry is publicly signed, so replacing the system pool with the
+chart CA broke exactly that leg while the L4 legs kept working.
+
+On the serving side, terminating with your own certificate is equally opt-in.
+Turn off chart-minted certs and point the ingress at the certificate you own:
+
+```yaml
+global:
+  ingress:
+    className: alb
+    aws:
+      certificateArn: arn:aws:acm:<region>:<account>:certificate/<id>   # edge cert
+  tls:
+    autoGenerate: false      # stop the chart minting self-signed certs
+  customCaCert:              # only if that cert chains to a private root
+    enabled: true
+    secretName: corporate-ca
+    key: ca.crt
+```
+
+A publicly trusted edge certificate needs no `customCaCert` at all — leaving the
+CA knobs unset is the correct configuration.
 
 Before rolling out, confirm from inside a remote cluster that it can reach all
 four central endpoints — the failure mode for a blocked security group is a

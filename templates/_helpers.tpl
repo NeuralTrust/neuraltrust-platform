@@ -2097,25 +2097,35 @@ global.controlPlane.loadBalancerScheme: "internal" (default) | "internet-facing"
 {{- end }}
 
 {{/*
-Default annotations for saas L4 Services when the operator left annotations
-empty. AWS only (NLB); GKE/AKS get a plain LoadBalancer without extra keys.
-Local annotations always win when non-empty.
+Annotations for saas L4 Services: cloud defaults first, local keys layered on
+top. AWS only (NLB); GKE/AKS get a plain LoadBalancer without extra keys.
+
+Local annotations MERGE rather than replace. Replacing meant a local block that
+set any key at all silently dropped the scheme derived from
+global.controlPlane.loadBalancerScheme — the Service came up internal, a remote
+data plane in another VPC dialled an RFC1918 address, and the resulting
+`i/o timeout` looked like an application fault rather than a values one. Same
+shape as neuraltrust-platform.ingress.annotations. An explicit local
+aws-load-balancer-scheme still wins.
 
 Usage: {{ include "neuraltrust-platform.controlPlane.l4Annotations" (dict "ctx" . "local" $annotations) }}
 */}}
 {{- define "neuraltrust-platform.controlPlane.l4Annotations" -}}
 {{- $ctx := .ctx -}}
 {{- $local := default dict .local -}}
-{{- if $local -}}
-{{- toYaml $local -}}
-{{- else -}}
+{{- $merged := dict -}}
 {{- $platform := (default dict $ctx.Values.global).platform | default "kubernetes" | toString | trim | lower -}}
 {{- if eq $platform "aws" -}}
 {{- $scheme := include "neuraltrust-platform.controlPlane.loadBalancerScheme" $ctx -}}
-service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
-service.beta.kubernetes.io/aws-load-balancer-scheme: {{ $scheme | quote }}
-service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "ip"
+{{- $_ := set $merged "service.beta.kubernetes.io/aws-load-balancer-type" "nlb" -}}
+{{- $_ := set $merged "service.beta.kubernetes.io/aws-load-balancer-scheme" $scheme -}}
+{{- $_ := set $merged "service.beta.kubernetes.io/aws-load-balancer-nlb-target-type" "ip" -}}
 {{- end -}}
+{{- range $k, $v := $local -}}
+{{- $_ := set $merged $k ($v | toString) -}}
+{{- end -}}
+{{- if $merged -}}
+{{- toYaml $merged -}}
 {{- end -}}
 {{- end }}
 
@@ -2444,6 +2454,24 @@ Precedence: global.clickstack.egress.tlsCaSecretName → controlPlane.caSecretNa
 {{- $explicit -}}
 {{- else -}}
 {{- include "neuraltrust-platform.controlPlane.caSecretName" . -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Whether the egress OTLP exporter keeps the system root pool alongside ca_file.
+
+Default true: one-knob caSecretName covers DataBridge + config-sync (often
+chart-signed) and telemetry (often a public CA). Without the
+system pool, ca_file replaces roots and public telemetry endpoints fail with
+x509 unknown authority. Set global.clickstack.egress.tlsIncludeSystemCaCerts
+false only for a closed private-PKI trust store.
+*/}}
+{{- define "neuraltrust-platform.clickstackEgress.includeSystemCaCerts" -}}
+{{- $cfg := default dict (default dict (default dict .Values.global).clickstack).egress -}}
+{{- if hasKey $cfg "tlsIncludeSystemCaCerts" -}}
+  {{- if $cfg.tlsIncludeSystemCaCerts -}}true{{- else -}}false{{- end -}}
+{{- else -}}
+true
 {{- end -}}
 {{- end }}
 

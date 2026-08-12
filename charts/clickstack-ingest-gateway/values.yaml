@@ -41,10 +41,11 @@ auth:
   # Scope a token must carry for its batch to be accepted.
   requiredScope: "otlp:write"
 # Where verified telemetry goes next: the trusted in-cluster collector that owns
-# the ClickHouse credentials. Cleartext because it never leaves the cluster.
+# the ClickHouse credentials. OTLP/HTTP because that hop is bearer-authenticated
+# and gRPC rejects per-RPC credentials on a cleartext connection; cleartext is
+# fine because it never leaves the cluster. Include the scheme when overriding.
 downstream:
-  endpoint: "" # Empty ⇒ clickstack-collector.<namespace>.svc.cluster.local:4317
-  tlsInsecure: true
+  endpoint: "" # Empty ⇒ http://clickstack-collector.<namespace>.svc.cluster.local:4318
 ports:
   otlpGrpc: 4317
   otlpHttp: 4318
