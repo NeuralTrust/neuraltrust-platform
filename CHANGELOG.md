@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.11.3] — 2026-08-12
+
 ### Fixed
 
 - **Local L4 annotations no longer silently discard `loadBalancerScheme`.**
