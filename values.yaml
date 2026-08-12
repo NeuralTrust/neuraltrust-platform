@@ -42,9 +42,9 @@ global:
     # When Route53 / private DNS for *.<domain> is missing, dial the load
     # balancer hostname directly and keep domain for TLS SNI. host:port;
     # bare host gets :443. Empty → derived from domain / saasRegion.
-    databridgeAddr: ""   # e.g. k8s-….elb.amazonaws.com:443
-    configSyncAddr: ""   # e.g. k8s-….elb.amazonaws.com:443 (both products)
-    telemetryUrl: ""     # e.g. https://k8s-….elb.amazonaws.com  (OTLP/HTTP base)
+    databridgeAddr: "" # e.g. k8s-….elb.amazonaws.com:443
+    configSyncAddr: "" # e.g. k8s-….elb.amazonaws.com:443 (both products)
+    telemetryUrl: "" # e.g. https://k8s-….elb.amazonaws.com  (OTLP/HTTP base)
     # --- private / chart-generated CA --------------------------------------
     # Secret (key ca.crt) holding the control-plane CA bundle. One name wires
     # all three dial legs. Empty → system roots (NeuralTrust SaaS).
@@ -688,7 +688,7 @@ control-plane-app:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.130.0"
+          tag: "v1.138.0"
           pullPolicy: IfNotPresent
         config:
           nodeEnv: production
@@ -767,7 +767,7 @@ control-plane-app:
 # stays agentgateway for now; K8s names stay agentgateway-*.
 agentgateway:
   image:
-    tag: "v0.34.8"
+    tag: "v0.35.1"
   # Empty host/port/sslMode/username/tls inherit from global.postgresql /
   # global.redis, then fall back to the in-cluster Services. Set them here only
   # to point this one service somewhere else.
@@ -795,7 +795,7 @@ agentgateway:
 # TrustGuard: control-plane + data-plane (/v1/evaluate).
 trustguard:
   image:
-    tag: "v0.30.1"
+    tag: "v0.35.0"
   # Empty host/port/sslMode/username/tls inherit — see the agentgateway note.
   database:
     sslMode: ""
@@ -839,7 +839,7 @@ dataagent:
 # `global.postgresql` block.
 datacore:
   image:
-    tag: "v0.16.1"
+    tag: "v0.18.0"
   database:
     # Empty inherits global.postgresql, then control-plane-postgresql:5432.
     # name/user stay per-service: external gives each service its own role+DB.
@@ -1109,7 +1109,7 @@ firewall:
       replicas: 2
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-        tag: "v2.22.0"
+        tag: "v2.24.0"
         pullPolicy: IfNotPresent
       resources:
         requests:
@@ -1136,7 +1136,7 @@ firewall:
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
         # Keep in lockstep with gateway.image.tag.
-        tag: "v2.22.0"
+        tag: "v2.24.0"
         pullPolicy: IfNotPresent
       replicas: 1
       resources:
