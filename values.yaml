@@ -132,7 +132,13 @@ global:
       # to a customer-owned control plane presenting a private or chart-generated
       # certificate. The collector reads its trust store from config, not from
       # global.customCaCert, so that setting alone does not cover this hop.
+      # When set (or when global.controlPlane.caSecretName expands here), the
+      # exporter keeps system roots by default — telemetry is often publicly
+      # signed while DataBridge/config-sync use the chart CA.
       tlsCaSecretName: ""
+      # When tlsCaSecretName / caSecretName is active, also trust system roots
+      # (otelcol include_system_ca_certs_pool). false = closed private-PKI only.
+      tlsIncludeSystemCaCerts: true
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/opentelemetry-collector-contrib
         tag: "0.158.0"

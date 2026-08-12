@@ -165,8 +165,13 @@ spec:
         imagePullPolicy: {{ default "IfNotPresent" $egressImg.pullPolicy }}
         args:
           - --config=/etc/otelcol/config.yaml
-        env:
-          {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "go" "ctx" .) | nindent 10 }}
+        {{- /* No SSL_CERT_FILE here on purpose. Go's crypto/x509 treats it as a
+               REPLACEMENT for the system bundle, so setting it would also empty
+               x509.SystemCertPool() and silently defeat the exporter's
+               include_system_ca_certs_pool. The collector gets its private
+               anchor declaratively via exporter tls.ca_file instead, so a chart
+               CA and a publicly-terminated telemetry endpoint can both be
+               trusted at once. */}}
         ports:
           - name: otlp-grpc
             containerPort: 4317
@@ -197,7 +202,6 @@ spec:
             mountPath: /etc/otelcol/ca
             readOnly: true
           {{- end }}
-          {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 10 }}
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true

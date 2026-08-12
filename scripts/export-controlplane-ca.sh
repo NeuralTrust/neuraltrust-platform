@@ -12,6 +12,13 @@
 # copy three or four secrets by hand, this bundles every CA into a single
 # ca.crt (Go and the OpenTelemetry Collector both accept concatenated PEM).
 #
+# Components scanned (label app.kubernetes.io/component):
+#   southbound-tls, configsync-tls, telemetry-ingress-tls
+# When telemetry terminates at a publicly trusted edge, there
+# is no telemetry-ingress-tls Secret — that is expected. The hybrid egress
+# collector keeps system roots alongside this bundle by default, so a public
+# telemetry cert still verifies; only chart-signed L4 legs need the export.
+#
 # Usage:
 #   ./scripts/export-controlplane-ca.sh [-n NAMESPACE] [-o OUTPUT] [--name SECRET]
 #

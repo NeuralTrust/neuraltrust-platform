@@ -140,6 +140,12 @@ namespace change cannot desynchronise them.
 
 {{/*
 Where verified batches are forwarded.
+
+OTLP/HTTP rather than gRPC: the downstream collector authenticates senders with
+a bearer token, and gRPC refuses per-RPC credentials on a cleartext connection
+("credentials require transport level security"). This hop never leaves the
+cluster, so terminating TLS for it buys nothing. Same :4318 + Authorization
+path every other in-cluster sender already uses.
 */}}
 {{- define "clickstack-ingest-gateway.downstreamEndpoint" -}}
 {{- $ds := default dict .Values.downstream -}}
@@ -147,7 +153,7 @@ Where verified batches are forwarded.
 {{- $ds.endpoint -}}
 {{- else -}}
 {{- /* clickstack-otel-collector pins fullnameOverride to this name. */ -}}
-{{- printf "clickstack-collector.%s.svc.cluster.local:4317" .Release.Namespace -}}
+{{- printf "http://clickstack-collector.%s.svc.cluster.local:4318" .Release.Namespace -}}
 {{- end -}}
 {{- end }}
 

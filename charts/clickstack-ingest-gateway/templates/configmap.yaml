@@ -79,15 +79,27 @@ data:
     exporters:
       # The trusted collector next door — the only one holding ClickHouse
       # credentials. This hop stays inside the cluster.
-      otlp/clickstack:
+      otlphttp/clickstack:
         endpoint: {{ include "clickstack-ingest-gateway.downstreamEndpoint" . | quote }}
-        tls:
-          insecure: {{ .Values.downstream.tlsInsecure }}
+        {{- /* clickstack-collector authenticates its OTLP receivers with
+               OTLP_AUTH_TOKEN. Verifying the sender's JWT above does not
+               authenticate us to it, so without this the batch is accepted at
+               the edge and then rejected downstream with `Unauthenticated:
+               missing or empty authorization header` — telemetry lost on the
+               last hop, after every earlier check passed. */}}
+        auth:
+          authenticator: bearertokenauth/downstream
 
     extensions:
       health_check:
         endpoint: ${env:MY_POD_IP}:{{ .Values.ports.health }}
         path: /health
+      # Same token every other in-cluster sender presents, read from the env so
+      # the credential stays out of the ConfigMap. `scheme: ""` sends the raw
+      # token, matching OTEL_EXPORTER_OTLP_HEADERS=authorization=<token>.
+      bearertokenauth/downstream:
+        scheme: ""
+        token: ${env:OTLP_AUTH_TOKEN}
       # DataCore signs the telemetry tokens and publishes the JWKS. The audience
       # must equal DataCore's TELEMETRY_JWT_AUDIENCE, and the issuer URL must
       # equal its TELEMETRY_JWT_ISSUER_URL exactly — the collector rejects a
@@ -101,12 +113,13 @@ data:
       extensions:
         - health_check
         - oidc
+        - bearertokenauth/downstream
       pipelines:
         {{- range $signal := list "logs" "traces" "metrics" }}
         {{ $signal }}:
           receivers: [otlp]
           processors: [memory_limiter, resource/tenant_from_claims, filter/require_tenant_and_scope, resource/drop_scope_attr, batch]
-          exporters: [otlp/clickstack]
+          exporters: [otlphttp/clickstack]
         {{- end }}
       telemetry:
         logs:

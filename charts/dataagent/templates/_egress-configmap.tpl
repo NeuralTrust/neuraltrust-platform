@@ -37,9 +37,16 @@ exporters:
     auth:
       authenticator: oauth2client
     compression: gzip
-    {{- with (include "neuraltrust-platform.clickstackEgress.tlsCaSecretName" .) }}
+    {{- $egressCa := include "neuraltrust-platform.clickstackEgress.tlsCaSecretName" . -}}
+    {{- if $egressCa }}
     tls:
       ca_file: /etc/otelcol/ca/ca.crt
+      {{- /* ca_file alone replaces system roots (otelcol default). Keep them
+             so a chart CA for DataBridge/config-sync does not break a
+             publicly-terminated telemetry hop. */}}
+      {{- if eq (include "neuraltrust-platform.clickstackEgress.includeSystemCaCerts" .) "true" }}
+      include_system_ca_certs_pool: true
+      {{- end }}
     {{- end }}
     retry_on_failure:
       enabled: true
