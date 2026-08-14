@@ -97,7 +97,7 @@ steps the chart cannot do for you.
        caSecretName: controlplane-ca
        # Only when DNS for *.<domain> is not ready yet (SNI still uses domain):
        # databridgeAddr: "<nlb-hostname>:443"
-       # configSyncAddr: "<nlb-hostname>:443"
+       # configSyncAddr: "<nlb-hostname>:443"  # single product; two products need per-product endpoints
    agentgateway:
      configSync:
        token: "<from console>"
@@ -421,7 +421,7 @@ distinct control plane — the same model as the Docker bundle's
 |---|---|
 | `domain` | `databridge.<domain>:443`, `<product>-configsync.<domain>:443`, `https://telemetry.<domain>` |
 | `databridgeAddr` | DataAgent `DATABRIDGE_ADDR` (SNI stays `databridge.<domain>`) |
-| `configSyncAddr` | both products' `CONFIG_SYNC_GRPC_ENDPOINT` (SNI stays `<product>-configsync.<domain>`) |
+| `configSyncAddr` | **one** product's `CONFIG_SYNC_GRPC_ENDPOINT` (SNI stays `<product>-configsync.<domain>`). Two or more products fail the render — use per-product `<product>.configSync.endpoint` or DNS. |
 | `telemetryUrl` | egress collector OTLP/HTTP base |
 | `caSecretName` | mount + `TLS_CA_FILE` / `CONFIG_SYNC_TLS_CA` / egress `ca_file` (egress keeps system roots by default — see TLS) |
 
@@ -433,11 +433,23 @@ global:
     # Optional: dial the load balancers directly when DNS for *.<domain> is not
     # ready yet. SNI still uses the domain-derived cert names above.
     databridgeAddr: <databridge-lb-hostname>:443
+    # Single product only. Two products → per-product endpoints below, not this key.
     configSyncAddr: <configsync-lb-hostname>:443
     # telemetryUrl: https://<telemetry-lb-hostname>   # only if telemetry is also on an L4 LB
     caSecretName: controlplane-ca   # apply scripts/export-controlplane-ca.sh output first
   products:
     trustgate: true
+```
+
+Two products with DNS not ready yet — one address cannot cover both certificates:
+
+```yaml
+agentgateway:
+  configSync:
+    endpoint: <agentgateway-configsync-lb>:443
+trustguard:
+  configSync:
+    endpoint: <trustguard-configsync-lb>:443
 ```
 
 Per-product overrides (`dataagent.databridge.addr`, `agentgateway.configSync.endpoint`,

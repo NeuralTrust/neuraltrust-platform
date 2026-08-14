@@ -484,6 +484,18 @@ checks:
       window: 10m
     thresholds:
       staleStatus: critical
+  - id: platform-pvc-fill
+    kind: pvc_fill
+    enabled: false
+    thresholds:
+      warning: 0.80
+      critical: 0.90
+  - id: platform-pod-saturation
+    kind: pod_resource_saturation
+    enabled: false
+    thresholds:
+      warning: 0.80
+      critical: 0.95
   - id: control-plane-synthetic
     kind: httpsynthetic
     enabled: false

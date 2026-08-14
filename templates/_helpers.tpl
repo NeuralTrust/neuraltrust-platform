@@ -306,7 +306,8 @@ DataAgent TLS_CA_FILE. Product tlsCa wins; else the shared control-plane CA path
 {{/*
 Config-sync gRPC dial address for a hybrid product data plane.
 
-Precedence: configSync.endpoint → global.controlPlane.configSyncAddr →
+Precedence: <product>.configSync.endpoint → global.controlPlane.configSyncAddr
+(single product only; two or more products fail the render) →
 <product>-configsync.<domain>:443.
 Usage: {{ include "…configSyncAddr" (dict "ctx" . "product" "agentgateway") }}
 */}}
