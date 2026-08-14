@@ -4184,13 +4184,16 @@ assert_contains "$out25ca" '^      - name: egress-ca-bundle$' \
 # One-knob form: domain + raw NLB dial hosts + caSecretName. Mirrors the
 # dataplane-bundle CONTROL_PLANE_* model so Docker and Helm hybrid installs
 # share the same operator surface. SNI must stay on the cert name (domain),
-# not the NLB hostname.
+# not the NLB hostname. DataBridge is genuinely shared; config-sync is per
+# product, so two products pin each endpoint rather than a scalar
+# controlPlane.configSyncAddr (that combination fails the render — AUT-540).
 out25one="$TMP/scenario-hybrid-controlplane-one-knob.yaml"
 render_default "$out25one" \
   --set global.deploymentMode=hybrid \
   --set global.controlPlane.domain=neuraltrust.es \
   --set global.controlPlane.databridgeAddr=k8s-databrid.elb.eu-west-1.amazonaws.com:443 \
-  --set global.controlPlane.configSyncAddr=k8s-agentgat.elb.eu-west-1.amazonaws.com:443 \
+  --set agentgateway.configSync.endpoint=k8s-agentgat.elb.eu-west-1.amazonaws.com:443 \
+  --set trustguard.configSync.endpoint=k8s-trustgua.elb.eu-west-1.amazonaws.com:443 \
   --set global.controlPlane.telemetryUrl=https://k8s-telemetry.elb.eu-west-1.amazonaws.com \
   --set global.controlPlane.caSecretName=controlplane-ca \
   --set agentgateway.configSync.token=cs-trustgate \
@@ -4202,9 +4205,13 @@ assert_contains "$out25one" '^  DATABRIDGE_SERVER_NAME: "databridge\.neuraltrust
 assert_contains "$out25one" '^  TLS_CA_FILE: "/etc/ssl/certs/custom-ca\.crt"$' \
   "one-knob: caSecretName expands into DataAgent TLS_CA_FILE"
 assert_contains "$out25one" '^          value: "k8s-agentgat\.elb\.eu-west-1\.amazonaws\.com:443"$' \
-  "one-knob: config-sync dials the raw NLB"
+  "one-knob: AgentGateway config-sync dials its own NLB"
+assert_contains "$out25one" '^          value: "k8s-trustgua\.elb\.eu-west-1\.amazonaws\.com:443"$' \
+  "one-knob: TrustGuard config-sync dials its own NLB"
 assert_contains "$out25one" '^          value: "agentgateway-configsync\.neuraltrust\.es"$' \
-  "one-knob: config-sync SNI stays on the domain cert name"
+  "one-knob: AgentGateway config-sync SNI stays on the domain cert name"
+assert_contains "$out25one" '^          value: "trustguard-configsync\.neuraltrust\.es"$' \
+  "one-knob: TrustGuard config-sync SNI stays on the domain cert name"
 assert_contains "$out25one" '^          value: "/etc/ssl/certs/custom-ca\.crt"$' \
   "one-knob: caSecretName expands into CONFIG_SYNC_TLS_CA"
 assert_contains "$out25one" '^        endpoint: "https://k8s-telemetry\.elb\.eu-west-1\.amazonaws\.com"$' \
@@ -4238,12 +4245,13 @@ assert_not_contains "$out25nosys" 'include_system_ca_certs_pool' \
   "closed trust store: tlsIncludeSystemCaCerts=false omits system roots"
 
 # Product-level overrides still beat the umbrella controlPlane dial hosts.
+# Do not set controlPlane.configSyncAddr here: values-required enables both
+# products, and that scalar with 2+ products fails closed (AUT-540).
 out25ovr="$TMP/scenario-hybrid-controlplane-override.yaml"
 render_default "$out25ovr" \
   --set global.deploymentMode=hybrid \
   --set global.controlPlane.domain=neuraltrust.es \
   --set global.controlPlane.databridgeAddr=k8s-databrid.elb.amazonaws.com:443 \
-  --set global.controlPlane.configSyncAddr=k8s-agentgat.elb.amazonaws.com:443 \
   --set dataagent.databridge.addr=custom-bridge.internal:9443 \
   --set dataagent.databridge.serverName=databridge.neuraltrust.es \
   --set agentgateway.configSync.endpoint=custom-sync.internal:8443 \
@@ -4252,7 +4260,28 @@ render_default "$out25ovr" \
 assert_contains "$out25ovr" '^  DATABRIDGE_ADDR: "custom-bridge\.internal:9443"$' \
   "override: dataagent.databridge.addr beats controlPlane.databridgeAddr"
 assert_contains "$out25ovr" '^          value: "custom-sync\.internal:8443"$' \
-  "override: configSync.endpoint beats controlPlane.configSyncAddr"
+  "override: configSync.endpoint beats the domain-derived config-sync host"
+
+# Two-product hybrid without dial-host pins: each product derives its own
+# <product>-configsync.<domain> listener (AUT-540).
+out25two="$TMP/scenario-hybrid-two-product-configsync.yaml"
+render_default "$out25two" \
+  --set global.deploymentMode=hybrid \
+  --set global.controlPlane.domain=neuraltrust.es \
+  --set agentgateway.configSync.token=cs-trustgate \
+  --set trustguard.configSync.token=cs-trustguard
+assert_contains "$out25two" '^          value: "agentgateway-configsync\.neuraltrust\.es:443"$' \
+  "two-product: AgentGateway dials agentgateway-configsync.<domain>"
+assert_contains "$out25two" '^          value: "trustguard-configsync\.neuraltrust\.es:443"$' \
+  "two-product: TrustGuard dials trustguard-configsync.<domain>"
+
+assert_render_fails_with 'configSyncAddr cannot serve more than one product' \
+  "scalar configSyncAddr with two products fails closed" \
+  --set global.deploymentMode=hybrid \
+  --set global.controlPlane.domain=neuraltrust.es \
+  --set global.controlPlane.configSyncAddr=k8s-agentgat.elb.amazonaws.com:443 \
+  --set agentgateway.configSync.token=cs-trustgate \
+  --set trustguard.configSync.token=cs-trustguard
 
 # Defaults must stay on system roots. Emitting an empty TLS_CA_FILE would replace
 # the system pool with nothing and break every hybrid install against NeuralTrust.

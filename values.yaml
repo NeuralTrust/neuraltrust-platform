@@ -43,7 +43,7 @@ global:
     # balancer hostname directly and keep domain for TLS SNI. host:port;
     # bare host gets :443. Empty → derived from domain / saasRegion.
     databridgeAddr: "" # e.g. k8s-….elb.amazonaws.com:443
-    configSyncAddr: "" # e.g. k8s-….elb.amazonaws.com:443 (both products)
+    configSyncAddr: "" # e.g. k8s-….elb.amazonaws.com:443 (single product only; 2+ products fail the render)
     telemetryUrl: "" # e.g. https://k8s-….elb.amazonaws.com  (OTLP/HTTP base)
     # --- private / chart-generated CA --------------------------------------
     # Secret (key ca.crt) holding the control-plane CA bundle. One name wires
@@ -688,7 +688,7 @@ control-plane-app:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.138.0"
+          tag: "v1.141.1"
           pullPolicy: IfNotPresent
         config:
           nodeEnv: production
@@ -767,7 +767,7 @@ control-plane-app:
 # stays agentgateway for now; K8s names stay agentgateway-*.
 agentgateway:
   image:
-    tag: "v0.35.1"
+    tag: "v0.36.1"
   # Empty host/port/sslMode/username/tls inherit from global.postgresql /
   # global.redis, then fall back to the in-cluster Services. Set them here only
   # to point this one service somewhere else.
@@ -795,7 +795,7 @@ agentgateway:
 # TrustGuard: control-plane + data-plane (/v1/evaluate).
 trustguard:
   image:
-    tag: "v0.35.0"
+    tag: "v0.36.1"
   # Empty host/port/sslMode/username/tls inherit — see the agentgateway note.
   database:
     sslMode: ""
@@ -921,7 +921,7 @@ clickstack-otel-collector:
 alertengine:
   enabled: true
   image:
-    tag: "v0.7.0"
+    tag: "v0.7.2"
   database:
     # Empty inherits global.postgresql, then control-plane-postgresql:5432.
     # name/user stay per-service: external gives each service its own role+DB.
@@ -1027,7 +1027,7 @@ data-plane-api:
                   memory: 128Mi
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.46.1
+          tag: v1.46.2
           pullPolicy: IfNotPresent
         accessMode: ReadWriteOnce
         huggingfaceToken: ""
@@ -1109,7 +1109,7 @@ firewall:
       replicas: 2
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-        tag: "v2.24.0"
+        tag: "v2.26.1"
         pullPolicy: IfNotPresent
       resources:
         requests:
@@ -1136,7 +1136,7 @@ firewall:
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
         # Keep in lockstep with gateway.image.tag.
-        tag: "v2.24.0"
+        tag: "v2.26.1"
         pullPolicy: IfNotPresent
       replicas: 1
       resources:

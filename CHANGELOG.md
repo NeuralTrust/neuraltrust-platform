@@ -4,6 +4,17 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Fixed
+
+- **A scalar `global.controlPlane.configSyncAddr` no longer silently breaks
+  every product but one.** Config-sync is per product (own L4 listener, own
+  certificate SAN). The single dial host applied to every product, so the
+  second product presented SNI the first product's load balancer could not
+  cover and sat on last-known-good with a healthy-looking pod. Hybrid now
+  fails the render when that key is set with two or more products enabled;
+  set `agentgateway.configSync.endpoint` / `trustguard.configSync.endpoint`,
+  or rely on DNS (`<product>-configsync.<domain>:443`).
+
 ## [v2.11.3] — 2026-08-12
 
 ### Fixed

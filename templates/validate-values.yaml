@@ -33,6 +33,21 @@ no Kubernetes resource when validation succeeds.
   {{- if not $anyProduct -}}
     {{- fail "v2 hybrid requires at least one product: set global.products.trustgate, global.products.trustguard, and/or global.products.dataPlane to true. External mode ignores these flags and always deploys the full stack." -}}
   {{- end -}}
+  {{- /* A single dial host cannot present two product certificates. */ -}}
+  {{- $cp := default dict $global.controlPlane -}}
+  {{- $scalar := $cp.configSyncAddr | default "" | toString | trim -}}
+  {{- if $scalar -}}
+    {{- $configSyncProducts := 0 -}}
+    {{- if eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustgate")) "true" -}}
+      {{- $configSyncProducts = add $configSyncProducts 1 -}}
+    {{- end -}}
+    {{- if eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustguard")) "true" -}}
+      {{- $configSyncProducts = add $configSyncProducts 1 -}}
+    {{- end -}}
+    {{- if ge $configSyncProducts 2 -}}
+      {{- fail "global.controlPlane.configSyncAddr cannot serve more than one product: each product publishes its own config-sync L4 listener and certificate. Unset it and set agentgateway.configSync.endpoint and trustguard.configSync.endpoint, or rely on DNS (<product>-configsync.<domain>:443)." -}}
+    {{- end -}}
+  {{- end -}}
 {{- end -}}
 
 {{- /* MCP OAuth needs the control-plane app as its authorization server, and that
