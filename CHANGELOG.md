@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.11.5] — 2026-08-14
+
 ### Fixed
 
 - **A scalar `global.controlPlane.configSyncAddr` no longer silently breaks
