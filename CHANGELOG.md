@@ -4,6 +4,53 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Hybrid raw telemetry was silently dropped: metadata and raw OTLP exporters
+  collided on the name `otlp`.** Both products merge the metadata and raw
+  default exporter lists into one map keyed by exporter name, so the bare
+  `otlp` token on both sides resolved to a single metadata exporter and raw
+  payloads were never emitted — the console showed no raw rows while pods
+  stayed Ready. `TELEMETRY_EXPORTERS_METADATA` / `TELEMETRY_EXPORTERS_RAW` now
+  render explicitly named exporters (`metadata-otlp` plus `raw-postgres` in
+  hybrid, `raw-otlp` in external/saas), so the collision cannot recur.
+  TrustGate bumped `v0.36.1 → v0.37.0`.
+
+  Hybrid also no longer dual-writes raw payloads over OTLP. Previously the
+  hybrid exporter list carried `raw-otlp` alongside the postgres exporter, so
+  prompts and responses left the cluster even though the documented hybrid
+  promise is that only metadata is exported — and nothing read those rows
+  (console raw reads for a hybrid deployment go through DataBridge to
+  DataAgent's Postgres store). Hybrid raw is now `raw-postgres` only.
+
+  The `telemetry.yaml` ConfigMaps are gone: `TELEMETRY_EXPORTERS_METADATA` /
+  `TELEMETRY_EXPORTERS_RAW` are now the only exporter source, and
+  `TELEMETRY_EXPORTERS_FILE` is pinned empty so the binary default
+  (`config/telemetry.yaml`, absent from both images) is never probed. This
+  requires **TrustGate v0.37.0+** and **TrustGuard v0.37.1+** — older images
+  read only the file and would register no exporters at all, dropping every
+  event while staying Ready. TrustGuard is bumped `v0.36.1 → v0.37.1`
+  (`v0.37.0` never reached the prod registry; its release Trivy gate failed
+  and the promote was skipped). Pin no product image below those versions
+  without restoring a mounted exporters file.
+
+### Changed
+
+- **saas post-install NOTES name the mode and the four remote-plane endpoints.**
+  `global.deploymentMode: saas` used to print the external profile and only the
+  Ingress hostnames, so operators never saw DataBridge, the ingest gateway, or
+  the L4 names they have to put in DNS. NOTES now print `saas (customer-owned
+  central control plane)`, those two components, `databridge.<domain>:443` /
+  `https://telemetry.<domain>` / `<product>-configsync.<domain>:443`, a
+  `kubectl get svc` line for the LoadBalancers, and a warning when any of those
+  listeners is still on a chart-minted certificate. Hybrid and external NOTES
+  are unchanged.
+
+- Image bumps: TrustGate (`agentgateway`) `v0.36.1 → v0.37.0`, TrustGuard
+  `v0.36.1 → v0.37.1`, control-plane `app` `v1.141.1 → v1.141.2`. Subcharts:
+  `agentgateway` `0.1.43 → 0.1.45`, `trustguard` `0.1.39 → 0.1.41`,
+  `control-plane-app` `0.1.29 → 0.1.30`, `dataagent` `0.1.14 → 0.1.15`.
+
 ## [v2.11.5] — 2026-08-14
 
 ### Fixed

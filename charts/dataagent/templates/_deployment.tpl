@@ -74,11 +74,11 @@ spec:
             name: {{ include "dataagent.secretName" . | quote }}
         {{- end }}
         env:
-        {{- if eq (include "neuraltrust-platform.isHybrid" .) "true" }}
+        {{- $storeBackend := (default dict .Values.store).backend | default "" | toString | lower }}
+        {{- if and (eq (include "neuraltrust-platform.isHybrid" .) "true") (eq $storeBackend "postgres") }}
         {{- /* Discrete POSTGRES_* parts (RUN-1093). DataAgent builds a libpq
                keyword connection string in-process, so the chart no longer
-               composes SENSIBLE_PG_DSN. Requires a DataAgent image that reads
-               these vars when DATABASE_URL is unset. */}}
+               composes SENSIBLE_PG_DSN. Omitted when STORE_BACKEND is none. */}}
         {{- $pgSecret := include "neuraltrust-platform.v2.hybridPg.secretName" . }}
         - name: POSTGRES_HOST
           valueFrom:

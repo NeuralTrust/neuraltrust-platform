@@ -76,6 +76,17 @@ render_default() {
   validate_yaml "$out"
 }
 
+# NOTES.txt is not a Kubernetes object. Helm 4 has no `template --notes`;
+# client-side install dry-run is the supported way to render it.
+render_notes() {
+  local out="$1"
+  shift
+  helm install nt-notes "$CHART_DIR" --dry-run=client --namespace default \
+    -f "$CHART_DIR/values-required.yaml" \
+    "${CLICKSTACK_DEFAULT_ARGS[@]}" "$@" 2>/dev/null \
+    | awk '/^NOTES:/,0' > "$out"
+}
+
 # Hybrid product slices start from values-required with every product off
 # (values file, so later -f product examples can turn flags back on), then
 # apply positive-only product examples. --set must not clear products: Helm
@@ -495,10 +506,20 @@ assert_contains "$out1" 'name: clickstack-egress-collector'$'\n''        image:'
   "hybrid: OTLP egress sidecar on primary DataAgent renders"
 assert_contains "$out1" 'name: POSTGRES_HOST'$'\n''          valueFrom:'$'\n''            secretKeyRef:'$'\n''              name: "postgresql-secrets"'$'\n''              key: POSTGRES_HOST' \
   "hybrid: DataAgent reads POSTGRES_HOST from postgresql-secrets"
-assert_contains "$out1" 'type: postgres'$'\n' \
-  "hybrid: telemetry ConfigMap registers sensible-pg without dsn_env"
-assert_not_contains "$out1" 'dsn_env: SENSIBLE_PG_DSN' \
-  "hybrid: telemetry ConfigMap no longer names SENSIBLE_PG_DSN"
+assert_contains "$out1" 'TELEMETRY_EXPORTERS_METADATA: .*name.*metadata-otlp.*type.*otlp' \
+  "hybrid: metadata exporter is a named otlp list"
+assert_contains "$out1" 'TELEMETRY_EXPORTERS_RAW: .*name.*raw-postgres.*type.*postgres' \
+  "hybrid: raw exporter is a named postgres list"
+assert_not_contains "$out1" 'TELEMETRY_EXPORTERS_RAW: .*raw-otlp' \
+  "hybrid: raw payloads stay in local Postgres, not OTLP"
+assert_contains "$out1" 'TELEMETRY_EXPORTERS_FILE: ""' \
+  "hybrid: exporters file is empty so env vars are the only source"
+assert_not_contains "$out1" 'name: trustguard-telemetry' \
+  "hybrid: no TrustGuard telemetry ConfigMap"
+assert_not_contains "$out1" 'name: agentgateway-telemetry' \
+  "hybrid: no AgentGateway telemetry ConfigMap"
+assert_not_contains "$out1" 'mountPath: /etc/telemetry' \
+  "hybrid: no telemetry volume mount"
 assert_contains "$out1" 'name: OAUTH_BROKER_ADDR'$'\n''          value: "127.0.0.1:9465"' \
   "hybrid: DataAgent enables loopback OAuth broker for egress sidecar"
 assert_contains "$out1" 'token_url: "http://127.0.0.1:9465/oauth/token"' \
@@ -546,6 +567,25 @@ if suite_full; then
   assert_render_fails "unknown product selector keys are rejected" \
     --set global.products.unknown=true
 fi
+
+blue "==> Scenario 1c2: hybrid raw=remote is gated off (postgres-less parked)"
+assert_render_fails_with 'global.telemetry.raw must be "local" or "remote"' \
+  "invalid global.telemetry.raw is rejected" \
+  --set global.telemetry.raw=otlp
+assert_render_fails_with 'global.telemetry.raw=remote is experimental and unsupported' \
+  "hybrid raw=remote is rejected without the experimental hatch" \
+  --set global.telemetry.raw=remote \
+  --set global.products.dataPlane=false
+
+out1c2="$TMP/scenario-hybrid-raw-remote-experimental.yaml"
+render_default "$out1c2" \
+  --set global.telemetry.raw=remote \
+  --set global.telemetry.rawRemoteExperimental=true \
+  --set global.products.dataPlane=false
+assert_not_contains "$out1c2" 'name: postgresql-secrets' \
+  "experimental raw=remote: postgresql-secrets is not rendered"
+assert_contains "$out1c2" 'STORE_BACKEND: "none"' \
+  "experimental raw=remote: DataAgent store is none"
 
 # --- full-only: dense config-sync / datastore variants (not Helm-version related)
 if suite_full; then
@@ -737,6 +777,16 @@ assert_contains "$out3" 'NEURAL_TRUST_FIREWALL_BASE_URL: "http://firewall.defaul
   "external: TrustGuard wires in-cluster Firewall base URL"
 assert_contains "$out3" 'name: NEURAL_TRUST_FIREWALL_SECRET_KEY'$'\n''          valueFrom:'$'\n''            secretKeyRef:'$'\n''              name: "firewall-secrets"' \
   "external: TrustGuard mounts firewall-secrets JWT_SECRET"
+assert_contains "$out3" 'TELEMETRY_EXPORTERS_METADATA: .*name.*metadata-otlp.*type.*otlp' \
+  "external: metadata exporter is a named otlp list"
+assert_contains "$out3" 'TELEMETRY_EXPORTERS_RAW: .*name.*raw-otlp.*type.*otlp' \
+  "external: raw exporter is a named otlp list"
+assert_not_contains "$out3" 'TELEMETRY_EXPORTERS_RAW: .*postgres' \
+  "external: raw payloads go to ClickStack, not local Postgres"
+assert_not_contains "$out3" 'name: trustguard-telemetry' \
+  "external: no TrustGuard telemetry ConfigMap"
+assert_not_contains "$out3" 'name: agentgateway-telemetry' \
+  "external: no AgentGateway telemetry ConfigMap"
 assert_contains "$out3" 'OTEL_EXPORTER_OTLP_ENDPOINT: "http://clickstack-collector.default.svc.cluster.local:4318/v1/logs"' \
   "external: product OTLP logs endpoint includes /v1/logs (WithEndpointURL)"
 assert_contains "$out3" 'OPENTELEMETRY_TRACES_ENDPOINT: "clickstack-collector.default.svc.cluster.local:4318"' \
@@ -3660,6 +3710,16 @@ assert_contains "$out25" '^  name: databridge-southbound$' \
   "saas: DataBridge southbound Service renders"
 assert_contains "$out25" '^  name: clickstack-ingest-gateway$' \
   "saas: ClickStack ingest gateway renders"
+assert_contains "$out25" 'TELEMETRY_EXPORTERS_METADATA: .*name.*metadata-otlp.*type.*otlp' \
+  "saas: metadata exporter is a named otlp list"
+assert_contains "$out25" 'TELEMETRY_EXPORTERS_RAW: .*name.*raw-otlp.*type.*otlp' \
+  "saas: central CP raw exporter is a named otlp list"
+assert_not_contains "$out25" 'TELEMETRY_EXPORTERS_RAW: .*postgres' \
+  "saas: central CP does not default raw to postgres"
+assert_not_contains "$out25" 'name: trustguard-telemetry' \
+  "saas: no TrustGuard telemetry ConfigMap"
+assert_not_contains "$out25" 'name: agentgateway-telemetry' \
+  "saas: no AgentGateway telemetry ConfigMap"
 # Ingress is the product path (hybrid OTLP/HTTP). Default ON; inherits
 # global.ingress like app/api. Host is telemetry.<controlPlane.domain>.
 assert_contains "$out25" '^  name: clickstack-ingest-gateway$' \
@@ -3679,6 +3739,52 @@ if [[ "$gw_ing_backend" != "otlp-http" ]]; then
   exit 1
 fi
 green "ok  - saas: ingest gateway Ingress backends OTLP/HTTP"
+
+# --- AUT-514: saas NOTES name the mode and the four remote-plane endpoints
+notes25="$TMP/scenario-saas-notes.txt"
+render_notes "$notes25" "${SAAS_ARGS[@]}"
+assert_contains "$notes25" 'Deployment profile: Platform v2 — saas \(customer-owned central control plane' \
+  "saas NOTES: profile names saas mode"
+assert_contains "$notes25" 'databridge.cp.example.com:443' \
+  "saas NOTES: DataBridge derived endpoint"
+assert_contains "$notes25" 'https://telemetry.cp.example.com' \
+  "saas NOTES: telemetry derived endpoint"
+assert_contains "$notes25" 'agentgateway-configsync.cp.example.com:443' \
+  "saas NOTES: AgentGateway config-sync endpoint"
+assert_contains "$notes25" 'trustguard-configsync.cp.example.com:443' \
+  "saas NOTES: TrustGuard config-sync endpoint"
+assert_contains "$notes25" 'kubectl get svc -n default databridge-southbound agentgateway-admin-configsync trustguard-control-plane-configsync' \
+  "saas NOTES: L4 Service lookup"
+assert_contains "$notes25" 'serving chart-minted certificates' \
+  "saas NOTES: self-signed warning on default minting path"
+assert_contains "$notes25" 'DataBridge \(southbound L4' \
+  "saas NOTES: DataBridge in component list"
+
+notes25byo="$TMP/scenario-saas-notes-byo.txt"
+render_notes "$notes25byo" "${SAAS_BYO_ARGS[@]}" \
+  --set databridge.tls.autoGenerate=false \
+  --set agentgateway.configSync.expose.selfSignedTls=false \
+  --set trustguard.configSync.expose.selfSignedTls=false
+assert_not_contains "$notes25byo" 'serving chart-minted certificates' \
+  "saas NOTES: no self-signed warning on BYO certs"
+
+notes_ext="$TMP/scenario-external-notes.txt"
+render_notes "$notes_ext" --set global.deploymentMode=external
+assert_contains "$notes_ext" 'Deployment profile: Platform v2 — external \(control \+ data plane' \
+  "external NOTES: profile unchanged"
+assert_not_contains "$notes_ext" 'Remote data-plane endpoints' \
+  "external NOTES: no saas L4 block"
+assert_not_contains "$notes_ext" 'DataBridge \(southbound L4' \
+  "external NOTES: no DataBridge saas component line"
+
+notes_hyb="$TMP/scenario-hybrid-notes.txt"
+render_notes "$notes_hyb" \
+  --set global.products.trustgate=true \
+  --set agentgateway.configSync.token=cs-trustgate
+assert_contains "$notes_hyb" 'Deployment profile: Platform v2 — hybrid \(data plane in-cluster' \
+  "hybrid NOTES: profile unchanged"
+assert_not_contains "$notes_hyb" 'Remote data-plane endpoints' \
+  "hybrid NOTES: no saas L4 block"
 
 # --- every image comes from one registry ----------------------------------
 # An air-gapped install mirrors what it is told to mirror. An image with no

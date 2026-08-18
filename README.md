@@ -223,7 +223,7 @@ Full contract: [`docs/architecture.md`](./docs/architecture.md) and
 
 | Mode | Hosted control plane | Workloads in cluster | Analytics path |
 |---|---:|---|---|
-| `hybrid` (default) | Yes | TrustGate / TrustGuard / data-plane-api via positive `global.products` (at least one); Firewall follows TrustGuard; per-product DataAgent when TrustGate/TrustGuard is on | Hosted analytics via enrolment-backed ClickStack OTLP; DataAgent also bridges entitled reads. No in-cluster ClickHouse |
+| `hybrid` (default) | Yes | TrustGate / TrustGuard / data-plane-api via positive `global.products` (at least one); Firewall follows TrustGuard; per-product DataAgent when TrustGate/TrustGuard is on | Hosted analytics via enrolment-backed ClickStack OTLP. Raw payloads stay in Postgres for DataAgent. No in-cluster ClickHouse |
 | `external` | No | Full product stack (product flags ignored) plus control planes, product API/app, DataCore, AlertEngine | ClickStack OTel Collector writes to ClickHouse; data-plane API reads ClickHouse |
 | `saas` | No — this cluster *is* one, for `hybrid` clusters elsewhere | Everything `external` renders, plus DataBridge (HA by default) and the ClickStack ingest gateway | Local ClickHouse for central telemetry; DataCore runs `RESIDENCY_BACKEND=hybrid` and reaches remote data planes through DataBridge. Operator path: [saas-mode quick start](./docs/saas-mode.md#quick-start) |
 

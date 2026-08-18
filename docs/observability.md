@@ -25,11 +25,16 @@ the chart renders ServiceMonitor, PodMonitor, and PrometheusRule resources.
 
 ## Hybrid ClickStack OTLP egress (mandatory)
 
-In hybrid mode, product OTLP is always on. AgentGateway and TrustGuard send
-plain OTLP to a local ClusterIP Service (`clickstack-egress-collector`) on the
-DataAgent pod. The sidecar exchanges the DataAgent enrolment JWT for a
-short-lived OTLP access token and exports to the hosted telemetry endpoint.
-There is no direct bearer on apps and no hybrid opt-out
+In hybrid mode, product OTLP is always on for the **metadata** class.
+AgentGateway and TrustGuard read exporters from
+`TELEMETRY_EXPORTERS_METADATA` / `TELEMETRY_EXPORTERS_RAW` as named exporter
+lists (no `telemetry.yaml` ConfigMap; requires TrustGate v0.37.0+ /
+TrustGuard v0.37.1+). Hybrid is `otlp` / `postgres`: metadata goes as plain
+OTLP to a local ClusterIP Service (`clickstack-egress-collector`) on the
+DataAgent pod, and raw payloads stay in local Postgres for DataAgent. The
+sidecar exchanges the DataAgent enrolment JWT for a short-lived OTLP access
+token and exports to the hosted (or customer-central) telemetry endpoint.
+There is no hybrid raw-OTLP dual-write and no hybrid opt-out
 (`global.clickstack.enabled` / `egress.enabled` are rejected). Air-gapped or
 local-only product telemetry requires `global.deploymentMode: external`.
 

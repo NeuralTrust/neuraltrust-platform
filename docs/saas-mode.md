@@ -9,6 +9,9 @@ Use it when a single `external` install cannot work because the data must stay
 where it was produced, but the console, alerting and cross-cluster reporting
 have to be in one place.
 
+Install order, silent failure modes, and upgrade notes:
+[saas-ops-runbook.md](./saas-ops-runbook.md).
+
 | If you want… | Use |
 |---|---|
 | Everything in one cluster | [`external`](../README-EXTERNAL.md) |
@@ -178,6 +181,11 @@ additions and one behaviour change.
 The behaviour change: DataCore runs `RESIDENCY_BACKEND=hybrid` rather than
 `saas`, so entitled reads go out through DataBridge to the remote clusters
 instead of straight to the local ClickHouse.
+
+Remote planes are still `hybrid`. They emit
+`TELEMETRY_EXPORTERS_METADATA=otlp` and `TELEMETRY_EXPORTERS_RAW=postgres`,
+so payloads stay in that cluster's Postgres for DataAgent. Metadata
+reaches `https://telemetry.<domain>` through the egress collector.
 
 ## Endpoints
 

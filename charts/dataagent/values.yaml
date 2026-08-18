@@ -40,7 +40,8 @@ databridge:
   # volume. Required by the binary when tlsMode is mtls.
   tlsCa: ""
 store:
-  backend: "postgres"
+  # Empty ⇒ postgres when global.telemetry.raw=local, none when raw=remote.
+  backend: ""
 database:
   host: "" # Empty ⇒ global.postgresql.host, else the in-cluster control-plane-postgresql Service
   port: "" # Empty ⇒ global.postgresql.port, else 5432
