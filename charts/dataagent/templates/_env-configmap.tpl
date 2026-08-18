@@ -23,7 +23,9 @@ data:
          opt-in, so omitting it would make tlsMode=insecure a crash loop. */}}
   ALLOW_INSECURE_TRANSPORT: "true"
 {{- end }}
-  STORE_BACKEND: {{ .Values.store.backend | quote }}
+{{- /* A blank STORE_BACKEND makes DataAgent reject every retrieval query, so
+       never emit one. The umbrella resolves this from global.telemetry.raw. */}}
+  STORE_BACKEND: {{ (default dict .Values.store).backend | default "postgres" | quote }}
   HEALTH_ADDR: {{ printf ":%v" .Values.ports.health | quote }}
   BACKOFF_MIN: {{ .Values.supervisor.backoffMin | quote }}
   BACKOFF_MAX: {{ .Values.supervisor.backoffMax | quote }}

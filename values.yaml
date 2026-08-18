@@ -113,6 +113,9 @@ global:
     trustguardClientId: "agentgateway-platform"
     trustguardClientSecret: "" # Auto-generated when empty (global.autoGenerateSecrets)
     trustguardClientSecretName: ""
+  # Hybrid raw-telemetry destination. local (default) keeps payloads in Postgres.
+  telemetry:
+    raw: local
   # Hybrid product OTLP: apps → local clickstack-egress-collector (DataAgent
   # enrolment). No direct authToken. Air-gapped → deploymentMode=external.
   # Ignored in external (in-cluster clickstack-otel-collector → ClickHouse).
@@ -227,8 +230,8 @@ global:
     # generated key; swapping one in later invalidates tokens signed by the old.
   # Shared PostgreSQL (v2 hybrid + external control-plane).
   # Hybrid: every service (AgentGateway, TrustGuard, DataAgent, data-plane-api)
-  # connects to ONE shared database via envFrom on the `postgresql-secrets`
-  # Secret rendered from this block.
+  # connects to ONE shared database via the `postgresql-secrets` Secret
+  # rendered from this block.
   # External: `deploy` still gates the in-cluster Postgres Deployment, and this
   # block (plus control-plane-api overlays) feeds the shared `postgresql-secrets`
   # used by control-plane-api/app. Runtime services keep their own per-service
@@ -688,7 +691,7 @@ control-plane-app:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.141.1"
+          tag: "v1.141.2"
           pullPolicy: IfNotPresent
         config:
           nodeEnv: production
@@ -767,7 +770,7 @@ control-plane-app:
 # stays agentgateway for now; K8s names stay agentgateway-*.
 agentgateway:
   image:
-    tag: "v0.36.1"
+    tag: "v0.37.0"
   # Empty host/port/sslMode/username/tls inherit from global.postgresql /
   # global.redis, then fall back to the in-cluster Services. Set them here only
   # to point this one service somewhere else.
@@ -795,7 +798,7 @@ agentgateway:
 # TrustGuard: control-plane + data-plane (/v1/evaluate).
 trustguard:
   image:
-    tag: "v0.36.1"
+    tag: "v0.37.1"
   # Empty host/port/sslMode/username/tls inherit — see the agentgateway note.
   database:
     sslMode: ""

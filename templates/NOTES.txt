@@ -7,6 +7,7 @@ Secrets have been auto-generated for this deployment.
 {{- end }}
 
 {{- $isExternal := eq (include "neuraltrust-platform.isExternal" .) "true" }}
+{{- $isSaas := eq (include "neuraltrust-platform.isSaas" .) "true" }}
 {{- $dataagentEnabled := eq (include "neuraltrust-platform.dataagentEnabled" .) "true" }}
 {{- $trustgateEnabled := eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustgate")) "true" }}
 {{- $trustguardEnabled := eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustguard")) "true" }}
@@ -22,7 +23,7 @@ Secrets have been auto-generated for this deployment.
 {{- $cpApp := index .Values "control-plane-app" | default dict }}
 {{- $dpValues := index .Values "data-plane-api" | default dict }}
 
-Deployment profile: Platform v2 — {{ if $isExternal }}external (control + data plane + in-cluster analytics){{ else }}hybrid (data plane in-cluster; hosted control plane){{ end }}.
+Deployment profile: Platform v2 — {{ if $isSaas }}saas (customer-owned central control plane; remote data planes enrol){{ else if $isExternal }}external (control + data plane + in-cluster analytics){{ else }}hybrid (data plane in-cluster; hosted control plane){{ end }}.
 
 {{- if $isExternal }}
 {{- if .Values.infrastructure.clickhouse.deploy }}
@@ -40,12 +41,12 @@ Redis has been deployed in this release (service "redis").
 Using external Redis at {{ .Values.global.redis.host }}:{{ .Values.global.redis.port }}
 {{- end }}
 
-{{- $pgDeploy := true }}
-{{- if hasKey (.Values.global.postgresql | default dict) "deploy" }}{{- $pgDeploy = .Values.global.postgresql.deploy }}{{- end }}
-{{- if $pgDeploy }}
+{{- if eq (include "neuraltrust-platform.postgresql.deploy" .) "true" }}
 PostgreSQL has been deployed in this release (service "control-plane-postgresql").
-{{- else if .Values.global.postgresql.host }}
+{{- else if and (eq (include "neuraltrust-platform.postgresRequired" .) "true") (.Values.global.postgresql.host) }}
 Using external PostgreSQL at {{ .Values.global.postgresql.host }}:{{ .Values.global.postgresql.port }}
+{{- else if eq (include "neuraltrust-platform.telemetry.raw" .) "remote" }}
+PostgreSQL is not installed (global.telemetry.raw=remote). Raw telemetry leaves over OTLP.
 {{- end }}
 
 Enabled v2 components:
@@ -72,6 +73,10 @@ Enabled v2 components:
   - Control Plane API + App (on-prem console)
   - DataCore + ClickStack OTel Collector (self-hosted analytics)
   - AlertEngine
+{{- if $isSaas }}
+  - DataBridge (southbound L4 for remote data planes)
+  - ClickStack ingest gateway (public OTLP)
+{{- end }}
 {{- end }}
 {{- if .Values.trustlens.enabled }}
   - TrustLens
@@ -149,6 +154,23 @@ Ingress endpoints:
   - Data Plane API:       https://{{ $dpApiHost }}
 {{- else }}
   - Data Plane API:       kubectl get ingress data-plane-api -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].{{ $ipField }}}'
+{{- end }}
+{{- end }}
+
+{{- if $isSaas }}
+{{- $db := .Values.databridge | default dict }}
+{{- $tgVals := .Values.trustguard | default dict }}
+{{- $dbMinting := and (eq (include "neuraltrust-platform.boolish" (dict "value" (dig "tls" "autoGenerate" true $db) "default" true)) "true") (not (dig "tls" "existingSecret" "" $db | toString | trim)) }}
+{{- $agMinting := and (eq (include "neuraltrust-platform.boolish" (dict "value" (dig "configSync" "expose" "selfSignedTls" true $ag) "default" true)) "true") (not (dig "configSync" "grpcTls" "existingSecret" "" $ag | toString | trim)) }}
+{{- $tgMinting := and (eq (include "neuraltrust-platform.boolish" (dict "value" (dig "configSync" "expose" "selfSignedTls" true $tgVals) "default" true)) "true") (not (dig "configSync" "grpcTls" "existingSecret" "" $tgVals | toString | trim)) }}
+Remote data-plane endpoints (L4 names must bypass any TLS-terminating proxy):
+  - DataBridge:               {{ include "neuraltrust-platform.saas.databridgeHost" . }}:443
+  - Telemetry (HTTPS):        {{ include "neuraltrust-platform.saas.telemetryEndpoint" . }}
+  - AgentGateway config-sync: {{ include "neuraltrust-platform.configSync.publicHost" (dict "ctx" . "product" "agentgateway") }}:443
+  - TrustGuard config-sync:   {{ include "neuraltrust-platform.configSync.publicHost" (dict "ctx" . "product" "trustguard") }}:443
+  kubectl get svc -n {{ .Release.Namespace }} databridge-southbound agentgateway-admin-configsync trustguard-control-plane-configsync
+{{- if or $dbMinting $agMinting $tgMinting }}
+  Warning: DataBridge and/or config-sync are serving chart-minted certificates. Remote planes reject the handshake until you install the generated CA (scripts/export-controlplane-ca.sh → global.controlPlane.caSecretName).
 {{- end }}
 {{- end }}
 

@@ -78,10 +78,15 @@ data:
   {{- end }}
   {{- end }}
   {{- end }}
-  # The exporters file contains no Kafka exporter. Hybrid persists raw events to
-  # local Postgres; external sends metadata and raw events to ClickStack.
+  # Exporters come from env vars; no telemetry.yaml is mounted. FILE is pinned
+  # empty because the binary default is "config/telemetry.yaml" — leaving it
+  # unset would probe that path. Requires TrustGate v0.37.0+.
+  # Names differ per class: the merged default list is keyed by name, so a bare
+  # "otlp" token on both sides would drop the raw exporter.
   TELEMETRY_ENABLED: {{ .Values.config.telemetryEnabled | quote }}
-  TELEMETRY_EXPORTERS_FILE: "/etc/telemetry/telemetry.yaml"
+  TELEMETRY_EXPORTERS_FILE: ""
+  TELEMETRY_EXPORTERS_METADATA: {{ include "neuraltrust-platform.telemetry.metadataExporters" . | quote }}
+  TELEMETRY_EXPORTERS_RAW: {{ include "neuraltrust-platform.telemetry.rawExporters" . | quote }}
   {{- if eq (include "neuraltrust-platform.isExternal" .) "true" }}
   # OTLP logs via WithEndpointURL — path must include /v1/logs.
   # Auth from clickstack-collector-secrets on the Deployments.

@@ -45,10 +45,6 @@ spec:
       volumes:
       - name: tmp
         emptyDir: {}
-      - name: telemetry
-        configMap:
-          name: trustguard-telemetry
-          optional: true
       {{- if eq (include "trustguard.configSyncTls.active" .) "true" }}
       - name: configsync-tls
         secret:
@@ -133,9 +129,6 @@ spec:
         volumeMounts:
         - name: tmp
           mountPath: /tmp
-        - name: telemetry
-          mountPath: /etc/telemetry
-          readOnly: true
         {{- if eq (include "trustguard.configSyncTls.active" .) "true" }}
         - name: configsync-tls
           mountPath: {{ include "trustguard.configSyncTls.mountPath" . | quote }}

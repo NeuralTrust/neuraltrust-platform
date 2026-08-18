@@ -14,6 +14,19 @@ no Kubernetes resource when validation succeeds.
 {{- /* Reject a bad region even when nothing in the release resolves a SaaS
        hostname (external mode), so the typo is caught before it matters. */ -}}
 {{- $_ := include "neuraltrust-platform.saas.region" . -}}
+{{- /* Same for the raw-telemetry knob — a typo must not silently keep
+       writing payloads to Postgres (or the other way around). */ -}}
+{{- $_ := include "neuraltrust-platform.telemetry.raw" . -}}
+{{- /* postgres-less hybrid (raw=remote) is parked: DataCore has no
+       self-report channel for raw residency, so the path is gated off
+       until Runtime decides how operators set it. Flip the escape hatch
+       only for local experiments. */ -}}
+{{- if and (eq $mode "hybrid") (eq (include "neuraltrust-platform.telemetry.raw" .) "remote") -}}
+  {{- $telemetry := default dict $global.telemetry -}}
+  {{- if ne (include "neuraltrust-platform.boolish" (dict "value" $telemetry.rawRemoteExperimental "default" false)) "true" -}}
+    {{- fail "global.telemetry.raw=remote is experimental and unsupported. Hybrid raw payloads stay in Postgres. Set global.telemetry.rawRemoteExperimental=true only for local experiments." -}}
+  {{- end -}}
+{{- end -}}
 
 {{- $products := default dict $global.products -}}
 {{- range $name, $enabled := $products -}}

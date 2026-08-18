@@ -102,7 +102,14 @@ data:
   NEURAL_TRUST_FIREWALL_BASE_URL: {{ $fw.baseURL | default (printf "http://firewall.%s.svc.cluster.local" .Release.Namespace) | quote }}
   FIREWALL_ALLOW_PRIVATE_EGRESS: "true"
   OPENTELEMETRY_SERVICE_NAME: "trustguard"
-  TELEMETRY_EXPORTERS_FILE: "/etc/telemetry/telemetry.yaml"
+  # Exporters come from env vars; no telemetry.yaml is mounted. FILE is pinned
+  # empty because the binary default is "config/telemetry.yaml" — leaving it
+  # unset would probe that path. Requires TrustGuard v0.37.1+.
+  # Names differ per class: the merged default list is keyed by name, so a bare
+  # "otlp" token on both sides would drop the raw exporter.
+  TELEMETRY_EXPORTERS_FILE: ""
+  TELEMETRY_EXPORTERS_METADATA: {{ include "neuraltrust-platform.telemetry.metadataExporters" . | quote }}
+  TELEMETRY_EXPORTERS_RAW: {{ include "neuraltrust-platform.telemetry.rawExporters" . | quote }}
   {{- if eq (include "neuraltrust-platform.isExternal" .) "true" }}
   # OTLP logs via WithEndpointURL — path must include /v1/logs.
   # Traces/metrics use OPENTELEMETRY_* host:port (app appends /v1/traces|metrics).

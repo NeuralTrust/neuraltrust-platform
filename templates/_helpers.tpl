@@ -102,6 +102,69 @@ saas without external would mean duplicating ~40 conditionals.
 {{- end }}
 
 {{/*
+Where hybrid raw telemetry is stored.
+
+  local  (default) — TrustGate/TrustGuard persist raw payloads in Postgres.
+  remote           — raw goes over OTLP with metadata; no local raw store.
+
+Non-hybrid modes already ship raw over OTLP, so this reports "remote" there.
+*/}}
+{{- define "neuraltrust-platform.telemetry.raw" -}}
+{{- if ne (include "neuraltrust-platform.isHybrid" .) "true" -}}
+remote
+{{- else -}}
+{{- $raw := ((default dict (default dict .Values.global).telemetry).raw | default "local") | toString | trim | lower -}}
+{{- if not (has $raw (list "local" "remote")) -}}
+{{- fail (printf "global.telemetry.raw must be \"local\" or \"remote\", got %q" $raw) -}}
+{{- end -}}
+{{- $raw -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Type token TrustGate / TrustGuard emit as TELEMETRY_EXPORTERS_RAW.
+*/}}
+{{- define "neuraltrust-platform.telemetry.rawExporter" -}}
+{{- if eq (include "neuraltrust-platform.telemetry.raw" .) "local" -}}postgres{{- else -}}otlp{{- end -}}
+{{- end }}
+
+{{/*
+Exporter lists for TELEMETRY_EXPORTERS_METADATA / _RAW.
+
+Names must be unique across both classes: both products merge the metadata and
+raw defaults into one list keyed by exporter name, so a bare "otlp" token on
+both sides collapses to a single metadata exporter and raw payloads are never
+emitted (RUN-1086 telemetry.yaml used the same metadata-otlp / raw-otlp split).
+
+These env vars are the only exporter source — requires TrustGate v0.37.0+ /
+TrustGuard v0.37.1+, which read them when no exporters file is present.
+*/}}
+{{- define "neuraltrust-platform.telemetry.metadataExporters" -}}
+[{"name":"metadata-otlp","type":"otlp"}]
+{{- end }}
+
+{{- define "neuraltrust-platform.telemetry.rawExporters" -}}
+{{- $type := include "neuraltrust-platform.telemetry.rawExporter" . -}}
+[{"name":{{ printf "raw-%s" $type | quote }},"type":{{ $type | quote }}}]
+{{- end }}
+
+{{/*
+True when this release needs a PostgreSQL instance (in-cluster or hosted).
+
+Hybrid + raw=remote needs none unless data-plane-api is enabled on its
+postgres backend. External/saas always keep the shared control-plane database.
+*/}}
+{{- define "neuraltrust-platform.postgresRequired" -}}
+{{- if ne (include "neuraltrust-platform.isHybrid" .) "true" -}}
+true
+{{- else if eq (include "neuraltrust-platform.telemetry.raw" .) "local" -}}
+true
+{{- else if and (eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "dataPlane")) "true") (eq (include "neuraltrust-platform.dataPlaneApi.sqlBackend" .) "postgres") -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/*
 Which NeuralTrust SaaS region a hybrid install dials: "eu" (default) or "us".
 deploymentMode picks the topology; saasRegion picks the SaaS behind it. Every
 public NeuralTrust hostname derives from one domain so operators flip a single
@@ -459,13 +522,17 @@ Get ClickHouse connection details. In v2 external only.
 
 {{/*
 In-cluster PostgreSQL deploy gate.
-Returns "true" when global.postgresql.deploy is true (the only path in v2).
+Returns "true" when global.postgresql.deploy is true AND this topology
+still needs Postgres (see postgresRequired). raw=remote hybrid with no
+data-plane-api skips the instance even if deploy is left at its default.
 */}}
 {{- define "neuraltrust-platform.postgresql.deploy" -}}
+{{- if eq (include "neuraltrust-platform.postgresRequired" .) "true" -}}
 {{- $pg := default dict (default dict .Values.global).postgresql -}}
 {{- $deploy := true -}}
 {{- if hasKey $pg "deploy" -}}{{- $deploy = $pg.deploy -}}{{- end -}}
 {{- if $deploy -}}true{{- end -}}
+{{- end -}}
 {{- end -}}
 
 {{- define "neuraltrust-platform.postgresql.inClusterDeploy" -}}
@@ -1044,6 +1111,7 @@ fall back to the service DatabaseConfig (DB_*) when no dsn_env is set (RUN-1086)
 */}}
 {{- define "neuraltrust-platform.postgresEnv" -}}
 {{- $ctx := .ctx -}}
+{{- if eq (include "neuraltrust-platform.postgresRequired" $ctx) "true" -}}
 {{- $secret := include "neuraltrust-platform.v2.hybridPg.secretName" $ctx -}}
 {{- /* DB_PASSWORD is handled separately via passwordEnv so passwordSecret
        redirects work in hybrid too. */}}
@@ -1072,6 +1140,7 @@ fall back to the service DatabaseConfig (DB_*) when no dsn_env is set (RUN-1086)
 {{- if not (has "DB_PASSWORD" $skip) }}
 {{- include "neuraltrust-platform.postgresql.passwordEnv" (dict "ctx" $ctx "secret" $secret "envName" "DB_PASSWORD") }}
 {{- end }}
+{{- end -}}
 {{- end -}}
 
 {{/*
@@ -1316,6 +1385,17 @@ Usage: {{ include "neuraltrust-platform.dataagent.instanceValues" (dict "ctx" $ 
 {{- $_ := set $merged "product" $product -}}
 {{- $_ := set $merged "egressPrimary" (and (eq $product $primary) (eq (include "neuraltrust-platform.clickstackHybridEnabled" $root) "true")) -}}
 {{- $_ := set $merged "global" (default dict $root.Values.global) -}}
+{{- $store := default dict $merged.store -}}
+{{- $backend := $store.backend | default "" | toString | lower -}}
+{{- if not $backend -}}
+  {{- if eq (include "neuraltrust-platform.telemetry.raw" $root) "remote" -}}
+    {{- $backend = "none" -}}
+  {{- else -}}
+    {{- $backend = "postgres" -}}
+  {{- end -}}
+{{- end -}}
+{{- $_ := set $store "backend" $backend -}}
+{{- $_ := set $merged "store" $store -}}
 {{- toYaml $merged -}}
 {{- end }}
 
@@ -1362,8 +1442,10 @@ Credential readiness for a merged instance cfg (dict "ctx" $ "cfg" $merged).
 {{- $pgIam := and (eq ($globalPg.authMode | default "password" | toString | lower) "iam") (not $pgDeploy) -}}
 {{- $fallbackSharedPgReady := and (not $autoGenerate) (not $preserve) (not ($globalPgExisting.name | default "")) (or ($globalPg.password | default "") $pgIam) -}}
 {{- $tokenReady := or $existingName $hasManagedToken (and $token $chartGeneratesDatabase) -}}
+{{- $storeBackend := (default dict $cfg.store).backend | default "" | toString | lower -}}
+{{- $storeLess := or (eq $storeBackend "none") (eq $storeBackend "memory") -}}
 {{/* tenant_id / instance_id live in the enrolment JWT — not Helm values. */}}
-{{- if and $tokenReady (or $chartGeneratesDatabase $fallbackSharedPgReady $sharedPgReady $dataSecretName $hasManagedDatabase) -}}true{{- end -}}
+{{- if and $tokenReady (or $storeLess $chartGeneratesDatabase $fallbackSharedPgReady $sharedPgReady $dataSecretName $hasManagedDatabase) -}}true{{- end -}}
 {{- end }}
 
 {{/*
@@ -2316,7 +2398,7 @@ http/protobuf
 {{- end }}
 
 {{/*
-Hybrid product OTLP dual-write is always on (no opt-out). EXTERNAL ignores this.
+Hybrid product OTLP metadata export is always on (no opt-out). EXTERNAL ignores this.
 */}}
 {{- define "neuraltrust-platform.clickstackHybridEnabled" -}}
 {{- if eq (include "neuraltrust-platform.isHybrid" .) "true" -}}

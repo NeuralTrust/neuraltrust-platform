@@ -27,26 +27,26 @@ customer cluster:
 
 - TrustGate proxy and MCP (K8s resources remain `agentgateway-*`)
 - TrustGuard data plane
-- PostgreSQL and Redis by default
+- PostgreSQL and Redis
 - Firewall whenever TrustGuard is selected
 - DataAgent (enrolment required for hybrid OTLP egress and DataBridge)
 
 Hybrid does **not** deploy an in-cluster ClickHouse: analytics use the hosted
-path. AgentGateway and TrustGuard **always dual-write** product data over OTLP
-via a local `clickstack-egress-collector` (enrolment-backed; see
+path. AgentGateway and TrustGuard read their default exporters from
+`TELEMETRY_EXPORTERS_METADATA` / `TELEMETRY_EXPORTERS_RAW` (named exporter
+lists, no mounted `telemetry.yaml`; requires TrustGate v0.37.0+ /
+TrustGuard v0.37.1+). Hybrid uses **metadata `otlp`** (via a local
+`clickstack-egress-collector`; enrolment-backed — see
 [hybrid ClickStack OTLP](#hybrid-clickstack-otlp-mandatory-when-trustgatetrustguard-on))
-while ALSO
-persisting raw payloads to the local PostgreSQL for DataAgent. `data-plane-api`
-renders **by default** in hybrid and reads from the umbrella-managed
-**PostgreSQL** (`SQL_DATABASE=postgres`), so no ClickHouse is required. Its
-schema is applied by a `postgres-migrations` initContainer (idempotent,
-advisory-locked). If you instead want it to read from an **external/managed
-ClickHouse**, either set a dotted
-`data-plane-api.dataPlane.components.clickhouse.host` (auto-resolves to
-ClickHouse) or force it with
-`data-plane-api.dataPlane.components.api.database.backend: clickhouse`.
-The backend can also be pinned to `postgres` explicitly. In-cluster ClickHouse
-deploys only in external mode.
+and **raw `postgres`** so payloads stay in the local PostgreSQL for
+DataAgent. There is no hybrid raw-OTLP dual-write. `data-plane-api` is
+**opt-in** (`global.products.dataPlane`) and, when selected, defaults to
+the umbrella-managed **PostgreSQL** (`SQL_DATABASE=postgres`). Its schema
+is applied by a `postgres-migrations` initContainer (idempotent,
+advisory-locked). The backend can be pinned to `postgres` explicitly, or
+pointed at an external ClickHouse via a dotted
+`data-plane-api.dataPlane.components.clickhouse.host`. In-cluster
+ClickHouse deploys only in external mode.
 
 ### Hybrid control and data channels
 
@@ -172,9 +172,10 @@ selected primary (TrustGate when enabled, otherwise TrustGuard) co-locates the
 
 ### Hybrid ClickStack OTLP (mandatory when TrustGate/TrustGuard on)
 
-When TrustGate or TrustGuard is enabled, hybrid ClickStack export is **always
-on**. Apps send plain OTLP to a local ClusterIP Service
-(`clickstack-egress-collector`) on the primary DataAgent pod.
+When TrustGate or TrustGuard is enabled, hybrid ClickStack **metadata** export
+is **always on**. Apps send metadata-class OTLP to a local ClusterIP Service
+(`clickstack-egress-collector`) on the primary DataAgent pod. Raw payloads
+stay in local Postgres (`TELEMETRY_EXPORTERS_RAW=postgres`) for DataAgent.
 The sidecar exchanges the DataAgent enrolment JWT for a short-lived OTLP access
 token and exports to the hosted telemetry endpoint. There is **no** direct
 bearer on TrustGate/TrustGuard and **no** hybrid opt-out:
@@ -223,7 +224,8 @@ hosted telemetry egress.
 `saas` is a superset of `external`: same control-plane stack, plus DataBridge
 (HA by default), the ClickStack ingest gateway, and published config-sync
 listeners so **other clusters** can run `hybrid` against *this* install.
-Operator runbook: [saas-mode.md quick start](./saas-mode.md#quick-start).
+Operator runbook: [saas-ops-runbook.md](./saas-ops-runbook.md) (install order and
+silent failure modes). Chart contract: [saas-mode.md quick start](./saas-mode.md#quick-start).
 
 ## Components
 
@@ -236,7 +238,7 @@ it. External and saas ignore the flags and deploy the full product stack.
 | TrustGate admin | hosted | yes | yes | Gateway administration |
 | TrustGuard data plane | opt-in | yes | yes | Runtime safety evaluation |
 | TrustGuard control plane | hosted | yes | yes | Policy administration |
-| data-plane API | opt-in (PostgreSQL) | yes (ClickHouse) | yes (ClickHouse) | Analytics / evaluation API |
+| data-plane API | opt-in (PostgreSQL unless pointed at external ClickHouse) | yes (ClickHouse) | yes (ClickHouse) | Analytics / evaluation API |
 | DataAgent | one per enabled TrustGate/TrustGuard | no | no | Outbound entitled-query bridge; primary also powers ClickStack egress |
 | ClickStack OTel Collector | no | yes | yes | OTLP to ClickHouse |
 | DataCore | no | yes | yes (`RESIDENCY_BACKEND=hybrid`) | Residency query API |
