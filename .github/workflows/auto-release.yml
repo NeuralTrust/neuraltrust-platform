@@ -25,6 +25,10 @@ on:
       - '.gitignore'
       - '.helmignore'
 
+concurrency:
+  group: auto-release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
 

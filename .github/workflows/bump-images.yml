@@ -92,6 +92,10 @@ on:
         type: boolean
         default: true
 
+concurrency:
+  group: bump-images-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   AR_REGISTRY: europe-west1-docker.pkg.dev
   AR_PROJECT: neuraltrust-app-prod

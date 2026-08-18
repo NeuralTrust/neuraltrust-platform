@@ -4,6 +4,10 @@ on:
   release:
     types: [published]
 
+concurrency:
+  group: publish-chart-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   AR_REGISTRY: europe-west1-docker.pkg.dev
   AR_LOCATION: europe-west1
