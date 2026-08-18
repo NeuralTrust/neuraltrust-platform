@@ -43,6 +43,41 @@ control planes and never deploys DataAgent. Before going live, read
 [`NEXT_PUBLIC_*` cannot be configured at runtime](#next_public_-cannot-be-configured-at-runtime)
 — it affects the tenant URL a self-hosted console advertises to IdPs.
 
+### Central control plane (`deploymentMode: saas`)
+
+A central control plane is an External install, so everything in the External
+table applies unchanged. It creates no additional operator-supplied Secret — but
+it is the one mode with a hard requirement on the **shared platform Secret**,
+which carries five keys that let remote data planes enrol:
+
+| Key | Used by |
+|---|---|
+| `ENROLMENT_INTROSPECTION_TOKEN` | DataCore — compares what DataBridge presents |
+| `DATACORE_SERVICE_TOKEN` | DataBridge — alias of the above, must hold the **identical** value |
+| `ENROLMENT_SIGNING_SECRET` | DataCore — signs enrolment tokens |
+| `CONFIG_SYNC_SIGNING_SECRET` | DataCore — signs private-gateway install tokens; product control planes verify it as `CONFIG_SYNC_JWT_SECRET` |
+| `TELEMETRY_JWT_PRIVATE_KEY_PEM` | DataCore — RS256 key for the OTLP tokens the ingest gateway verifies |
+
+The chart generates all five by default and you create nothing. They become
+yours to supply only when the platform Secret is taken out of play — by
+`global.platformSecret.enabled: false`, an operator-owned
+`global.platformSecret.existingSecret`, `global.preserveExistingSecrets: true`,
+or `global.autoGenerateSecrets: false`. In saas mode that combination is
+**rejected at render time** unless you supply all five yourself, so the mistake
+surfaces during `helm upgrade` rather than on first traffic.
+
+Two failure modes are worth knowing because neither points at the Secret:
+
+- If `ENROLMENT_INTROSPECTION_TOKEN` and `DATACORE_SERVICE_TOKEN` drift apart,
+  every agent connection returns 401 with nothing visibly wrong on either side.
+- If `CONFIG_SYNC_SIGNING_SECRET` is missing, DataCore answers
+  `POST /v1/admin/credentials` with HTTP 501 `"not implemented"` and the console
+  private-gateway wizard fails *after* creating the gateway row.
+
+`./create-secrets.sh` with `DEPLOYMENT_MODE=saas` writes all five correctly,
+including the alias. Remote data planes are ordinary hybrid installs and need
+the hybrid Secrets above, with their tokens issued by **your** console.
+
 ## Quick start
 
 ### Auto-generated secrets (default — recommended)
