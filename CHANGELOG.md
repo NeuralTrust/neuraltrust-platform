@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.11.6] — 2026-08-18
+
 ### Fixed
 
 - **Hybrid raw telemetry was silently dropped: metadata and raw OTLP exporters
