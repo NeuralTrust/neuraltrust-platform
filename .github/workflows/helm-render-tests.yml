@@ -10,8 +10,10 @@ on:
       - "charts/**"
       - "scripts/test-helm-render.sh"
       - ".github/workflows/helm-render-tests.yml"
-  push:
-    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read

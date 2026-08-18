@@ -45,7 +45,7 @@ dependencies:
       - v2
   # TrustGuard. Hybrid gated by global.products.trustguard.
   - name: trustguard
-    version: 0.1.41
+    version: 0.1.42
     repository: file://./charts/trustguard
     tags:
       - neuraltrust
@@ -59,7 +59,7 @@ dependencies:
       - v2
   # DataAgent (hybrid; agentgateway.dataagent / trustguard.dataagent).
   - name: dataagent
-    version: 0.1.15
+    version: 0.1.16
     repository: file://./charts/dataagent
     tags:
       - neuraltrust
@@ -103,7 +103,7 @@ dependencies:
   # Firewall is part of TrustGuard. Templates follow the TrustGuard product
   # gate in hybrid; always on in external.
   - name: firewall
-    version: 2.1.11
+    version: 2.1.12
     repository: file://./charts/firewall
     tags:
       - neuraltrust
