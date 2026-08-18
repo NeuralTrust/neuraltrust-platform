@@ -13,10 +13,10 @@ dependencies:
   version: 0.1.30
 - name: agentgateway
   repository: file://./charts/agentgateway
-  version: 0.1.45
+  version: 0.1.46
 - name: trustguard
   repository: file://./charts/trustguard
-  version: 0.1.42
+  version: 0.1.43
 - name: trustlens
   repository: file://./charts/trustlens
   version: 0.1.2
@@ -44,5 +44,5 @@ dependencies:
 - name: watchdog
   repository: file://./charts/watchdog
   version: 0.3.6
-digest: sha256:7c1b34e958cbdda3e1ffc42b1e1e5a1cfcf79cca74e38a1436e523557c11748f
-generated: "2026-08-18T15:35:04.75395+02:00"
+digest: sha256:f3d99581cec7a7e437643fcf8abdd5978db70298731b7df00c58fefac19e12fc
+generated: "2026-08-18T16:50:17.924151663Z"
