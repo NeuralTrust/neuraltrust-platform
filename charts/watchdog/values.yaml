@@ -13,7 +13,7 @@ enabled: false
 fullnameOverride: "neuraltrust-watchdog"
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/watchdog
-  tag: v0.13.7 # defaults to .Chart.AppVersion
+  tag: v0.14.0 # defaults to .Chart.AppVersion
   pullPolicy: IfNotPresent
 # Pull secret(s) for private nt-docker images.
 # Defaults to gcr-secret like the rest of the chart. Set to [] on clusters that
@@ -501,7 +501,8 @@ checks:
     enabled: false
     target:
       urls:
-        - {name: api, url: 'http://control-plane-api-service/health', expectedStatus: 200, latencyWarnMs: 500, latencyCriticalMs: 2000}
+        - {name: api, url: 'http://control-plane-api-service/health', expectedStatus: 200,
+          latencyWarnMs: 500, latencyCriticalMs: 2000}
         - {name: app, url: 'http://control-plane-app-service/api/health', expectedStatus: 200}
   # data-plane-api readiness.
   - id: v2-data-plane-synthetic
@@ -509,7 +510,8 @@ checks:
     enabled: false
     target:
       urls:
-        - {name: api, url: 'http://data-plane-api-service/health', expectedStatus: 200, latencyWarnMs: 500, latencyCriticalMs: 2000}
+        - {name: api, url: 'http://data-plane-api-service/health', expectedStatus: 200,
+          latencyWarnMs: 500, latencyCriticalMs: 2000}
         - {name: ready, url: 'http://data-plane-api-service/health/ready', expectedStatus: 200}
   - id: postgres-tcp
     kind: tcpsynthetic
@@ -613,7 +615,8 @@ checks:
     enabled: false
     target:
       namespace: trustscan
-      deployments: [trustscan-api, trustscan-integration-created-worker, trustscan-scan-chunk-completed-worker, trustscan-scan-requested-worker]
+      deployments: [trustscan-api, trustscan-integration-created-worker, trustscan-scan-chunk-completed-worker,
+        trustscan-scan-requested-worker]
   # Alerts on a high volume of ERROR/WARN container-log lines per workload,
   # read from the in-cluster log bridge (no Prometheus needed). REQUIRES
   # logExport.enabled — without the bridge it reports unknown. Notify-only.
