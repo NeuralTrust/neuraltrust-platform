@@ -4,6 +4,37 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.11.11] — 2026-08-24
+
+### Fixed
+
+- **The render suite could never pass.** The AgentGateway m2m generator check
+  looked for the literal `ADMIN_M2M_PUBLIC_KEYS` in the hook's Node source, but
+  the script reads that field name out of the environment, so the assertion was
+  unsatisfiable. It now checks the Job's env carries the right field names and
+  that the script derives the public half, which is what the check was for.
+- **The key-generation hooks drifted off the app image.** Neither hook was in
+  `bump-images.yml`, so the MCP fallback sat at `v1.117.0` while `values.yaml`
+  had moved to `v1.142.0`. There is now one fallback, in `templates/_keygen.tpl`,
+  and the bump workflow updates it with the app.
+- **`create-secrets.sh` led operators into a failing render.** It prompted for
+  the m2m private key but never mentioned the public half, which the chart
+  requires alongside it. It now derives the public half from whichever encoding
+  the key arrives in and prints the `global.agentgatewayM2m.publicKeys` line to
+  paste; with no key supplied it says the hook Job will mint the pair.
+
+### Changed
+
+- **One key-generation hook instead of two.** `templates/_keygen.tpl` now backs
+  both the MCP OAuth signing key and the m2m pair, which were ~250 lines of
+  identical ServiceAccount, Role, RoleBinding and Job each. The public half is
+  optional, so MCP stays a single key. Object names, labels, annotations, RBAC
+  scoping and env stay as they were; only the shared script differs.
+- **Shared three-state and credential-lookup helpers.** `tristate` and
+  `platformCredentialPresent` replace the duplicated bodies behind
+  `mcpOAuth.intent`, `mcpOAuth.signingKeyPresent`, `agentgatewayM2m.intent` and
+  `agentgatewayM2m.privateKeyPresent`, which keep their names and behaviour.
+
 ## [v2.11.10] — 2026-08-24
 
 ### Added

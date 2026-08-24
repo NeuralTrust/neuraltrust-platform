@@ -2124,6 +2124,45 @@ true
 {{- end }}
 
 {{/*
+An optional feature flag, normalised to "on", "off" or "auto".
+
+Distinct from `boolish` because unset is a third state rather than a default:
+these features decide for themselves whether they can work, and "the operator
+said nothing" has to stay tellable apart from "the operator said no".
+
+`enabled` is read in two places — the feature's own helper family and
+validate-values — and a raw `kindIs "bool"` test disagrees with Go truthiness for
+a string. That is not exotic: a Flux HelmRelease sourcing values from a ConfigMap
+yields every value as a string, as does Helmfile templating, so `enabled: "false"`
+would otherwise turn a feature ON in external and get a hybrid install rejected
+for disabling it.
+
+Anything that is neither truthy nor falsy fails loudly rather than being guessed
+at. `path` names the value in the message and `hint` names the feature.
+
+Usage: {{ include "neuraltrust-platform.tristate" (dict "raw" $raw "path" "global.mcpOAuth.enabled" "hint" "MCP OAuth") }}
+*/}}
+{{- define "neuraltrust-platform.tristate" -}}
+{{- $raw := .raw -}}
+{{- if kindIs "invalid" $raw -}}
+auto
+{{- else if kindIs "bool" $raw -}}
+{{- if $raw }}on{{ else }}off{{ end -}}
+{{- else -}}
+{{- $v := toString $raw | trim | lower -}}
+{{- if eq $v "" -}}
+auto
+{{- else if has $v (list "true" "yes" "on" "1") -}}
+on
+{{- else if has $v (list "false" "no" "off" "0") -}}
+off
+{{- else -}}
+{{- fail (printf "%s must be true, false, or unset for automatic (got %q). Leave it unset to have %s follow the deployment mode." .path $raw .hint) -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Whether a product's config-sync gRPC listener gets published outside the cluster.
 
 Only saas has a reason to: hybrid dials someone else's control plane, and
@@ -3003,26 +3042,34 @@ global.mcpOAuth.issuer explicitly (full URL, including the path).
 {{- end }}
 
 {{/*
-Whether a stable MCP OAuth signing key is available to this install, checked
-against the same sources the shared Secret resolves from: an explicit pin, the
-live `platform-secrets`, an operator-owned Secret, and the legacy Secret the key
-used to live in.
+Whether a credential is already available to this install, checked against the
+same sources the shared Secret resolves from: an explicit pin in
+`platformSecret.values`, the live `platform-secrets`, an operator-owned Secret,
+and the legacy Secret the key used to live in.
 
-The app mints an ephemeral key per replica when the key is unset, so tokens one
-replica signs fail JWKS verification against another. That makes "is a key
-available" the real precondition for the feature, not the operator's intent.
+A map or slice pin is ignored rather than treated as a value: that shape reaches
+this helper when an operator nests keys under `platformSecret.values`, and
+counting it as present would wire a ref to something the Secret never carries.
+
+The generated hook Secret is deliberately not consulted. On upgrade the
+generator re-reads it and leaves any live key in place, so asking "did the
+operator supply one" stays a separate question from "does one exist".
+
+Usage: {{ include "neuraltrust-platform.platformCredentialPresent" (dict "ctx" . "key" "MCP_OAUTH_SIGNING_KEY") }}
 */}}
-{{- define "neuraltrust-platform.mcpOAuth.signingKeyPresent" -}}
-{{- $ps := default dict (default dict .Values.global).platformSecret -}}
-{{- $pinned := index (default dict $ps.values) "MCP_OAUTH_SIGNING_KEY" | default "" -}}
+{{- define "neuraltrust-platform.platformCredentialPresent" -}}
+{{- $ctx := .ctx -}}
+{{- $key := .key -}}
+{{- $ps := default dict (default dict $ctx.Values.global).platformSecret -}}
+{{- $pinned := index (default dict $ps.values) $key | default "" -}}
 {{- if and $pinned (not (kindIs "map" $pinned)) (not (kindIs "slice" $pinned)) -}}
 true
 {{- else -}}
 {{- $found := "" -}}
 {{- range $name := (list "platform-secrets" ((default dict $ps.existingSecret).name | default "") "control-plane-secrets") -}}
 {{- if and $name (not $found) -}}
-{{- $live := lookup "v1" "Secret" $.Release.Namespace $name -}}
-{{- if and $live $live.data (index $live.data "MCP_OAUTH_SIGNING_KEY") -}}
+{{- $live := lookup "v1" "Secret" $ctx.Release.Namespace $name -}}
+{{- if and $live $live.data (index $live.data $key) -}}
 {{- $found = "true" -}}
 {{- end -}}
 {{- end -}}
@@ -3032,36 +3079,22 @@ true
 {{- end }}
 
 {{/*
+Whether a stable MCP OAuth signing key is available to this install.
+
+The app mints an ephemeral key per replica when the key is unset, so tokens one
+replica signs fail JWKS verification against another. That makes "is a key
+available" the real precondition for the feature, not the operator's intent.
+*/}}
+{{- define "neuraltrust-platform.mcpOAuth.signingKeyPresent" -}}
+{{- include "neuraltrust-platform.platformCredentialPresent" (dict "ctx" . "key" "MCP_OAUTH_SIGNING_KEY") -}}
+{{- end }}
+
+{{/*
 The operator's intent for MCP OAuth, normalised to "on", "off" or "auto".
-
-Exists because `enabled` is read in two places — this helper family and
-validate-values — and a raw `kindIs "bool"` test disagrees with Go truthiness for
-a string. That is not exotic: a Flux HelmRelease sourcing values from a ConfigMap
-yields every value as a string, as does Helmfile templating, so `enabled: "false"`
-would otherwise turn the feature ON in external and get a hybrid install rejected
-for disabling it.
-
-Anything that is neither truthy nor falsy fails loudly rather than being guessed at.
 */}}
 {{- define "neuraltrust-platform.mcpOAuth.intent" -}}
 {{- $mcp := default dict (default dict .Values.global).mcpOAuth -}}
-{{- $raw := $mcp.enabled -}}
-{{- if kindIs "invalid" $raw -}}
-auto
-{{- else if kindIs "bool" $raw -}}
-{{- if $raw }}on{{ else }}off{{ end -}}
-{{- else -}}
-{{- $v := toString $raw | trim | lower -}}
-{{- if eq $v "" -}}
-auto
-{{- else if has $v (list "true" "yes" "on" "1") -}}
-on
-{{- else if has $v (list "false" "no" "off" "0") -}}
-off
-{{- else -}}
-{{- fail (printf "global.mcpOAuth.enabled must be true, false, or unset for automatic (got %q). Leave it unset to have MCP OAuth follow the deployment mode." $raw) -}}
-{{- end -}}
-{{- end -}}
+{{- include "neuraltrust-platform.tristate" (dict "raw" $mcp.enabled "path" "global.mcpOAuth.enabled" "hint" "MCP OAuth") -}}
 {{- end }}
 
 {{/*
@@ -3282,47 +3315,14 @@ Usage:
 */}}
 {{- define "neuraltrust-platform.agentgatewayM2m.intent" -}}
 {{- $m2m := default dict (default dict .Values.global).agentgatewayM2m -}}
-{{- $raw := $m2m.enabled -}}
-{{- if kindIs "invalid" $raw -}}
-auto
-{{- else if kindIs "bool" $raw -}}
-{{- if $raw }}on{{ else }}off{{ end -}}
-{{- else -}}
-{{- $v := toString $raw | trim | lower -}}
-{{- if eq $v "" -}}
-auto
-{{- else if has $v (list "true" "yes" "on" "1") -}}
-on
-{{- else if has $v (list "false" "no" "off" "0") -}}
-off
-{{- else -}}
-{{- fail (printf "global.agentgatewayM2m.enabled must be true, false, or unset for automatic (got %q). Leave it unset to have Admin API machine credentials follow the deployment mode." $raw) -}}
-{{- end -}}
-{{- end -}}
+{{- include "neuraltrust-platform.tristate" (dict "raw" $m2m.enabled "path" "global.agentgatewayM2m.enabled" "hint" "Admin API machine credentials") -}}
 {{- end }}
 
 {{/*
-Whether an operator-supplied private key is already available. The generated
-Secret is not consulted: on upgrade the Job re-reads that Secret and leaves
-the live key in place.
+Whether an operator-supplied private key is already available.
 */}}
 {{- define "neuraltrust-platform.agentgatewayM2m.privateKeyPresent" -}}
-{{- $ps := default dict (default dict .Values.global).platformSecret -}}
-{{- $pinned := index (default dict $ps.values) "AGENTGATEWAY_M2M_PRIVATE_KEY" | default "" -}}
-{{- if and $pinned (not (kindIs "map" $pinned)) (not (kindIs "slice" $pinned)) -}}
-true
-{{- else -}}
-{{- $found := "" -}}
-{{- range $name := (list "platform-secrets" ((default dict $ps.existingSecret).name | default "") "control-plane-secrets") -}}
-{{- if and $name (not $found) -}}
-{{- $live := lookup "v1" "Secret" $.Release.Namespace $name -}}
-{{- if and $live $live.data (index $live.data "AGENTGATEWAY_M2M_PRIVATE_KEY") -}}
-{{- $found = "true" -}}
-{{- end -}}
-{{- end -}}
-{{- end -}}
-{{- $found -}}
-{{- end -}}
+{{- include "neuraltrust-platform.platformCredentialPresent" (dict "ctx" . "key" "AGENTGATEWAY_M2M_PRIVATE_KEY") -}}
 {{- end }}
 
 {{- define "neuraltrust-platform.agentgatewayM2m.publicKeys" -}}
