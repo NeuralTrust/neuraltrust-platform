@@ -2310,7 +2310,8 @@ assert_render_fails "a custom app host without an explicit issuer is refused" \
 out12host="$TMP/scenario-mcp-oauth-custom-host.yaml"
 render_default "$out12host" --set global.deploymentMode=external \
   --set 'control-plane-app.controlPlane.components.app.host=console.acme.test' \
-  --set global.mcpOAuth.issuer=https://console.acme.test/api/mcp/oauth
+  --set global.mcpOAuth.issuer=https://console.acme.test/api/mcp/oauth \
+  --set global.agentgatewayM2m.issuer=https://console.acme.test
 assert_contains "$out12host" 'https://console.acme.test/api/mcp/oauth' \
   "a custom app host works once the issuer is explicit"
 
@@ -2327,18 +2328,154 @@ ruby -ryaml -e '
   app = docs.find { |d| d["kind"] == "Deployment" && d.dig("metadata", "name") == "control-plane-app" }
   job = docs.find { |d| d["kind"] == "Job" && d.dig("metadata", "labels", "app.kubernetes.io/component") == "mcp-signing-key" }
   abort "the generator Job is not rendered" if job.nil?
+  m2m = docs.find { |d| d["kind"] == "Job" && d.dig("metadata", "labels", "app.kubernetes.io/component") == "agentgateway-m2m-keys" }
+  abort "the m2m generator Job is not rendered" if m2m.nil?
   app_c = app.dig("spec", "template", "spec", "containers").find { |c| c["name"] == "app" }
   job_c = job.dig("spec", "template", "spec", "containers", 0)
+  m2m_c = m2m.dig("spec", "template", "spec", "containers", 0)
   abort "the Job pulls #{job_c["image"]}, the app pulls #{app_c["image"]}" unless job_c["image"] == app_c["image"]
+  abort "the m2m Job pulls #{m2m_c["image"]}, the app pulls #{app_c["image"]}" unless m2m_c["image"] == app_c["image"]
   abort "the mirrored registry was not applied: #{job_c["image"]}" unless job_c["image"].start_with?("registry.internal.example.com/nt/")
   pull = ->(d) { (d.dig("spec", "template", "spec", "imagePullSecrets") || []).map { |s| s["name"] } }
   abort "pull secrets differ: #{pull.call(job).inspect} vs #{pull.call(app).inspect}" unless pull.call(job) == pull.call(app)
+  abort "m2m pull secrets differ: #{pull.call(m2m).inspect} vs #{pull.call(app).inspect}" unless pull.call(m2m) == pull.call(app)
   abort "the operator pull secret did not reach the Job: #{pull.call(job).inspect}" unless pull.call(job) == ["mirror-creds"]
   unless job_c["imagePullPolicy"] == app_c["imagePullPolicy"]
     abort "pull policies differ: #{job_c["imagePullPolicy"]} vs #{app_c["imagePullPolicy"]}"
   end
 ' "$out12reg" || { red "FAIL: the generator does not follow the app image into a custom registry"; exit 1; }
 green "ok  - the generator follows the app image through a mirrored registry and pull secrets"
+
+# AgentGateway Admin API machine credentials (ENG-1212). On by default in
+# external/saas: a hook Job writes a PKCS#8 private key and the matching public
+# PEM so the Credentials tab works with no operator action. Hybrid has no Admin
+# API and no in-cluster app, so the feature stays off.
+blue "==> Scenario 12m: AgentGateway Admin API machine credentials"
+assert_platform_key "$out12ext" absent AGENTGATEWAY_M2M_PRIVATE_KEY \
+  "external defaults: the generated m2m private key stays out of platform-secrets"
+assert_contains "$out12ext" 'name: "agentgateway-m2m-keys"' \
+  "external defaults: the app and TrustGate read the generated m2m Secret"
+assert_not_contains "$out12hyb" 'AGENTGATEWAY_M2M_|ADMIN_M2M_|component: agentgateway-m2m-keys' \
+  "hybrid: Admin API machine credentials stay off"
+assert_render_fails "agentgatewayM2m=true in hybrid fails loudly" \
+  --set global.agentgatewayM2m.enabled=true
+assert_render_fails "agentgatewayM2m=true with no key and no generator fails loudly" \
+  --set global.deploymentMode=external \
+  --set global.agentgatewayM2m.generateKeys=false \
+  --set global.agentgatewayM2m.enabled=true
+assert_render_fails "a private m2m key without publicKeys fails loudly" \
+  --set global.deploymentMode=external \
+  --set global.agentgatewayM2m.generateKeys=false \
+  --set global.platformSecret.values.AGENTGATEWAY_M2M_PRIVATE_KEY=pem-placeholder
+assert_render_fails "publicKeys without a private m2m key fails loudly" \
+  --set global.deploymentMode=external \
+  --set global.agentgatewayM2m.generateKeys=false \
+  --set global.agentgatewayM2m.publicKeys=pub-placeholder
+m2mkey="pem-placeholder"
+m2mpub="pub-placeholder"
+out12m2m="$TMP/scenario-agentgateway-m2m-on.yaml"
+render_default "$out12m2m" --set global.deploymentMode=external \
+  --set global.platformSecret.values.AGENTGATEWAY_M2M_PRIVATE_KEY="$m2mkey" \
+  --set global.agentgatewayM2m.publicKeys="$m2mpub"
+assert_platform_key "$out12m2m" present AGENTGATEWAY_M2M_PRIVATE_KEY \
+  "an operator-supplied private key is emitted into platform-secrets"
+assert_not_contains "$out12m2m" 'component: agentgateway-m2m-keys' \
+  "an operator-supplied pair stands the m2m generator down"
+ruby -ryaml -rbase64 -e '
+  docs = YAML.load_stream(File.read(ARGV.fetch(0))).compact
+  def env_of(docs, name)
+    d = docs.find { |x| x["kind"] == "Deployment" && x.dig("metadata", "name") == name }
+    abort "#{name} not rendered" if d.nil?
+    (d.dig("spec", "template", "spec", "containers") || []).flat_map { |c| c["env"] || [] }
+  end
+  app = env_of(docs, "control-plane-app")
+  admin = env_of(docs, "agentgateway-admin")
+  priv = app.find { |e| e["name"] == "AGENTGATEWAY_M2M_PRIVATE_KEY" }
+  abort "app is missing AGENTGATEWAY_M2M_PRIVATE_KEY" if priv.nil?
+  skr = priv.dig("valueFrom", "secretKeyRef")
+  abort "app private key is not from platform-secrets: #{skr.inspect}" unless skr && skr["name"] == "platform-secrets" && skr["key"] == "AGENTGATEWAY_M2M_PRIVATE_KEY"
+  pub = admin.find { |e| e["name"] == "ADMIN_M2M_PUBLIC_KEYS" }
+  abort "admin is missing ADMIN_M2M_PUBLIC_KEYS" if pub.nil?
+  abort "admin public keys were not taken from values: #{pub.inspect}" unless pub["value"] == ARGV.fetch(1)
+  app_iss = app.find { |e| e["name"] == "AGENTGATEWAY_M2M_ISSUER" }&.fetch("value", nil)
+  admin_iss = admin.find { |e| e["name"] == "ADMIN_M2M_ISSUER" }&.fetch("value", nil)
+  abort "issuer missing on one side: #{app_iss.inspect} vs #{admin_iss.inspect}" if app_iss.nil? || admin_iss.nil?
+  abort "issuers differ: #{app_iss} vs #{admin_iss}" unless app_iss == admin_iss
+  abort "issuer has a trailing slash: #{app_iss}" if app_iss.end_with?("/")
+  abort "derived issuer is not the app origin: #{app_iss}" unless app_iss == "https://app.platform.example.com"
+  app_aud = app.find { |e| e["name"] == "AGENTGATEWAY_M2M_AUDIENCE" }&.fetch("value", nil)
+  admin_aud = admin.find { |e| e["name"] == "ADMIN_M2M_AUDIENCE" }&.fetch("value", nil)
+  abort "audiences differ: #{app_aud.inspect} vs #{admin_aud.inspect}" unless app_aud == admin_aud
+  %w[agentgateway-proxy agentgateway-mcp].each do |name|
+    leaked = env_of(docs, name).map { |e| e["name"] }.grep(/^(ADMIN_M2M_|AGENTGATEWAY_M2M_)/)
+    abort "#{name} carries #{leaked.join(", ")}" unless leaked.empty?
+  end
+  s = docs.find { |d| d["kind"] == "Secret" && d.dig("metadata", "name") == "platform-secrets" }
+  got = Base64.decode64(s.fetch("data").fetch("AGENTGATEWAY_M2M_PRIVATE_KEY"))
+  abort "private key was not adopted verbatim: #{got.inspect}" unless got == ARGV.fetch(2)
+' "$out12m2m" "$m2mpub" "$m2mkey" || { red "FAIL: m2m wiring is not consistent across app and TrustGate"; exit 1; }
+green "ok  - m2m on: app and TrustGate share one issuer; private key stays on the app, public keys on admin"
+# Default-on: the generated Secret is what both sides read, and the Job never
+# rewrites a live pair.
+ruby -ryaml -e '
+  docs = YAML.load_stream(File.read(ARGV.fetch(0))).compact
+  hook = docs.select { |d| d.dig("metadata", "labels", "app.kubernetes.io/component") == "agentgateway-m2m-keys" }
+  kinds = hook.map { |d| d["kind"] }.sort
+  want = %w[Job Role RoleBinding ServiceAccount]
+  abort "hook bundle is #{kinds.inspect}, want #{want.inspect}" unless kinds == want
+  job = hook.find { |d| d["kind"] == "Job" }
+  script = job.dig("spec", "template", "spec", "containers", 0, "command").last
+  abort "the generator does not check for an existing key" unless script.include?("already present")
+  abort "the generator does not produce PKCS#8" unless script.include?("pkcs8")
+  abort "the generator dials the apiserver by IP instead of DNS" \
+    if script.include?("process.env.KUBERNETES_SERVICE_HOST")
+  abort "the generator does not dial kubernetes.default.svc" \
+    unless script.include?("https://kubernetes.default.svc:")
+  abort "the generator does not write the TrustGate public key" unless script.include?("ADMIN_M2M_PUBLIC_KEYS")
+  role = hook.find { |d| d["kind"] == "Role" }
+  named = role["rules"].select { |r| r["resourceNames"] }
+  abort "no rule is scoped to a single Secret" if named.empty?
+  named.each do |r|
+    abort "a name-scoped rule reaches beyond the generated Secret: #{r["resourceNames"].inspect}" \
+      unless r["resourceNames"] == ["agentgateway-m2m-keys"]
+  end
+  def env_of(docs, name)
+    d = docs.find { |x| x["kind"] == "Deployment" && x.dig("metadata", "name") == name }
+    abort "#{name} not rendered" if d.nil?
+    (d.dig("spec", "template", "spec", "containers") || []).flat_map { |c| c["env"] || [] }
+  end
+  app = env_of(docs, "control-plane-app")
+  admin = env_of(docs, "agentgateway-admin")
+  priv = app.find { |e| e["name"] == "AGENTGATEWAY_M2M_PRIVATE_KEY" }.dig("valueFrom", "secretKeyRef")
+  pub = admin.find { |e| e["name"] == "ADMIN_M2M_PUBLIC_KEYS" }.dig("valueFrom", "secretKeyRef")
+  abort "generated private key ref missing" if priv.nil?
+  abort "generated public keys ref missing" if pub.nil?
+  abort "generated halves live in different Secrets: #{priv.inspect} vs #{pub.inspect}" unless priv["name"] == pub["name"]
+  abort "generated Secret is not agentgateway-m2m-keys: #{priv["name"]}" unless priv["name"] == "agentgateway-m2m-keys"
+  abort "app reads #{priv["key"].inspect}, not AGENTGATEWAY_M2M_PRIVATE_KEY" unless priv["key"] == "AGENTGATEWAY_M2M_PRIVATE_KEY"
+  abort "admin reads #{pub["key"].inspect}, not ADMIN_M2M_PUBLIC_KEYS" unless pub["key"] == "ADMIN_M2M_PUBLIC_KEYS"
+' "$out12ext" || { red "FAIL: the m2m generator is not self-contained"; exit 1; }
+green "ok  - m2m generator writes both halves into agentgateway-m2m-keys and never rewrites a live pair"
+out12m2moff="$TMP/scenario-agentgateway-m2m-forced-off.yaml"
+render_default "$out12m2moff" --set global.deploymentMode=external \
+  --set global.agentgatewayM2m.enabled=false
+assert_not_contains "$out12m2moff" 'AGENTGATEWAY_M2M_|ADMIN_M2M_|component: agentgateway-m2m-keys' \
+  "explicit false: Admin API machine credentials stay off"
+out12m2miss="$TMP/scenario-agentgateway-m2m-explicit-issuer.yaml"
+render_default "$out12m2miss" --set global.deploymentMode=external \
+  --set global.agentgatewayM2m.issuer=https://console.example.com/
+ruby -ryaml -e '
+  docs = YAML.load_stream(File.read(ARGV.fetch(0))).compact
+  def env_of(docs, name)
+    d = docs.find { |x| x["kind"] == "Deployment" && x.dig("metadata", "name") == name }
+    (d.dig("spec", "template", "spec", "containers") || []).flat_map { |c| c["env"] || [] }
+  end
+  app_iss = env_of(docs, "control-plane-app").find { |e| e["name"] == "AGENTGATEWAY_M2M_ISSUER" }&.fetch("value", nil)
+  admin_iss = env_of(docs, "agentgateway-admin").find { |e| e["name"] == "ADMIN_M2M_ISSUER" }&.fetch("value", nil)
+  abort "explicit issuer was not trimmed: #{app_iss.inspect}" unless app_iss == "https://console.example.com"
+  abort "issuers differ after trim: #{app_iss} vs #{admin_iss}" unless app_iss == admin_iss
+' "$out12m2miss" || { red "FAIL: explicit m2m issuer was not applied identically on both sides"; exit 1; }
+green "ok  - explicit m2m issuer is trimmed and identical on app and TrustGate"
 
 # AUT-390: control-plane pull-secret precedence
 #   controlPlane.imagePullSecrets → subchart root → global.imagePullSecrets → gcr-secret

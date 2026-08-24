@@ -91,6 +91,18 @@ no Kubernetes resource when validation succeeds.
   {{- end -}}
 {{- end -}}
 
+{{- if and (eq (include "neuraltrust-platform.agentgatewayM2m.intent" .) "on") (not $controlPlaneInCluster) -}}
+  {{- fail "global.agentgatewayM2m.enabled requires global.deploymentMode=external or saas: the Admin API and the control-plane app that mints machine-credential tokens are not deployed in hybrid." -}}
+{{- end -}}
+{{- if eq (include "neuraltrust-platform.agentgatewayM2m.enabled" .) "true" -}}
+  {{- $appValuesM2m := default dict (index .Values "control-plane-app") -}}
+  {{- $appComponentM2m := default dict (default dict (default dict $appValuesM2m.controlPlane).components).app -}}
+  {{- $customHostM2m := or ($appComponentM2m.host | default "") (and $appComponentM2m.hostPrefix (ne $appComponentM2m.hostPrefix "app")) -}}
+  {{- if and $customHostM2m (not (default dict $global.agentgatewayM2m).issuer) -}}
+    {{- fail "AgentGateway machine credentials derive the token issuer from global.domain as https://app.<domain>, but this install serves the control-plane app from a different host, so TrustGate would reject every service token. Set global.agentgatewayM2m.issuer to the app's real public URL, or set global.agentgatewayM2m.enabled=false." -}}
+  {{- end -}}
+{{- end -}}
+
 {{- $trustlens := default dict .Values.trustlens -}}
 {{- $trustlensImage := default dict $trustlens.image -}}
 {{- if and ($trustlens.enabled | default false) (not ($trustlensImage.tag | default "")) -}}

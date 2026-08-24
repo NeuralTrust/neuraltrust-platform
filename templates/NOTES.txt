@@ -66,6 +66,9 @@ Enabled v2 components:
 {{- if $isExternal }}
 {{- if $trustgateEnabled }}
   - AgentGateway Admin (on-prem control plane)
+{{- if eq (include "neuraltrust-platform.agentgatewayM2m.enabled" .) "true" }}
+  - AgentGateway Admin API machine credentials (issuer {{ include "neuraltrust-platform.agentgatewayM2m.issuer" . }})
+{{- end }}
 {{- end }}
 {{- if $trustguardEnabled }}
   - TrustGuard Control Plane (on-prem control plane)

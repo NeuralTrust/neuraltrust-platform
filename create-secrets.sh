@@ -355,6 +355,7 @@ PLATFORM_SECRET_REGISTRY_KEYS=(
     MODEL_SCANNER_SECRET
     MCP_OAUTH_CLIENT_SECRET
     MCP_OAUTH_SIGNING_KEY
+    AGENTGATEWAY_M2M_PRIVATE_KEY
     AUTH_SECRET_KEY
     ENROLMENT_INTROSPECTION_TOKEN
     DATACORE_SERVICE_TOKEN
@@ -398,8 +399,8 @@ read_secret_key_value() {
 
 # Write one registry key into platform-secrets. generate: adopt keys are only
 # written when an env/legacy value exists (never invented). aliasOf keys mirror
-# their target. MCP_OAUTH_SIGNING_KEY stays adopt-only — the chart's hook Job
-# owns generation (AUT-393 out of scope).
+# their target. MCP_OAUTH_SIGNING_KEY and AGENTGATEWAY_M2M_PRIVATE_KEY stay
+# adopt-only — the chart's hook Jobs own generation (PKCS#8; Helm cannot).
 ensure_platform_secret_key() {
     local key=$1
     local legacy_name=$2
@@ -613,6 +614,9 @@ if prompt_yes_default "ENABLE_TRUSTLENS" "Enable TrustLens secrets?" "false"; th
 fi
 if shape_enabled external && prompt_yes_default "ENABLE_MCP_OAUTH" "Enable MCP OAuth client secret?" "true"; then
     PLATFORM_SHAPES+=(mcpOAuth)
+fi
+if shape_enabled external && prompt_yes_default "ENABLE_AGENTGATEWAY_M2M" "Enable AgentGateway Admin API machine-credential private key?" "true"; then
+    PLATFORM_SHAPES+=(agentgatewayM2m)
 fi
 if prompt_yes_default "ENABLE_WATCHDOG" "Enable Watchdog usage-export JWT secrets?" "false"; then
     PLATFORM_SHAPES+=(watchdog)
@@ -1198,6 +1202,7 @@ ensure_platform_secret_key "NEXTAUTH_SECRET" "control-plane-secrets" "NEXTAUTH_S
 ensure_platform_secret_key "MODEL_SCANNER_SECRET" "control-plane-secrets" "MODEL_SCANNER_SECRET" "adopt" "MODEL_SCANNER_SECRET" "external"
 ensure_platform_secret_key "MCP_OAUTH_CLIENT_SECRET" "control-plane-secrets" "MCP_OAUTH_CLIENT_SECRET" "random" "MCP_OAUTH_CLIENT_SECRET" "mcpOAuth"
 ensure_platform_secret_key "MCP_OAUTH_SIGNING_KEY" "control-plane-secrets" "MCP_OAUTH_SIGNING_KEY" "adopt" "MCP_OAUTH_SIGNING_KEY" "mcpOAuth"
+ensure_platform_secret_key "AGENTGATEWAY_M2M_PRIVATE_KEY" "control-plane-secrets" "AGENTGATEWAY_M2M_PRIVATE_KEY" "adopt" "AGENTGATEWAY_M2M_PRIVATE_KEY" "agentgatewayM2m"
 ensure_platform_secret_key "AUTH_SECRET_KEY" "control-plane-secrets" "AUTH_SECRET_KEY" "install" "AUTH_SECRET_KEY" "external"
 # saas only: credentials shared between DataCore and DataBridge so data planes
 # in other clusters can enrol. DATACORE_SERVICE_TOKEN aliases the introspection
