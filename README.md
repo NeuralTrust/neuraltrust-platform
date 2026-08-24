@@ -346,6 +346,7 @@ In this repo:
 - [Cluster sizing](./docs/sizing.md)
 - [Hybrid network allowlist](./docs/hybrid-network.md)
 - [Observability and self-healing](./docs/observability.md)
+- [Mirroring images into a customer registry](./docs/image-mirror.md)
 
 Public documentation at [docs.neuraltrust.ai](https://docs.neuraltrust.ai/neuraltrust/deployment/overview):
 

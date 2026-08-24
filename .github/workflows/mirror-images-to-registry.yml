@@ -1,0 +1,355 @@
+name: Mirror images to customer registry
+
+# Copies the images this chart pins from Artifact Registry into the customer's
+# ECR, then starts their deployment pipelines.
+#
+# Manual only: the destination is a third-party account and each push is
+# coordinated with them. Credentials come from the client-a-preview GitHub
+# Environment, so their role can pin its OIDC trust policy to
+# repo:NeuralTrust/neuraltrust-platform:environment:client-a-preview.
+#
+# Versions are read from values.yaml at the checked-out ref, so the mirror
+# cannot drift from what the chart declares.
+#
+# See docs/image-mirror.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      images:
+        description: Comma-separated image names, no spaces. Blank mirrors everything.
+        type: string
+        required: false
+        default: ''
+      dry_run:
+        description: Authenticate and verify the destination repositories, but copy nothing.
+        type: boolean
+        required: false
+        default: false
+      start_pipelines:
+        description: Start the destination pipelines once every image has landed.
+        type: boolean
+        required: false
+        default: true
+      overwrite:
+        description: Allow replacing an existing version tag whose digest differs. Off by default; tags are immutable in normal use.
+        type: boolean
+        required: false
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  SOURCE_REGISTRY: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker
+  # The tag the customer's deployment consumes.
+  ENVIRONMENT_TAG: preview
+  YQ_VERSION: v4.52.4
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Deliberately outside the environment so the versions render before the
+    # approval gate, giving reviewers what they are actually approving.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install yq
+        run: |
+          set -euo pipefail
+          sudo wget -qO /usr/local/bin/yq \
+            "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Render plan
+        env:
+          IMAGES: ${{ inputs.images }}
+        run: |
+          set -euo pipefail
+          chart_version="$(yq eval '.version' Chart.yaml)"
+
+          # Keep this list in step with the mirror job's matrix below.
+          images=$(cat <<'LIST'
+          agentgateway .agentgateway.image.tag
+          trustguard .trustguard.image.tag
+          data-plane-api .["data-plane-api"].dataPlane.components.api.image.tag
+          firewall-cpu .firewall.firewall.gateway.image.tag
+          dataagent .dataagent.image.tag
+          opentelemetry-collector-contrib .global.observability.collector.image.tag
+          postgres .global.postgresql.image.tag
+          LIST
+          )
+
+          # A typo in the filter would otherwise mirror nothing and look green.
+          # This also catches stray spaces, which the matrix filter cannot match.
+          if [[ -n "$IMAGES" ]]; then
+            known="$(awk '{print $1}' <<<"$images" | paste -sd, -)"
+            IFS=',' read -ra requested <<<"$IMAGES"
+            for want in "${requested[@]}"; do
+              [[ ",${known}," == *",${want},"* ]] \
+                || { echo "::error::'${want}' is not one of the mirrored images (${known})"; exit 1; }
+            done
+          fi
+
+          {
+            echo "### Mirror plan"
+            echo
+            echo "Chart \`${chart_version}\`. Each image is tagged with its version, \`${ENVIRONMENT_TAG}\`, and \`chart-${chart_version}\`."
+            echo
+            echo '| Image | Version |'
+            echo '|---|---|'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          while read -r name tag_path; do
+            [[ -z "$name" ]] && continue
+            if [[ -n "$IMAGES" && ",${IMAGES}," != *",${name},"* ]]; then
+              continue
+            fi
+            version="$(yq eval "$tag_path" values.yaml)"
+            [[ -n "$version" && "$version" != "null" ]] \
+              || { echo "::error::${name}: '${tag_path}' did not resolve in values.yaml"; exit 1; }
+            echo "| ${name} | \`${version}\` |" >> "$GITHUB_STEP_SUMMARY"
+          done <<<"$images"
+
+          # gateway and workerDefaults run the same firewall image.
+          gw="$(yq eval '.firewall.firewall.gateway.image.tag' values.yaml)"
+          wd="$(yq eval '.firewall.firewall.workerDefaults.image.tag' values.yaml)"
+          [[ "$gw" == "$wd" ]] \
+            || { echo "::error::firewall gateway is ${gw} but workerDefaults is ${wd}; pins must match"; exit 1; }
+
+  mirror:
+    name: ${{ matrix.image.name }} to ${{ matrix.region }}
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: client-a-preview
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      # The firewall image is ~8 GB and goes to every region; throttle so a full
+      # run does not saturate the runner's network.
+      max-parallel: 4
+      matrix:
+        region: [eu-west-1, us-west-2]
+        image:
+          - name: agentgateway
+            tagPath: .agentgateway.image.tag
+            repository: neuraltrust-v2-agentgateway
+          - name: trustguard
+            tagPath: .trustguard.image.tag
+            repository: neuraltrust-v2-trustguard
+          - name: data-plane-api
+            tagPath: .["data-plane-api"].dataPlane.components.api.image.tag
+            repository: neuraltrust-v2-data-plane-api
+          - name: firewall-cpu
+            tagPath: .firewall.firewall.gateway.image.tag
+            repository: neuraltrust-v2-firewall
+          - name: dataagent
+            tagPath: .dataagent.image.tag
+            repository: neuraltrust-v2-dataagent
+          - name: opentelemetry-collector-contrib
+            tagPath: .global.observability.collector.image.tag
+            repository: neuraltrust-v2-otel-collector
+          - name: postgres
+            tagPath: .global.postgresql.image.tag
+            repository: neuraltrust-v2-postgres
+    env:
+      # The matrix context is unavailable in a job-level `if`, so the filter is
+      # evaluated once here and applied to the steps that have side effects.
+      SELECTED: >-
+        ${{ inputs.images == ''
+            || contains(format(',{0},', inputs.images), format(',{0},', matrix.image.name)) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install crane
+        uses: NeuralTrust/workflows/.github/actions/setup-crane@main
+
+      - name: Install yq
+        run: |
+          set -euo pipefail
+          sudo wget -qO /usr/local/bin/yq \
+            "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Authenticate to Google Cloud
+        if: env.SELECTED == 'true'
+        id: gcp_auth
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.PLATFORM_WIF_PROVIDER }}
+          service_account: ${{ secrets.PLATFORM_WIF_SERVICE_ACCOUNT }}
+          token_format: access_token
+          create_credentials_file: false
+
+      - name: Authenticate to AWS
+        if: env.SELECTED == 'true'
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.MIRROR_AWS_ROLE_ARN }}
+          aws-region: ${{ matrix.region }}
+          # The role caps sessions at three hours, sized for the firewall image.
+          role-duration-seconds: 10800
+
+      - name: Mirror
+        if: env.SELECTED == 'true'
+        env:
+          ACCESS_TOKEN: ${{ steps.gcp_auth.outputs.access_token }}
+          IMAGE_NAME: ${{ matrix.image.name }}
+          TAG_PATH: ${{ matrix.image.tagPath }}
+          DEST_REPOSITORY: ${{ matrix.image.repository }}
+          REGION: ${{ matrix.region }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          OVERWRITE: ${{ inputs.overwrite }}
+        run: |
+          set -euo pipefail
+
+          version="$(yq eval "$TAG_PATH" values.yaml)"
+          [[ -n "$version" && "$version" != "null" ]] \
+            || { echo "::error::'${TAG_PATH}' did not resolve in values.yaml"; exit 1; }
+          chart_version="$(yq eval '.version' Chart.yaml)"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+          account="$(aws sts get-caller-identity --query Account --output text)"
+          ecr_host="${account}.dkr.ecr.${REGION}.amazonaws.com"
+
+          echo "$ACCESS_TOKEN" |
+            crane auth login "${SOURCE_REGISTRY%%/*}" -u oauth2accesstoken --password-stdin
+          aws ecr get-login-password --region "$REGION" |
+            crane auth login "$ecr_host" -u AWS --password-stdin
+
+          # The role can push but not create, so a missing repository is a
+          # customer-side change rather than something this run can fix.
+          aws ecr describe-repositories --region "$REGION" \
+            --repository-names "$DEST_REPOSITORY" \
+            --query 'repositories[0].repositoryUri' --output text
+
+          src="${SOURCE_REGISTRY}/${IMAGE_NAME}:${version}"
+          dest="${ecr_host}/${DEST_REPOSITORY}"
+
+          src_digest="$(crane digest "$src")"
+          echo "source $src is $src_digest"
+
+          if dest_digest="$(crane digest "${dest}:${version}" 2>/dev/null)"; then
+            if [[ "$dest_digest" == "$src_digest" ]]; then
+              echo "already mirrored at the same digest; skipping the layer copy"
+              skip_copy=true
+            elif [[ "$OVERWRITE" == "true" ]]; then
+              echo "::warning::replacing ${dest}:${version} ($dest_digest -> $src_digest)"
+              skip_copy=false
+            else
+              echo "::error::${dest}:${version} already exists with digest $dest_digest," \
+                   "which differs from the source $src_digest." \
+                   "Re-run with overwrite enabled if replacing it is intended."
+              exit 1
+            fi
+          else
+            skip_copy=false
+          fi
+
+          if [[ "$DRY_RUN" == "true" ]]; then
+            echo "dry run: would copy $src to ${dest}:${version}" \
+                 "and tag it ${ENVIRONMENT_TAG}, chart-${chart_version}"
+            exit 0
+          fi
+
+          if [[ "$skip_copy" != "true" ]]; then
+            crane copy "$src" "${dest}:${version}"
+          fi
+
+          # Manifest-only operations, so re-pointing the environment tag costs
+          # nothing even for the multi-gigabyte images.
+          crane tag "${dest}:${version}" "$ENVIRONMENT_TAG"
+          crane tag "${dest}:${version}" "chart-${chart_version}"
+
+      - name: Summary
+        if: always()
+        env:
+          IMAGE_NAME: ${{ matrix.image.name }}
+          DEST_REPOSITORY: ${{ matrix.image.repository }}
+          REGION: ${{ matrix.region }}
+          OUTCOME: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          if [[ "$SELECTED" != "true" ]]; then
+            echo "\`${IMAGE_NAME}\` in ${REGION}: not in the images filter" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "\`${IMAGE_NAME}:${VERSION:-unresolved}\` to \`${DEST_REPOSITORY}\` in ${REGION}: ${OUTCOME}" \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  pipelines:
+    name: Start pipelines
+    needs: mirror
+    if: inputs.start_pipelines && !inputs.dry_run
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: client-a-preview
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Authenticate to AWS
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.MIRROR_AWS_ROLE_ARN }}
+          # Credentials are global; each call below names its own region.
+          aws-region: eu-west-1
+
+      - name: Start pipelines
+        run: |
+          set -euo pipefail
+
+          regions=(eu-west-1 us-west-2)
+
+          # The full set, not derived from the images filter: a partial mirror
+          # should run with start_pipelines off.
+          pipelines=(
+            neuraltrust-v2-gateway
+            neuraltrust-v2-mcp
+            neuraltrust-v2-trustguard
+            neuraltrust-v2-data-plane-api
+            neuraltrust-v2-firewall
+            neuraltrust-v2-fw-moderation
+            neuraltrust-v2-fw-prompt-jailbreak
+            neuraltrust-v2-fw-resp-jailbreak
+            neuraltrust-v2-fw-toxicity
+            neuraltrust-v2-fw-injections
+            neuraltrust-v2-dataagent
+            neuraltrust-v2-dataagent-trustguard
+          )
+
+          echo '### Pipelines started' >> "$GITHUB_STEP_SUMMARY"
+          failed=0
+
+          for region in "${regions[@]}"; do
+            for name in "${pipelines[@]}"; do
+              if execution_id="$(aws codepipeline start-pipeline-execution \
+                    --name "$name" --region "$region" \
+                    --query pipelineExecutionId --output text)"; then
+                echo "- \`${name}\` (${region}): ${execution_id}" >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo "::error::failed to start ${name} in ${region}"
+                echo "- \`${name}\` (${region}): failed to start" >> "$GITHUB_STEP_SUMMARY"
+                failed=1
+              fi
+            done
+          done
+
+          # Every image is already in the registry at this point, so one bad
+          # pipeline name should not hide the ones that did start.
+          exit "$failed"
