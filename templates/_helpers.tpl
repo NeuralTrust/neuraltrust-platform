@@ -2881,6 +2881,10 @@ when any of them is in play:
                feature that cannot serve logins yet. External-only, because the
                authorization server is the control-plane app and hybrid uses the
                hosted platform instead.
+  agentgatewayM2m → Admin API machine credentials are on: external/saas, and a
+               key pair exists (generated, or one you supplied). The private
+               half is adopt-only in this Secret; the chart's hook Job writes
+               both halves into `agentgateway-m2m-keys` when it owns them.
   watchdog   → watchdog usage export is on. It calls the control-plane and
                data-plane APIs, so it needs their keys even in hybrid.
   saas       → deploymentMode=saas: this cluster serves data planes that live
@@ -2914,6 +2918,12 @@ adopt-only on purpose. The app loads it with `importPKCS8`, while Helm's
 `genPrivateKey "rsa"` emits PKCS#1, so anything the chart generated would fail
 to parse. SECRETS.md carries the `openssl genpkey` command. While it is absent
 the app mints an ephemeral key per replica, which only works with one replica.
+
+AGENTGATEWAY_M2M_PRIVATE_KEY — RS256 PKCS#8 key the app uses to sign Admin API
+machine-credential tokens (ENG-1212). Adopt-only in this Secret for the same
+reason as MCP_OAUTH_SIGNING_KEY; the matching public half never lives here — it
+is either `global.agentgatewayM2m.publicKeys` or the hook-owned
+`agentgateway-m2m-keys` Secret the generator writes next to the private key.
 
 AUTH_SECRET_KEY — encrypts SSO client secrets and SMTP credentials at rest
 (scrypt into AES-256-GCM). Deliberately independent of AUTH_SECRET, which signs
@@ -2952,6 +2962,7 @@ NEXTAUTH_SECRET: {legacyName: control-plane-secrets, legacyKey: NEXTAUTH_SECRET,
 MODEL_SCANNER_SECRET: {legacyName: control-plane-secrets, legacyKey: MODEL_SCANNER_SECRET, generate: adopt, requires: external}
 MCP_OAUTH_CLIENT_SECRET: {legacyName: control-plane-secrets, legacyKey: MCP_OAUTH_CLIENT_SECRET, generate: random, length: 64, requires: mcpOAuth}
 MCP_OAUTH_SIGNING_KEY: {legacyName: control-plane-secrets, legacyKey: MCP_OAUTH_SIGNING_KEY, generate: adopt, requires: mcpOAuth}
+AGENTGATEWAY_M2M_PRIVATE_KEY: {legacyName: control-plane-secrets, legacyKey: AGENTGATEWAY_M2M_PRIVATE_KEY, generate: adopt, requires: agentgatewayM2m}
 AUTH_SECRET_KEY: {legacyName: control-plane-secrets, legacyKey: AUTH_SECRET_KEY, generate: install, length: 64, requires: external}
 ENROLMENT_INTROSPECTION_TOKEN: {legacyName: datacore-secrets, legacyKey: ENROLMENT_INTROSPECTION_TOKEN, generate: random, length: 64, requires: saas}
 DATACORE_SERVICE_TOKEN: {legacyName: databridge-secrets, legacyKey: DATACORE_SERVICE_TOKEN, aliasOf: ENROLMENT_INTROSPECTION_TOKEN, requires: saas}
@@ -3248,6 +3259,250 @@ Usage:
   valueFrom:
     secretKeyRef:
       {{- include "neuraltrust-platform.secretRef" (dict "ctx" $ctx "logical" "MCP_OAUTH_CLIENT_SECRET" "optional" true) | nindent 6 }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
+AgentGateway Admin API machine credentials (`global.agentgatewayM2m`).
+
+The control-plane app mints 5-minute admin tokens from a long-lived
+client_id/client_secret pair (ENG-1212). It signs with an RSA private key;
+TrustGate admin verifies with the matching public key. External/saas only —
+hybrid deploys neither the Admin API nor the app that mints tokens.
+
+Both sides share one issuer helper because a trailing slash on one side 401s
+every service token. Helm cannot produce PKCS#8 RSA, so a pre-install hook
+writes both halves into `agentgateway-m2m-keys` unless the operator supplies
+the pair.
+
+Usage:
+  {{- include "neuraltrust-platform.agentgatewayM2m.appEnv" (dict "ctx" . "skip" $ownEnv) | nindent 8 }}
+  {{- include "neuraltrust-platform.agentgatewayM2m.adminEnv" (dict "ctx" . "skip" .Values.controlPlane.extraEnv) | nindent 8 }}
+*/}}
+{{- define "neuraltrust-platform.agentgatewayM2m.intent" -}}
+{{- $m2m := default dict (default dict .Values.global).agentgatewayM2m -}}
+{{- $raw := $m2m.enabled -}}
+{{- if kindIs "invalid" $raw -}}
+auto
+{{- else if kindIs "bool" $raw -}}
+{{- if $raw }}on{{ else }}off{{ end -}}
+{{- else -}}
+{{- $v := toString $raw | trim | lower -}}
+{{- if eq $v "" -}}
+auto
+{{- else if has $v (list "true" "yes" "on" "1") -}}
+on
+{{- else if has $v (list "false" "no" "off" "0") -}}
+off
+{{- else -}}
+{{- fail (printf "global.agentgatewayM2m.enabled must be true, false, or unset for automatic (got %q). Leave it unset to have Admin API machine credentials follow the deployment mode." $raw) -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Whether an operator-supplied private key is already available. The generated
+Secret is not consulted: on upgrade the Job re-reads that Secret and leaves
+the live key in place.
+*/}}
+{{- define "neuraltrust-platform.agentgatewayM2m.privateKeyPresent" -}}
+{{- $ps := default dict (default dict .Values.global).platformSecret -}}
+{{- $pinned := index (default dict $ps.values) "AGENTGATEWAY_M2M_PRIVATE_KEY" | default "" -}}
+{{- if and $pinned (not (kindIs "map" $pinned)) (not (kindIs "slice" $pinned)) -}}
+true
+{{- else -}}
+{{- $found := "" -}}
+{{- range $name := (list "platform-secrets" ((default dict $ps.existingSecret).name | default "") "control-plane-secrets") -}}
+{{- if and $name (not $found) -}}
+{{- $live := lookup "v1" "Secret" $.Release.Namespace $name -}}
+{{- if and $live $live.data (index $live.data "AGENTGATEWAY_M2M_PRIVATE_KEY") -}}
+{{- $found = "true" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $found -}}
+{{- end -}}
+{{- end }}
+
+{{- define "neuraltrust-platform.agentgatewayM2m.publicKeys" -}}
+{{- $m2m := default dict (default dict .Values.global).agentgatewayM2m -}}
+{{- $m2m.publicKeys | default "" | toString | trim -}}
+{{- end }}
+
+{{- define "neuraltrust-platform.agentgatewayM2m.generatedSecretName" -}}
+agentgateway-m2m-keys
+{{- end }}
+
+{{/*
+iss both sides stamp/verify. Empty when neither an explicit value nor
+global.domain is available. Always trim a trailing slash: the two env vars
+must be identical strings.
+*/}}
+{{- define "neuraltrust-platform.agentgatewayM2m.issuer" -}}
+{{- $m2m := default dict (default dict .Values.global).agentgatewayM2m -}}
+{{- $explicit := $m2m.issuer | default "" | toString | trim -}}
+{{- if $explicit -}}
+{{- trimSuffix "/" $explicit -}}
+{{- else -}}
+{{- $domain := include "neuraltrust-platform.domain" . -}}
+{{- if $domain -}}
+{{- $host := printf "app.%s" $domain -}}
+{{- if eq (include "neuraltrust-platform.isOpenshift" .) "true" -}}
+{{- $host = printf "control-plane-app.%s" $domain -}}
+{{- end -}}
+{{- printf "https://%s" $host -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{- define "neuraltrust-platform.agentgatewayM2m.audience" -}}
+{{- $m2m := default dict (default dict .Values.global).agentgatewayM2m -}}
+{{- $m2m.audience | default "trustgate-admin" | toString | trim -}}
+{{- end }}
+
+{{- define "neuraltrust-platform.agentgatewayM2m.maxTokenTtl" -}}
+{{- $m2m := default dict (default dict .Values.global).agentgatewayM2m -}}
+{{- $m2m.maxTokenTtl | default "15m" | toString | trim -}}
+{{- end }}
+
+{{/*
+Whether the chart generates the key pair itself.
+
+Must not call agentgatewayM2m.enabled — that helper calls this one to decide
+whether a pair will exist.
+*/}}
+{{- define "neuraltrust-platform.agentgatewayM2m.generateKeys" -}}
+{{- $m2m := default dict (default dict .Values.global).agentgatewayM2m -}}
+{{- $wanted := true -}}
+{{- $raw := $m2m.generateKeys -}}
+{{- if kindIs "bool" $raw -}}
+{{- $wanted = $raw -}}
+{{- else if not (kindIs "invalid" $raw) -}}
+{{- $v := toString $raw | trim | lower -}}
+{{- if has $v (list "false" "no" "off" "0") -}}{{- $wanted = false -}}
+{{- else if has $v (list "true" "yes" "on" "1") -}}{{- $wanted = true -}}
+{{- else -}}
+{{- fail (printf "global.agentgatewayM2m.generateKeys must be true, false, or unset (got %q)" $raw) -}}
+{{- end -}}
+{{- end -}}
+{{- if eq (include "neuraltrust-platform.agentgatewayM2m.intent" .) "off" -}}{{- $wanted = false -}}{{- end -}}
+{{- /* An operator-supplied half means they own the pair; minting the other
+       half would sign with a key TrustGate does not verify, or verify a key
+       the app does not hold. */ -}}
+{{- if eq (include "neuraltrust-platform.agentgatewayM2m.privateKeyPresent" .) "true" -}}{{- $wanted = false -}}{{- end -}}
+{{- if include "neuraltrust-platform.agentgatewayM2m.publicKeys" . -}}{{- $wanted = false -}}{{- end -}}
+{{- if not (include "neuraltrust-platform.agentgatewayM2m.issuer" .) -}}{{- $wanted = false -}}{{- end -}}
+{{- if and $wanted (eq (include "neuraltrust-platform.isExternal" .) "true") -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/*
+On when the feature will actually work: external/saas, an issuer, and a key
+pair that will exist by the time pods start.
+*/}}
+{{- define "neuraltrust-platform.agentgatewayM2m.enabled" -}}
+{{- $intent := include "neuraltrust-platform.agentgatewayM2m.intent" . -}}
+{{- if eq $intent "off" -}}
+{{- else if ne (include "neuraltrust-platform.isExternal" .) "true" -}}
+{{- if eq $intent "on" -}}
+{{- fail "global.agentgatewayM2m.enabled requires global.deploymentMode=external or saas: the Admin API and the control-plane app that mints machine-credential tokens are not deployed in hybrid." -}}
+{{- end -}}
+{{- else if not (include "neuraltrust-platform.agentgatewayM2m.issuer" .) -}}
+{{- if eq $intent "on" -}}
+{{- fail "global.agentgatewayM2m.enabled=true needs an issuer: set global.agentgatewayM2m.issuer to the app's public URL, or set global.domain so it can be derived as https://app.<domain>." -}}
+{{- end -}}
+{{- else -}}
+{{- $private := eq (include "neuraltrust-platform.agentgatewayM2m.privateKeyPresent" .) "true" -}}
+{{- $public := include "neuraltrust-platform.agentgatewayM2m.publicKeys" . -}}
+{{- $generate := eq (include "neuraltrust-platform.agentgatewayM2m.generateKeys" .) "true" -}}
+{{- if and $private (not $public) (not $generate) -}}
+{{- fail "global.agentgatewayM2m: AGENTGATEWAY_M2M_PRIVATE_KEY is set but global.agentgatewayM2m.publicKeys is empty. TrustGate cannot verify tokens without the matching public key; supply both halves, or drop the private key and leave generateKeys on." -}}
+{{- else if and $public (not $private) (not $generate) -}}
+{{- fail "global.agentgatewayM2m.publicKeys is set but AGENTGATEWAY_M2M_PRIVATE_KEY is missing. The app cannot sign tokens without the matching private key; pin it via global.platformSecret.values.AGENTGATEWAY_M2M_PRIVATE_KEY (see SECRETS.md)." -}}
+{{- else if or $generate (and $private $public) -}}
+true
+{{- else if eq $intent "on" -}}
+{{- fail "global.agentgatewayM2m.enabled=true needs an RSA key pair, but generateKeys=false leaves the chart unable to create one: the Credentials tab would stay disabled and every service token would 401. Either drop generateKeys=false, or supply both AGENTGATEWAY_M2M_PRIVATE_KEY and global.agentgatewayM2m.publicKeys (see SECRETS.md)." -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{- define "neuraltrust-platform.agentgatewayM2m.privateKeyRef" -}}
+{{- if eq (include "neuraltrust-platform.agentgatewayM2m.generateKeys" .) "true" -}}
+name: {{ include "neuraltrust-platform.agentgatewayM2m.generatedSecretName" . | quote }}
+key: "AGENTGATEWAY_M2M_PRIVATE_KEY"
+{{- else -}}
+{{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "AGENTGATEWAY_M2M_PRIVATE_KEY" "optional" true) -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Env the control-plane app needs to mint machine-credential tokens.
+*/}}
+{{- define "neuraltrust-platform.agentgatewayM2m.appEnv" -}}
+{{- $ctx := .ctx -}}
+{{- $skip := list -}}
+{{- range (default list .skip) }}
+  {{- $skip = append $skip . }}
+{{- end }}
+{{- if eq (include "neuraltrust-platform.agentgatewayM2m.enabled" $ctx) "true" }}
+{{- if not (has "AGENTGATEWAY_M2M_PRIVATE_KEY" $skip) }}
+- name: AGENTGATEWAY_M2M_PRIVATE_KEY
+  valueFrom:
+    secretKeyRef:
+      {{- include "neuraltrust-platform.agentgatewayM2m.privateKeyRef" $ctx | nindent 6 }}
+{{- end }}
+{{- if not (has "AGENTGATEWAY_M2M_ISSUER" $skip) }}
+- name: AGENTGATEWAY_M2M_ISSUER
+  value: {{ include "neuraltrust-platform.agentgatewayM2m.issuer" $ctx | quote }}
+{{- end }}
+{{- if not (has "AGENTGATEWAY_M2M_AUDIENCE" $skip) }}
+- name: AGENTGATEWAY_M2M_AUDIENCE
+  value: {{ include "neuraltrust-platform.agentgatewayM2m.audience" $ctx | quote }}
+{{- end }}
+{{- $kid := (default dict (default dict $ctx.Values.global).agentgatewayM2m).keyId | default "" | toString | trim }}
+{{- if and $kid (not (has "AGENTGATEWAY_M2M_KEY_ID" $skip)) }}
+- name: AGENTGATEWAY_M2M_KEY_ID
+  value: {{ $kid | quote }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
+Env TrustGate admin needs to verify those tokens. Proxy and MCP never serve
+the Admin API, so this stays off those workloads.
+*/}}
+{{- define "neuraltrust-platform.agentgatewayM2m.adminEnv" -}}
+{{- $ctx := .ctx -}}
+{{- $skip := list -}}
+{{- range (default list .skip) }}
+  {{- if .name }}{{- $skip = append $skip .name }}{{- end }}
+{{- end }}
+{{- if eq (include "neuraltrust-platform.agentgatewayM2m.enabled" $ctx) "true" }}
+{{- if not (has "ADMIN_M2M_PUBLIC_KEYS" $skip) }}
+- name: ADMIN_M2M_PUBLIC_KEYS
+{{- if eq (include "neuraltrust-platform.agentgatewayM2m.generateKeys" $ctx) "true" }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "neuraltrust-platform.agentgatewayM2m.generatedSecretName" $ctx | quote }}
+      key: "ADMIN_M2M_PUBLIC_KEYS"
+{{- else }}
+  value: {{ include "neuraltrust-platform.agentgatewayM2m.publicKeys" $ctx | quote }}
+{{- end }}
+{{- end }}
+{{- if not (has "ADMIN_M2M_ISSUER" $skip) }}
+- name: ADMIN_M2M_ISSUER
+  value: {{ include "neuraltrust-platform.agentgatewayM2m.issuer" $ctx | quote }}
+{{- end }}
+{{- if not (has "ADMIN_M2M_AUDIENCE" $skip) }}
+- name: ADMIN_M2M_AUDIENCE
+  value: {{ include "neuraltrust-platform.agentgatewayM2m.audience" $ctx | quote }}
+{{- end }}
+{{- if not (has "ADMIN_M2M_MAX_TOKEN_TTL" $skip) }}
+- name: ADMIN_M2M_MAX_TOKEN_TTL
+  value: {{ include "neuraltrust-platform.agentgatewayM2m.maxTokenTtl" $ctx | quote }}
 {{- end }}
 {{- end }}
 {{- end }}

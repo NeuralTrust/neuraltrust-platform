@@ -75,6 +75,7 @@ spec:
         {{- with include "agentgateway.datastoreCredentialEnv" . }}
         {{- . | nindent 8 }}
         {{- end }}
+        {{- include "neuraltrust-platform.agentgatewayM2m.adminEnv" (dict "ctx" . "skip" .Values.controlPlane.extraEnv) | nindent 8 }}
         {{- with .Values.controlPlane.extraEnv }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

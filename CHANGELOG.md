@@ -4,6 +4,19 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Added
+
+- **AgentGateway Admin API machine credentials (ENG-1212).** The control-plane
+  app mints short-lived admin tokens from a long-lived `client_id` /
+  `client_secret` pair; TrustGate verifies them with a matching RSA public key.
+  `global.agentgatewayM2m` is three-state like MCP OAuth: on by default in
+  external/saas (off in hybrid), with a hook Job that writes a PKCS#8 private
+  key and the matching public PEM into `agentgateway-m2m-keys` so nothing has to
+  be configured. Both sides share one issuer helper (`https://app.<domain>`)
+  because a trailing-slash mismatch 401s every service token. An operator-supplied
+  pair stands the generator down; pinning only one half fails the render.
+  Subcharts: `control-plane-app` `0.1.31 → 0.1.32`, `agentgateway` `0.1.47 → 0.1.48`.
+
 ## [v2.11.6] — 2026-08-18
 
 ### Fixed

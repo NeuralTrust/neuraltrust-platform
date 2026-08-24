@@ -731,6 +731,7 @@ Resolution order per key: `global.platformSecret.values` → live `platform-secr
 | `AUTH_SECRET_KEY` | `control-plane-secrets` / `AUTH_SECRET_KEY` | generated on install only | external |
 | `MCP_OAUTH_CLIENT_SECRET` | `control-plane-secrets` / `MCP_OAUTH_CLIENT_SECRET` | generated | external, when MCP OAuth is on |
 | `MCP_OAUTH_SIGNING_KEY` | `control-plane-secrets` / `MCP_OAUTH_SIGNING_KEY` | adopted only — a key you supply. Otherwise generated into its own `mcp-oauth-signing` Secret by a hook Job | external, when you supply a key |
+| `AGENTGATEWAY_M2M_PRIVATE_KEY` | `control-plane-secrets` / `AGENTGATEWAY_M2M_PRIVATE_KEY` | adopted only — a key you supply. Otherwise generated into its own `agentgateway-m2m-keys` Secret by a hook Job (public half lives there too, never here) | external/saas, when you supply a key |
 | `ENROLMENT_INTROSPECTION_TOKEN` | `datacore-secrets` / `ENROLMENT_INTROSPECTION_TOKEN` | generated | **saas** |
 | `DATACORE_SERVICE_TOKEN` | `databridge-secrets` / `DATACORE_SERVICE_TOKEN` | **= `ENROLMENT_INTROSPECTION_TOKEN`** | **saas** |
 | `ENROLMENT_SIGNING_SECRET` | `datacore-secrets` / `ENROLMENT_SIGNING_SECRET` | generated | **saas** |
@@ -907,6 +908,95 @@ kubectl -n <namespace> patch secret platform-secrets --type merge \
 
 Your key always wins over a generated one. Swapping one in later is a key rotation:
 it invalidates tokens signed by the previous key, so nothing does it implicitly.
+
+### AgentGateway Admin API machine credentials (`global.agentgatewayM2m`)
+
+Automation (CI, Agent Factory, provisioning scripts) calls the TrustGate Admin
+API with a long-lived `client_id` / `client_secret` pair created in the console
+under **Settings → Agent Gateway → Credentials**, and exchanges it for a
+5-minute access token at `POST /api/gateway/oauth/token` on the app (ENG-1212).
+
+The app signs those tokens with an RSA private key; TrustGate verifies them with
+the matching public key. Only the public half ever reaches TrustGate, so a
+compromised data plane cannot mint admin credentials for itself.
+
+**External and saas only.** Hybrid deploys no Admin API (proxy + MCP only) and no
+control-plane app, so there is nothing in-cluster to sign or verify. Enabling it
+in hybrid fails at render time.
+
+**On by default in external/saas, with nothing to configure.** `enabled` is
+three-state, same as MCP OAuth:
+
+| `global.agentgatewayM2m.enabled` | Behaviour |
+| --- | --- |
+| unset (default) | On in external/saas, always off in hybrid. The chart generates the key pair when nothing else provides one. |
+| `true` | Required. The render **fails** when no key pair is available, which needs `generateKeys: false` and no keys of your own. |
+| `false` | Never. The Credentials tab stays disabled; console JWTs keep working. |
+
+```yaml
+global:
+  agentgatewayM2m:
+    # enabled: left unset — on in external/saas, and the pair is generated for you.
+    # Optional; only when the app is not served from app.<global.domain>.
+    issuer: "https://app.example.com"
+```
+
+The two sides must agree on `iss` character for character — a trailing slash on
+one side 401s every service token. Both derive it from one helper
+(`https://app.<global.domain>` unless you set `issuer`). Audiences default to
+`trustgate-admin` on both sides; leave them unless you change TrustGate too.
+
+`ADMIN_PLATFORM_CLAIM_REQUIRED` is deliberately not set. Turning it on before
+every issuer stamps `platform_admin` locks out platform-admin operations.
+
+Only the Admin workload gets the verifying keys; proxy and MCP do not serve that
+API.
+
+#### The key pair
+
+Helm cannot produce PKCS#8 RSA, and the public half has to match the private
+half, so the chart generates both with a `pre-install,pre-upgrade` hook Job that:
+
+- reuses the **app image** (same as MCP OAuth signing);
+- writes `AGENTGATEWAY_M2M_PRIVATE_KEY` (raw PKCS#8 PEM) and
+  `ADMIN_M2M_PUBLIC_KEYS` (single-line base64-encoded public PEM) into
+  `agentgateway-m2m-keys`;
+- **never replaces an existing private key**, and backfills the public half from
+  it if an interrupted run left only one side;
+- is skipped as soon as you supply a pair of your own, and can be turned off
+  with `global.agentgatewayM2m.generateKeys: false`.
+
+Because the Secret is hook-owned, `helm uninstall` leaves it in place.
+
+To supply your own pair instead — one RSA-2048 pair per environment, never reuse
+dev in production:
+
+```bash
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out m2m.key
+openssl rsa -in m2m.key -pubout -out m2m.pub
+base64 -i m2m.key | tr -d '\n'   # app secret
+base64 -i m2m.pub | tr -d '\n'   # TrustGate config
+```
+
+```yaml
+global:
+  platformSecret:
+    values:
+      AGENTGATEWAY_M2M_PRIVATE_KEY: "<base64 of m2m.key>"
+  agentgatewayM2m:
+    publicKeys: "<base64 of m2m.pub>"
+    # keyId: "2027-02"   # only while two keys are live during rotation
+```
+
+The private key goes **only** to the app, the public key **only** to TrustGate.
+If the same value appears on both sides, something is wrong. Pinning one half
+without the other fails the render rather than shipping a signer TrustGate
+cannot verify.
+
+Rotation is the only case that needs a `kid`: set TrustGate `publicKeys` to a
+JSON array of `{kid,pem}` holding both keys, switch the app to the new private
+key and `keyId`, then drop the old entry once no token signed by it can still
+be alive (5 minutes, bounded by `maxTokenTtl`).
 
 ### Managing it yourself
 
