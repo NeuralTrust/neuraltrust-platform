@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.11.10] — 2026-08-24
+
 ### Added
 
 - **AgentGateway Admin API machine credentials (ENG-1212).** The control-plane
