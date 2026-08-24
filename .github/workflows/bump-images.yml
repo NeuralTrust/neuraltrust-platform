@@ -362,6 +362,11 @@ jobs:
             BUMP_CONTROL_PLANE_APP=true
             update_template_tag "charts/control-plane-app/templates/app/deployment.yaml" "initImageTag" "$TAG"
             update_template_tag "charts/control-plane-app/templates/app/deployment.yaml" "appImageTag" "$TAG"
+            # The key-generation hooks run the app image too. Their fallback lives
+            # in its own file because update_template_tag rewrites every "$var :="
+            # in a file, and templates/_helpers.tpl already has a $tag for the
+            # otel collector.
+            update_template_tag "templates/_keygen.tpl" "appTag" "$TAG"
           fi
 
           # =============================================
@@ -650,6 +655,7 @@ jobs:
             Chart.yaml \
             Chart.lock \
             templates/_helpers.tpl \
+            templates/_keygen.tpl \
             templates/otel-collector/deployment.yaml \
             templates/redis/_helpers.tpl \
             templates/postgresql/deployment.yaml \

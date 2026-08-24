@@ -1835,6 +1835,7 @@ assert_shared_secret_wiring() {
       "CONTROL_PLANE_JWT_SECRET" => ["control-plane-secrets", "CONTROL_PLANE_JWT_SECRET"],
       "AUTH_SECRET" => ["control-plane-secrets", "AUTH_SECRET"],
       "MODEL_SCANNER_SECRET" => ["control-plane-secrets", "MODEL_SCANNER_SECRET"],
+      "AGENTGATEWAY_M2M_PRIVATE_KEY" => ["control-plane-secrets", "AGENTGATEWAY_M2M_PRIVATE_KEY"],
     }
     shared = docs.find { |d| d["kind"] == "Secret" && d.dig("metadata", "name") == "platform-secrets" }
     abort "platform-secrets not rendered" if shared.nil?
@@ -2431,7 +2432,14 @@ ruby -ryaml -e '
     if script.include?("process.env.KUBERNETES_SERVICE_HOST")
   abort "the generator does not dial kubernetes.default.svc" \
     unless script.include?("https://kubernetes.default.svc:")
-  abort "the generator does not write the TrustGate public key" unless script.include?("ADMIN_M2M_PUBLIC_KEYS")
+  abort "the generator does not derive the public half from the private one" \
+    unless script.include?("createPublicKey")
+  jobenv = (job.dig("spec", "template", "spec", "containers", 0, "env") || [])
+    .each_with_object({}) { |e, h| h[e["name"]] = e["value"] }
+  abort "the private half is written as #{jobenv["M2M_PRIVATE_KEY"].inspect}" \
+    unless jobenv["M2M_PRIVATE_KEY"] == "AGENTGATEWAY_M2M_PRIVATE_KEY"
+  abort "the public half is written as #{jobenv["M2M_PUBLIC_KEYS"].inspect}" \
+    unless jobenv["M2M_PUBLIC_KEYS"] == "ADMIN_M2M_PUBLIC_KEYS"
   role = hook.find { |d| d["kind"] == "Role" }
   named = role["rules"].select { |r| r["resourceNames"] }
   abort "no rule is scoped to a single Secret" if named.empty?

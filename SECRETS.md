@@ -957,7 +957,8 @@ API.
 Helm cannot produce PKCS#8 RSA, and the public half has to match the private
 half, so the chart generates both with a `pre-install,pre-upgrade` hook Job that:
 
-- reuses the **app image** (same as MCP OAuth signing);
+- reuses the **app image**, through the same shared hook template as the MCP
+  OAuth signing key (`templates/_keygen.tpl`);
 - writes `AGENTGATEWAY_M2M_PRIVATE_KEY` (raw PKCS#8 PEM) and
   `ADMIN_M2M_PUBLIC_KEYS` (single-line base64-encoded public PEM) into
   `agentgateway-m2m-keys`;
@@ -992,6 +993,12 @@ The private key goes **only** to the app, the public key **only** to TrustGate.
 If the same value appears on both sides, something is wrong. Pinning one half
 without the other fails the render rather than shipping a signer TrustGate
 cannot verify.
+
+`create-secrets.sh` derives the public half for you. Answer yes to the
+AgentGateway machine-credential prompt with `AGENTGATEWAY_M2M_PRIVATE_KEY` set —
+as a raw PEM, a base64 PEM, or an `\n`-escaped one — and it prints the exact
+`global.agentgatewayM2m.publicKeys` line to paste. With no private key set it
+says so and leaves the pair to the hook Job.
 
 Rotation is the only case that needs a `kid`: set TrustGate `publicKeys` to a
 JSON array of `{kid,pem}` holding both keys, switch the app to the new private

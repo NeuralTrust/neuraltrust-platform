@@ -470,6 +470,58 @@ ensure_platform_secret_key() {
     add_secret_key "$PLATFORM_SECRET_NAME" "$key" "$value" "$store_mode"
 }
 
+# The AgentGateway m2m private key as a PEM, in whichever of the three shapes the
+# chart accepts: a raw PEM, a \n-escaped PEM, or a single-line base64 PEM.
+# Empty when the operator supplied none, which is the common case.
+m2m_private_pem() {
+    local raw="${AGENTGATEWAY_M2M_PRIVATE_KEY:-}"
+    if [ -z "$raw" ]; then
+        raw=$(read_secret_key_value "$PLATFORM_SECRET_NAME" "AGENTGATEWAY_M2M_PRIVATE_KEY")
+    fi
+    if [ -z "$raw" ]; then
+        return 0
+    fi
+    case "$raw" in
+        # printf %b turns the escaped form back into real newlines. A PEM's
+        # base64 alphabet has no backslash, so a raw PEM passes through unharmed.
+        *"-----BEGIN"*) printf '%b' "$raw" ;;
+        *) printf '%s' "$raw" | base64 -d 2>/dev/null || true ;;
+    esac
+}
+
+# TrustGate verifies with the public half, and the chart cannot derive it from a
+# private key it never parses: supplying one without the other fails the render.
+# Print it rather than leave the operator to work out the encoding.
+report_m2m_public_key() {
+    if ! requires_any_shape "agentgatewayM2m"; then
+        return 0
+    fi
+
+    local pem
+    pem=$(m2m_private_pem)
+    if [ -z "$pem" ]; then
+        echo -e "${YELLOW}No AgentGateway m2m private key supplied; the chart's hook Job will mint the pair${NC}"
+        return 0
+    fi
+
+    local pub
+    pub=$(printf '%s' "$pem" | openssl pkey -pubout 2>/dev/null || true)
+    if [ -z "$pub" ]; then
+        echo -e "${RED}Error: AGENTGATEWAY_M2M_PRIVATE_KEY is not a readable private key, so its public half cannot be derived${NC}" >&2
+        echo -e "${RED}       Expected an RSA PKCS#8 PEM, base64-encoded or raw. Generate a pair with:${NC}" >&2
+        echo -e "${RED}         openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out m2m.key${NC}" >&2
+        return 1
+    fi
+
+    echo -e "${BLUE}=== AgentGateway Admin API machine credentials ===${NC}"
+    echo "Set this next to the private key, or the chart refuses to render:"
+    echo ""
+    # printf %s\n restores the newline command substitution ate. The chart's own
+    # generator writes a PEM that ends in one, and strict parsers want it.
+    echo "  global.agentgatewayM2m.publicKeys: $(printf '%s\n' "$pub" | base64 | tr -d '\n\r')"
+    echo ""
+}
+
 echo "=========================================="
 echo "NeuralTrust Platform Secrets Creation"
 echo "=========================================="
@@ -504,6 +556,7 @@ while [[ $# -gt 0 ]]; do
             echo "  - DEPLOYMENT_MODE       hybrid|external|saas (default: external)"
             echo "  - ENABLE_TRUSTGATE / ENABLE_TRUSTGUARD / ENABLE_DATAPLANE"
             echo "  - ENABLE_TRUSTLENS / ENABLE_MCP_OAUTH / ENABLE_WATCHDOG"
+            echo "  - ENABLE_AGENTGATEWAY_M2M (external; prints the public half to pin in values)"
             echo "  - ENABLE_CONFIG_SYNC (default: on for hybrid, off for external)"
             echo "  - CONFIG_SYNC_LKG_KEY (base64, exactly 32 bytes; generated when unset)"
             echo "    TRUSTGATE_CONFIG_SYNC_LKG_KEY / TRUSTGUARD_CONFIG_SYNC_LKG_KEY override per product"
@@ -1203,6 +1256,7 @@ ensure_platform_secret_key "MODEL_SCANNER_SECRET" "control-plane-secrets" "MODEL
 ensure_platform_secret_key "MCP_OAUTH_CLIENT_SECRET" "control-plane-secrets" "MCP_OAUTH_CLIENT_SECRET" "random" "MCP_OAUTH_CLIENT_SECRET" "mcpOAuth"
 ensure_platform_secret_key "MCP_OAUTH_SIGNING_KEY" "control-plane-secrets" "MCP_OAUTH_SIGNING_KEY" "adopt" "MCP_OAUTH_SIGNING_KEY" "mcpOAuth"
 ensure_platform_secret_key "AGENTGATEWAY_M2M_PRIVATE_KEY" "control-plane-secrets" "AGENTGATEWAY_M2M_PRIVATE_KEY" "adopt" "AGENTGATEWAY_M2M_PRIVATE_KEY" "agentgatewayM2m"
+report_m2m_public_key
 ensure_platform_secret_key "AUTH_SECRET_KEY" "control-plane-secrets" "AUTH_SECRET_KEY" "install" "AUTH_SECRET_KEY" "external"
 # saas only: credentials shared between DataCore and DataBridge so data planes
 # in other clusters can enrol. DATACORE_SERVICE_TOKEN aliases the introspection
