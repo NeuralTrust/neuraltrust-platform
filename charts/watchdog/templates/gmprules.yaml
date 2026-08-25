@@ -62,5 +62,5 @@ spec:
             {{- end }}
           annotations:
             summary: "Watchdog action dispatch is failing"
-            description: "The watchdog tried to fire an action (Slack notify, kafka_connect.restart_task, k8s.restart_deployment) and the dispatch failed."
+            description: "The watchdog tried to fire an action (Slack notify, k8s.restart_deployment) and the dispatch failed."
 {{- end }}
