@@ -1181,6 +1181,13 @@ for scenario_file in "$out1" "$out2" "$out3" "$out4"; do
     "no scheduler Deployment/Service in $(basename "$scenario_file")"
   assert_not_contains "$scenario_file" 'name: kafka-connect' \
     "no Kafka Connect Deployment/Service in $(basename "$scenario_file")"
+  # The watchdog binary no longer registers these kinds (watchdog:
+  # docs/retired-check-kinds.md). It skips them with a warning rather than
+  # refusing to boot, so a leak here would be silent — hence the fence.
+  assert_not_contains "$scenario_file" 'kind: kafka_(broker|connect|consumer_lag)' \
+    "no retired Kafka check kinds rendered in $(basename "$scenario_file")"
+  assert_not_contains "$scenario_file" 'kafka_connect\.restart_task' \
+    "no retired Kafka Connect action rendered in $(basename "$scenario_file")"
   assert_not_contains "$scenario_file" 'name: v2-postgresql-init' \
     "no v2-postgresql-init Job in $(basename "$scenario_file")"
   # The v1 console env block was gated on a helper that always returned true,

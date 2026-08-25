@@ -185,9 +185,6 @@ Usage: include "neuraltrust-watchdog.resolveCheck" (dict "check" $c "ctx" $)
 {{- $_ := set $target "namespaces" (list $ns) -}}
 {{- end -}}
 {{- end -}}
-{{- if and (hasKey $target "k8sNamespace") (eq ($target.k8sNamespace | toString) "") -}}
-{{- $_ := set $target "k8sNamespace" $ns -}}
-{{- end -}}
 {{- $_ := set $c "target" $target -}}
 {{- end -}}
 {{- $c | toYaml -}}

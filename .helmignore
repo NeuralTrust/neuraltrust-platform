@@ -18,9 +18,12 @@
 .svn/
 # Common backup files
 *.swp
+*.swo
 *.bak
+*.backup
 *.tmp
 *.orig
+*.log
 *~
 # CI-generated credentials
 gha-creds-*.json
@@ -29,7 +32,9 @@ gha-creds-*.json
 .idea/
 *.tmproj
 .vscode/
-.cursor/
+# Any hidden tooling directory — broader than naming each one, and keeps this
+# file from becoming a list of whatever editors the team happens to use.
+.*/
 
 # GitHub / local tooling — not part of the installable chart
 .github/

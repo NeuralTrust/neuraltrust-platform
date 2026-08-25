@@ -1,58 +1,37 @@
-.cursor/
-
-accounts
-regions
-local
-
+# Private / local overlays. Root-anchored: these are top-level directories, and
+# an unanchored pattern would also swallow any nested dir of the same name.
+/accounts/
+/regions/
+/local/
 my-values*.yaml
-
-# Helm chart packages
-*.tgz
-*.tar.gz
-
-# Helm dependencies (if using local charts)
-charts/*.tgz
-
-# Temporary Helm files
-.helm/
-
-# IDE and editor files
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.DS_Store
-
-# OS-specific files
-Thumbs.db
-.DS_Store
-
-# Sensitive files
-*.key
-*.pem
-# /secrets.yaml: ignore only a root-level file used to store secret values (not chart templates)
 /secrets.yaml
 
-# Helm test output
+# Secrets and registry credentials
+*.key
+*.pem
+key.json
+gcr-keys.json
+gha-creds-*.json
+
+# Helm packages and build output. *.tgz covers charts/*.tgz too.
+*.tgz
+*.tar.gz
+.helm/
 test-results/
 rendered-charts/
 
-# Backup files
+# Editor, OS and backup noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
 *.bak
 *.backup
-*~
-
-# Log files
 *.log
 
-# Environment-specific values files (optional - uncomment if needed)
-# values-*.yaml
-# !values-*.yaml.example
-gcr-keys.json
-key.json
-
-# CI-generated files
-gha-creds-*.json
+# CI scratch
 commits.txt
 request.json

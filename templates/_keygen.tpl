@@ -50,7 +50,7 @@ is stored as the raw PEM, which is what its consumer expects.
 {{- $cp := default dict $cpApp.controlPlane }}
 {{- $appImage := default dict (default dict (default dict $cp.components).app).image }}
 {{- $repo := $appImage.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
-{{- $appTag := $appImage.tag | default "v1.147.3" }}
+{{- $appTag := $appImage.tag | default "v1.148.4" }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
