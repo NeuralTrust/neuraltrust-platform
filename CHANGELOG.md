@@ -4,6 +4,38 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Fixed
+
+- **An unregistered gateway or guard lost its raw request/response bodies with
+  no error shown.** `RESIDENCY_DEFAULT_DEPLOYMENT_TYPE` was never templated, so
+  DataCore always ran with it empty — which it treats as strict fail-closed:
+  `/v1/residency/{product}/raw` returns 404 (`code: not_found`, message
+  `deployment not registered`) for any instance missing from its
+  `deployment_registry` table. Only the raw leg consults that registry, so the
+  activity row still renders with its detections and its correlated gateway
+  trace, just with an empty request and response — the app logs a warning and
+  shows nothing. This is not an edge case for TrustGuard: the app registers a
+  gateway on every create, but registers a guard only through the private/remote
+  wizard, so a normally-created guard has no registry row at all and this
+  fallback is the only thing that makes its bodies readable. Our own prod/prod-us
+  overlays set the variable to `saas`; chart installs had no such net. The
+  DataCore ConfigMap now renders it from the new
+  `datacore.config.residencyDefaultDeploymentType` default (`saas`), with `""`
+  to opt back into strict mode and `hybrid` for the DataBridge leg. Rendering it
+  explicitly rather than omitting it is the point — an absent key is the
+  fail-closed state, not a neutral one.
+
+### Changed
+
+- **Corrected the `telemetry.metadataExporters` / `rawExporters` helper
+  comment.** It claimed a bare `otlp` token on both classes collapses to a
+  single metadata exporter and drops raw payloads. It does not: TrustGate
+  prefixes the token with its class (`metadata-otlp` / `raw-otlp`) and
+  TrustGuard keys its exporter cache on the class, so both build two exporters.
+  The rendered JSON form is unchanged — the reasons to keep it are legibility
+  and that a misspelt type stops TrustGuard booting instead of quietly emitting
+  less.
+
 ## [v2.11.13] — 2026-08-26
 
 ### Changed

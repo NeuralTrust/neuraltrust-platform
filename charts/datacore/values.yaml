@@ -36,6 +36,30 @@ config:
   # unless you are doing something deliberately unusual. Set explicitly to
   # override. Postgres is required either way unless RESIDENCY_ALLOW_STUB=true.
   residencyBackend: ""
+  # Per-INSTANCE, not per-cluster: for one gateway or guard, where do its raw
+  # request/response bodies physically live? DataCore keeps that per instance in
+  # its `deployment_registry` table; this is only the assumption it falls back to
+  # for an instance that has no row there.
+  #   "saas"   → in this cluster's ClickHouse, because that instance ships raw
+  #              over OTLP. True for every data plane deployed alongside this
+  #              control plane, and also for a remote one running
+  #              global.telemetry.raw=remote.
+  #   "hybrid" → in the instance's own Postgres, reachable only through
+  #              DataBridge → DataAgent. This is a remote data plane on the
+  #              default global.telemetry.raw=local. Needs residencyBackend to
+  #              resolve to "hybrid" or DataCore refuses to start.
+  # So "hybrid" here never describes THIS release — a hybrid data plane runs no
+  # DataCore at all. It describes an instance somewhere else that this DataCore
+  # reads through DataBridge.
+  #
+  # Default "saas" because an unregistered instance is almost always a local one:
+  # the app registers a gateway on every create, but only registers a guard
+  # through the private/remote wizard, so a normally-created guard has no row and
+  # nothing but this fallback makes its bodies readable. Empty is fail-closed —
+  # raw 404s ("deployment not registered") while metadata keeps working, which
+  # surfaces as an activity row with an empty request/response and no error.
+  #   ""       → strict: 404 on any unregistered instance.
+  residencyDefaultDeploymentType: "saas"
   logLevel: "info"
   httpAddr: ":8080"
 # DataBridge leg — only read when residencyBackend resolves to "hybrid".

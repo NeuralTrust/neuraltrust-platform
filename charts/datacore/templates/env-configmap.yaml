@@ -4,6 +4,21 @@
        DataBridge, which is exactly what deploymentMode=saas needs. The word
        collision is unfortunate; the mapping is deliberate. */}}
 {{- $residency := .Values.config.residencyBackend | default (ternary "hybrid" "saas" $isSaas) }}
+{{- /* Fallback deployment type for instances missing from deployment_registry.
+       Left unset, DataCore fails closed and every raw (body) read 404s while
+       metadata keeps working — an activity row with an empty request/response
+       and no error anywhere. `hasKey` so an overlay can opt back into strict
+       mode with an explicit "", which `default` would silently overwrite. */}}
+{{- $defaultDeployment := "saas" }}
+{{- if hasKey .Values.config "residencyDefaultDeploymentType" }}
+{{- $defaultDeployment = .Values.config.residencyDefaultDeploymentType | toString | trim | lower }}
+{{- end }}
+{{- if not (has $defaultDeployment (list "" "saas" "hybrid")) }}
+{{- fail (printf "datacore.config.residencyDefaultDeploymentType must be \"\", \"saas\" or \"hybrid\", got %q" $defaultDeployment) }}
+{{- end }}
+{{- if and (eq $defaultDeployment "hybrid") (ne $residency "hybrid") }}
+{{- fail "datacore.config.residencyDefaultDeploymentType=hybrid needs residencyBackend to resolve to \"hybrid\" (deploymentMode saas) so the DataBridge leg exists; DataCore refuses to start otherwise" }}
+{{- end }}
 {{- /* An overlay that resets one of these blocks writes `null` rather than
        removing the key, and a bare dereference then aborts the render. */}}
 {{- $bridge := default dict .Values.databridge }}
@@ -18,6 +33,7 @@ metadata:
     {{- include "datacore.labels" . | nindent 4 }}
 data:
   RESIDENCY_BACKEND: {{ $residency | quote }}
+  RESIDENCY_DEFAULT_DEPLOYMENT_TYPE: {{ $defaultDeployment | quote }}
   {{- if eq $residency "hybrid" }}
   {{- /* DataCore refuses to start in this mode without an address. */}}
   DATABRIDGE_ADDR: {{ $bridge.addr | default (include "neuraltrust-platform.databridge.northboundAddr" .) | quote }}
