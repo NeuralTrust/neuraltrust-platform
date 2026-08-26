@@ -131,10 +131,13 @@ Type token TrustGate / TrustGuard emit as TELEMETRY_EXPORTERS_RAW.
 {{/*
 Exporter lists for TELEMETRY_EXPORTERS_METADATA / _RAW.
 
-Names must be unique across both classes: both products merge the metadata and
-raw defaults into one list keyed by exporter name, so a bare "otlp" token on
-both sides collapses to a single metadata exporter and raw payloads are never
-emitted (RUN-1086 telemetry.yaml used the same metadata-otlp / raw-otlp split).
+Both products also accept a bare type token ("otlp") on each side, and both
+build the two classes correctly from it — TrustGate prefixes the token with the
+class, TrustGuard keys its exporter cache on the class. We still emit the
+explicit metadata-otlp / raw-otlp JSON form: it is the shape RUN-1086's
+telemetry.yaml used, it survives the token spelling being wrong (an unknown type
+such as "oltp" stops TrustGuard booting rather than degrading), and the rendered
+ConfigMap says which exporter serves which class without reading Go.
 
 These env vars are the only exporter source — requires TrustGate v0.37.0+ /
 TrustGuard v0.37.1+, which read them when no exporters file is present.
