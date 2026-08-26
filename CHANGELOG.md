@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.11.13] — 2026-08-26
+
 ### Changed
 
 - **Plan/tier rate limiting is off by default for TrustGate and TrustGuard.**
