@@ -514,6 +514,14 @@ assert_not_contains "$out1" 'TELEMETRY_EXPORTERS_RAW: .*raw-otlp' \
   "hybrid: raw payloads stay in local Postgres, not OTLP"
 assert_contains "$out1" 'TELEMETRY_EXPORTERS_FILE: ""' \
   "hybrid: exporters file is empty so env vars are the only source"
+
+# Plan/tier limiting is SaaS metering with no entitlement source on a customer
+# cluster, and the binaries default it ON — so the key must be rendered false,
+# not omitted. Guards both a dropped template line and a flipped chart default.
+assert_contains "$out1" 'RATE_LIMIT_ENABLED: "false"' \
+  "hybrid: plan/tier rate limiting is explicitly off"
+assert_not_contains "$out1" 'RATE_LIMIT_ENABLED: "true"' \
+  "hybrid: no workload turns plan/tier rate limiting on by default"
 assert_not_contains "$out1" 'name: trustguard-telemetry' \
   "hybrid: no TrustGuard telemetry ConfigMap"
 assert_not_contains "$out1" 'name: agentgateway-telemetry' \
@@ -753,6 +761,10 @@ render_default "$out3" --set global.deploymentMode=external
 
 assert_contains "$out3" 'name: control-plane-api' \
   "external: control-plane-api Deployment/Service renders"
+assert_contains "$out3" 'RATE_LIMIT_ENABLED: "false"' \
+  "external: plan/tier rate limiting is explicitly off"
+assert_not_contains "$out3" 'RATE_LIMIT_ENABLED: "true"' \
+  "external: no workload turns plan/tier rate limiting on by default"
 assert_contains "$out3" 'name: control-plane-app' \
   "external: control-plane-app Deployment/Service renders"
 assert_contains "$out3" 'name: AUTH_EMAIL_FORCE_ENV' \

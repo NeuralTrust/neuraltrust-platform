@@ -4,6 +4,20 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Changed
+
+- **Plan/tier rate limiting is off by default for TrustGate and TrustGuard.**
+  `RATE_LIMIT_ENABLED` gates burst-per-minute, monthly-quota and MaxInstances
+  enforcement read from entitlements stamped on a gateway or guard — SaaS
+  metering that a customer-run cluster has no source for. Both binaries default
+  it **on** (TrustGate v0.14.0+, TrustGuard v0.16.0+) and neither env ConfigMap
+  set the key, so installs were silently inheriting enforcement. The charts now
+  render `RATE_LIMIT_ENABLED: "false"` unconditionally via the new
+  `agentgateway.config.rateLimitEnabled` / `trustguard.config.rateLimitEnabled`
+  defaults; set either to `true` where entitlements really are stamped. Rendered
+  rather than omitted on purpose — an absent key falls back to the binary
+  default, which is the wrong direction.
+
 ## [v2.11.11] — 2026-08-24
 
 ### Fixed

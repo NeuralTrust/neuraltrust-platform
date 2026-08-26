@@ -8,7 +8,7 @@ fullnameOverride: "trustguard"
 securityHardening: true
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/trustguard
-  tag: "v0.39.1"
+  tag: "v0.39.5"
   pullPolicy: IfNotPresent
 imagePullSecrets: "gcr-secret"
 serviceAccount:
@@ -18,6 +18,13 @@ serviceAccount:
 config:
   logLevel: "info"
   appEnv: "production"
+  # Plan/tier request limiting — burst per minute, monthly quota and
+  # MaxInstances, enforced from entitlements stamped on a guard. That is SaaS
+  # metering, so a customer-run install has no entitlement source and the chart
+  # ships it off; the binary's own default is on (TrustGuard v0.16.0+), which is
+  # why the key is always rendered rather than left unset. Set true only when
+  # guards in this cluster really carry entitlements.
+  rateLimitEnabled: false
 # PostgreSQL connection (external-capable). Password lives in the secret.
 # In v2 hybrid this block is IGNORED — hybrid workloads envFrom the shared
 # `postgresql-secrets` rendered from `global.postgresql.*` (default user +

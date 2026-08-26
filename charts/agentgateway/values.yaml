@@ -9,7 +9,7 @@ fullnameOverride: "agentgateway"
 securityHardening: true
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/agentgateway
-  tag: "v0.42.5"
+  tag: "v0.42.7"
   pullPolicy: IfNotPresent
 # Image pull secret name (string) or list. "none"/"" suppresses it.
 # Falls back to global.imagePullSecrets when empty.
@@ -41,6 +41,13 @@ config:
   # Enabled by default in v2: hybrid writes raw events to local Postgres;
   # external exports metadata and raw events to the ClickStack collector.
   telemetryEnabled: true
+  # Plan/tier request limiting — burst per minute, monthly quota and
+  # MaxInstances, enforced from entitlements stamped on a gateway. That is SaaS
+  # metering, so a customer-run install has no entitlement source and the chart
+  # ships it off; the binary's own default is on (TrustGate v0.14.0+), which is
+  # why the key is always rendered rather than left unset. Set true only when
+  # gateways in this cluster really carry entitlements.
+  rateLimitEnabled: false
 # PostgreSQL connection (external-capable). Password lives in the secret.
 # In v2 hybrid this block is IGNORED — hybrid workloads envFrom the shared
 # `postgresql-secrets` rendered from `global.postgresql.*` (default user +

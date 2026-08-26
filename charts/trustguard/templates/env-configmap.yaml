@@ -31,6 +31,13 @@ data:
   # are set so either plane boots correctly from the shared env (they must differ).
   SERVER_PORT: {{ .Values.controlPlane.ports.http | quote }}
   SERVER_DATA_PORT: {{ .Values.dataPlane.ports.http | quote }}
+  {{- /* Always emitted: the binary defaults RATE_LIMIT_ENABLED to true, so an
+         unset key would turn plan metering on in a customer cluster that has no
+         entitlements to meter against. hasKey keeps an explicit false from a
+         minimal override from being read as absent. */}}
+  {{- $rateLimit := false }}
+  {{- if hasKey .Values.config "rateLimitEnabled" }}{{- $rateLimit = .Values.config.rateLimitEnabled }}{{- end }}
+  RATE_LIMIT_ENABLED: {{ $rateLimit | quote }}
   {{- if $isHybrid }}
   # v2 hybrid: DB_HOST/DB_PORT/DB_USER/DB_NAME/DB_PASSWORD/DB_SSL_MODE arrive
   # through the shared `postgresql-secrets` Secret (via envFrom on the Deployment).
