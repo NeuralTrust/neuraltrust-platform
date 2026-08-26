@@ -734,7 +734,7 @@ control-plane-app:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.148.4"
+          tag: "v1.148.7"
           pullPolicy: IfNotPresent
         config:
           nodeEnv: production
@@ -813,7 +813,7 @@ control-plane-app:
 # stays agentgateway for now; K8s names stay agentgateway-*.
 agentgateway:
   image:
-    tag: "v0.42.5"
+    tag: "v0.42.7"
   # Empty host/port/sslMode/username/tls inherit from global.postgresql /
   # global.redis, then fall back to the in-cluster Services. Set them here only
   # to point this one service somewhere else.
@@ -841,7 +841,7 @@ agentgateway:
 # TrustGuard: control-plane + data-plane (/v1/evaluate).
 trustguard:
   image:
-    tag: "v0.39.1"
+    tag: "v0.39.5"
   # Empty host/port/sslMode/username/tls inherit — see the agentgateway note.
   database:
     sslMode: ""
