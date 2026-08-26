@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.12.0] — 2026-08-26
+
 ### Fixed
 
 - **An unregistered gateway or guard lost its raw request/response bodies with
