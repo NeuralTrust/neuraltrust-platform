@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.13.1] — 2026-08-27
+
 ### Added
 
 - **`PrometheusRule` for `data-plane-api` (AUT-406).** The v1-era rule was wrapped
