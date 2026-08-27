@@ -1576,6 +1576,109 @@ assert_not_contains "$out10b2" 'TOOLGUARD_WORKER_URL' \
   "firewall workers: TOOLGUARD_WORKER_URL absent"
 assert_not_contains "$out10b2" 'src.workers.toolguard.app:app' \
   "firewall workers: retired toolguard module absent"
+# topic-guard and complexity complete the image's worker set. Without a worker the
+# gateway never gets its <WORKER>_WORKER_URL and falls back to an in-process
+# localhost default, which fails every call for that detector.
+assert_contains "$out10b2" 'name: topic-guard-worker' \
+  "firewall workers: topic-guard present"
+assert_contains "$out10b2" 'src.workers.topic_guard.app:app' \
+  "firewall workers: topic-guard module arg"
+assert_contains "$out10b2" 'TOPIC_GUARD_WORKER_URL: "http://topic-guard-worker:80"' \
+  "firewall workers: topic-guard worker URL in ConfigMap"
+assert_contains "$out10b2" 'name: complexity-worker' \
+  "firewall workers: complexity present"
+assert_contains "$out10b2" 'src.workers.complexity.app:app' \
+  "firewall workers: complexity module arg"
+assert_contains "$out10b2" 'COMPLEXITY_WORKER_URL: "http://complexity-worker:80"' \
+  "firewall workers: complexity worker URL in ConfigMap"
+
+blue "==> Scenario 10b3: TrustGate complexity scoring wiring (AUT-402)"
+out10b3="$TMP/scenario-firewall-complexity-wiring.yaml"
+render_default "$out10b3"
+# The binary reads FIREWALL_BASE_URL / FIREWALL_SECRET_KEY, and appends
+# /v1/complexity — a route on the firewall GATEWAY, so this must be the `firewall`
+# Service and not the complexity worker.
+# Anchored: TrustGuard's own NEURAL_TRUST_FIREWALL_BASE_URL would match unanchored.
+assert_contains "$out10b3" '^  FIREWALL_BASE_URL: "http://firewall\.default\.svc\.cluster\.local"$' \
+  "complexity: agentgateway points at the firewall gateway Service"
+assert_contains "$out10b3" 'name: FIREWALL_SECRET_KEY' \
+  "complexity: agentgateway data plane mounts the firewall signing secret"
+# The wrong names were in the original plan; they leave the URL empty and silently
+# preserve the round-robin fallback, so fence them out.
+assert_not_contains "$out10b3" 'FIREWALL_COMPLEXITY_BASE_URL' \
+  "complexity: legacy FIREWALL_COMPLEXITY_BASE_URL name absent"
+assert_not_contains "$out10b3" 'FIREWALL_COMPLEXITY_TOKEN' \
+  "complexity: legacy FIREWALL_COMPLEXITY_TOKEN name absent"
+# Opting out must remove the variable entirely rather than emit an empty one, or
+# the binary would treat "" as configured-but-broken.
+out10b4="$TMP/scenario-firewall-complexity-optout.yaml"
+render_default "$out10b4" --set agentgateway.config.firewallBaseURL=""
+assert_not_contains "$out10b4" '^  FIREWALL_BASE_URL' \
+  "complexity: firewallBaseURL=\"\" opts out of scoring"
+
+blue "==> Scenario 10b5: data-plane-api PrometheusRule (AUT-406)"
+# The v1-era rule was gated on a helper that always returned true, so it never
+# rendered in v2 and was deleted. These assertions stop the coverage silently
+# disappearing a second time.
+out10b5="$TMP/scenario-dpapi-monitoring.yaml"
+render_default "$out10b5" --set global.monitoring.enabled=true --api-versions monitoring.coreos.com/v1
+assert_contains "$out10b5" 'alert: DataPlaneApiDown' \
+  "monitoring: data-plane-api rule renders with monitoring on and the CRD present"
+assert_contains "$out10b5" '^  name: data-plane-api$' \
+  "monitoring: data-plane-api PrometheusRule keeps its stable name"
+# Retired with the Kafka stack; there is no workload left to alert on.
+assert_not_contains "$out10b5" 'DataPlaneKafkaWorkersDown' \
+  "monitoring: retired Kafka worker alert stays absent"
+# Absent CRD must not produce an unappliable object.
+out10b5b="$TMP/scenario-dpapi-monitoring-nocrd.yaml"
+render_default "$out10b5b" --set global.monitoring.enabled=true
+assert_not_contains "$out10b5b" 'alert: DataPlaneApiDown' \
+  "monitoring: no data-plane-api rule when the Prometheus CRD is absent"
+# Default install leaves monitoring off.
+out10b5c="$TMP/scenario-dpapi-monitoring-off.yaml"
+render_default "$out10b5c" --api-versions monitoring.coreos.com/v1
+assert_not_contains "$out10b5c" 'alert: DataPlaneApiDown' \
+  "monitoring: no data-plane-api rule when monitoring is disabled"
+
+blue "==> Scenario 10b6: DataAgent POSTGRES_* yields to an extraEnv override (AUT-397)"
+# Emitting a name the operator also sets in extraEnv leaves two env entries with
+# that name, which fails the next helm upgrade on $setElementOrder.
+out10b6="$TMP/scenario-dataagent-pg-override.yaml"
+render_default "$out10b6" \
+  --set dataagent.store.backend=postgres \
+  --set 'dataagent.extraEnv[0].name=POSTGRES_HOST' \
+  --set 'dataagent.extraEnv[0].value=operator-pg-tg' \
+  --set 'trustguard.dataagent.extraEnv[0].name=POSTGRES_HOST' \
+  --set 'trustguard.dataagent.extraEnv[0].value=operator-pg-tgd'
+# Count the chart-emitted form — `- name: POSTGRES_HOST` immediately followed by
+# `valueFrom:` — across the render. Four workloads emit it by default; the two
+# DataAgent instances must drop theirs when the operator overrides the name, leaving
+# the two unrelated ones. Counting the secretKeyRef form rather than the bare name is
+# what distinguishes "chart yielded" from "chart duplicated".
+dpa_ref_count() {
+  grep -A1 -E '^\s+- name: POSTGRES_HOST$' "$1" | grep -c "valueFrom:" || true
+}
+ovr_refs="$(dpa_ref_count "$out10b6")"
+if [ "$ovr_refs" != "2" ]; then
+  red "FAIL: dataagent: expected 2 chart-emitted POSTGRES_HOST refs after both overrides, found $ovr_refs"
+  red "  4 means a DataAgent still emits its own alongside the override — two env entries"
+  red "  of one name is the \$setElementOrder patch failure that breaks the next helm upgrade"
+  exit 1
+fi
+green "ok  - dataagent: both instances yield POSTGRES_HOST to an extraEnv override"
+assert_contains "$out10b6" 'value: operator-pg-tg' \
+  "dataagent (TrustGate): the operator's POSTGRES_HOST value is the one present"
+assert_contains "$out10b6" 'value: operator-pg-tgd' \
+  "dataagent (TrustGuard): the operator's POSTGRES_HOST value is the one present"
+# Without an override the chart must still supply it from the Secret.
+out10b6b="$TMP/scenario-dataagent-pg-default.yaml"
+render_default "$out10b6b" --set dataagent.store.backend=postgres
+base_refs="$(dpa_ref_count "$out10b6b")"
+if [ "$base_refs" != "4" ]; then
+  red "FAIL: dataagent: expected 4 chart-emitted POSTGRES_HOST refs with no override, found $base_refs"
+  exit 1
+fi
+green "ok  - dataagent: chart still supplies POSTGRES_HOST from the Secret with no override"
 
 blue "==> Scenario 10c: hybrid has no in-cluster ClickStack; egress via sidecar"
 out10c="$TMP/scenario-hybrid-clickstack-channels.yaml"

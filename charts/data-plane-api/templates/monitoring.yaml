@@ -1,0 +1,59 @@
+{{- /* PrometheusRule for data-plane-api (AUT-406).
+
+       The v1-era file this replaces was gated on an `isV2` helper that returned a
+       hardcoded true, so neither of its alerts ever rendered in v2, and it was
+       deleted with the rest of the v1 retirement. An operator running
+       global.monitoring.enabled with the Prometheus Operator CRDs installed
+       therefore had no rule coverage for a component v2 still ships.
+
+       Gated on the same helper as the Deployment, so the alert cannot outlive the
+       workload it watches. `DataPlaneKafkaWorkersDown` is deliberately not carried
+       over: those Deployments no longer exist in the chart. */ -}}
+{{- if eq (include "neuraltrust-platform.dataPlaneApiV2.enabled" .) "true" }}
+{{- $g := default dict .Values.global -}}
+{{- $m := default dict $g.monitoring -}}
+{{- $cap := .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" -}}
+{{- if and $m.enabled $cap -}}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: data-plane-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: data-plane-api
+    app.kubernetes.io/managed-by: {{ .Release.Service | quote }}
+    app.kubernetes.io/instance: {{ .Release.Name | quote }}
+    app.kubernetes.io/part-of: neuraltrust-platform
+    {{- with $m.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: data-plane-api
+      interval: 1m
+      rules:
+        - alert: DataPlaneApiDown
+          expr: |
+            sum(kube_deployment_status_replicas_available{namespace="{{ .Release.Namespace }}",deployment="data-plane-api"}) == 0
+          {{- /* 10m rather than the v1 rule's 5m, which was written for a topology
+                 that had no migration step. This Deployment runs ClickHouse
+                 migrations in an initContainer, so a fresh install or a schema
+                 change legitimately sits at zero available replicas for minutes
+                 while they apply; 5m would page on a normal upgrade. */}}
+          for: 10m
+          labels:
+            severity: critical
+            {{- with $m.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: "data-plane-api has no ready replicas"
+            description: >-
+              The analytics and evaluation API is offline: evaluation runs and
+              the analytics the console reads will fail. Runtime traffic through
+              TrustGate and TrustGuard is unaffected, and product telemetry keeps
+              flowing over OTLP, so this is not a data-loss alert. Check the
+              clickhouse-migrations initContainer first — a failing migration
+              holds every replica unready.
+{{- end }}
+{{- end }}

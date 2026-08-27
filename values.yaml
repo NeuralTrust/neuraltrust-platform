@@ -813,7 +813,7 @@ control-plane-app:
 # stays agentgateway for now; K8s names stay agentgateway-*.
 agentgateway:
   image:
-    tag: "v0.43.1"
+    tag: "v0.43.2"
   # Empty host/port/sslMode/username/tls inherit from global.postgresql /
   # global.redis, then fall back to the in-cluster Services. Set them here only
   # to point this one service somewhere else.
@@ -1025,8 +1025,11 @@ data-plane-api:
           username: "neuraltrust"
         secrets:
           name: "clickhouse-secrets"
+        # The ClickHouse DDL ships inside the data-plane-api image and is copied into
+        # place at startup, so no ConfigMap is rendered. Set a name here only to mount
+        # a ConfigMap you manage yourself, carrying the DDL under the init-db.sql key.
         configmap:
-          name: "clickhouse-init-job"
+          name: ""
       api:
         enabled: true
         host: ""
@@ -1073,7 +1076,7 @@ data-plane-api:
                   memory: 128Mi
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.48.0
+          tag: v1.49.0
           pullPolicy: IfNotPresent
         accessMode: ReadWriteOnce
         huggingfaceToken: ""
