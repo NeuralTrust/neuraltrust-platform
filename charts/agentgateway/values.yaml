@@ -9,7 +9,7 @@ fullnameOverride: "agentgateway"
 securityHardening: true
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/agentgateway
-  tag: "v0.42.7"
+  tag: "v0.43.1"
   pullPolicy: IfNotPresent
 # Image pull secret name (string) or list. "none"/"" suppresses it.
 # Falls back to global.imagePullSecrets when empty.
@@ -21,6 +21,18 @@ serviceAccount:
 # Non-secret config injected into every workload via the env ConfigMap.
 config:
   logLevel: "info"
+  # Firewall gateway the smart-routing load balancer asks for complexity scores.
+  # It appends /v1/complexity, which is a route on the firewall GATEWAY, so this is
+  # the `firewall` Service — not the complexity worker.
+  #
+  # Leave the key ABSENT (the default) to derive
+  # http://firewall.<namespace>.svc.cluster.local whenever the firewall is
+  # deployed, which it is whenever TrustGuard is. Set it to "" to opt out and keep
+  # the round-robin fallback, or to a URL when the firewall runs outside this
+  # release. Scoring also needs FIREWALL_SECRET_KEY, wired from the shared firewall
+  # JWT_SECRET in the data-plane Deployment; with either missing the client stays
+  # unconfigured and falls back rather than failing requests.
+  # firewallBaseURL: ""
   # A deployed value (prod/production/staging/stage) makes the binary refuse
   # cleartext config-sync: the control plane requires a gRPC TLS keypair and the
   # data plane rejects CONFIG_SYNC_TLS_INSECURE=true. The chart provisions both

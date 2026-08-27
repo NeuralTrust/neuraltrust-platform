@@ -4,6 +4,51 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Added
+
+- **`topic-guard` firewall worker.** The chart shipped five of the seven workers
+  the firewall image contains, and `topic-guard` — the detector that serves
+  customer-defined topics, and the one TrustGuard topic policies call — was not
+  among them. Without it the gateway's `TOPIC_GUARD_WORKER_URL` is never set, so
+  `src/gateway/workers_client.py` falls back to its in-process default of
+  `localhost:8007` and every topic check fails. The worker has been in the image
+  since firewall v2.25.0, so the pinned `v2.28.2` tag already carries it and no
+  image bump is needed. Enabled by default like its five siblings; set
+  `firewall.workers.topic-guard.enabled=false` to opt out. It takes a 5Gi memory
+  limit rather than the 4Gi `workerDefaults` ceiling — the ONNX weights are
+  ~1.15Gi and ONNX Runtime plus the tokenizer peak past 4Gi under load, which is
+  the same figure the prod overlay uses. Note this adds one pod requesting 1 CPU /
+  3Gi to a default install. Which trained revision of `NeuralTrust/topic-guard`
+  is served follows the image tag, so a retrained model needs
+  `firewall.workerDefaults.image.tag` bumped.
+
+- **`complexity` firewall worker, and TrustGate wired to it (AUT-402).** The last
+  worker missing from the chart. TrustGate's smart-routing load balancer scores
+  prompt complexity through the firewall, but with no worker there was nothing for
+  its `FIREWALL_BASE_URL` to resolve to, so it logged one startup warning and
+  silently fell back to round-robin — degraded rather than broken, which is why it
+  went unnoticed. Three parts:
+  - `firewall.workers.complexity`, enabled by default like its siblings. Stateful
+    score modulation uses the firewall Redis wiring from AUT-386; without a
+    reachable Redis the gateway still answers from the stateless path.
+  - `FIREWALL_BASE_URL` on agentgateway, derived as
+    `http://firewall.<namespace>.svc.cluster.local`. Two details the plan had
+    wrong: the binary reads `FIREWALL_BASE_URL` / `FIREWALL_SECRET_KEY`, **not**
+    `FIREWALL_COMPLEXITY_*` (the wrong names leave the URL empty and preserve the
+    silent fallback), and it appends `/v1/complexity`, which is a route on the
+    firewall **gateway** — so this points at the `firewall` Service, not at the
+    complexity worker. Set `agentgateway.config.firewallBaseURL` to `""` to opt
+    out, or to a URL when the firewall runs outside the release.
+  - `FIREWALL_SECRET_KEY` on the agentgateway data plane, from the shared firewall
+    `JWT_SECRET`. TrustGate mints its own `{"purpose":"firewall"}` JWT from that
+    signing secret, so no chart-minted token is involved.
+
+  Both variables are gated on the firewall actually being deployed (it renders
+  with TrustGuard), because pointing the binary at an absent host would trade a
+  working fallback for failing calls. With either variable missing the client stays
+  unconfigured and falls back rather than erroring. Adds one pod requesting 1 CPU /
+  3Gi to a default install.
+
 ## [v2.12.0] — 2026-08-26
 
 ### Fixed

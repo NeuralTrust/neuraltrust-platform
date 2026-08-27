@@ -114,4 +114,27 @@ data:
   # from the shared trustguard-client-credentials Secret in the Deployment env.
   TRUSTGUARD_BASE_URL: {{ $tg.baseURL | default (printf "http://trustguard-data-plane.%s.svc.cluster.local" .Release.Namespace) | quote }}
   {{- end -}}
+  {{- /* Firewall complexity scoring for the smart-routing load balancer (AUT-402).
+         The binary reads FIREWALL_BASE_URL / FIREWALL_SECRET_KEY — not
+         FIREWALL_COMPLEXITY_*, which would leave the base URL empty and silently
+         keep the round-robin fallback. It appends /v1/complexity, a route on the
+         firewall GATEWAY, so this points at the `firewall` Service and not at the
+         complexity worker.
+
+         Gated on the firewall actually being deployed (it renders with TrustGuard),
+         because pointing the binary at an absent host trades a working fallback for
+         failing calls. FIREWALL_SECRET_KEY is the shared firewall JWT_SECRET, wired
+         in the data-plane Deployment env: TrustGate mints its own
+         {"purpose":"firewall"} token from it, so no chart-minted token is needed.
+         Missing either variable leaves the client unconfigured, which degrades to
+         round-robin rather than erroring. */ -}}
+  {{- $fwBase := "" -}}
+  {{- if hasKey .Values.config "firewallBaseURL" -}}
+  {{- $fwBase = .Values.config.firewallBaseURL | toString -}}
+  {{- else if eq (include "firewall.enabled" .) "true" -}}
+  {{- $fwBase = printf "http://firewall.%s.svc.cluster.local" .Release.Namespace -}}
+  {{- end -}}
+  {{- if $fwBase }}
+  FIREWALL_BASE_URL: {{ $fwBase | quote }}
+  {{- end }}
 {{- end }}

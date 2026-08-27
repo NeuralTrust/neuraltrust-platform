@@ -115,6 +115,39 @@ firewall:
       module: src.workers.response_jailbreak.app:app
       extraEnv: []
       extraEnvFrom: []
+    # Scores prompt complexity for TrustGate's smart-routing load balancer, which
+    # reaches it through the gateway at /v1/complexity. Until this shipped there
+    # was nothing for agentgateway's FIREWALL_BASE_URL to resolve to, so TrustGate
+    # logged one startup warning and silently fell back to round-robin (AUT-402).
+    # Stateful modulation needs the firewall Redis wiring from AUT-386; without a
+    # reachable Redis the gateway still answers, from the stateless path.
+    complexity:
+      enabled: true
+      module: src.workers.complexity.app:app
+      extraEnv: []
+      extraEnvFrom: []
+    # Serves customer-defined topics, so TrustGuard topic policies call this one.
+    # Present in the worker image since firewall v2.25.0, so the pinned tag above
+    # already carries it. Which trained revision of NeuralTrust/topic-guard is
+    # baked in follows the image tag — bump workerDefaults.image.tag to pick up a
+    # retrained model. Override TOPIC_GUARD_LOCAL_MODEL_PATH via extraEnv only for
+    # a custom image that stores the weights elsewhere.
+    topic-guard:
+      enabled: true
+      module: src.workers.topic_guard.app:app
+      # ONNX weights are ~1.15Gi and ONNX Runtime plus the tokenizer peak past the
+      # 4Gi workerDefaults limit under load, so this worker gets the same 5Gi
+      # ceiling the prod overlay gives it. `resources` replaces the whole
+      # workerDefaults block rather than merging into it, so the rest is restated.
+      resources:
+        requests:
+          cpu: "1"
+          memory: 3Gi
+        limits:
+          cpu: "2"
+          memory: 5Gi
+      extraEnv: []
+      extraEnvFrom: []
   # --- ServiceAccount ---
   serviceAccount:
     create: true
