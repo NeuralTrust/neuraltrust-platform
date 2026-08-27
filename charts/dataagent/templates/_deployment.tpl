@@ -80,32 +80,36 @@ spec:
                keyword connection string in-process, so the chart no longer
                composes SENSIBLE_PG_DSN. Omitted when STORE_BACKEND is none. */}}
         {{- $pgSecret := include "neuraltrust-platform.v2.hybridPg.secretName" . }}
-        - name: POSTGRES_HOST
+        {{- /* An operator override arrives through .Values.extraEnv, spliced in below.
+               Emitting a name the override also sets leaves TWO env entries with that
+               name, which is the `$setElementOrder` strategic-merge-patch failure that
+               breaks the next `helm upgrade` — the same reason
+               neuraltrust-platform.postgresEnv takes a `skip` list for the gateways
+               (AUT-397). Yield to the override instead of duplicating it. The env name
+               equals the Secret key for all five, so an ordered list keeps the rendered
+               order stable rather than re-sorting it alphabetically as a dict would. */}}
+        {{- $skip := list }}
+        {{- range $e := (default list .Values.extraEnv) }}
+        {{- if $e.name }}{{- $skip = append $skip $e.name }}{{- end }}
+        {{- end }}
+        {{- range $envName := (list "POSTGRES_HOST" "POSTGRES_PORT" "POSTGRES_USER" "POSTGRES_DB" "POSTGRES_SSLMODE") }}
+        {{- if not (has $envName $skip) }}
+        {{- /* Key unquoted, matching what this block emitted before the skip guard.
+               A quoted `key: "POSTGRES_SSLMODE"` is the shape the render suite fences
+               against for operator-owned Secrets, because the gateway helper renames
+               POSTGRES_* to DB_* and cannot rename keys it does not control. DataAgent
+               does not rename — env name equals Secret key — so it is outside that
+               fence's intent, and keeping the original form leaves it undisturbed. */}}
+        - name: {{ $envName }}
           valueFrom:
             secretKeyRef:
               name: {{ $pgSecret | quote }}
-              key: POSTGRES_HOST
-        - name: POSTGRES_PORT
-          valueFrom:
-            secretKeyRef:
-              name: {{ $pgSecret | quote }}
-              key: POSTGRES_PORT
-        - name: POSTGRES_USER
-          valueFrom:
-            secretKeyRef:
-              name: {{ $pgSecret | quote }}
-              key: POSTGRES_USER
-        - name: POSTGRES_DB
-          valueFrom:
-            secretKeyRef:
-              name: {{ $pgSecret | quote }}
-              key: POSTGRES_DB
-        - name: POSTGRES_SSLMODE
-          valueFrom:
-            secretKeyRef:
-              name: {{ $pgSecret | quote }}
-              key: POSTGRES_SSLMODE
+              key: {{ $envName }}
+        {{- end }}
+        {{- end }}
+        {{- if not (has "POSTGRES_PASSWORD" $skip) }}
         {{- include "neuraltrust-platform.postgresql.passwordEnv" (dict "ctx" . "secret" $pgSecret) | nindent 8 }}
+        {{- end }}
         {{- end }}
         {{- if $egressEnabled }}
         - name: OAUTH_BROKER_ADDR

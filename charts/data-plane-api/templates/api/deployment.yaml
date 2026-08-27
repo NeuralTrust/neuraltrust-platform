@@ -19,6 +19,16 @@
 {{- $dpRedisCfg := default dict .Values.dataPlane.components.api.redis }}
 {{- $dpRedisBackend := include "neuraltrust-platform.dataPlaneApi.redisBackend" . }}
 {{- $api := default dict .Values.dataPlane.components.api }}
+{{- $apiImage := default dict $api.image }}
+{{- $apiRepo := $apiImage.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api" }}
+{{- $apiTag := $apiImage.tag | default "v1.49.0" }}
+{{- $apiPull := $apiImage.pullPolicy | default "IfNotPresent" }}
+{{- /* The ClickHouse DDL ships inside the data-plane-api image, so it always matches
+       the application version that reads it. Setting clickhouse.configmap.name opts
+       into a self-managed ConfigMap instead; the chart no longer renders one. */ -}}
+{{- $chCmp := default dict (default dict .Values.dataPlane.components).clickhouse }}
+{{- $chInitConfigMap := (default dict $chCmp.configmap).name | default "" }}
+{{- $chInitFromImage := and $renderChInit (not $chInitConfigMap) }}
 {{- $autoscaling := default dict $api.autoscaling }}
 apiVersion: apps/v1
 kind: Deployment
@@ -69,6 +79,27 @@ spec:
       {{- end }}
       {{- if or $renderChInit $renderPgInit }}
       initContainers:
+        {{- if $chInitFromImage }}
+        - name: copy-migration-sql
+          image: {{ include "data-plane.image" (dict "repository" $apiRepo "tag" $apiTag "global" .Values.global) | quote }}
+          imagePullPolicy: {{ $apiPull }}
+          {{- if .Values.securityHardening }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          {{- end }}
+          command:
+          - /bin/sh
+          - -c
+          - |
+            set -eu
+            cp /app/migrations/clickhouse/init-db.sql /init-db/init-db.sql
+          volumeMounts:
+          - name: init-db
+            mountPath: /init-db
+        {{- end }}
         {{- if $renderChInit }}
         - name: clickhouse-migrations
           {{- $chMigrationRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickhouse-server" }}
@@ -137,48 +168,110 @@ spec:
               --query="GRANT ALL ON *.* TO ${CLICKHOUSE_USER}" 2>/dev/null || \
               echo "Permissions may already be granted, continuing..."
             
+            ch_client() {
+              clickhouse-client \
+                --host="${CLICKHOUSE_HOST}" \
+                --port="${CLICKHOUSE_NATIVE_PORT}" \
+                --user="${CLICKHOUSE_USER}" \
+                --password="${CLICKHOUSE_PASSWORD}" \
+                "$@"
+            }
+
+            # The SQL file selects its own database with USE, which is what the previous
+            # single-stream run honoured; keep that authoritative over CLICKHOUSE_DATABASE.
+            DB=$(sed 's/--.*$//' /init-db/init-db.sql \
+              | sed -n 's/^[[:space:]]*[Uu][Ss][Ee][[:space:]]\{1,\}`\{0,1\}\([A-Za-z0-9_]\{1,\}\).*/\1/p' | head -1)
+            DB="${DB:-${CLICKHOUSE_DATABASE:-neuraltrust}}"
+            echo "Target database: ${DB}"
+
             # Calculate MD5 hash of the migration file
             MIGRATION_HASH=$(md5sum /init-db/init-db.sql | cut -d' ' -f1)
             echo "Migration file MD5: $MIGRATION_HASH"
-            
+
             # Check if this migration has already been applied
-            EXISTING_HASH=$(clickhouse-client \
-              --host="${CLICKHOUSE_HOST}" \
-              --port="${CLICKHOUSE_NATIVE_PORT}" \
-              --user="${CLICKHOUSE_USER}" \
-              --password="${CLICKHOUSE_PASSWORD}" \
-              --query="SELECT migrationHash FROM ${CLICKHOUSE_DATABASE}.schema_migrations WHERE migrationHash = '${MIGRATION_HASH}' LIMIT 1" 2>/dev/null | tr -d '\n' || echo "")
-            
+            EXISTING_HASH=$(ch_client \
+              --query="SELECT migrationHash FROM ${DB}.schema_migrations WHERE migrationHash = '${MIGRATION_HASH}' LIMIT 1" 2>/dev/null | tr -d '\n' || echo "")
+
             if [ -n "$EXISTING_HASH" ] && [ "$EXISTING_HASH" = "$MIGRATION_HASH" ]; then
               echo "Migration $MIGRATION_HASH has already been applied. Skipping."
               exit 0
             fi
-            
+
             echo "Applying migration $MIGRATION_HASH..."
-            
-            # Execute the migration
-            clickhouse-client \
-              --host="${CLICKHOUSE_HOST}" \
-              --port="${CLICKHOUSE_NATIVE_PORT}" \
-              --user="${CLICKHOUSE_USER}" \
-              --password="${CLICKHOUSE_PASSWORD}" \
-              --multiquery \
-              < /init-db/init-db.sql
-            
-            if [ $? -ne 0 ]; then
-              echo "Error: Migration failed!"
+
+            STATEMENT_ATTEMPTS="${STATEMENT_ATTEMPTS:-10}"
+            APPLIED=0
+
+            run_statement() {
+              case "$1" in
+                CREATE\ DATABASE*|create\ database*) ch_client --query="$1" </dev/null ;;
+                *) ch_client --database="${DB}" --query="$1" </dev/null ;;
+              esac
+            }
+
+            # Statements are applied one at a time rather than as a single --multiquery
+            # stream. A replicated backend rejects an ALTER whose metadata version has not
+            # yet caught up with the coordinator (CANNOT_ASSIGN_ALTER, code 517); that is
+            # retryable, but in a multiquery stream it discards every statement after it.
+            # Per-statement retry keeps progress monotonic instead of replaying the file.
+            apply_statement() {
+              STATEMENT=$(printf '%s' "$1" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+              if [ -z "${STATEMENT}" ]; then
+                return 0
+              fi
+              case "${STATEMENT}" in
+                USE\ *|use\ *) return 0 ;;
+              esac
+
+              ATTEMPT=1
+              while : ; do
+                if run_statement "${STATEMENT}"; then
+                  APPLIED=$((APPLIED + 1))
+                  return 0
+                fi
+                if [ "${ATTEMPT}" -ge "${STATEMENT_ATTEMPTS}" ]; then
+                  echo "Error: statement failed after ${ATTEMPT} attempts: $(printf '%s' "${STATEMENT}" | cut -c1-120)"
+                  return 1
+                fi
+                echo "Retrying in ${ATTEMPT}s (attempt ${ATTEMPT}/${STATEMENT_ATTEMPTS}): $(printf '%s' "${STATEMENT}" | cut -c1-120)"
+                sleep "${ATTEMPT}"
+                ATTEMPT=$((ATTEMPT + 1))
+              done
+            }
+
+            # Split on the statement terminator while streaming the file, so no scratch file
+            # is needed on a read-only root filesystem and the loop stays in this shell (a
+            # pipeline subshell could not abort the container on failure).
+            BUFFER=""
+            LINE=""
+            while IFS= read -r LINE <&3 || [ -n "${LINE}" ]; do
+              BUFFER="${BUFFER} ${LINE%%--*}"
+              LINE=""
+              while : ; do
+                case "${BUFFER}" in
+                  *\;*)
+                    if ! apply_statement "${BUFFER%%;*}"; then
+                      exit 1
+                    fi
+                    BUFFER="${BUFFER#*;}"
+                    ;;
+                  *) break ;;
+                esac
+              done
+            done 3< /init-db/init-db.sql
+            if ! apply_statement "${BUFFER}"; then
               exit 1
             fi
-            
-            # Record the migration
-            clickhouse-client \
-              --host="${CLICKHOUSE_HOST}" \
-              --port="${CLICKHOUSE_NATIVE_PORT}" \
-              --user="${CLICKHOUSE_USER}" \
-              --password="${CLICKHOUSE_PASSWORD}" \
-              --query="INSERT INTO ${CLICKHOUSE_DATABASE}.schema_migrations (migrationHash, appliedAt) VALUES ('${MIGRATION_HASH}', now64(6))" \
-              2>/dev/null || echo "Warning: Failed to record migration (non-fatal)"
-            
+
+            echo "Applied ${APPLIED} statements."
+
+            # A silent failure here replays the whole DDL on every pod start, which is what
+            # exposes the ALTER sequence to the race above, so surface it.
+            if ! ch_client \
+              --query="INSERT INTO ${DB}.schema_migrations (migrationHash, appliedAt) VALUES ('${MIGRATION_HASH}', now64(6))"; then
+              echo "Error: migration applied but NOT recorded; the next pod start will replay the full DDL"
+            fi
+
             echo "Migration $MIGRATION_HASH applied successfully."
           env:
           - name: CLICKHOUSE_HOST
@@ -305,16 +398,8 @@ spec:
       {{- end }}
       containers:
       - name: api
-        {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.image }}
-        {{- $apiRepo := .Values.dataPlane.components.api.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api" }}
-        {{- $apiTag := .Values.dataPlane.components.api.image.tag | default "v1.48.0" }}
         image: {{ include "data-plane.image" (dict "repository" $apiRepo "tag" $apiTag "global" .Values.global) | quote }}
-        imagePullPolicy: {{ .Values.dataPlane.components.api.image.pullPolicy | default "IfNotPresent" }}
-        {{- else }}
-        {{- $fallbackApiTag := "v1.48.0" }}
-        image: {{ include "data-plane.image" (dict "repository" "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api" "tag" $fallbackApiTag "global" .Values.global) | quote }}
-        imagePullPolicy: IfNotPresent
-        {{- end }}
+        imagePullPolicy: {{ $apiPull }}
         {{- if .Values.securityHardening }}
         securityContext:
           allowPrivilegeEscalation: false
@@ -568,10 +653,13 @@ spec:
       {{- with .Values.dataPlane.components.api.extraVolumes }}
       {{- include "neuraltrust-platform.extraVolumes" (dict "items" .) | nindent 6 }}
       {{- end }}
-      {{- if $renderChInit }}
+      {{- if $chInitFromImage }}
+      - name: init-db
+        emptyDir: {}
+      {{- else if $renderChInit }}
       - name: init-db
         configMap:
-          name: {{ if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.clickhouse .Values.dataPlane.components.clickhouse.configmap }}{{ .Values.dataPlane.components.clickhouse.configmap.name | default "clickhouse-init-job" }}{{ else }}clickhouse-init-job{{ end }}
+          name: {{ $chInitConfigMap }}
           items:
             - key: init-db.sql
               path: init-db.sql

@@ -4,6 +4,66 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Added
+
+- **`PrometheusRule` for `data-plane-api` (AUT-406).** The v1-era rule was wrapped
+  in a guard on an `isV2` helper that returned a hardcoded `true`, so it never
+  rendered in v2, and it was deleted with the rest of the v1 retirement. An
+  operator running `global.monitoring.enabled` with the Prometheus Operator CRDs
+  installed therefore had no alert coverage for a component v2 still ships.
+  `DataPlaneApiDown` is back, gated on the same helper as the Deployment so it
+  cannot outlive the workload, plus `global.monitoring.enabled` and the CRD being
+  present. `for: 10m` rather than the v1 rule's `5m`: this Deployment runs
+  ClickHouse migrations in an initContainer, so a fresh install or a schema change
+  legitimately sits at zero available replicas for minutes, and `5m` would page on
+  a normal upgrade. The description was rewritten too — the v1 text claimed
+  telemetry ingest was failing, which is no longer this component's job.
+  `DataPlaneKafkaWorkersDown` is deliberately not restored; those Deployments no
+  longer exist.
+
+### Fixed
+
+- **A DataAgent `extraEnv` override of any `POSTGRES_*` name broke the next
+  `helm upgrade` (AUT-397).** The hybrid Postgres block emitted `POSTGRES_HOST`,
+  `_PORT`, `_USER`, `_DB`, `_SSLMODE` and `_PASSWORD` without the `skip` guard the
+  gateways get from `neuraltrust-platform.postgresEnv`, while `.Values.extraEnv` is
+  spliced in a few lines later. An operator overriding one of those names ended up
+  with **two** env entries of that name, which is the `$setElementOrder`
+  strategic-merge-patch failure the canonical key-family work avoids everywhere
+  else. Reproduced on 2.13.0 before the fix. The block now yields to an override
+  instead of duplicating it. A chart-managed install renders byte-identically —
+  same six variables, same order, same unquoted Secret keys — so nothing changes
+  for anyone not setting an override.
+
+### Changed
+
+- **`data-plane-api` ClickHouse DDL now comes from the application image.** The
+  chart used to render `files/clickhouse/init-db.sql` into a `clickhouse-init-job`
+  ConfigMap and mount that at `/init-db`. The same DDL already ships inside the
+  `data-plane-api` image at `/app/migrations/clickhouse/init-db.sql`, so the chart
+  carried a second copy that drifted from the application that reads it — the
+  chart's copy was two schema revisions behind the pinned image. A
+  `copy-migration-sql` init container now copies the file out of the image into an
+  `emptyDir` before the migration runs, so the schema always matches the image tag
+  and `migration-v2.sql` travels with it. The generated ConfigMap and the bundled
+  SQL file are gone, and `dataPlane.components.clickhouse.configmap.name` now
+  defaults to `""`: set it to mount a ConfigMap you manage yourself carrying the
+  DDL under an `init-db.sql` key, and the chart will use that instead of the image.
+
+### Fixed
+
+- **ClickHouse migrations no longer abort on a lagging replica.** The migration
+  init container fed the whole DDL file to `clickhouse-client --multiquery`. On a
+  replicated backend an `ALTER` is rejected while the replica's metadata version
+  trails the coordinator (`CANNOT_ASSIGN_ALTER`, code 517) — retryable in itself,
+  but in a multiquery stream it discards every statement that follows, so a
+  40-statement `ALTER` sequence turned one transient rejection into a
+  `CrashLoopBackOff` that replayed the file from the top on each restart.
+  Statements are now applied one at a time and retried individually (10 attempts,
+  incrementing backoff), so progress is monotonic. The runner also reports the
+  target database it resolved and no longer silences a failure to record the
+  migration hash, which would otherwise replay the whole DDL on every pod start.
+
 ## [v2.13.0] — 2026-08-27
 
 ### Added
