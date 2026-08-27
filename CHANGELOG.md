@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.13.0] — 2026-08-27
+
 ### Added
 
 - **`topic-guard` firewall worker.** The chart shipped five of the seven workers
