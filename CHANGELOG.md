@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.13.3] — 2026-08-28
+
 ### Fixed
 
 - **CH-dependent workloads no longer CrashLoopBackOff into a starting ClickHouse
