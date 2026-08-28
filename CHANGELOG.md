@@ -639,6 +639,25 @@ Chart `2.9.4` → `2.9.5`.
   `["none"]` suppressing. The MCP signing-key Job uses the same helper so it
   keeps tracking the app image.
 
+## [v2.9.4] — 2026-08-06
+
+### Changed
+
+- Synced `.trusttest_config.json` from `data-plane-api` (#104). No chart templates or
+  values changed.
+
+## [v2.9.3] — 2026-08-06
+
+### Fixed
+
+- **ConfigMap-only changes shipped silently and activated at an unpredictable later
+  restart (AUT-403).** Workload pod templates now carry checksum annotations over the
+  ConfigMaps and `envFrom` sources they read, so a config-only edit rolls the pods
+  that consume it instead of waiting for an unrelated restart to pick it up.
+- **`create-secrets.sh` did not create `CONFIG_SYNC_LKG_KEY` for pre-provisioned
+  installs (AUT-393).** The last-known-good encryption key is chart-owned, so an
+  install that pre-created its Secrets ended up without it.
+
 ## [v2.9.2] — 2026-08-05
 
 Chart `2.9.1` → `2.9.2`. Four chart defects against the SaaS gitops reference.
@@ -687,6 +706,22 @@ Chart `2.9.1` → `2.9.2`. Four chart defects against the SaaS gitops reference.
 - Subcharts: `agentgateway` `0.1.37 → 0.1.38`, `trustguard` `0.1.34 → 0.1.35`,
   `datacore` `0.1.16 → 0.1.17`, `alertengine` `0.1.7 → 0.1.8`,
   `firewall` `2.1.6 → 2.1.7`.
+
+## [v2.9.1] — 2026-08-03
+
+### Changed
+
+- Image bumps across the v2 services (#101). No template or values contract changes.
+
+## [v2.9.0] — 2026-08-03
+
+### Changed
+
+- **Platform secrets consolidation and PostgreSQL handling.** Extended
+  `platform-secrets` and the `resolveSecret` plumbing across the gateway,
+  data-plane-api, DataAgent and TrustLens workloads, with matching
+  `create-secrets.sh`, `validate-values.yaml` and render-suite coverage. Groundwork
+  for the shared-credential model the later 2.9.x releases build on.
 
 ## [v2.8.0] — 2026-08-01
 
@@ -763,6 +798,12 @@ credential at all.
 - **The user is now URL-encoded in the composed Prisma URL.** The lib/pq DSN
   next to it already encoded it. No effect on any name that is a plain SQL
   identifier, which is every default.
+
+## [v2.7.1] — 2026-07-31
+
+### Changed
+
+- Image bumps across the v2 services (#100). No template or values contract changes.
 
 ## [v2.7.0] — 2026-07-31
 
@@ -1164,6 +1205,21 @@ versions change, and the other subcharts render identically, so they are not bum
   scheduler component exists in v2 — so the fallbacks are being removed on the console
   side. Deleting the dead chart block does not change this behaviour either way.
 
+## [v2.5.2] — 2026-07-31
+
+### Documentation
+
+- Clarified which components an external install actually deploys, in
+  `README-EXTERNAL.md`.
+
+## [v2.5.1] — 2026-07-30
+
+### Documentation
+
+- Clarified the external deployment component list across `README.md`,
+  `README-EXTERNAL.md`, `VALUES_SCENARIOS.md`, `docs/architecture.md` and
+  `docs/observability.md`, and removed stale watchdog references.
+
 ## [v2.5.0] — 2026-07-30
 
 ### Added
@@ -1223,6 +1279,13 @@ versions change, and the other subcharts render identically, so they are not bum
   `hasKey`. Turning generation off without supplying an `existingSecret` produces a
   control plane that cannot start, so the chart also rejects that combination at render
   time rather than at rollout.
+
+## [v2.4.2] — 2026-07-30
+
+### Documentation
+
+- Expanded the image-pull documentation and clarified registry behaviour across
+  `README.md`, `README-EXTERNAL.md` and `SECRETS.md`.
 
 ## [v2.4.1] — 2026-07-30
 
