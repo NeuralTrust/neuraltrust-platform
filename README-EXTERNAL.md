@@ -17,7 +17,7 @@ your environment. For the default hosted-control-plane path, see the
 | Analytics store         | Hosted, via enrolment-backed OTLP egress           | In-cluster or managed **ClickHouse**                      |
 | Telemetry collector     | `clickstack-egress-collector` sidecar on DataAgent | `clickstack-collector` Deployment writing to ClickHouse   |
 | DataAgent               | One per enabled product                            | **Never renders**                                         |
-| Config-sync             | On by default, needs console tokens                | Off — configuration lives in PostgreSQL                   |
+| Config-sync             | On by default, needs console tokens                | Data planes do not dial it — configuration lives in PostgreSQL. The control plane still serves the listener; see below |
 | Air-gap capable         | No (product OTLP egress is mandatory)              | Yes                                                       |
 
 
@@ -70,6 +70,37 @@ admin off entirely.
 Unlike hybrid, external needs **no** config-sync tokens and **no** DataAgent
 enrolment JWTs. Every other credential is generated on first install and reused
 on upgrade while `global.autoGenerateSecrets: true` — see [SECRETS.md](./SECRETS.md).
+
+#### Why two `*-configsync-tls` Secrets appear anyway
+
+A default external install creates `agentgateway-configsync-tls` and
+`trustguard-configsync-tls` even though config-sync is not in use. They are not
+leftovers, and their presence does not mean config-sync is enabled.
+
+The two halves are separately gated:
+
+| | State in a default external install |
+|---|---|
+| Config-sync **client** (data planes dial the control plane) | **Off.** Configuration is read from PostgreSQL, and no console token is needed |
+| Config-sync **server** (control plane listens on gRPC `:8083`) | **Always started**, and under a deployed `config.appEnv` — `prod`, `production`, `staging` or `stage` — it refuses to boot without a TLS keypair |
+
+So the Secrets exist because the *server* always starts, not because anything
+dials it. Both control planes hard-fail without them: TrustGate at
+`pkg/container/modules/control_config_sync.go` and TrustGuard at
+`internal/container/modules/control_config_sync.go` both return an invalid-config
+error when `CONFIG_SYNC_GRPC_TLS_CERT` / `_KEY` are unset in a deployed
+environment. The chart generates a self-signed CA and server certificate for
+exactly this reason, and never rotates them.
+
+You do not need to do anything with these Secrets. Two consequences worth knowing:
+
+- Setting `configSync.grpcTls.autoGenerate: false` without supplying
+  `configSync.grpcTls.existingSecret` is rejected at render time, because the
+  control plane could not start.
+- Turning on in-cluster control-plane → data-plane sync is supported and needs no
+  new certificates: set `agentgateway.configSync.enabled: true` (and/or the
+  TrustGuard equivalent). The TLS material is already there. That is a deliberate
+  option, not the default.
 
 ### 3. Write your values file
 
