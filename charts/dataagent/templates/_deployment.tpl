@@ -50,6 +50,15 @@ spec:
       - name: egress-config
         configMap:
           name: {{ include "neuraltrust-platform.clickstackEgress.fullname" . }}-config
+      {{- /* Backing store for the exporter's sending_queue. Required rather than
+             optional: the collector container runs readOnlyRootFilesystem: true,
+             so the queue directory has to be a mounted volume. sizeLimit bounds
+             it so a long broker outage cannot consume the node's ephemeral
+             storage. Survives a container restart, not pod rescheduling
+             (AUT-510). */}}
+      - name: egress-queue
+        emptyDir:
+          sizeLimit: 1Gi
       {{- with (include "neuraltrust-platform.clickstackEgress.tlsCaSecretName" .) }}
       - name: egress-ca-bundle
         secret:
@@ -201,6 +210,8 @@ spec:
           - name: egress-config
             mountPath: /etc/otelcol
             readOnly: true
+          - name: egress-queue
+            mountPath: /var/lib/otelcol/queue
           {{- with (include "neuraltrust-platform.clickstackEgress.tlsCaSecretName" .) }}
           - name: egress-ca-bundle
             mountPath: /etc/otelcol/ca

@@ -11,7 +11,24 @@ extensions:
     token_url: {{ include "neuraltrust-platform.clickstackEgress.tokenURL" . | quote }}
     scopes: ["otlp:write"]
     timeout: 10s
-    expiry_buffer: 2m
+    {{- /* Refresh this far ahead of expiry. The token TTL reads like an hour of
+           cover but is not: at 2m the agent refreshed ~58min in, and a broker
+           outage spanning that moment failed the mint outright. 10m absorbs a
+           short outage using the token's own remaining validity, before the
+           queue below has to do anything (AUT-510). */}}
+    expiry_buffer: 10m
+  {{- /* Disk-backed queue for the exporter. Without it there is no buffer at all:
+         a batch in flight when the broker goes away is retried in memory and then
+         dropped, and anything held is lost if the collector restarts.
+
+         The directory must be a mounted volume — this container runs
+         readOnlyRootFilesystem: true. The chart mounts an emptyDir, so the queue
+         survives a collector restart and the outage itself but NOT pod
+         rescheduling. That is deliberate: a PersistentVolume here would put a
+         storage requirement on every hybrid data plane, including air-gapped and
+         edge installs with no dynamic provisioner. */}}
+  file_storage/queue:
+    directory: /var/lib/otelcol/queue
 
 receivers:
   otlp:
@@ -48,14 +65,24 @@ exporters:
       include_system_ca_certs_pool: true
       {{- end }}
     {{- end }}
+    sending_queue:
+      enabled: true
+      storage: file_storage/queue
+      {{- /* Batches, not bytes. Paired with the 1Gi emptyDir sizeLimit on the
+             mount so a long outage cannot fill the node's ephemeral storage. */}}
+      queue_size: 1000
     retry_on_failure:
       enabled: true
       initial_interval: 5s
       max_interval: 30s
-      max_elapsed_time: 300s
+      {{- /* Was 300s, which is why a >5min broker outage lost telemetry: the
+             exporter gave up and dropped the batch. 30m is past any plausible
+             broker outage and still bounded, so a permanently rejected batch
+             cannot wedge the queue forever. */}}
+      max_elapsed_time: 1800s
 
 service:
-  extensions: [health_check, oauth2client]
+  extensions: [health_check, oauth2client, file_storage/queue]
   pipelines:
     logs:
       receivers: [otlp]
