@@ -4,6 +4,50 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Fixed
+
+- **A DataBridge outage longer than five minutes silently dropped telemetry
+  (AUT-510).** A data plane holds no long-lived telemetry credential: the egress
+  collector mints a short-lived OTLP token through DataAgent, which relays the
+  exchange over the DataBridge stream. With the stream down the mint fails, and the
+  collector had nowhere to put the data — `otlphttp/saas` had **no `sending_queue`
+  at all**, so a batch was retried in memory and dropped once
+  `max_elapsed_time: 300s` elapsed, and anything held was lost outright if the
+  collector restarted. Both pods stayed healthy throughout and nothing alerted, so
+  the product could not tell a broken token path from a customer with no traffic.
+  The exporter now has a disk-backed `sending_queue` behind a `file_storage`
+  extension, `max_elapsed_time` is 30m, and `oauth2client.expiry_buffer` is 10m so a
+  short outage is absorbed by the token's own remaining validity before the queue is
+  needed.
+
+  The queue is backed by an `emptyDir` with a 1Gi `sizeLimit`, mounted because that
+  sidecar runs `readOnlyRootFilesystem: true`. **It survives a collector restart and
+  the outage; it does not survive pod rescheduling.** That is deliberate — a
+  PersistentVolume here would put a storage requirement on every hybrid data plane,
+  including air-gapped and edge installs with no dynamic provisioner.
+
+  Ships alongside a `dataplane-ingest-freshness` watchdog check, **disabled**. An
+  untuned freshness alert cannot distinguish an idle data plane from a broken one,
+  so it needs a per-install soak against real volume before being armed.
+
+- **An unready DataAgent took the egress collector out of service with it
+  (AUT-538).** `clickstack-egress-collector` runs as a sidecar in the DataAgent pod
+  and its Service selects that pod, and Kubernetes marks a pod Ready only when every
+  container is. A DataBridge outage therefore stripped the endpoints of a perfectly
+  healthy collector, converting a control-plane outage into a **local telemetry
+  outage** at exactly the moment telemetry is needed to diagnose it — and costing the
+  collector its ability to buffer and retry, so that telemetry was lost rather than
+  delayed. The Service now sets `publishNotReadyAddresses: true`.
+
+  The root cause is in DataAgent, which failed `/readyz` whenever the stream was
+  down; that fix is in the DataAgent repo and reaches installs with its next image.
+  Nothing dials DataAgent — it is outbound-only — so its readiness protected no
+  consumer of its own and only governed the sidecar's reachability. The chart change
+  stands on its own and also covers any future readiness regression. Trade-off:
+  endpoints are published while the collector itself is starting, so a sender can get
+  a refused connection rather than "no endpoints"; both are retryable, and the
+  exporter now has the queue above behind it.
+
 ## [v2.13.2] — 2026-08-28
 
 ### Fixed

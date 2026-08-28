@@ -484,6 +484,30 @@ checks:
       window: 10m
     thresholds:
       staleStatus: critical
+  # Per-data-plane ingest, which is the loud half of AUT-510. The quiet failure it
+  # exists for: a DataAgent's OTLP token mint depends on the DataBridge stream, so a
+  # broker outage spanning a refresh stops telemetry arriving while both pods stay
+  # healthy and nothing pages. The product then cannot tell a broken token path from
+  # a customer with no traffic.
+  #
+  # Ships DISABLED and needs a soak before it is armed anywhere: a data plane that
+  # legitimately has no traffic looks identical to a broken one, so the window has to
+  # be tuned per install against real volume first. Arming it untuned would page at
+  # night on an idle tenant, which the freshness rules explicitly forbid.
+  #
+  # Requires runner.clickstack (external/saas only — hybrid has no local ClickHouse,
+  # and the central watchdog evaluates hybrid tenants with target.tenantId instead).
+  - id: dataplane-ingest-freshness
+    kind: otlp_freshness
+    enabled: false
+    target:
+      # Widen per install: the services whose absence from the sink means a data
+      # plane has gone quiet. Left narrow on purpose so enabling it does not
+      # immediately alert on every service that never emitted.
+      services: [trustguard, trustgate]
+      window: 15m
+    thresholds:
+      staleStatus: critical
   - id: platform-pvc-fill
     kind: pvc_fill
     enabled: false

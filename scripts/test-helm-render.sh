@@ -1729,6 +1729,55 @@ document_named "$out10b8" control-plane-secrets "$out10b8cps"
 assert_not_contains "$out10b8cps" 'OPENAI_API_KEY' \
   "openaiApiKey map form: the key is omitted from the chart Secret, not encoded"
 
+blue "==> Scenario 10b9: egress collector telemetry durability (AUT-510)"
+# Without a sending_queue the exporter retried in memory and dropped the batch at
+# max_elapsed_time, so a DataBridge outage spanning a token refresh lost telemetry
+# silently. The queue needs a writable volume because the sidecar runs
+# readOnlyRootFilesystem: true.
+out10b9="$TMP/scenario-egress-queue.yaml"
+render_default "$out10b9"
+assert_contains "$out10b9" 'file_storage/queue:' \
+  "egress: file_storage extension declared"
+assert_contains "$out10b9" 'extensions: \[health_check, oauth2client, file_storage/queue\]' \
+  "egress: the storage extension is registered on the service, or it is inert"
+assert_contains "$out10b9" 'storage: file_storage/queue' \
+  "egress: the exporter queue is backed by that extension"
+assert_contains "$out10b9" 'name: egress-queue' \
+  "egress: queue volume and mount render"
+# 300s is the value that produced the reported data loss; fence it out.
+assert_not_contains "$out10b9" 'max_elapsed_time: 300s' \
+  "egress: the 5-minute give-up window is gone"
+# The zero-ingest check must ship disabled — an untuned freshness alert cannot tell
+# an idle data plane from a broken one, and would page at night on a quiet tenant.
+out10b9b="$TMP/scenario-ingest-freshness.yaml"
+render_default "$out10b9b" --set watchdog.enabled=true
+ingest_enabled="$(yq -N '.checks[] | select(.id == "dataplane-ingest-freshness") | .enabled' \
+  <(yq -N 'select(.kind == "ConfigMap" and (.metadata.name | test("watchdog"))) | .data.["config.yaml"]' "$out10b9b") 2>/dev/null | head -1)"
+if [ "$ingest_enabled" != "false" ]; then
+  red "FAIL: dataplane-ingest-freshness must ship disabled (got enabled=${ingest_enabled:-missing})"
+  exit 1
+fi
+green "ok  - watchdog: dataplane-ingest-freshness ships disabled pending a soak"
+
+blue "==> Scenario 10c0: egress collector survives an unready DataAgent (AUT-538)"
+# The egress Service selects the DataAgent pod, and a pod is Ready only when every
+# container is — so a control-plane blip stripped the endpoints of a healthy
+# collector and took local telemetry down with it.
+egress_pnr="$(yq -N 'select(.kind == "Service" and .metadata.name == "clickstack-egress-collector") | .spec.publishNotReadyAddresses' "$out10b9" 2>/dev/null | head -1)"
+if [ "$egress_pnr" != "true" ]; then
+  red "FAIL: clickstack-egress-collector must publish not-ready addresses (got ${egress_pnr:-missing})"
+  exit 1
+fi
+green "ok  - egress Service keeps endpoints when the dataagent container is unready"
+# Deliberately scoped to the egress Service: the agent's own health Service should
+# still drop out when the agent is unready.
+da_pnr="$(yq -N 'select(.kind == "Service" and .metadata.name == "dataagent") | .spec.publishNotReadyAddresses' "$out10b9" 2>/dev/null | head -1)"
+if [ "$da_pnr" = "true" ]; then
+  red "FAIL: the dataagent health Service must not publish not-ready addresses"
+  exit 1
+fi
+green "ok  - dataagent health Service still drops out when unready"
+
 blue "==> Scenario 10c: hybrid has no in-cluster ClickStack; egress via sidecar"
 out10c="$TMP/scenario-hybrid-clickstack-channels.yaml"
 render_default "$out10c"
