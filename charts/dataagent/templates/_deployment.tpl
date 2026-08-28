@@ -95,13 +95,18 @@ spec:
                breaks the next `helm upgrade` — the same reason
                neuraltrust-platform.postgresEnv takes a `skip` list for the gateways
                (AUT-397). Yield to the override instead of duplicating it. The env name
-               equals the Secret key for all five, so an ordered list keeps the rendered
+               equals the Secret key throughout, so an ordered list keeps the rendered
                order stable rather than re-sorting it alphabetically as a dict would. */}}
         {{- $skip := list }}
         {{- range $e := (default list .Values.extraEnv) }}
         {{- if $e.name }}{{- $skip = append $skip $e.name }}{{- end }}
         {{- end }}
-        {{- range $envName := (list "POSTGRES_HOST" "POSTGRES_PORT" "POSTGRES_USER" "POSTGRES_DB" "POSTGRES_SSLMODE") }}
+        {{- /* Required, deliberately (AUT-397). DataAgent cannot function without a
+               database when STORE_BACKEND=postgres, so a missing key should stop the
+               pod rather than let it start misconfigured. The cost is that the reason
+               only shows in `kubectl describe` as CreateContainerConfigError, which
+               is why SECRETS.md now names these as required for this store. */}}
+        {{- range $envName := (list "POSTGRES_HOST" "POSTGRES_PORT" "POSTGRES_USER" "POSTGRES_DB") }}
         {{- if not (has $envName $skip) }}
         {{- /* Key unquoted, matching what this block emitted before the skip guard.
                A quoted `key: "POSTGRES_SSLMODE"` is the shape the render suite fences
@@ -115,6 +120,20 @@ spec:
               name: {{ $pgSecret | quote }}
               key: {{ $envName }}
         {{- end }}
+        {{- end }}
+        {{- /* SSLMODE is optional, unlike its four siblings above. SECRETS.md
+               documents it as not required for a pre-generated postgresql-secrets,
+               and the gateway helper treats it the same way — so a required ref here
+               meant an operator who followed the documentation exactly landed in
+               CreateContainerConfigError. Absent, DataAgent uses its own libpq
+               default, which is the behaviour the gateways already have. */}}
+        {{- if not (has "POSTGRES_SSLMODE" $skip) }}
+        - name: POSTGRES_SSLMODE
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecret | quote }}
+              key: POSTGRES_SSLMODE
+              optional: true
         {{- end }}
         {{- if not (has "POSTGRES_PASSWORD" $skip) }}
         {{- include "neuraltrust-platform.postgresql.passwordEnv" (dict "ctx" . "secret" $pgSecret) | nindent 8 }}
