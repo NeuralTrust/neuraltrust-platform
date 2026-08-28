@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.13.2] — 2026-08-28
+
 ### Fixed
 
 - **The managed config-sync Secret vanished from upgrade renders, hiding key
