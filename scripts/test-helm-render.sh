@@ -676,6 +676,23 @@ out1d5="$TMP/scenario-config-sync-upgrade-render.yaml"
 render_default "$out1d5" --is-upgrade
 assert_not_contains "$out1d5" 'key: "?CONFIG_SYNC_LKG_KEY"?' \
   "config-sync: an upgrade render agrees with the install render on the owned path"
+# Same principle, the other direction (AUT-408): the managed Secret document itself
+# must survive an upgrade render. Gated on "config-sync needs the chart to mint a
+# token" it did not, so an operator supplying their own token saw the whole Secret —
+# and CONFIG_SYNC_LKG_KEY with it — disappear from `helm diff upgrade`. The live
+# upgrade was unaffected; the review diff lied.
+assert_contains "$out1d5" 'name: agentgateway-secrets' \
+  "config-sync: an upgrade render still emits the managed agentgateway Secret"
+assert_contains "$out1d5" 'name: trustguard-secrets' \
+  "config-sync: an upgrade render still emits the managed trustguard Secret"
+out1d6="$TMP/scenario-config-sync-upgrade-operator-token.yaml"
+render_default "$out1d6" --is-upgrade \
+  --set agentgateway.configSync.existingSecret.name=my-token \
+  --set trustguard.configSync.existingSecret.name=my-token
+assert_contains "$out1d6" 'name: agentgateway-secrets' \
+  "config-sync: operator-supplied token still leaves the managed Secret in an upgrade render"
+assert_contains "$out1d6" 'name: trustguard-secrets' \
+  "config-sync: same for trustguard"
 
 blue "==> Scenario 1e: preserved shared PostgreSQL supports DataAgent"
 out1f="$TMP/scenario-preserved-shared-postgres.yaml"
@@ -1679,6 +1696,38 @@ if [ "$base_refs" != "4" ]; then
   exit 1
 fi
 green "ok  - dataagent: chart still supplies POSTGRES_HOST from the Secret with no override"
+
+blue "==> Scenario 10b7: shared-credential integrity (AUT-383)"
+# A knob that redirects only one half of a signer/verifier pair leaves the two
+# holding different values, so every token one side mints is rejected by the other
+# — silently, with both pods healthy. The consumers are sibling subcharts and
+# cannot read each other's values, so this is rejected rather than reconciled.
+assert_render_fails "one-sided firewall Secret override is rejected" \
+  --set global.deploymentMode=external \
+  --set trustguard.firewall.existingSecret.name=my-fw
+assert_render_fails "one-sided data-plane JWT Secret override is rejected" \
+  --set global.deploymentMode=external \
+  --set 'data-plane-api.dataPlane.secrets.dataPlaneJWTSecretName=my-dp'
+# The supported way to own the credential moves every consumer at once, so naming
+# that same Secret on both sides must still render.
+out10b7="$TMP/scenario-shared-secret-aligned.yaml"
+render_default "$out10b7" --set global.deploymentMode=external \
+  --set global.platformSecret.existingSecret.name=mine \
+  --set trustguard.firewall.existingSecret.name=mine
+assert_contains "$out10b7" 'name: "?mine"?' \
+  "shared credential: pointing both sides at one operator Secret still renders"
+# A map-shaped openaiApiKey is documented and handled by both Deployments, but was
+# piped straight into b64enc here and aborted the whole render.
+out10b8="$TMP/scenario-openai-map-shape.yaml"
+render_default "$out10b8" --set global.deploymentMode=external \
+  --set 'control-plane-api.controlPlane.secrets.openaiApiKey.secretName=my-openai' \
+  --set 'control-plane-api.controlPlane.secrets.openaiApiKey.secretKey=API_KEY'
+assert_contains "$out10b8" 'name: "?my-openai"?' \
+  "openaiApiKey map form: Deployments reference the operator Secret"
+out10b8cps="$TMP/scenario-openai-map-cp-secret.yaml"
+document_named "$out10b8" control-plane-secrets "$out10b8cps"
+assert_not_contains "$out10b8cps" 'OPENAI_API_KEY' \
+  "openaiApiKey map form: the key is omitted from the chart Secret, not encoded"
 
 blue "==> Scenario 10c: hybrid has no in-cluster ClickStack; egress via sidecar"
 out10c="$TMP/scenario-hybrid-clickstack-channels.yaml"

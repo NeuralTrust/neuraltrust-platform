@@ -382,3 +382,28 @@ Secret produces a pod that cannot start. Fail at render instead.
     {{- fail "saas mode requires the shared platform Secret, which is currently out of play (global.platformSecret.enabled=false, an operator-owned global.platformSecret.existingSecret, global.preserveExistingSecrets=true, or global.autoGenerateSecrets=false). It carries ENROLMENT_INTROSPECTION_TOKEN and its DATACORE_SERVICE_TOKEN alias — which must hold one identical value or every agent connection 401s — plus ENROLMENT_SIGNING_SECRET, CONFIG_SYNC_SIGNING_SECRET (private-gateway install tokens), and the RS256 TELEMETRY_JWT_PRIVATE_KEY_PEM. Re-enable it, or supply all five in your own Secret and point global.platformSecret.existingSecret at it." -}}
   {{- end -}}
 {{- end -}}
+
+{{- /* One-sided overrides of a shared credential (AUT-383).
+
+       Two knobs redirect only half of a signer/verifier pair. The other half keeps
+       reading the chart's Secret, so the two hold different values and every token
+       one side mints is rejected by the other — silently, at runtime, with both
+       pods healthy. Neither can be made to work where it sits: the consumers are
+       sibling subcharts and cannot read a value under another subchart's root.
+
+       Rejecting at render time rather than papering over it, because the supported
+       way to own this credential is global.platformSecret.existingSecret.name,
+       which moves every consumer at once. Setting the knob to that same Secret is
+       allowed — both sides then agree, which is the only thing being enforced. */ -}}
+{{- $sharedSecretName := (default dict (default dict $global.platformSecret).existingSecret).name | default "" -}}
+
+{{- $tgFwRef := (default dict (default dict (default dict .Values.trustguard).firewall).existingSecret).name | default "" -}}
+{{- if and $tgFwRef (ne $tgFwRef $sharedSecretName) -}}
+  {{- fail (printf "trustguard.firewall.existingSecret.name=%q points only TrustGuard at that Secret. The firewall gateway and every firewall worker are a sibling subchart and cannot read a value under trustguard.*, so they keep reading the chart's Secret. TrustGuard would sign its {\"purpose\":\"firewall\"} JWT with your key while the firewall verifies with the chart's, and every firewall call would fail authentication. To supply your own Secret for both sides, set global.platformSecret.existingSecret.name instead (see SECRETS.md for the logical key names it must carry)." $tgFwRef) -}}
+{{- end -}}
+
+{{- $dpApiVals := default dict (index .Values "data-plane-api") -}}
+{{- $dpJwtRef := (default dict (default dict $dpApiVals.dataPlane).secrets).dataPlaneJWTSecretName | default "" -}}
+{{- if and $dpJwtRef (ne $dpJwtRef $sharedSecretName) -}}
+  {{- fail (printf "data-plane-api.dataPlane.secrets.dataPlaneJWTSecretName=%q points only data-plane-api at that Secret. control-plane-api and control-plane-app keep reading DATA_PLANE_JWT_SECRET from the chart's Secret, so the token the control plane signs is not the one the data plane accepts. Set global.platformSecret.existingSecret.name instead to move every consumer at once (see SECRETS.md)." $dpJwtRef) -}}
+{{- end -}}
