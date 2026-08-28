@@ -1696,6 +1696,66 @@ if [ "$base_refs" != "4" ]; then
   exit 1
 fi
 green "ok  - dataagent: chart still supplies POSTGRES_HOST from the Secret with no override"
+# AUT-397 second half: which refs are required is a decision, so pin it. The four
+# credentials DataAgent cannot work without stay required so a missing key stops the
+# pod; SSLMODE is optional because SECRETS.md documents it as not required for a
+# pre-generated Secret, and a required ref there meant following the docs produced
+# CreateContainerConfigError.
+da_opt() {  # env name -> "true" when the ref is optional
+  yq -N "select(.kind == \"Deployment\" and .metadata.name == \"dataagent\")
+    | .spec.template.spec.containers[].env[] | select(.name == \"$1\")
+    | .valueFrom.secretKeyRef.optional" "$out10b6b" 2>/dev/null | head -1
+}
+for req in POSTGRES_HOST POSTGRES_PORT POSTGRES_USER POSTGRES_DB; do
+  got="$(da_opt "$req")"
+  if [ "$got" != "null" ]; then
+    red "FAIL: dataagent: $req must stay a required ref (optional=$got)"
+    exit 1
+  fi
+done
+green "ok  - dataagent: the four indispensable Postgres keys stay required"
+sslmode_opt="$(da_opt POSTGRES_SSLMODE)"
+if [ "$sslmode_opt" != "true" ]; then
+  red "FAIL: dataagent: POSTGRES_SSLMODE must be optional, SECRETS.md documents it as not required (optional=$sslmode_opt)"
+  exit 1
+fi
+green "ok  - dataagent: POSTGRES_SSLMODE is an optional ref, matching the documented contract"
+
+blue "==> Scenario 10c1: CH-dependent workloads wait for ClickHouse (AUT-409)"
+# On a clean install these four raced clickhouse-0 and CrashLoopBackOff'd two or
+# three times before it accepted connections.
+out10c1="$TMP/scenario-ch-wait.yaml"
+render_default "$out10c1" --set global.deploymentMode=external
+for dep in datacore alertengine-api alertengine-worker clickstack-collector; do
+  # Select the Deployment first, then list initContainer names. A `[]?` guard would
+  # emit a 0 for every non-matching document and the first of those wins a `head -1`.
+  names="$(yq -N "select(.kind == \"Deployment\" and .metadata.name == \"$dep\") | .spec.template.spec.initContainers[].name" "$out10c1" 2>/dev/null || true)"
+  count="$(printf '%s\n' "$names" | grep -c '^wait-for-clickhouse$' || true)"
+  if [ "${count:-0}" != "1" ]; then
+    red "FAIL: $dep must have exactly one wait-for-clickhouse initContainer (got ${count:-0})"
+    exit 1
+  fi
+done
+green "ok  - all four CH-dependent workloads gain a wait-for-clickhouse initContainer"
+# The invariant that keeps this from breaking a working install: the wait must target
+# exactly what the app is configured to reach, never a guess. If they ever diverge the
+# initContainer would fail a deployment that would otherwise have worked.
+ch_wait_cmd="$(yq -N 'select(.kind == "Deployment" and .metadata.name == "datacore") | .spec.template.spec.initContainers[] | select(.name == "wait-for-clickhouse") | .command[-1]' "$out10c1" 2>/dev/null)"
+ch_wait_host="$(printf '%s' "$ch_wait_cmd" | sed -n 's/^ *HOST="\(.*\)"$/\1/p' | head -1)"
+ch_wait_port="$(printf '%s' "$ch_wait_cmd" | sed -n 's/^ *PORT="\(.*\)"$/\1/p' | head -1)"
+ch_app_addr="$(yq -N 'select(.kind == "ConfigMap" and .metadata.name == "datacore-env-vars") | .data.CLICKHOUSE_ADDR' "$out10c1" 2>/dev/null | head -1)"
+if [ "${ch_wait_host}:${ch_wait_port}" != "$ch_app_addr" ]; then
+  red "FAIL: datacore wait target ${ch_wait_host}:${ch_wait_port} != CLICKHOUSE_ADDR ${ch_app_addr}"
+  red "  a wait that targets anything other than the app's own endpoint can fail an install that would have worked"
+  exit 1
+fi
+green "ok  - the wait targets exactly the endpoint the app is configured to reach"
+# Hybrid deploys no ClickHouse and none of these workloads, so nothing should appear.
+# Render its own file: $out10b9 belongs to a later scenario and set -u would abort.
+out10c1h="$TMP/scenario-ch-wait-hybrid.yaml"
+render_default "$out10c1h"
+assert_not_contains "$out10c1h" 'wait-for-clickhouse' \
+  "hybrid: no ClickHouse wait, since neither ClickHouse nor these workloads render"
 
 blue "==> Scenario 10b7: shared-credential integrity (AUT-383)"
 # A knob that redirects only one half of a signer/verifier pair leaves the two

@@ -35,6 +35,14 @@ spec:
       - name: tmp
         emptyDir: {}
       {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 6 }}
+      {{- /* Wait for ClickHouse rather than CrashLoopBackOff into it on first boot
+             (AUT-409). Host/port come from this subchart's own clickhouse block —
+             .Values.infrastructure is an umbrella key and invisible here. */}}
+      {{- $ch := default dict .Values.clickhouse }}
+      {{- with (include "neuraltrust-platform.clickhouse.waitInit" (dict "host" ($ch.host | default "") "port" ($ch.nativePort | default "") "global" .Values.global)) }}
+      initContainers:
+      {{- . | nindent 6 }}
+      {{- end }}
       containers:
       - name: alertengine
         image: {{ $img | quote }}

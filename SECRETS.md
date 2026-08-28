@@ -309,10 +309,20 @@ when convenient — it is validated at render time, `extraEnv` is not.
 | `postgresql-secrets` | `POSTGRES_USER` | Yes (if pre-generating) | Database username |
 | `postgresql-secrets` | `POSTGRES_PASSWORD` | Auto-generated (password mode) | Database password. Empty when `controlPlane.components.postgresql.authMode: iam`. |
 | `postgresql-secrets` | `POSTGRES_DB` | Yes (if pre-generating) | Database name |
-| `postgresql-secrets` | `POSTGRES_SSLMODE` | No | `sslmode` for the connection. |
+| `postgresql-secrets` | `POSTGRES_SSLMODE` | No | `sslmode` for the connection. Referenced optionally everywhere, so omitting it falls back to each service's own libpq default rather than blocking a pod. |
 | `postgresql-secrets` | `POSTGRES_LOGIN` | No | `aws` (IAM) or `default`. The only IAM switch the Go services read (`pkg/config/config.go`). |
 | `postgresql-secrets` | `POSTGRES_AUTH_MODE` | No | `password` (default) or `iam`. Read by the Next.js app (`lib/db/postgresConfig.ts`). |
 | `postgresql-secrets` | `POSTGRES_CONNECTION_TYPE` | No | `postgres` (password) or `aurora` (IAM). Read by the Python API (`src/database.py`). |
+
+> **Pre-generating `postgresql-secrets` with a DataAgent on the Postgres store.**
+> `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER` and `POSTGRES_DB` are referenced
+> as **required** by DataAgent, deliberately: it cannot work without a database, so a
+> missing key stops the pod rather than letting it start misconfigured. The cost is
+> that the reason is only visible as `CreateContainerConfigError` in
+> `kubectl describe pod`, so check those four first if a DataAgent will not start
+> against an operator-owned Secret. `POSTGRES_SSLMODE` and `POSTGRES_PASSWORD` are
+> optional references and their absence is safe — password is expected to be empty
+> under IAM auth.
 | `postgresql-secrets` | `POSTGRES_PRISMA_URL` | Yes in external | Prisma-compatible URL, carrying `connection_limit`. Password-less when `authMode: iam` (init-db mints a token at migrate time). Not rendered in hybrid, which has no Prisma reader, nor when `global.postgresql.passwordSecret` owns the password — the app then builds the URL itself. `SENSIBLE_PG_DSN` is no longer written: hybrid readers build connections from the discrete `POSTGRES_*` / `DB_*` parts (RUN-1086, RUN-1093). |
 
 #### Datastore credentials without values

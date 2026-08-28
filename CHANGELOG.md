@@ -6,6 +6,41 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ### Fixed
 
+- **CH-dependent workloads no longer CrashLoopBackOff into a starting ClickHouse
+  (AUT-409).** `datacore`, `alertengine-api`, `alertengine-worker` and
+  `clickstack-collector` raced `clickhouse-0` on a clean install and restarted two or
+  three times before it accepted connections. The install converged either way, so
+  this was first-boot noise rather than a functional failure — but it made a healthy
+  install look broken. Each now gets a bounded `wait-for-clickhouse` initContainer.
+
+  Parameterised on host and port rather than sharing one gate, because
+  `.Values.infrastructure` is an umbrella key that no subchart can read, and the three
+  charts describe ClickHouse differently: datacore and alertengine use
+  `clickhouse.host` + `clickhouse.nativePort`, the ClickStack collector an endpoint
+  URL that is split. The probe is a shell TCP check needing no credentials, so it is
+  neutral to both password and IAM auth, and it gives up after ~5 minutes with a
+  readable message rather than hanging a rollout.
+
+  The invariant that keeps this safe is fenced in the render suite: **the wait must
+  target exactly the endpoint the app is configured to reach.** A wait pointing
+  anywhere else could fail an install that would otherwise have worked.
+
+- **DataAgent's `POSTGRES_SSLMODE` reference was required while the documentation
+  called it optional (AUT-397).** `SECRETS.md` lists `POSTGRES_SSLMODE` as not
+  required for a pre-generated `postgresql-secrets`, and the gateway helper treats it
+  as optional — but DataAgent's reference had no `optional: true`, so an operator who
+  followed the documentation exactly got a pod stuck in
+  `CreateContainerConfigError`. It is now an optional reference, falling back to
+  DataAgent's own libpq default exactly as the gateways do.
+
+  `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER` and `POSTGRES_DB` stay
+  **required**, deliberately: DataAgent cannot work without a database, so a missing
+  key should stop the pod rather than let it start misconfigured. Since that failure
+  is only visible via `kubectl describe`, `SECRETS.md` now says so at the point an
+  operator builds the Secret. Both halves are pinned by render assertions so the
+  decision cannot drift silently.
+
+
 - **A DataBridge outage longer than five minutes silently dropped telemetry
   (AUT-510).** A data plane holds no long-lived telemetry credential: the egress
   collector mints a short-lived OTLP token through DataAgent, which relays the

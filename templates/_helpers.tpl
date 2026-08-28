@@ -3601,3 +3601,64 @@ Usage:
 {{- end }}
 {{- end }}
 {{- end }}
+
+{{/*
+Bounded wait-for-ClickHouse initContainer (AUT-409).
+
+On a clean install the ClickHouse-dependent workloads race `clickhouse-0` and
+CrashLoopBackOff two or three times before ClickHouse accepts connections. The
+install converges either way, so this is first-boot noise rather than a functional
+failure — but it makes a healthy install look broken.
+
+Parameterised on host and port because `.Values.infrastructure` is an umbrella key
+and is not visible from inside a subchart (no subchart reads it), and each subchart
+carries its own ClickHouse block in a different shape: datacore and alertengine use
+`clickhouse.host` + `clickhouse.nativePort`, the ClickStack collector an endpoint URL.
+So each caller passes its own resolved host/port.
+
+Shell-based TCP probe rather than clickhouse-client: it needs no credentials, which
+keeps this out of the way of both password and IAM auth. Bounded at ~5 minutes so a
+wrong or unreachable endpoint fails with a readable message instead of hanging a
+rollout forever — the failure mode the issue explicitly asked to avoid.
+
+Image follows the wait-for-postgresql precedent in control-plane-api: a pinned,
+mirrored image resolved through the shared registry helper. It is the same
+clickhouse-server image the release already pulls when the subchart is deployed, so
+IfNotPresent makes it free there.
+
+Usage:
+  {{- include "neuraltrust-platform.clickhouse.waitInit" (dict "host" "clickhouse" "port" 9000 "global" .Values.global) | nindent 6 }}
+*/}}
+{{- define "neuraltrust-platform.clickhouse.waitInit" -}}
+{{- $host := .host | toString -}}
+{{- $port := .port | toString -}}
+{{- if and $host $port -}}
+- name: wait-for-clickhouse
+  image: {{ include "neuraltrust-platform.image" (dict "repository" "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickhouse-server" "tag" "26.7" "global" .global) | quote }}
+  imagePullPolicy: IfNotPresent
+  command:
+    - /bin/bash
+    - -c
+    - |
+      set -u
+      HOST={{ $host | quote }}
+      PORT={{ $port | quote }}
+      ATTEMPTS=60
+      i=0
+      until timeout 2 bash -c "cat < /dev/null > /dev/tcp/${HOST}/${PORT}" 2>/dev/null; do
+        i=$((i+1))
+        if [ "$i" -ge "$ATTEMPTS" ]; then
+          echo "ClickHouse at ${HOST}:${PORT} still unreachable after $((ATTEMPTS*5))s; giving up so the failure is visible rather than hanging." >&2
+          exit 1
+        fi
+        echo "waiting for ClickHouse at ${HOST}:${PORT} (${i}/${ATTEMPTS})"
+        sleep 5
+      done
+      echo "ClickHouse at ${HOST}:${PORT} is accepting connections"
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+{{- end -}}
+{{- end -}}
