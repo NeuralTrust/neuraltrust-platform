@@ -4,6 +4,43 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Fixed
+
+- **The managed config-sync Secret vanished from upgrade renders, hiding key
+  changes from review (AUT-408).** `charts/{agentgateway,trustguard}/templates/secrets.yaml`
+  computed `$hasExplicit` from "config-sync needs the chart to mint a token", which
+  is false whenever the operator supplies `configSync.existingSecret.name`. The
+  render gate then dropped the whole Secret on any upgrade render that cannot see
+  the cluster: `helm template --is-upgrade` emitted **zero** occurrences of
+  `CONFIG_SYNC_LKG_KEY` against two on install, and both `agentgateway-secrets` and
+  `trustguard-secrets` disappeared entirely. Live upgrades were never affected —
+  `lookup` finds the Secret and `helm.sh/resource-policy: keep` preserves it — but
+  `helm diff upgrade` and `--dry-run` are how Secret changes get reviewed, and a
+  diff that shows a key vanishing with no replacement teaches reviewers to discount
+  it. The gate now keys on config-sync simply being enabled.
+
+- **A map-shaped `openaiApiKey` aborted the entire render (AUT-383).** Both
+  control-plane Deployments document and handle
+  `controlPlane.secrets.openaiApiKey` as either a string or a
+  `{secretName, secretKey}` map, branching on `kindIs "map"`. But
+  `templates/control-plane/secrets.yaml` piped it straight into `b64enc`, so the
+  map form failed with `wrong type for value; expected string; got
+  map[string]interface {}` — the documented form could not be installed at all. A
+  map now omits the key from the chart Secret, since it means the operator owns the
+  credential and the Deployments already reference their Secret directly.
+
+- **Two knobs redirected only one half of a shared credential (AUT-383).**
+  `trustguard.firewall.existingSecret.name` moved TrustGuard but not the firewall
+  gateway or any of its workers; `data-plane-api.dataPlane.secrets.dataPlaneJWTSecretName`
+  moved data-plane-api but not control-plane-api or control-plane-app. Each left
+  the two sides of a signer/verifier pair holding different values, so every token
+  one side minted was rejected by the other — silently, at runtime, with both pods
+  healthy. Neither could be made to work in place, because the consumers are
+  sibling subcharts that cannot read a value under another subchart's root. Both
+  are now rejected at render time with a message naming the supported alternative,
+  `global.platformSecret.existingSecret.name`, which moves every consumer at once.
+  Pointing the knob at that same Secret still renders, since both sides then agree.
+
 ## [v2.13.1] — 2026-08-27
 
 ### Added
