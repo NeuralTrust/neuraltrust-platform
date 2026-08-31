@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.13.4] — 2026-08-31
+
 ### Fixed
 
 - **An external ClickHouse endpoint was ignored by four of its five consumers
