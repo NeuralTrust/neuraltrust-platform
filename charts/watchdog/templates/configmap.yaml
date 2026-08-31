@@ -13,13 +13,19 @@ data:
       defaultTimeout: {{ .Values.runner.defaultTimeout }}
       failureThreshold: {{ .Values.runner.failureThreshold }}
       {{- /* ClickStack sink for red / otlp_freshness. external+saas get the
-             in-cluster ClickHouse native address when the operator left
+             ClickHouse native address when the operator left
              runner.clickstack.address empty; hybrid stays empty (no local CH).
              Credentials always reuse CLICKHOUSE_* from clickhouse-secrets. */ -}}
       {{- $cs := default dict .Values.runner.clickstack -}}
       {{- $csAddr := default "" $cs.address -}}
+      {{- /* AUT-636: this was the literal "clickhouse:9000", so an external
+             ClickHouse left the runner probing a Service that deploy=false never
+             renders -- a check that fails for a reason the operator cannot see from
+             their own values. Resolves through global.clickhouse now, and still
+             yields clickhouse:9000 for a default in-cluster install. */ -}}
       {{- if and (eq $csAddr "") (eq (include "neuraltrust-platform.isExternal" .) "true") -}}
-      {{- $csAddr = "clickhouse:9000" -}}
+      {{- $wch := include "neuraltrust-platform.clickhouse.resolve" (dict "local" dict "global" .Values.global) | fromYaml -}}
+      {{- $csAddr = printf "%s:%s" $wch.host $wch.nativePort -}}
       {{- end -}}
       {{- if $csAddr }}
       clickstack:

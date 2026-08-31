@@ -79,10 +79,14 @@ data:
   AWS_REGION: {{ $dcRegion | quote }}
   {{- end }}
   {{- end }}
-  CLICKHOUSE_ADDR: {{ printf "%s:%v" .Values.clickhouse.host .Values.clickhouse.nativePort | quote }}
+  {{- /* AUT-636: host/port/tls resolve through global.clickhouse so a managed
+         endpoint is named once. The two database names stay local -- event tables
+         live in `default`, the OTLP landing DB is `otel`. */}}
+  {{- $ch := include "neuraltrust-platform.clickhouse.resolve" (dict "local" .Values.clickhouse "global" .Values.global) | fromYaml }}
+  CLICKHOUSE_ADDR: {{ printf "%s:%v" $ch.host $ch.nativePort | quote }}
   CLICKHOUSE_DATABASE: {{ .Values.clickhouse.database | quote }}
   CLICKHOUSE_OTEL_DATABASE: {{ .Values.clickhouse.otelDatabase | quote }}
-  CLICKHOUSE_TLS: {{ .Values.clickhouse.tls | quote }}
+  CLICKHOUSE_TLS: {{ $ch.tls | quote }}
   {{- with .Values.jwt.issuer }}
   AUTH_JWT_ISSUER: {{ . | quote }}
   {{- end }}

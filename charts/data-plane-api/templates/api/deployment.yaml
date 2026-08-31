@@ -123,8 +123,12 @@ spec:
           - |
             set -eu
             echo "Running ClickHouse initialization scripts..."
-            # Use port 9000 for native protocol (migrations require native protocol, not HTTP)
-            CLICKHOUSE_NATIVE_PORT="9000"
+            # Migrations require the native protocol, not HTTP, so this is a
+            # separate port from CLICKHOUSE_PORT. Resolved through
+            # global.clickhouse (AUT-636) -- it was hardcoded to 9000, which meant
+            # a managed endpoint on a non-default native/TLS port failed every
+            # migration while the API itself connected fine over HTTP.
+            CLICKHOUSE_NATIVE_PORT={{ (include "neuraltrust-platform.clickhouse.resolve" (dict "local" .Values.dataPlane.components.clickhouse "global" .Values.global) | fromYaml).nativePort | quote }}
             echo "Using port ${CLICKHOUSE_NATIVE_PORT} for migrations (native protocol)"
             
             # Wait for ClickHouse to be ready

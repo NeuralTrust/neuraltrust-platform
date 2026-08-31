@@ -25,16 +25,21 @@ ports:
 # set clickhouse.endpoint to your external/Cloud endpoint (e.g.
 # https://<instance>.clickhouse.cloud:8443) when infrastructure.clickhouse.deploy=false.
 clickhouse:
-  endpoint: "http://clickhouse:8123"
+  # Empty is composed from global.clickhouse (host + httpPort, scheme from
+  # global.clickhouse.tls), then http://clickhouse:8123 (AUT-636).
+  endpoint: ""
   database: "otel"
-  user: "neuraltrust"
+  user: ""
   # CLICKHOUSE_PASSWORD is read from a shared secret — the in-cluster `clickhouse`
   # subchart secret by default (same secret DataCore/AlertEngine use). For external
   # ClickHouse (infrastructure.clickhouse.deploy=false), point this at the secret
   # holding your password (matches infrastructure.clickhouse.external.secretName/Key).
+  # Empty inherits global.clickhouse.existingSecret, then the in-cluster
+  # `clickhouse` Secret / `admin-password` (AUT-636). The fallback lives in the
+  # resolver helper, not here, so an unset key can fall through.
   existingSecret:
-    name: "clickhouse"
-    key: "admin-password"
+    name: ""
+    key: ""
 # Secures the OTLP receivers (senders present this token).
 otlpAuthToken: "" # Auto-generated if empty
 resources:

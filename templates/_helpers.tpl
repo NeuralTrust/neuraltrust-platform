@@ -489,38 +489,60 @@ without every template being rewritten.
 {{- end -}}
 
 {{/*
-Get ClickHouse connection details. In v2 external only.
+Resolve the ClickHouse connection for one consumer (AUT-636).
+
+Replaces four helpers that read `.Values.infrastructure.clickhouse.external.*`
+and had **zero callers** — they were correct and completely dead, which is
+precisely why the external path looked wired up while three of the four consumers
+still dialled the in-cluster Service that `deploy: false` never renders.
+
+The mechanism had to change, not just the call sites. `.Values.infrastructure` is
+an umbrella key and a subchart cannot see it; only `.Values.global` crosses that
+boundary, and a template cannot write to `global` either. So the operator-facing
+contract moved to `global.clickhouse`, which is where `global.postgresql` and
+`global.redis` already live — and why those two work while this did not.
+
+Resolution, per field: an explicit local value wins, then `global.clickhouse`,
+then the in-cluster default. That ordering only works because the consumer pins
+were emptied in values.yaml; a pin of "clickhouse" is indistinguishable from an
+operator setting it, so `global` could never win. Same pattern as the AUT-390
+pull-secret helpers: the fallback lives here, not in values.
+
+Deliberately NOT resolved here: `database` and `otelDatabase`. The chart splits
+event tables (`default`) from the OTLP landing DB (`otel`) on purpose, so a single
+global database key would collapse a distinction the pipeline depends on.
+
+Returns a YAML dict — pipe through fromYaml:
+
+  {{- $ch := include "neuraltrust-platform.clickhouse.resolve" (dict "local" .Values.clickhouse "global" .Values.global) | fromYaml }}
+  {{ printf "%s:%v" $ch.host $ch.nativePort }}
 */}}
-{{- define "neuraltrust-platform.clickhouse.host" -}}
-{{- if .Values.infrastructure.clickhouse.deploy }}
-{{- "clickhouse" }}
-{{- else }}
-{{- .Values.infrastructure.clickhouse.external.host }}
-{{- end }}
-{{- end }}
-
-{{- define "neuraltrust-platform.clickhouse.port" -}}
-{{- if .Values.infrastructure.clickhouse.deploy }}
-{{- "8123" }}
-{{- else }}
-{{- .Values.infrastructure.clickhouse.external.port }}
-{{- end }}
-{{- end }}
-
-{{- define "neuraltrust-platform.clickhouse.user" -}}
-{{- if .Values.infrastructure.clickhouse.deploy }}
-{{- .Values.clickhouse.auth.username | default "neuraltrust" }}
-{{- else }}
-{{- .Values.infrastructure.clickhouse.external.user }}
-{{- end }}
-{{- end }}
-
-{{- define "neuraltrust-platform.clickhouse.database" -}}
-{{- if .Values.infrastructure.clickhouse.deploy }}
-{{- "default" }}
-{{- else }}
-{{- .Values.infrastructure.clickhouse.external.database }}
-{{- end }}
+{{- define "neuraltrust-platform.clickhouse.resolve" -}}
+{{- $local := default dict .local -}}
+{{- $gch := default dict (default dict .global).clickhouse -}}
+{{- $host := $local.host | default $gch.host | default "clickhouse" -}}
+{{- $httpPort := $local.port | default $gch.httpPort | default "8123" -}}
+{{- $nativePort := $local.nativePort | default $gch.nativePort | default 9000 -}}
+{{- $user := $local.user | default $local.username | default $gch.user | default "neuraltrust" -}}
+{{- /* tls is a bool, so `default` cannot distinguish an explicit false from unset.
+       Test the kind instead, or an operator who deliberately turned TLS off would
+       silently inherit the global setting. */ -}}
+{{- $tls := false -}}
+{{- if kindIs "bool" $local.tls -}}{{- $tls = $local.tls -}}
+{{- else if kindIs "bool" $local.secure -}}{{- $tls = $local.secure -}}
+{{- else if kindIs "bool" $gch.tls -}}{{- $tls = $gch.tls -}}
+{{- end -}}
+{{- $localSecret := default dict $local.existingSecret -}}
+{{- $globalSecret := default dict $gch.existingSecret -}}
+{{- $secretName := $localSecret.name | default $globalSecret.name | default "clickhouse" -}}
+{{- $secretKey := $localSecret.key | default $globalSecret.key | default "admin-password" -}}
+host: {{ $host | quote }}
+httpPort: {{ $httpPort | quote }}
+nativePort: {{ $nativePort | quote }}
+user: {{ $user | quote }}
+tls: {{ $tls }}
+secretName: {{ $secretName | quote }}
+secretKey: {{ $secretKey | quote }}
 {{- end }}
 
 {{/*
@@ -693,6 +715,65 @@ values while subchart Deployments pass their own .Values root:
   {{- $secrets = append $secrets "gcr-secret" -}}
 {{- end -}}
 {{- if gt (len $secrets) 0 -}}
+imagePullSecrets:
+{{- range $secrets }}
+  - name: {{ . }}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Shared imagePullSecrets resolver for the product subcharts (AUT-427).
+
+Nine subcharts carried byte-identical copies of this logic and all nine shared the
+same defect: the list branch appended every element unfiltered, so
+`global.imagePullSecrets: ["none"]` rendered a phantom `- name: none` referencing a
+Secret that does not exist — while each helper's own doc comment claimed it emitted
+nothing for "none". Fixing that once is why they now delegate here instead of each
+keeping a copy. charts/clickhouse, charts/firewall and charts/watchdog inlined their
+own variants and delegate here too.
+
+Precedence: local key → global.imagePullSecrets. There is deliberately **no**
+`gcr-secret` literal, unlike the controlPlane and postgresql helpers above: these
+charts pin the key in their own values.yaml, so a template fallback would be
+unreachable. The consequence — an operator must set the subchart key to "" before
+`global.imagePullSecrets` can win — is documented next to `global.imagePullSecrets`
+in values.yaml. Emptying those nine pins is the larger change AUT-427 deliberately
+did not make.
+
+Accepts a string or a list of strings / {name:} maps on either side. A "none" at
+either level suppresses entirely and clears anything already collected, matching
+the controlPlane helper's semantics so there is one rule to learn.
+
+  {{- include "neuraltrust-platform.subchart.imagePullSecrets" (dict "local" .Values.imagePullSecrets "global" .Values.global) | nindent 6 }}
+*/}}
+{{- define "neuraltrust-platform.subchart.imagePullSecrets" -}}
+{{- $global := default dict .global -}}
+{{- $src := .local -}}
+{{- if not $src -}}
+  {{- $src = $global.imagePullSecrets -}}
+{{- end -}}
+{{- $secrets := list -}}
+{{- $suppress := false -}}
+{{- if kindIs "string" $src -}}
+  {{- if eq $src "none" -}}{{- $suppress = true -}}
+  {{- else if ne $src "" -}}{{- $secrets = append $secrets $src -}}
+  {{- end -}}
+{{- else if kindIs "slice" $src -}}
+  {{- range $src -}}
+    {{- $name := "" -}}
+    {{- if kindIs "string" . -}}{{- $name = . -}}
+    {{- else if kindIs "map" . -}}{{- $name = .name | default "" -}}
+    {{- end -}}
+    {{- if eq $name "none" -}}
+      {{- $suppress = true -}}
+      {{- $secrets = list -}}
+    {{- else if and $name (ne $name "") (not $suppress) -}}
+      {{- $secrets = append $secrets $name -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- if and (not $suppress) (gt (len $secrets) 0) -}}
 imagePullSecrets:
 {{- range $secrets }}
   - name: {{ . }}

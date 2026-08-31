@@ -35,20 +35,35 @@ Fully-qualified Redis image (repository:tag) with sane mirror defaults.
 
 {{/*
 imagePullSecrets block: honor global.imagePullSecrets (list of strings/maps),
-else fall back to the chart-wide gcr-secret default.
+else fall back to the chart-wide gcr-secret default. There is no per-component
+key here -- the umbrella owns this Deployment.
+
+A "none" element suppresses entirely (AUT-427). It previously rendered a phantom
+`- name: none` pointing at a Secret that does not exist, which is a pull failure
+on the IAM / Workload Identity clusters that set it precisely to opt out.
 */}}
 {{- define "neuraltrust-platform.v2Redis.imagePullSecrets" -}}
 {{- $global := default dict .Values.global -}}
-{{- if $global.imagePullSecrets -}}
+{{- $names := list -}}
+{{- $suppress := false -}}
+{{- range (default (list) $global.imagePullSecrets) -}}
+  {{- $name := "" -}}
+  {{- if kindIs "string" . -}}{{- $name = . -}}
+  {{- else if kindIs "map" . -}}{{- $name = .name | default "" -}}
+  {{- end -}}
+  {{- if eq $name "none" -}}
+    {{- $suppress = true -}}
+    {{- $names = list -}}
+  {{- else if and $name (ne $name "") (not $suppress) -}}
+    {{- $names = append $names $name -}}
+  {{- end -}}
+{{- end -}}
+{{- if gt (len $names) 0 -}}
 imagePullSecrets:
-{{- range $global.imagePullSecrets }}
-{{- if kindIs "string" . }}
+{{- range $names }}
   - name: {{ . }}
-{{- else if kindIs "map" . }}
-  - {{ toYaml . | nindent 4 | trim }}
 {{- end }}
-{{- end }}
-{{- else -}}
+{{- else if not $suppress -}}
 imagePullSecrets:
   - name: gcr-secret
 {{- end -}}

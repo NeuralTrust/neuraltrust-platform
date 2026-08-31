@@ -5,7 +5,7 @@ fullnameOverride: ""
 securityHardening: true
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/dataagent
-  tag: "v0.6.1"
+  tag: "v0.6.2"
   pullPolicy: IfNotPresent
 imagePullSecrets: "gcr-secret"
 serviceAccount:

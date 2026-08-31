@@ -261,19 +261,38 @@ global:
     host: "redis.example.com"
     tls: "true"
 
+  clickhouse:
+    host: "clickhouse.example.com"
+    httpPort: "8443"
+    nativePort: "9440"
+    user: "neuraltrust"
+    tls: true
+    existingSecret:
+      name: "managed-clickhouse"
+      key: "password"
+
 infrastructure:
   clickhouse:
     deploy: false
-    external:
-      host: "clickhouse.example.com"
-      port: "8443"
-      secretName: "managed-clickhouse"
-      secretKey: "password"
 ```
 
-Add a per-service `database:` / `redis:` block only to send one service somewhere
-else — it still takes precedence. ClickHouse has no global block, so its endpoint
-is named per consumer.
+ClickHouse needs two ports because the consumers split by protocol: DataCore,
+AlertEngine and watchdog speak the **native** protocol, while data-plane-api and
+the ClickStack collector use **HTTP**. A managed endpoint that only exposes TLS
+still needs both named — usually its TLS port for each.
+
+`infrastructure.clickhouse.deploy: false` stops the in-cluster ClickHouse from
+rendering; `global.clickhouse` says where to reach the real one. Both are needed.
+
+> **Changed in 2.14:** the endpoint used to be named under
+> `infrastructure.clickhouse.external`, which never worked — `.Values.infrastructure`
+> is an umbrella key that no subchart can read, so three of the five consumers
+> ignored it and kept dialling the in-cluster Service that `deploy: false` had just
+> removed. That block is now inert, and setting it without a real endpoint elsewhere
+> fails the render rather than misconfiguring the install silently.
+
+Add a per-service `database:` / `redis:` / `clickhouse:` block only to send one
+service somewhere else — it still takes precedence over the global.
 
 The **passwords** need not live in a values file at all. Name a Secret you created
 under `<service>.database.existingSecret` (or `.redis.existingSecret`) and the

@@ -138,6 +138,13 @@ Resolve imagePullSecrets for the in-chart OTel Collector. Priority:
   2. global.imagePullSecrets (list of strings or {name: ...} maps) -> umbrella-wide override.
   3. observability.collector.imagePullSecret (string) / default "gcr-secret" -> matches the rest of the chart.
 Returns an "imagePullSecrets:" YAML block ready to inline, or empty.
+
+Note the precedence is inverted relative to every other helper here: global wins
+over the component key, which acts only as an opt-out (1) or as the final default
+(3). Left as-is deliberately in AUT-427 -- changing it silently would be worse
+than the inconsistency -- but a "none" element in the global list now suppresses
+instead of rendering a phantom `- name: none`, which is what that pass did fix.
+
 Usage:
   spec:
     {{- include "neuraltrust-platform.otelCollector.imagePullSecrets" . | nindent 6 }}
@@ -149,14 +156,29 @@ Usage:
 {{- if and (hasKey $coll "imagePullSecret") (or (eq ($coll.imagePullSecret | toString) "none") (eq ($coll.imagePullSecret | toString) "")) -}}
 {{- /* explicit opt-out: render nothing */ -}}
 {{- else if $global.imagePullSecrets -}}
+{{- $names := list -}}
+{{- $suppress := false -}}
+{{- range $global.imagePullSecrets -}}
+  {{- $name := "" -}}
+  {{- if kindIs "string" . -}}{{- $name = . -}}
+  {{- else if kindIs "map" . -}}{{- $name = .name | default "" -}}
+  {{- end -}}
+  {{- if eq $name "none" -}}
+    {{- $suppress = true -}}
+    {{- $names = list -}}
+  {{- else if and $name (ne $name "") (not $suppress) -}}
+    {{- $names = append $names $name -}}
+  {{- end -}}
+{{- end -}}
+{{- if gt (len $names) 0 -}}
 imagePullSecrets:
-{{- range $global.imagePullSecrets }}
-{{- if kindIs "string" . }}
+{{- range $names }}
   - name: {{ . }}
-{{- else if kindIs "map" . }}
-  - {{ toYaml . | nindent 4 | trim }}
 {{- end }}
-{{- end }}
+{{- else if not $suppress -}}
+imagePullSecrets:
+  - name: {{ default "gcr-secret" $coll.imagePullSecret }}
+{{- end -}}
 {{- else -}}
 imagePullSecrets:
   - name: {{ default "gcr-secret" $coll.imagePullSecret }}

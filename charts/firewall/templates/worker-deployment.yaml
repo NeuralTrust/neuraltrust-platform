@@ -36,11 +36,9 @@ spec:
       {{- if $.Values.firewall.serviceAccount.create }}
       serviceAccountName: {{ $.Values.firewall.serviceAccount.name | default "firewall" }}
       {{- end }}
-      {{- $imagePullSecret := $.Values.firewall.imagePullSecrets | default "" }}
-      {{- if and $imagePullSecret (ne $imagePullSecret "") }}
-      imagePullSecrets:
-        - name: {{ $imagePullSecret }}
-      {{- end }}
+      {{- /* AUT-427: see gateway-deployment.yaml. Uses $ because this renders inside
+             a per-worker range. */}}
+      {{- include "neuraltrust-platform.subchart.imagePullSecrets" (dict "local" $.Values.firewall.imagePullSecrets "global" $.Values.global) | nindent 6 }}
       {{- /* Per-worker selection and global.nodeSelector are merged into a single
              nodeAffinity so they never collide on the same label key. The
              per-worker selector (lists, e.g. the GPU pool) wins over global on

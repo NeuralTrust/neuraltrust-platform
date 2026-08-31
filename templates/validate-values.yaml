@@ -407,3 +407,36 @@ Secret produces a pod that cannot start. Fail at render instead.
 {{- if and $dpJwtRef (ne $dpJwtRef $sharedSecretName) -}}
   {{- fail (printf "data-plane-api.dataPlane.secrets.dataPlaneJWTSecretName=%q points only data-plane-api at that Secret. control-plane-api and control-plane-app keep reading DATA_PLANE_JWT_SECRET from the chart's Secret, so the token the control plane signs is not the one the data plane accepts. Set global.platformSecret.existingSecret.name instead to move every consumer at once (see SECRETS.md)." $dpJwtRef) -}}
 {{- end -}}
+
+{{- /* The deprecated external-ClickHouse block, which could never work (AUT-636).
+
+       infrastructure.clickhouse.external was read by exactly one of the five
+       ClickHouse consumers. `.Values.infrastructure` is an umbrella key and no
+       subchart can see it, and a template cannot write to `global`, so there was
+       never a path from that block to datacore / alertengine / the ClickStack
+       collector. An operator who followed README-EXTERNAL.md got `deploy: false`
+       plus three workloads dialling a Service the chart no longer renders --
+       accepted without complaint, failing at install time.
+
+       The replacement is global.clickhouse. This fails only on the precisely broken
+       combination: the old block set, and no endpoint supplied anywhere that a
+       consumer will actually read. An install that set the old block AND restated
+       the endpoint per-consumer (what values-managed-datastores.yaml.example did,
+       and the only way this ever worked) still renders, which is why the test is
+       narrow rather than a blanket rejection of the deprecated key. */ -}}
+{{- $infraCh := default dict (default dict .Values.infrastructure).clickhouse -}}
+{{- $legacyExt := default dict $infraCh.external -}}
+{{- $legacyHost := $legacyExt.host | default "" | toString | trim -}}
+{{- if $legacyHost -}}
+  {{- $gch := default dict $global.clickhouse -}}
+  {{- $globalHost := $gch.host | default "" | toString | trim -}}
+  {{- /* Any per-consumer key still counts as a supplied endpoint. */ -}}
+  {{- $dcHost := ((default dict (default dict .Values.datacore).clickhouse).host | default "" | toString | trim) -}}
+  {{- $aeHost := ((default dict (default dict .Values.alertengine).clickhouse).host | default "" | toString | trim) -}}
+  {{- $colEp := ((default dict (default dict (index .Values "clickstack-otel-collector")).clickhouse).endpoint | default "" | toString | trim) -}}
+  {{- $dpaCh := default dict (default dict (default dict (default dict (index .Values "data-plane-api")).dataPlane).components).clickhouse -}}
+  {{- $dpaHost := ($dpaCh.host | default "" | toString | trim) -}}
+  {{- if not (or $globalHost $dcHost $aeHost $colEp $dpaHost) -}}
+    {{- fail (printf "infrastructure.clickhouse.external.host=%q is set but nothing reads it. That block is inert: .Values.infrastructure is an umbrella key, so the datacore, alertengine and clickstack-otel-collector subcharts cannot see it, and they would each still dial the in-cluster \"clickhouse\" Service -- which infrastructure.clickhouse.deploy=false means is never rendered. Set global.clickhouse.host (plus httpPort / nativePort / user / tls / existingSecret as your endpoint needs) instead: every consumer resolves through it. See README-EXTERNAL.md." $legacyHost) -}}
+  {{- end -}}
+{{- end -}}

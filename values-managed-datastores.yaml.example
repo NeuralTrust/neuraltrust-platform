@@ -56,6 +56,14 @@
 # Secret per service.
 # - clickstack-collector-secrets: CLICKHOUSE_ENDPOINT, CLICKHOUSE_USER,
 #   OTLP_AUTH_TOKEN
+# - clickhouse-secrets: CLICKHOUSE_HOST, CLICKHOUSE_PORT, CLICKHOUSE_USER,
+#   CLICKHOUSE_DATABASE (read by data-plane-api and its migration initContainer)
+#   With autoGenerateSecrets=false the chart writes none of these, so the values in
+#   the two Secrets above must match `global.clickhouse` below. The chart still
+#   templates the parts that are not Secret data -- the CLICKHOUSE_PASSWORD
+#   secretKeyRef, the wait-for-ClickHouse initContainers and the migration job's
+#   native port -- and those all resolve from `global.clickhouse`, so a mismatch
+#   shows up as a connection failure rather than a render error.
 # - managed-clickhouse: password (the shared ClickHouse credential referenced below)
 # - managed-postgres-roles: CONTROL_PLANE, AGENTGATEWAY, TRUSTGUARD, ALERTENGINE,
 #   DATACORE
@@ -103,17 +111,29 @@ global:
   observability:
     hostedExport:
       enabled: false
+  # ClickHouse, named once for every consumer (AUT-636). Two ports because the
+  # consumers split by protocol: DataCore, AlertEngine and watchdog speak the
+  # native protocol, data-plane-api and the ClickStack collector use HTTP.
+  #
+  # This replaces `infrastructure.clickhouse.external`, which was inert -- a
+  # subchart cannot read `.Values.infrastructure`, so three of the five consumers
+  # ignored it. That is why this file used to restate the endpoint four more times
+  # below; it no longer needs to.
+  clickhouse:
+    host: "clickhouse.example.com"
+    httpPort: "8443"
+    nativePort: "9440"
+    user: "neuraltrust"
+    tls: true
+    existingSecret:
+      name: "managed-clickhouse"
+      key: "password"
 
 infrastructure:
   clickhouse:
+    # Stops the in-cluster ClickHouse rendering. `global.clickhouse` above says
+    # where the real one is -- both are needed.
     deploy: false
-    external:
-      host: "clickhouse.example.com"
-      port: "8443"
-      user: "neuraltrust"
-      database: "neuraltrust"
-      secretName: "managed-clickhouse"
-      secretKey: "password"
 
 # Datastore passwords, read from two Secrets instead of written here. `key` is
 # configurable, so one Secret holds every database role under its own key. Only
@@ -136,50 +156,25 @@ trustguard:
     existingSecret:
       name: "managed-redis-auth"
 
-# ClickHouse has no global block, so its endpoint is still named per consumer.
+# ClickHouse is no longer restated per consumer -- `global.clickhouse` above covers
+# all five. A per-service `clickhouse:` block still overrides it for that service
+# alone, which is the only reason to add one back.
 alertengine:
   enabled: true
   database:
     existingSecret:
       name: "managed-postgres-roles"
       key: "ALERTENGINE"
-  clickhouse:
-    host: "clickhouse.example.com"
-    nativePort: 9440
-    secure: true
-    existingSecret:
-      name: "managed-clickhouse"
-      key: "password"
 
 datacore:
   database:
     existingSecret:
       name: "managed-postgres-roles"
       key: "DATACORE"
-  clickhouse:
-    host: "clickhouse.example.com"
-    nativePort: 9440
-    tls: true
-    existingSecret:
-      name: "managed-clickhouse"
-      key: "password"
-
-clickstack-otel-collector:
-  clickhouse:
-    endpoint: "https://clickhouse.example.com:8443"
-    existingSecret:
-      name: "managed-clickhouse"
-      key: "password"
 
 data-plane-api:
   dataPlane:
     components:
-      clickhouse:
-        host: "clickhouse.example.com"
-        port: "8443"
-        existingSecret:
-          name: "managed-clickhouse"
-          key: "password"
       api:
         redis:
           existingSecret:

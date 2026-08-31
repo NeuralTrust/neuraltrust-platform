@@ -36,10 +36,10 @@ spec:
         emptyDir: {}
       {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 6 }}
       {{- /* Wait for ClickHouse rather than CrashLoopBackOff into it on first boot
-             (AUT-409). Host/port come from this subchart's own clickhouse block —
-             .Values.infrastructure is an umbrella key and invisible here. */}}
-      {{- $ch := default dict .Values.clickhouse }}
-      {{- with (include "neuraltrust-platform.clickhouse.waitInit" (dict "host" ($ch.host | default "") "port" ($ch.nativePort | default "") "global" .Values.global)) }}
+             (AUT-409), resolved through the shared helper (AUT-636) so the wait
+             follows a managed endpoint rather than the in-cluster Service. */}}
+      {{- $ch := include "neuraltrust-platform.clickhouse.resolve" (dict "local" .Values.clickhouse "global" .Values.global) | fromYaml }}
+      {{- with (include "neuraltrust-platform.clickhouse.waitInit" (dict "host" $ch.host "port" $ch.nativePort "global" .Values.global)) }}
       initContainers:
       {{- . | nindent 6 }}
       {{- end }}
@@ -68,8 +68,8 @@ spec:
         - name: CLICKHOUSE_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: {{ .Values.clickhouse.existingSecret.name | default "clickhouse" | quote }}
-              key: {{ .Values.clickhouse.existingSecret.key | default "admin-password" | quote }}
+              name: {{ $ch.secretName | quote }}
+              key: {{ $ch.secretKey | quote }}
         {{- with .Values.api.extraEnv }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
