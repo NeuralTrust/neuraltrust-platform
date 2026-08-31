@@ -139,6 +139,10 @@ global:
     deploy: false
   redis:
     deploy: false
+  clickhouse:
+    host: "clickhouse.example.com"
+    httpPort: "8443"
+    nativePort: "9440"
 
 infrastructure:
   clickhouse:

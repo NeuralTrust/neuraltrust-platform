@@ -26,19 +26,11 @@ spec:
           serviceAccountName: {{ include "clickhouse.backup.serviceAccountName" . }}
           {{- end }}
           restartPolicy: OnFailure
-          {{- $pullSecrets := list }}
-          {{- if .Values.imagePullSecrets }}
-            {{- $pullSecrets = append $pullSecrets .Values.imagePullSecrets }}
-          {{- end }}
-          {{- if and .Values.global .Values.global.imagePullSecrets }}
-            {{- $pullSecrets = concat $pullSecrets .Values.global.imagePullSecrets }}
-          {{- end }}
-          {{- if $pullSecrets }}
-          imagePullSecrets:
-            {{- range $pullSecrets }}
-            - name: {{ . }}
-            {{- end }}
-          {{- end }}
+          {{- /* AUT-427: shares the resolver with statefulset.yaml. This copy had
+                 drifted furthest -- no "none" guard at all -- so a chart pinned to
+                 "none" gave the backup Job a pull secret the StatefulSet correctly
+                 omitted. */}}
+          {{- include "neuraltrust-platform.subchart.imagePullSecrets" (dict "local" .Values.imagePullSecrets "global" .Values.global) | nindent 10 }}
           {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" . "local" .Values.backup.nodeSelector) | nindent 10 }}
           {{- include "neuraltrust-platform.tolerations" (dict "ctx" . "local" .Values.backup.tolerations) | nindent 10 }}
           {{- if .Values.backup.affinity }}

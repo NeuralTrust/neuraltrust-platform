@@ -85,29 +85,37 @@ Usage: {{ include "clickstack-otel-collector.image" (dict "repository" .Values.i
 
 {{/*
 imagePullSecrets block. Priority: .Values.imagePullSecrets > global.imagePullSecrets.
-Emits nothing when unset or "none".
+Accepts a string or a list of strings/maps. Emits nothing when unset, "" or "none".
+
+Delegates to the umbrella resolver (AUT-427). This body used to be one of nine
+byte-identical copies, and every copy dropped the "none" check in the list branch
+-- so global.imagePullSecrets: ["none"] rendered a phantom `- name: none` despite
+the line above promising otherwise. Keep the wrapper: the name is what templates
+call, and it keeps the value key local to this chart.
 Usage: {{- include "clickstack-otel-collector.imagePullSecrets" . | nindent 6 }}
 */}}
 {{- define "clickstack-otel-collector.imagePullSecrets" -}}
-{{- $secrets := list -}}
-{{- $src := .Values.imagePullSecrets -}}
-{{- if not $src -}}
-  {{- if and .Values.global .Values.global.imagePullSecrets -}}
-    {{- $src = .Values.global.imagePullSecrets -}}
-  {{- end -}}
-{{- end -}}
-{{- if kindIs "string" $src -}}
-  {{- if and (ne $src "") (ne $src "none") -}}{{- $secrets = append $secrets $src -}}{{- end -}}
-{{- else if kindIs "slice" $src -}}
-  {{- range $src -}}
-    {{- if kindIs "string" . -}}{{- $secrets = append $secrets . -}}
-    {{- else if kindIs "map" . -}}{{- if .name -}}{{- $secrets = append $secrets .name -}}{{- end -}}{{- end -}}
-  {{- end -}}
-{{- end -}}
-{{- if gt (len $secrets) 0 -}}
-imagePullSecrets:
-{{- range $secrets }}
-  - name: {{ . }}
-{{- end -}}
+{{- include "neuraltrust-platform.subchart.imagePullSecrets" (dict "local" .Values.imagePullSecrets "global" .Values.global) -}}
+{{- end }}
+
+{{/*
+The ClickHouse HTTP endpoint URL (AUT-636).
+
+An explicit clickhouse.endpoint wins, so this consumer can still be pointed
+somewhere else on its own. Empty composes the URL from global.clickhouse -- host
+plus HTTP port, https when global.clickhouse.tls is true -- and finally falls back
+to the in-cluster http://clickhouse:8123.
+
+Defined once because the Secret needs the URL and the wait-for-ClickHouse
+initContainer needs the same host and port split back out of it.
+*/}}
+{{- define "clickstack-otel-collector.clickhouseEndpoint" -}}
+{{- $explicit := (default dict .Values.clickhouse).endpoint | default "" -}}
+{{- if $explicit -}}
+{{- $explicit -}}
+{{- else -}}
+{{- $ch := include "neuraltrust-platform.clickhouse.resolve" (dict "local" .Values.clickhouse "global" .Values.global) | fromYaml -}}
+{{- $scheme := ternary "https" "http" $ch.tls -}}
+{{- printf "%s://%s:%s" $scheme $ch.host $ch.httpPort -}}
 {{- end -}}
 {{- end }}

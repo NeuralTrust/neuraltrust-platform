@@ -38,10 +38,10 @@ spec:
              (AUT-409). This subchart configures an endpoint URL, so split it into
              host and port; default to the ClickHouse HTTP port when the URL omits
              one. */}}
-      {{- $chEp := (default dict .Values.clickhouse).endpoint | default "" }}
+      {{- $chEp := include "clickstack-otel-collector.clickhouseEndpoint" . }}
       {{- $chHostPort := $chEp | trimPrefix "https://" | trimPrefix "http://" | trimSuffix "/" }}
       {{- $chHost := $chHostPort }}
-      {{- $chPort := "8123" }}
+      {{- $chPort := (include "neuraltrust-platform.clickhouse.resolve" (dict "local" .Values.clickhouse "global" .Values.global) | fromYaml).httpPort }}
       {{- if contains ":" $chHostPort }}
       {{- $chHost = (splitList ":" $chHostPort) | first }}
       {{- $chPort = (splitList ":" $chHostPort) | last }}
@@ -64,8 +64,9 @@ spec:
         - name: CLICKHOUSE_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: {{ .Values.clickhouse.existingSecret.name | default "clickhouse" | quote }}
-              key: {{ .Values.clickhouse.existingSecret.key | default "admin-password" | quote }}
+              {{- $ch := include "neuraltrust-platform.clickhouse.resolve" (dict "local" .Values.clickhouse "global" .Values.global) | fromYaml }}
+              name: {{ $ch.secretName | quote }}
+              key: {{ $ch.secretKey | quote }}
         - name: HYPERDX_OTEL_EXPORTER_CLICKHOUSE_DATABASE
           value: {{ .Values.clickhouse.database | quote }}
         - name: HYPERDX_LOG_LEVEL

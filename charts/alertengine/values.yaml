@@ -11,7 +11,7 @@ fullnameOverride: "alertengine"
 securityHardening: true
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/alertengine
-  tag: "v0.7.2"
+  tag: "v0.8.1"
   pullPolicy: IfNotPresent
 imagePullSecrets: "gcr-secret"
 serviceAccount:
@@ -54,25 +54,28 @@ database:
   # Requires IRSA + awsRegion.
   # iamAuth:
   awsRegion: "" # Required when IAM is on → AWS_REGION (falls back to global.postgresql.awsRegion)
-# ClickHouse (native protocol, port 9000). Defaults to the in-cluster clickhouse
-# subchart; set host/nativePort to your endpoint when infrastructure.clickhouse.deploy=false.
+# ClickHouse (native protocol, port 9000). Empty host/nativePort/username/secure
+# inherit global.clickhouse, then the in-cluster `clickhouse` Service (AUT-636).
 clickhouse:
-  host: "clickhouse"
-  nativePort: 9000
+  host: ""
+  nativePort: ""
   # Event tables (trustgate_events / trustguard_events) live in `default`.
   # `otel` is only the OTLP landing database that ClickStack writes; DataCore
   # materialized views transform those logs into the event tables AlertEngine
   # queries. SaaS overlays use CLICKHOUSE_DATABASE=default for the same reason.
   database: "default"
-  username: "neuraltrust"
+  username: ""
   # CLICKHOUSE_PASSWORD is read from a shared secret — the in-cluster `clickhouse`
   # subchart secret by default (same secret DataCore uses). For external ClickHouse
   # (infrastructure.clickhouse.deploy=false), point this at the secret holding your
   # password (matches infrastructure.clickhouse.external.secretName/Key).
+  # Empty inherits global.clickhouse.existingSecret, then the in-cluster
+  # `clickhouse` Secret / `admin-password` (AUT-636). The fallback lives in the
+  # resolver helper, not here, so an unset key can fall through.
   existingSecret:
-    name: "clickhouse"
-    key: "admin-password"
-  secure: false
+    name: ""
+    key: ""
+  secure: ""
 # HS256 JWT verification key. Must match the app BFF token signer for the
 # Alerts/Logs/Integrations UI to authenticate. Auto-generated if empty.
 authJwtSecret: ""

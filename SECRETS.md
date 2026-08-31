@@ -473,7 +473,7 @@ otherwise.
 
 | Kubernetes Secret | Type | Required | Description |
 |---|---|---|---|
-| `gcr-secret` | `docker-registry` | Yes | Credentials for NeuralTrust container images, built from the registry key NeuralTrust sends you. Create it with `./create-image-pull-secret.sh --namespace <ns>`; the chart never generates it. Mirroring images to your own registry? Name that registry's pull Secret `gcr-secret` too — `global.imagePullSecrets` does **not** override the per-component default. |
+| `gcr-secret` | `docker-registry` | Yes | Credentials for NeuralTrust container images, built from the registry key NeuralTrust sends you. Create it with `./create-image-pull-secret.sh --namespace <ns>`; the chart never generates it. Mirroring images to your own registry? Either name that registry's pull Secret `gcr-secret` too, or set `global.imagePullSecrets: ["my-registry"]` **and** clear the per-chart pin (`datacore.imagePullSecrets: ""`, and so on for each product chart) — the product subcharts pin `gcr-secret` in their own values, so the global list is ignored until the pin is cleared. Control-plane app/api, PostgreSQL, Redis and the OTel collector default in the template instead, so they honour the global list with no pin to clear. A `"none"` element suppresses pull secrets entirely, for clusters pulling via IAM / Workload Identity. |
 
 ## Secret reference in values
 

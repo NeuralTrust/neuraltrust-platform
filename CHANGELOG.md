@@ -4,6 +4,124 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Fixed
+
+- **An external ClickHouse endpoint was ignored by four of its five consumers
+  (AUT-636).** `infrastructure.clickhouse.external.{host,port,user,database}` was a
+  documented values block, echoed in `README-EXTERNAL.md` as *the* managed-datastore
+  config beside `global.postgresql` and `global.redis` — and read by exactly one
+  consumer. Setting `infrastructure.clickhouse.deploy: false` alongside it left
+  DataCore, AlertEngine (api and worker) and the ClickStack collector still dialling
+  `clickhouse:9000`, a Service that `deploy: false` had just stopped rendering. A hard
+  failure at install time, from values the chart accepted without complaint.
+
+  The cause is structural, not a missing reference: `.Values.infrastructure` is an
+  umbrella key that **no subchart can read**, and a template cannot write to
+  `global`, so there was never a path from that block down to the subcharts. Four
+  helpers existed to resolve it (`neuraltrust-platform.clickhouse.host` / `.port` /
+  `.user` / `.database`) and had **zero callers** — correct, dead, and the reason the
+  feature looked wired up. The block also could not express the native port those
+  three consumers need (its `port` was HTTP-shaped `8123`) nor the TLS flag a managed
+  endpoint requires, so it could not have worked as documented even if it had been
+  read.
+
+  **`global.clickhouse` is now the contract**, sitting where `global.postgresql` and
+  `global.redis` already do — which is why those two work and this did not. It carries
+  `host`, `httpPort`, `nativePort`, `user`, `tls` and `existingSecret`, and every
+  consumer resolves through one new helper,
+  `neuraltrust-platform.clickhouse.resolve`. Precedence is per-field: an explicit
+  per-service key wins, then `global.clickhouse`, then the in-cluster default — so a
+  single service can still be pointed elsewhere on its own.
+
+  Fixed along the way, all in the same failure mode:
+
+  - **watchdog's ClickStack sink was the literal `clickhouse:9000`**, so an external
+    ClickHouse left the runner probing a Service that no longer existed — a check
+    failing for a reason invisible in the operator's own values.
+  - **data-plane-api's migration initContainer hardcoded `CLICKHOUSE_NATIVE_PORT=9000`.**
+    A managed endpoint on a TLS native port failed every migration while the API
+    itself connected fine over HTTP, which reads as a broken database rather than a
+    config error.
+  - **The ClickStack collector's endpoint URL** is now composed from the resolved host
+    and HTTP port, with the scheme following `tls` — a TLS-only endpoint reached over
+    `http://` is refused at the transport.
+  - **`external.password`, `external.secretName` and `external.secretKey` were read by
+    nothing.** The credential half now flows through
+    `global.clickhouse.existingSecret`.
+
+  The four dead helpers are deleted, and the render suite fails if they come back.
+  A default in-cluster install renders identically: `clickhouse:9000`,
+  `http://clickhouse:8123`, TLS off, user `neuraltrust`, native 9000 for migrations —
+  each asserted.
+
+  **Consumer defaults moved from values into the resolver.** `datacore.clickhouse.host`
+  and friends previously pinned `"clickhouse"` in `values.yaml`, which is
+  indistinguishable from an operator setting it, so `global.clickhouse` could never
+  have won. They are now empty and the fallback lives in the helper — the same pattern
+  `values.yaml` already documents for the AUT-390 pull-secret helpers.
+
+- **`imagePullSecrets: "none"` did not actually suppress pull secrets in most of the
+  chart (AUT-427).** `"none"` is the documented way to opt out on clusters that pull
+  private images through IAM / Workload Identity. In nine product subcharts it worked
+  for a bare string and silently failed for a list, rendering `- name: none` — a
+  syntactically valid reference to a Secret that does not exist, so the pods
+  `ImagePullBackOff` on exactly the clusters that asked for no pull secret. Every one
+  of those nine helpers promised otherwise in its own doc comment.
+
+  The nine bodies were byte-identical, so they now delegate to one umbrella resolver,
+  `neuraltrust-platform.subchart.imagePullSecrets`. Their names are unchanged, so no
+  call site moved. Three more sites had inlined their own variants and now share it:
+
+  - **`charts/clickhouse`** concatenated the global list into `- name: {{ . }}`, so a
+    list-of-`{name:}` global — an accepted shape in every other chart — rendered a map
+    into a scalar position. Its `backup-cronjob.yaml` had also drifted from its
+    `statefulset.yaml` sibling and carried no `"none"` guard at all, so a chart pinned
+    to `"none"` gave the backup Job a pull secret the StatefulSet correctly omitted.
+    Resolution is now precedence-based (local wins) rather than additive.
+  - **`charts/firewall`** read only its local key, ignored `global.imagePullSecrets`
+    entirely and had no `"none"` handling.
+  - **`charts/watchdog`** was a raw `toYaml` passthrough with no global fallback and
+    no `"none"` handling.
+
+  `neuraltrust-platform.otelCollector.imagePullSecrets` and
+  `neuraltrust-platform.v2Redis.imagePullSecrets` got the same `"none"` filter. The
+  collector helper's inverted precedence (global above the component key) is left
+  alone deliberately — changing it silently would be worse than the inconsistency.
+
+  A default install renders byte-identically: every workload still pulls with
+  `gcr-secret`, asserted across all chart families in the render suite.
+
+### Changed
+
+
+- **`infrastructure.clickhouse.external` is deprecated and fails closed (AUT-636).**
+  The keys remain so an existing `values.yaml` still installs, but the block is inert.
+  Setting `external.host` with no endpoint named anywhere a consumer reads is now a
+  render-time error pointing at `global.clickhouse`, instead of a silently
+  misconfigured install.
+
+  The check is deliberately narrow: setting the deprecated block **alongside** a real
+  endpoint still renders. That combination is how the documented
+  `values-managed-datastores.yaml.example` worked — it set the old block and then
+  restated the endpoint at all four per-consumer keys — and blanket-rejecting the key
+  would have broken the one values file that got it right. That example still renders,
+  asserted in the suite.
+
+
+- **The `imagePullSecrets` precedence split is now documented rather than unified
+  (AUT-427).** Product subcharts pin `imagePullSecrets: "gcr-secret"` in their own
+  `values.yaml`, so that pin wins and `global.imagePullSecrets` is ignored until the
+  operator clears it — while control-plane app/api, PostgreSQL, Redis and the OTel
+  collector default in the *template*, so an unset key falls through to the global
+  list. Pointing a product chart at another registry therefore needs both
+  `global.imagePullSecrets: ["my-registry"]` **and** `<chart>.imagePullSecrets: ""`.
+
+  Emptying those nine pins would unify the two families, and was deliberately not
+  done: it changes rendered output for every install that relies on the pin winning
+  today. Recorded in `values.yaml` beside `global.imagePullSecrets` and in
+  `SECRETS.md`, alongside the third case — `data-plane-api`, which ignores the global
+  list by design.
+
 ## [v2.13.3] — 2026-08-28
 
 ### Fixed

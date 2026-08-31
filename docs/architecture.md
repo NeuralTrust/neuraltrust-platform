@@ -335,9 +335,9 @@ via `global.postgresql.deploy: false` + host/user/password (or set
 PostgreSQL by default in hybrid, sharing the same `postgresql-secrets` — a
 `postgres-migrations` initContainer applies its own schema
 (`neuraltrust` schema + `tests`/`test_runs` tables). Point it at an
-external/managed ClickHouse instead by setting a dotted
-`data-plane-api.dataPlane.components.clickhouse.host` (and its
-`existingSecret`), or force the backend with
+external/managed ClickHouse instead by naming it once at `global.clickhouse`, or
+with a dotted `data-plane-api.dataPlane.components.clickhouse.host` (and its
+`existingSecret`) to move this service alone, or force the backend with
 `data-plane-api.dataPlane.components.api.database.backend`.
 
 External gives control-plane services separate per-service databases. AlertEngine
@@ -367,6 +367,10 @@ global:
     deploy: false
   redis:
     deploy: false
+  clickhouse:
+    host: "clickhouse.example.com"
+    httpPort: "8443"
+    nativePort: "9440"
 
 infrastructure:
   clickhouse:
@@ -375,6 +379,14 @@ infrastructure:
 
 See `values-managed-datastores.yaml.example`. External PostgreSQL roles and
 databases must be pre-created.
+
+`global.clickhouse` is the single place the ClickHouse endpoint is named; every
+consumer (DataCore, AlertEngine api+worker, the ClickStack collector,
+data-plane-api and watchdog) resolves through it, with each service's own
+`clickhouse:` block still overriding for that service alone. It lives under
+`global` rather than beside `infrastructure.clickhouse.deploy` because a subchart
+can only read `.Values.global`, which is exactly why the older
+`infrastructure.clickhouse.external` block was inert.
 
 ## Observability collectors
 

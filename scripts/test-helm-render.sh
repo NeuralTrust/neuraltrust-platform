@@ -4933,5 +4933,340 @@ assert_pdb_shape "$out25" minAvailable 1 \
 assert_pdb_shape "$out25single" maxUnavailable 1 \
   "saas: singleton DataBridge PDB allows a node drain to proceed"
 
+# =========================================================================
+# Scenario 10c2 — imagePullSecrets: "none" actually suppresses (AUT-427)
+# =========================================================================
+# Nine subcharts carried byte-identical resolvers and every one of them dropped
+# the "none" check in the list branch, so global.imagePullSecrets: ["none"]
+# rendered `- name: none` — a reference to a Secret that does not exist, i.e. an
+# ImagePullBackOff on exactly the IAM / Workload Identity clusters that set it to
+# opt out. charts/clickhouse, charts/firewall and charts/watchdog had their own
+# inline variants with the same or worse gaps.
+#
+# These assertions are the regression fence. The whole point of the fix is that
+# the string "name: none" can never reach a rendered podspec.
+
+# Helper: resolve one workload's pull secrets to a comma-joined string.
+pull_secrets_of() {
+  local file="$1" kind="$2" name="$3"
+  yq eval "select(.kind == \"$kind\" and .metadata.name == \"$name\")
+    | (.spec.template.spec.imagePullSecrets // []) | map(.name) | join(\",\")" "$file"
+}
+
+# --- 1. the default install is byte-identical to before the refactor -------
+# The nine delegating wrappers must not change what a default render emits;
+# every product workload still pulls with gcr-secret from its own values pin.
+out10c2="$TMP/scenario-pullsecret-default.yaml"
+render_default "$out10c2" --set global.deploymentMode=external \
+  --set watchdog.enabled=true --set clickhouse.backup.enabled=true
+for _w in "Deployment:datacore" "Deployment:firewall" "Deployment:toxicity-worker" \
+          "Deployment:alertengine-api" "Deployment:clickstack-collector" \
+          "Deployment:agentgateway-proxy" "Deployment:trustguard-data-plane" \
+          "Deployment:redis" "StatefulSet:clickhouse" "StatefulSet:neuraltrust-watchdog"; do
+  _got=$(pull_secrets_of "$out10c2" "${_w%%:*}" "${_w##*:}")
+  if [[ "$_got" != "gcr-secret" ]]; then
+    red "FAIL: default install: ${_w##*:} pull secret changed (got: ${_got:-<none>}, want gcr-secret)"
+    exit 1
+  fi
+done
+green "ok  - default install still pulls with gcr-secret across every chart family"
+
+# --- 2. a "none" pin suppresses, and leaves no phantom Secret name ---------
+out10c2n="$TMP/scenario-pullsecret-none-pin.yaml"
+render_default "$out10c2n" --set global.deploymentMode=external \
+  --set watchdog.enabled=true --set clickhouse.backup.enabled=true \
+  --set datacore.imagePullSecrets=none \
+  --set firewall.firewall.imagePullSecrets=none \
+  --set clickhouse.imagePullSecrets=none \
+  --set watchdog.imagePullSecrets=none
+for _w in "Deployment:datacore" "Deployment:firewall" "Deployment:toxicity-worker" \
+          "StatefulSet:clickhouse" "StatefulSet:neuraltrust-watchdog"; do
+  _got=$(pull_secrets_of "$out10c2n" "${_w%%:*}" "${_w##*:}")
+  if [[ -n "$_got" ]]; then
+    red "FAIL: imagePullSecrets=none: ${_w##*:} still carries a pull secret (got: $_got)"
+    exit 1
+  fi
+done
+green "ok  - a \"none\" pin suppresses pull secrets on subchart, firewall, clickhouse and watchdog workloads"
+
+# The fence that matters most: "none" must never render as a Secret name. It is
+# valid YAML and a valid object reference, so nothing else catches it.
+assert_not_contains "$out10c2n" '^        - name: none$' \
+  "no workload references a Secret literally named \"none\""
+
+# The backup CronJob had drifted furthest — no "none" guard at all — so a chart
+# pinned to "none" gave the Job a pull secret the StatefulSet correctly omitted.
+cj_pull=$(yq eval 'select(.kind == "CronJob" and .metadata.name == "clickhouse-backup")
+  | (.spec.jobTemplate.spec.template.spec.imagePullSecrets // []) | map(.name) | join(",")' "$out10c2n")
+if [[ -n "$cj_pull" ]]; then
+  red "FAIL: clickhouse backup CronJob ignores imagePullSecrets=none (got: $cj_pull)"
+  exit 1
+fi
+green "ok  - the clickhouse backup CronJob honours \"none\" like its StatefulSet sibling"
+
+# --- 3. global ["none"] suppresses where the chart has no values pin -------
+# redis, the OTel collector and control-plane default in the template, so an
+# unset key falls through to the global list. Both previously rendered
+# `- name: none` from a global opt-out.
+out10c2g="$TMP/scenario-pullsecret-none-global.yaml"
+render_default "$out10c2g" --set global.deploymentMode=external \
+  --set 'global.imagePullSecrets={none}'
+for _n in redis control-plane-api control-plane-app control-plane-postgresql; do
+  _got=$(pull_secrets_of "$out10c2g" Deployment "$_n")
+  if [[ -n "$_got" ]]; then
+    red "FAIL: global.imagePullSecrets=[none]: $_n still carries a pull secret (got: $_got)"
+    exit 1
+  fi
+done
+green "ok  - global [\"none\"] suppresses redis, control-plane api/app and postgresql"
+assert_not_contains "$out10c2g" '^        - name: none$' \
+  "global [\"none\"] leaves no phantom Secret name anywhere"
+
+# --- 4. a list-of-{name:} global is valid YAML everywhere ------------------
+# charts/clickhouse concatenated the global list into `- name: {{ . }}`, so a
+# list-of-maps global — an accepted shape in every other chart — rendered a map
+# into a scalar position. `helm template` parses, but the object is malformed.
+# Rendering through yq is itself the assertion: a broken document fails to parse.
+out10c2m="$TMP/scenario-pullsecret-global-maps.yaml"
+render_default "$out10c2m" --set global.deploymentMode=external \
+  --set watchdog.enabled=true \
+  --set clickhouse.imagePullSecrets=null \
+  --set datacore.imagePullSecrets=null \
+  --set watchdog.imagePullSecrets=null \
+  --set 'global.imagePullSecrets[0].name=mirror-registry'
+for _w in "StatefulSet:clickhouse" "Deployment:datacore" "StatefulSet:neuraltrust-watchdog"; do
+  _got=$(pull_secrets_of "$out10c2m" "${_w%%:*}" "${_w##*:}")
+  if [[ "$_got" != "mirror-registry" ]]; then
+    red "FAIL: list-of-maps global: ${_w##*:} did not resolve (got: ${_got:-<none>}, want mirror-registry)"
+    exit 1
+  fi
+done
+green "ok  - a list-of-{name:} global.imagePullSecrets resolves to a valid Secret reference"
+
+# --- 5. firewall and watchdog gained a global fallback they never had ------
+# Both read only their local key before, so an operator setting only the global
+# list got the pinned default silently.
+out10c2f="$TMP/scenario-pullsecret-global-fallback.yaml"
+render_default "$out10c2f" --set global.deploymentMode=external \
+  --set watchdog.enabled=true \
+  --set firewall.firewall.imagePullSecrets="" \
+  --set watchdog.imagePullSecrets=null \
+  --set 'global.imagePullSecrets={my-registry}'
+for _w in "Deployment:firewall" "Deployment:toxicity-worker" "StatefulSet:neuraltrust-watchdog"; do
+  _got=$(pull_secrets_of "$out10c2f" "${_w%%:*}" "${_w##*:}")
+  if [[ "$_got" != "my-registry" ]]; then
+    red "FAIL: cleared pin + global: ${_w##*:} did not fall through (got: ${_got:-<none>}, want my-registry)"
+    exit 1
+  fi
+done
+green "ok  - clearing a firewall/watchdog pin lets global.imagePullSecrets win"
+
+# --- 6. the scalar accessor data-plane-api needs still works --------------
+# api/deployment.yaml forwards the resolved NAME into K8S_JOB_IMAGE_PULL_SECRET so
+# Jobs the API spawns pull with the same credential. A block-only refactor would
+# silently drop it, and nothing else in the suite covers that env var.
+# The env var only renders when k8sJobs is enabled, which is off by default.
+out10c2j="$TMP/scenario-pullsecret-job-name.yaml"
+render_default "$out10c2j" --set global.deploymentMode=external \
+  --set data-plane-api.dataPlane.components.api.k8sJobs.enabled=true
+jobsecret=$(yq eval 'select(.kind == "Deployment" and .metadata.name == "data-plane-api")
+  | .spec.template.spec.containers[0].env[] | select(.name == "K8S_JOB_IMAGE_PULL_SECRET") | .value' "$out10c2j")
+podsecret=$(pull_secrets_of "$out10c2j" Deployment data-plane-api)
+if [[ -z "$jobsecret" || "$jobsecret" != "$podsecret" ]]; then
+  red "FAIL: K8S_JOB_IMAGE_PULL_SECRET ($jobsecret) does not match the podspec pull secret ($podsecret)"
+  exit 1
+fi
+green "ok  - K8S_JOB_IMAGE_PULL_SECRET resolves to the same name the podspec pulls with"
+
+# And it must vanish, not render "none", when the operator opts out.
+out10c2jn="$TMP/scenario-pullsecret-job-none.yaml"
+render_default "$out10c2jn" --set global.deploymentMode=external \
+  --set data-plane-api.dataPlane.components.api.k8sJobs.enabled=true \
+  --set data-plane-api.dataPlane.imagePullSecrets=none
+assert_not_contains "$out10c2jn" 'K8S_JOB_IMAGE_PULL_SECRET' \
+  "data-plane-api omits the Job pull-secret env entirely when set to \"none\""
+
+# =========================================================================
+# Scenario 10c3 — an external ClickHouse reaches every consumer (AUT-636)
+# =========================================================================
+# infrastructure.clickhouse.external was read by exactly ONE of the five
+# consumers, because .Values.infrastructure is invisible to a subchart. So
+# `deploy: false` plus an external host left datacore, alertengine and the
+# ClickStack collector dialling a Service that is never rendered. There was no
+# scenario asserting the external path reached anything, which is why it shipped.
+#
+# The contract is now global.clickhouse. These assertions are the fence: every
+# consumer must follow it, and the in-cluster default must not move.
+
+blue "==> Scenario 10c3: external ClickHouse resolves for every consumer (AUT-636)"
+
+CH_EXT_ARGS=(
+  --set global.deploymentMode=external
+  --set watchdog.enabled=true
+  --set infrastructure.clickhouse.deploy=false
+  --set global.clickhouse.host=ch.managed.example.com
+  --set global.clickhouse.httpPort=8443
+  --set global.clickhouse.nativePort=9440
+  --set global.clickhouse.tls=true
+  --set global.clickhouse.user=ch_operator
+  --set global.clickhouse.existingSecret.name=managed-ch-secret
+  --set global.clickhouse.existingSecret.key=ch-password
+)
+out10c3="$TMP/scenario-ch-external.yaml"
+render_default "$out10c3" "${CH_EXT_ARGS[@]}"
+
+# --- native-protocol consumers: DataCore and both AlertEngine workloads -----
+assert_contains "$out10c3" '^  CLICKHOUSE_ADDR: "ch\.managed\.example\.com:9440"$' \
+  "external CH: CLICKHOUSE_ADDR follows global.clickhouse for DataCore and AlertEngine"
+assert_not_contains "$out10c3" 'CLICKHOUSE_ADDR: "clickhouse:' \
+  "external CH: no consumer is left pointing at the in-cluster Service"
+assert_contains "$out10c3" '^  CLICKHOUSE_TLS: "true"$' \
+  "external CH: DataCore gets CLICKHOUSE_TLS from global.clickhouse.tls"
+assert_contains "$out10c3" '^  CLICKHOUSE_SECURE: "true"$' \
+  "external CH: AlertEngine gets CLICKHOUSE_SECURE from the same key"
+assert_contains "$out10c3" '^  CLICKHOUSE_USERNAME: "ch_operator"$' \
+  "external CH: AlertEngine user follows global.clickhouse.user"
+
+# --- HTTP consumers: the ClickStack collector composes a URL -----------------
+# This chart is the only one configured by URL, and the scheme has to follow tls
+# or a TLS-only managed endpoint refuses the connection.
+assert_contains "$out10c3" 'CLICKHOUSE_ENDPOINT: "https://ch\.managed\.example\.com:8443"' \
+  "external CH: the collector composes an https endpoint from host + httpPort + tls"
+
+# --- data-plane-api keeps its own Secret, values decoded ---------------------
+dpa_host=$(yq -N 'select(.kind == "Secret" and .metadata.name == "clickhouse-secrets") | .data.CLICKHOUSE_HOST' "$out10c3" | head -1 | base64 -d)
+dpa_port=$(yq -N 'select(.kind == "Secret" and .metadata.name == "clickhouse-secrets") | .data.CLICKHOUSE_PORT' "$out10c3" | head -1 | base64 -d)
+if [[ "$dpa_host" != "ch.managed.example.com" || "$dpa_port" != "8443" ]]; then
+  red "FAIL: external CH: data-plane-api resolved ${dpa_host}:${dpa_port}, want ch.managed.example.com:8443"
+  exit 1
+fi
+green "ok  - external CH: data-plane-api's clickhouse-secrets carries the managed host and HTTP port"
+
+# A dotted host must pass through verbatim rather than being expanded to an
+# in-cluster FQDN. That heuristic uses "is it dotted?" as the proxy for "is it
+# external", so a managed host suffixed with .svc.cluster.local would be a bug.
+assert_not_contains "$out10c3" 'ch\.managed\.example\.com\.default\.svc\.cluster\.local' \
+  "external CH: a dotted managed host is not expanded into an in-cluster FQDN"
+
+# --- watchdog's ClickStack sink was a hardcoded literal ----------------------
+assert_contains "$out10c3" 'address: "ch\.managed\.example\.com:9440"' \
+  "external CH: watchdog's ClickStack sink follows global.clickhouse, not the old literal"
+
+# --- the migration initContainer needs the NATIVE port, not HTTP -------------
+# It was hardcoded to 9000, so a managed endpoint on a TLS native port failed
+# every migration while the API itself connected fine over HTTP -- a split-brain
+# failure that looks like a broken database rather than a config error.
+assert_contains "$out10c3" 'CLICKHOUSE_NATIVE_PORT="9440"' \
+  "external CH: the ClickHouse migration job uses the resolved native port"
+assert_not_contains "$out10c3" 'CLICKHOUSE_NATIVE_PORT="9000"' \
+  "external CH: the migration job no longer hardcodes native 9000"
+
+# --- the password Secret moves with it --------------------------------------
+pw_refs=$(grep -c 'managed-ch-secret' "$out10c3" || true)
+if [[ "$pw_refs" -lt 4 ]]; then
+  red "FAIL: external CH: expected >=4 references to managed-ch-secret, got $pw_refs"
+  exit 1
+fi
+green "ok  - external CH: every consumer reads the password from global.clickhouse.existingSecret"
+
+# --- the AUT-409 wait invariant must still hold on the external path --------
+# Re-asserted here, not just for the in-cluster default: a wait pointing at the
+# old Service would fail an install that would otherwise have worked.
+for _dep in datacore alertengine-api alertengine-worker; do
+  _cmd=$(yq -N "select(.kind == \"Deployment\" and .metadata.name == \"$_dep\") | .spec.template.spec.initContainers[] | select(.name == \"wait-for-clickhouse\") | .command[-1]" "$out10c3" 2>/dev/null)
+  _h=$(printf '%s' "$_cmd" | sed -n 's/^ *HOST="\(.*\)"$/\1/p' | head -1)
+  _p=$(printf '%s' "$_cmd" | sed -n 's/^ *PORT="\(.*\)"$/\1/p' | head -1)
+  if [[ "$_h" != "ch.managed.example.com" || "$_p" != "9440" ]]; then
+    red "FAIL: external CH: $_dep waits on ${_h}:${_p}, but the app is configured for ch.managed.example.com:9440"
+    exit 1
+  fi
+done
+green "ok  - external CH: every wait-for-clickhouse targets the managed endpoint"
+
+# --- the in-cluster default must be untouched -------------------------------
+out10c3d="$TMP/scenario-ch-incluster-default.yaml"
+render_default "$out10c3d" --set global.deploymentMode=external --set watchdog.enabled=true
+assert_contains "$out10c3d" '^  CLICKHOUSE_ADDR: "clickhouse:9000"$' \
+  "in-cluster default: CLICKHOUSE_ADDR unchanged by the AUT-636 rewiring"
+assert_contains "$out10c3d" 'CLICKHOUSE_ENDPOINT: "http://clickhouse:8123"' \
+  "in-cluster default: the collector endpoint is unchanged"
+assert_contains "$out10c3d" '^  CLICKHOUSE_TLS: "false"$' \
+  "in-cluster default: TLS stays off"
+assert_contains "$out10c3d" '^  CLICKHOUSE_USERNAME: "neuraltrust"$' \
+  "in-cluster default: the ClickHouse user is unchanged"
+assert_contains "$out10c3d" 'CLICKHOUSE_NATIVE_PORT="9000"' \
+  "in-cluster default: migrations still use native 9000"
+
+# --- a per-consumer override still wins over global ------------------------
+# The point of keeping the local keys: one service can be moved on its own.
+out10c3o="$TMP/scenario-ch-local-override.yaml"
+render_default "$out10c3o" --set global.deploymentMode=external \
+  --set global.clickhouse.host=shared.example.com \
+  --set global.clickhouse.nativePort=9440 \
+  --set datacore.clickhouse.host=datacore-only.example.com
+dc_addr=$(yq -N 'select(.kind == "ConfigMap" and .metadata.name == "datacore-env-vars") | .data.CLICKHOUSE_ADDR' "$out10c3o" | head -1)
+ae_addr=$(yq -N 'select(.kind == "ConfigMap" and .metadata.name == "alertengine-env-vars") | .data.CLICKHOUSE_ADDR' "$out10c3o" | head -1)
+if [[ "$dc_addr" != "datacore-only.example.com:9440" ]]; then
+  red "FAIL: a per-consumer clickhouse.host must beat global (datacore got: $dc_addr)"
+  exit 1
+fi
+if [[ "$ae_addr" != "shared.example.com:9440" ]]; then
+  red "FAIL: AlertEngine should still follow global.clickhouse (got: $ae_addr)"
+  exit 1
+fi
+green "ok  - a per-consumer clickhouse.host overrides global for that service alone"
+
+# --- the deprecated block fails closed instead of being ignored -------------
+# It was accepted silently while doing nothing, which is the whole bug. The fail
+# is deliberately narrow: setting it alongside a real endpoint still renders, so
+# the one values file that made it work (values-managed-datastores.yaml.example)
+# keeps installing.
+# Bypasses render_default deliberately: this render must FAIL, so it cannot go
+# through a helper that pipes to a file and validates. Same base values, though,
+# or it would not be testing the same install.
+render_raw() {
+  helm template nt-legacy "$CHART_DIR" --namespace default \
+    -f "$CHART_DIR/values-required.yaml" "${CLICKSTACK_DEFAULT_ARGS[@]}" "$@" >/dev/null 2>&1
+}
+if render_raw \
+    --set global.deploymentMode=external \
+    --set infrastructure.clickhouse.deploy=false \
+    --set infrastructure.clickhouse.external.host=ch.legacy.example.com; then
+  red "FAIL: infrastructure.clickhouse.external.host alone should fail the render, not be silently ignored"
+  exit 1
+fi
+green "ok  - the inert infrastructure.clickhouse.external block now fails closed"
+for _combo in "--set global.clickhouse.host=ch.legacy.example.com" "--set datacore.clickhouse.host=ch.legacy.example.com"; do
+  # shellcheck disable=SC2086  # $_combo is a deliberate two-token --set pair
+  if ! render_raw \
+      --set global.deploymentMode=external \
+      --set infrastructure.clickhouse.deploy=false \
+      --set infrastructure.clickhouse.external.host=ch.legacy.example.com \
+      $_combo; then
+    red "FAIL: the deprecated block alongside a real endpoint ($_combo) must still render"
+    exit 1
+  fi
+done
+green "ok  - the deprecated block alongside a real endpoint still installs"
+
+# The documented managed-datastore example predates global.clickhouse and works by
+# restating the endpoint per consumer. It must keep installing.
+# The example file is self-contained (it sets its own deploymentMode and
+# datastores), so it is rendered on its own rather than layered on values-required.
+if ! helm template nt-example "$CHART_DIR" --namespace default \
+    -f "$CHART_DIR/values-managed-datastores.yaml.example" >/dev/null 2>&1; then
+  red "FAIL: values-managed-datastores.yaml.example no longer renders"
+  exit 1
+fi
+green "ok  - values-managed-datastores.yaml.example still renders"
+
+# --- the four dead helpers are gone, not merely unused ---------------------
+if grep -qE 'define "neuraltrust-platform\.clickhouse\.(host|port|user|database)"' templates/_helpers.tpl; then
+  red "FAIL: the dead infrastructure-reading ClickHouse helpers are back"
+  red "  they read .Values.infrastructure, which no subchart can see -- reintroducing them recreates AUT-636"
+  exit 1
+fi
+green "ok  - the four dead infrastructure-reading ClickHouse helpers stay deleted"
+
 green ""
 green "All v2 render scenarios passed."

@@ -28,10 +28,13 @@ data:
   {{- end }}
   {{- end }}
   # ---- ClickHouse (event source, native protocol) ----
-  CLICKHOUSE_ADDR: {{ printf "%s:%v" .Values.clickhouse.host .Values.clickhouse.nativePort | quote }}
+  {{- /* AUT-636: resolves through global.clickhouse. `secure` is this binary's
+         name for the same flag DataCore calls `tls`. */}}
+  {{- $ch := include "neuraltrust-platform.clickhouse.resolve" (dict "local" .Values.clickhouse "global" .Values.global) | fromYaml }}
+  CLICKHOUSE_ADDR: {{ printf "%s:%v" $ch.host $ch.nativePort | quote }}
   CLICKHOUSE_DATABASE: {{ .Values.clickhouse.database | quote }}
-  CLICKHOUSE_USERNAME: {{ .Values.clickhouse.username | quote }}
-  CLICKHOUSE_SECURE: {{ .Values.clickhouse.secure | quote }}
+  CLICKHOUSE_USERNAME: {{ $ch.user | quote }}
+  CLICKHOUSE_SECURE: {{ $ch.tls | quote }}
   # ---- Auth (JWT teamId, mirrors app BFF) ----
   AUTH_ENABLED: {{ .Values.config.authEnabled | quote }}
   # ---- Worker (evaluation + SIEM forwarding) ----

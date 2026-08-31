@@ -43,11 +43,12 @@ spec:
           labelSelector:
             matchLabels:
               {{- include "firewall.gateway.selectorLabels" . | nindent 14 }}
-      {{- $imagePullSecret := .Values.firewall.imagePullSecrets | default "" }}
-      {{- if and $imagePullSecret (ne $imagePullSecret "") }}
-      imagePullSecrets:
-        - name: {{ $imagePullSecret }}
-      {{- end }}
+      {{- /* AUT-427: previously read only .Values.firewall.imagePullSecrets, ignored
+             global entirely, and did not special-case "none" -- so "none" rendered a
+             phantom imagePullSecrets entry naming a Secret that does not exist. That
+             gap was live enough to be written up as a warning in a customer values
+             file. The value key stays nested under `firewall.`; only resolution moved. */}}
+      {{- include "neuraltrust-platform.subchart.imagePullSecrets" (dict "local" .Values.firewall.imagePullSecrets "global" .Values.global) | nindent 6 }}
       {{- if .Values.firewall.podSecurityContext }}
       securityContext:
         {{- toYaml .Values.firewall.podSecurityContext | nindent 8 }}

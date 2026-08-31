@@ -74,10 +74,11 @@ spec:
         {{- end }}
     spec:
       serviceAccountName: {{ include "neuraltrust-watchdog.serviceAccountName" . }}
-      {{- with .Values.imagePullSecrets }}
-      imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+      {{- /* AUT-427: was a raw toYaml passthrough -- no global fallback and no "none"
+             support, and this is the only chart whose values default is a
+             list-of-{name:} rather than a string. The resolver accepts both shapes, so
+             the default renders identically. */}}
+      {{- include "neuraltrust-platform.subchart.imagePullSecrets" (dict "local" .Values.imagePullSecrets "global" .Values.global) | nindent 6 }}
       {{- if .Values.priorityClassName }}
       priorityClassName: {{ .Values.priorityClassName }}
       {{- end }}

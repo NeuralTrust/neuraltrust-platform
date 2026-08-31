@@ -249,6 +249,12 @@ global:
     deploy: false
   redis:
     deploy: false
+  # Where the managed ClickHouse actually is. Needed alongside deploy: false --
+  # every consumer resolves through here (see README-EXTERNAL.md).
+  clickhouse:
+    host: "clickhouse.example.com"
+    httpPort: "8443"
+    nativePort: "9440"
 
 infrastructure:
   clickhouse:

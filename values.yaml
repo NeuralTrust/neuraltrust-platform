@@ -150,8 +150,25 @@ global:
   # Base domain used for URL generation (<hostPrefix>.<domain>).
   domain: "neuraltrust.ai"
   imageRegistry: "" # Global registry mirror; empty = per-component defaults
-  # Optional global pull-secret list. Control-plane app/api honour it after
-  # their own keys (AUT-390); other product charts vary — see chart-wide audit.
+  # Optional global pull-secret list. Accepts names or {name:} maps. A "none"
+  # element suppresses pull secrets entirely (IAM / Workload Identity clusters).
+  #
+  # Two families, and the difference is deliberate (AUT-427):
+  #   * control-plane app/api, postgresql, redis and the OTel collector default in
+  #     the TEMPLATE, so leaving their key unset falls through to this list.
+  #   * the product subcharts (agentgateway, alertengine, clickhouse, clickstack-*,
+  #     dataagent, databridge, datacore, firewall, trustguard, trustlens, watchdog)
+  #     pin `imagePullSecrets: "gcr-secret"` in their own values.yaml, so that pin
+  #     wins and this list is ignored until you clear it.
+  #
+  # So to point a product chart at your own registry, set BOTH:
+  #   global.imagePullSecrets: ["my-registry"]
+  #   datacore.imagePullSecrets: ""      # clear the pin so the global wins
+  #
+  # Unifying the two families would change rendered output for every install that
+  # relies on the pin winning today, which is why the split is documented rather
+  # than removed. data-plane-api is a third case: it ignores this list by design
+  # and resolves from `data-plane-api.dataPlane.imagePullSecrets`.
   imagePullSecrets: []
   autoGenerateSecrets: true
   preserveExistingSecrets: false
@@ -378,6 +395,35 @@ global:
         password: "REDIS_PASSWORD"
         username: "REDIS_USERNAME"
         tls: "REDIS_TLS"
+  # Shared ClickHouse connection (AUT-636). Every consumer -- DataCore,
+  # AlertEngine api+worker, the ClickStack collector, data-plane-api and watchdog
+  # -- resolves through here, so a managed / external ClickHouse is named once.
+  #
+  # This lives under `global` rather than beside `infrastructure.clickhouse.deploy`
+  # for a structural reason: a subchart cannot read `.Values.infrastructure`, and a
+  # template cannot write to `global`. That is why the old
+  # `infrastructure.clickhouse.external` block was read by exactly one of the five
+  # consumers -- see the deprecation note there.
+  #
+  # Empty means "use the in-cluster default": host `clickhouse`, HTTP 8123,
+  # native 9000, user `neuraltrust`, Secret `clickhouse`/`admin-password`.
+  # A per-consumer key still overrides this for one service.
+  clickhouse:
+    host: ""
+    # HTTP interface (data-plane-api, ClickStack collector).
+    httpPort: ""
+    # Native protocol (DataCore, AlertEngine, watchdog). A managed endpoint that
+    # only speaks HTTPS still needs this set, usually to the same TLS port.
+    nativePort: ""
+    user: ""
+    # true when the endpoint requires TLS. Renders as CLICKHOUSE_TLS for DataCore
+    # and CLICKHOUSE_SECURE for AlertEngine -- one key, both names.
+    tls: ""
+    # Secret holding the ClickHouse password. Defaults to the in-cluster
+    # `clickhouse` subchart's Secret.
+    existingSecret:
+      name: ""
+      key: ""
   security:
     allowInsecureImages: true # Bitnami charts require this
   storageClass: ""
@@ -523,17 +569,31 @@ global:
         clusterScoped: true
 # Infrastructure toggles.
 infrastructure:
-  # In-cluster ClickHouse: external mode only. Set deploy=false for hosted CH.
+  # In-cluster ClickHouse: external mode only. Set deploy=false for hosted CH,
+  # and name the endpoint under `global.clickhouse`.
   clickhouse:
     deploy: true
+    # DEPRECATED and inert (AUT-636). This block was read by exactly one of the
+    # five ClickHouse consumers, because `.Values.infrastructure` is invisible to
+    # subcharts -- so `deploy: false` plus an `external.host` left DataCore,
+    # AlertEngine and the ClickStack collector still dialling `clickhouse:9000`,
+    # a Service that is no longer rendered. It could not express the native port
+    # those three need, nor the TLS flag a managed endpoint requires, so it could
+    # never have worked as documented.
+    #
+    # Use `global.clickhouse` instead. Setting `external.host` here with no
+    # endpoint configured anywhere else is now a render-time error rather than a
+    # silent misconfiguration -- see templates/validate-values.yaml.
+    #
+    # Kept (unread) so an existing values.yaml still installs.
     external:
-      host: "clickhouse.clickhouse.svc.cluster.local"
-      port: "8123"
-      user: "neuraltrust"
+      host: ""
+      port: ""
+      user: ""
       password: ""
-      database: "neuraltrust"
-      secretName: "clickhouse"
-      secretKey: "admin-password"
+      database: ""
+      secretName: ""
+      secretKey: ""
   # In-cluster Redis Deployment knobs. host/port/password flow through
   # global.redis; the block below controls how the in-cluster Redis renders.
   redis:
@@ -734,7 +794,7 @@ control-plane-app:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.150.0"
+          tag: "v1.153.0"
           pullPolicy: IfNotPresent
         config:
           nodeEnv: production
@@ -813,7 +873,7 @@ control-plane-app:
 # stays agentgateway for now; K8s names stay agentgateway-*.
 agentgateway:
   image:
-    tag: "v0.43.2"
+    tag: "v0.49.1"
   # Empty host/port/sslMode/username/tls inherit from global.postgresql /
   # global.redis, then fall back to the in-cluster Services. Set them here only
   # to point this one service somewhere else.
@@ -841,7 +901,7 @@ agentgateway:
 # TrustGuard: control-plane + data-plane (/v1/evaluate).
 trustguard:
   image:
-    tag: "v0.41.0"
+    tag: "v0.42.0"
   # Empty host/port/sslMode/username/tls inherit — see the agentgateway note.
   database:
     sslMode: ""
@@ -872,7 +932,7 @@ trustlens:
 # agentgateway.dataagent / trustguard.dataagent.
 dataagent:
   image:
-    tag: "v0.6.1"
+    tag: "v0.6.2"
   databridge:
     # Empty derives from global.saasRegion (databridge.<saas domain>:443).
     addr: ""
@@ -885,7 +945,7 @@ dataagent:
 # `global.postgresql` block.
 datacore:
   image:
-    tag: "v0.18.0"
+    tag: "v0.20.0"
   database:
     # Empty inherits global.postgresql, then control-plane-postgresql:5432.
     # name/user stay per-service: external gives each service its own role+DB.
@@ -896,9 +956,12 @@ datacore:
     sslMode: ""
     # Unset ⇒ global.postgresql.authMode (AUT-392). Explicit true/false wins.
     # iamAuth:
+  # Empty host/nativePort/user/tls inherit global.clickhouse, then the in-cluster
+  # default (AUT-636). The two database names stay per-consumer on purpose: event
+  # tables live in `default`, the OTLP landing DB is `otel`.
   clickhouse:
-    host: "clickhouse"
-    nativePort: 9000
+    host: ""
+    nativePort: ""
     database: "default"
     otelDatabase: "otel"
 # DataBridge (v2 saas only): brokers data planes running outside this cluster.
@@ -960,14 +1023,17 @@ clickstack-otel-collector:
   image:
     tag: "2.34.0"
     repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickstack-otel-collector
+  # Empty endpoint is composed from global.clickhouse (scheme follows
+  # global.clickhouse.tls), then http://clickhouse:8123 (AUT-636). Set it
+  # explicitly to override for this consumer only.
   clickhouse:
-    endpoint: "http://clickhouse:8123"
+    endpoint: ""
     database: "otel"
 # AlertEngine (v2 external only): detection rules over ClickHouse telemetry.
 alertengine:
   enabled: true
   image:
-    tag: "v0.7.2"
+    tag: "v0.8.1"
   database:
     # Empty inherits global.postgresql, then control-plane-postgresql:5432.
     # name/user stay per-service: external gives each service its own role+DB.
@@ -978,13 +1044,14 @@ alertengine:
     sslMode: ""
     # Unset ⇒ global.postgresql.authMode (AUT-392). Explicit true/false wins.
     # iamAuth:
+  # Empty host/nativePort/username/secure inherit global.clickhouse (AUT-636).
   clickhouse:
-    host: "clickhouse"
-    nativePort: 9000
+    host: ""
+    nativePort: ""
     # Event tables live in `default`; `otel` is the OTLP landing DB only (AUT-385).
     database: "default"
-    username: "neuraltrust"
-    secure: false
+    username: ""
+    secure: ""
 # data-plane-api (analytics / evaluation API).
 data-plane-api:
   securityHardening: true
@@ -1012,15 +1079,18 @@ data-plane-api:
       # the shared platform Secret.
       dataPlaneJWTSecret: ""
     components:
+      # Empty host/port/user inherit global.clickhouse (AUT-636).
       clickhouse:
         enabled: true
-        host: "clickhouse"
-        port: "8123"
-        user: "neuraltrust"
+        host: ""
+        port: ""
+        user: ""
         database: "neuraltrust"
+        # Empty inherits global.clickhouse.existingSecret, then the in-cluster
+        # `clickhouse` Secret / `admin-password` (AUT-636).
         existingSecret:
-          name: "clickhouse"
-          key: "admin-password"
+          name: ""
+          key: ""
         auth:
           username: "neuraltrust"
         secrets:
