@@ -733,7 +733,7 @@ control-plane-api:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api"
-          tag: "v1.25.0"
+          tag: "v1.26.0"
           pullPolicy: IfNotPresent
         config:
           controlPlaneApiUrl: ""
@@ -794,7 +794,7 @@ control-plane-app:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.153.0"
+          tag: "v1.165.1"
           pullPolicy: IfNotPresent
         config:
           nodeEnv: production
@@ -873,7 +873,7 @@ control-plane-app:
 # stays agentgateway for now; K8s names stay agentgateway-*.
 agentgateway:
   image:
-    tag: "v0.49.1"
+    tag: "v0.53.1"
   # Empty host/port/sslMode/username/tls inherit from global.postgresql /
   # global.redis, then fall back to the in-cluster Services. Set them here only
   # to point this one service somewhere else.
@@ -945,7 +945,7 @@ dataagent:
 # `global.postgresql` block.
 datacore:
   image:
-    tag: "v0.20.0"
+    tag: "v0.20.2"
   database:
     # Empty inherits global.postgresql, then control-plane-postgresql:5432.
     # name/user stay per-service: external gives each service its own role+DB.
@@ -1146,7 +1146,7 @@ data-plane-api:
                   memory: 128Mi
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.49.0
+          tag: v1.50.1
           pullPolicy: IfNotPresent
         accessMode: ReadWriteOnce
         huggingfaceToken: ""

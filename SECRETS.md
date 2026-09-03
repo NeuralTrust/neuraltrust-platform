@@ -41,7 +41,8 @@ already points at. Copy-pasteable `kubectl create secret` commands are in
 External needs no config-sync tokens and no enrolment JWTs; it runs its own
 control planes and never deploys DataAgent. Before going live, read
 [`NEXT_PUBLIC_*` cannot be configured at runtime](#next_public_-cannot-be-configured-at-runtime)
-— it affects the tenant URL a self-hosted console advertises to IdPs.
+— it affects the SCIM URLs a self-hosted console advertises to IdPs, and the fix
+requires a recent app image.
 
 ### Central control plane (`deploymentMode: saas`)
 
@@ -241,21 +242,31 @@ control-plane-app:
 the JavaScript bundle when the image is built, so setting one as pod env — including
 through `extraEnv` — has **no effect**. The chart deliberately sets none of them.
 
-The one that matters on-premise is `NEXT_PUBLIC_APP_URL`, which falls back to the SaaS
-default `https://app.neuraltrust.ai`. It is used by two server-side paths, so a
-self-hosted install advertises the wrong host in:
+**Nothing you deploy needs to set one.** This used to be a live problem: server-side
+paths read `NEXT_PUBLIC_APP_URL` and fell back to the SaaS default
+`https://app.neuraltrust.ai`, so a self-hosted install advertised the wrong host in
+the SCIM **tenant URL** and in the `meta.location` of SCIM **user** resources, which
+IdPs follow back. Since that variable was never accepted as a Dockerfile build
+argument, there was no way to configure it correctly either.
 
-- the SCIM **tenant URL** shown after generating a SCIM token
-- the `meta.location` field of SCIM user resources, which IdPs consume
+Both now resolve at runtime — request headers first (so a custom domain is reflected
+back), then `APP_URL`, which this chart already sets from `global.domain`.
+**Requires an app image built from `main` at or after 31 Aug 2026**; on an older
+image those URLs still carry the SaaS host, and rebuilding is the only remedy.
 
-Both need an image rebuilt with your own `NEXT_PUBLIC_APP_URL`, which the app's
-Dockerfile does not yet accept as a build argument — making these two paths read the
-runtime `APP_URL` instead is planned. Most other
-user-facing URLs are safe: the SSO/OIDC/Azure setup screens and the SCIM setup guide
-derive the origin from the browser, and invite links, magic links and server-side SSO
-callbacks use the runtime `APP_URL` / `NEXTAUTH_URL` that the chart does set from
-`global.domain` (override with
-`control-plane-app.controlPlane.components.app.config.appUrl`).
+SCIM **group** provisioning is a separate matter: the `/scim/v2/Groups` endpoints are
+not present on `main` yet, so an IdP configured to push directory groups will not find
+them regardless of image date. They arrive in a later release, and this note will say
+so when they do.
+
+Everything else was already safe and is unchanged: the SSO/OIDC/Azure setup screens
+and the SCIM setup guide derive the origin from the browser, and invite links, magic
+links and server-side SSO callbacks use the runtime `APP_URL` / `NEXTAUTH_URL`
+(override with `control-plane-app.controlPlane.components.app.config.appUrl`).
+
+The general rule at the top of this section still holds for every other
+`NEXT_PUBLIC_*` variable, so it is worth keeping in mind before trying to configure
+one through `extraEnv`.
 
 ### Outbound email
 
