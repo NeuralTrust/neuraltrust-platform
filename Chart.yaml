@@ -16,21 +16,21 @@ dependencies:
       - infrastructure
   # Analytics / evaluation API. Gated by global.products.dataPlane in hybrid.
   - name: data-plane-api
-    version: 1.7.1
+    version: 1.7.2
     repository: file://./charts/data-plane-api
     tags:
       - neuraltrust
       - v2
   # Control-plane API — external only (templates gated by isExternal).
   - name: control-plane-api
-    version: 0.1.5
+    version: 0.1.6
     repository: file://./charts/control-plane-api
     tags:
       - neuraltrust
       - v2
   # Control-plane App/UI — external only.
   - name: control-plane-app
-    version: 0.1.38
+    version: 0.1.39
     repository: file://./charts/control-plane-app
     tags:
       - neuraltrust
@@ -38,7 +38,7 @@ dependencies:
   # TrustGate (values: agentgateway; K8s: agentgateway-*). Hybrid gated by
   # global.products.trustgate.
   - name: agentgateway
-    version: 0.1.57
+    version: 0.1.58
     repository: file://./charts/agentgateway
     tags:
       - neuraltrust
@@ -66,7 +66,7 @@ dependencies:
       - v2
   # DataCore — v2 external only.
   - name: datacore
-    version: 0.1.21
+    version: 0.1.22
     repository: file://./charts/datacore
     tags:
       - neuraltrust
@@ -109,7 +109,7 @@ dependencies:
       - neuraltrust
   # Watchdog — optional self-monitoring/self-healing.
   - name: watchdog
-    version: 0.3.12
+    version: 0.3.13
     repository: file://./charts/watchdog
     condition: watchdog.enabled
     tags:
