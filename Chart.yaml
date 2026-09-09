@@ -30,7 +30,7 @@ dependencies:
       - v2
   # Control-plane App/UI — external only.
   - name: control-plane-app
-    version: 0.1.41
+    version: 0.1.42
     repository: file://./charts/control-plane-app
     tags:
       - neuraltrust
@@ -38,7 +38,7 @@ dependencies:
   # TrustGate (values: agentgateway; K8s: agentgateway-*). Hybrid gated by
   # global.products.trustgate.
   - name: agentgateway
-    version: 0.1.60
+    version: 0.1.61
     repository: file://./charts/agentgateway
     tags:
       - neuraltrust
