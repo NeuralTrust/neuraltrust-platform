@@ -733,7 +733,7 @@ control-plane-api:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api"
-          tag: "v1.26.0"
+          tag: "v1.27.0"
           pullPolicy: IfNotPresent
         config:
           controlPlaneApiUrl: ""
@@ -794,7 +794,7 @@ control-plane-app:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.170.3"
+          tag: "v1.172.1"
           pullPolicy: IfNotPresent
         config:
           nodeEnv: production
@@ -873,7 +873,7 @@ control-plane-app:
 # stays agentgateway for now; K8s names stay agentgateway-*.
 agentgateway:
   image:
-    tag: "v0.57.4"
+    tag: "v0.58.0"
   # Empty host/port/sslMode/username/tls inherit from global.postgresql /
   # global.redis, then fall back to the in-cluster Services. Set them here only
   # to point this one service somewhere else.
@@ -901,7 +901,7 @@ agentgateway:
 # TrustGuard: control-plane + data-plane (/v1/evaluate).
 trustguard:
   image:
-    tag: "v0.43.0"
+    tag: "v0.44.2"
   # Empty host/port/sslMode/username/tls inherit — see the agentgateway note.
   database:
     sslMode: ""
@@ -945,7 +945,7 @@ dataagent:
 # `global.postgresql` block.
 datacore:
   image:
-    tag: "v0.20.2"
+    tag: "v0.23.0"
   database:
     # Empty inherits global.postgresql, then control-plane-postgresql:5432.
     # name/user stay per-service: external gives each service its own role+DB.
@@ -1146,7 +1146,7 @@ data-plane-api:
                   memory: 128Mi
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.50.1
+          tag: v1.51.0
           pullPolicy: IfNotPresent
         accessMode: ReadWriteOnce
         huggingfaceToken: ""
@@ -1228,7 +1228,7 @@ firewall:
       replicas: 2
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-        tag: "v2.28.2"
+        tag: "v2.28.3"
         pullPolicy: IfNotPresent
       resources:
         requests:
@@ -1255,7 +1255,7 @@ firewall:
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
         # Keep in lockstep with gateway.image.tag.
-        tag: "v2.28.2"
+        tag: "v2.28.3"
         pullPolicy: IfNotPresent
       replicas: 1
       resources:
