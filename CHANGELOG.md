@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.13.10] — 2026-09-15
+
 ### Added
 
 - **Zone spreading and disruption budgets for the two workloads that had
@@ -65,7 +67,6 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
   gateway and workers, the OTel collector, and `watchdog`. An operator who set
   the key explicitly still wins; one who never set it now follows
   `global.highAvailability`.
-
 
 ## [v2.13.4] — 2026-08-31
 
