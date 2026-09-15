@@ -1,0 +1,25 @@
+{{- if and (eq (include "agentgateway.enabled" .) "true") (eq (include "neuraltrust-platform.isExternal" .) "true") }}
+{{- $pdb := default dict .Values.controlPlane.podDisruptionBudget }}
+{{- $autoscaling := default dict .Values.controlPlane.autoscaling }}
+{{- $replicas := default 2 .Values.controlPlane.replicas }}
+{{- if $autoscaling.enabled }}
+  {{- $replicas = default 1 $autoscaling.minReplicas }}
+{{- end }}
+{{- /* A budget on a single replica makes disruptionsAllowed 0 and deadlocks
+       every node drain, so it only renders once there is something to spare. */}}
+{{- if and (eq (include "neuraltrust-platform.ha.pdbEnabled" (dict "ctx" . "local" $pdb)) "true") (gt ($replicas | int) 1) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Values.controlPlane.name }}
+  labels:
+    {{- include "agentgateway.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+spec:
+  {{- include "neuraltrust-platform.ha.pdbSpec" (dict "ctx" . "local" $pdb) | nindent 2 }}
+  selector:
+    matchLabels:
+      {{- include "agentgateway.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: control-plane
+{{- end }}
+{{- end }}

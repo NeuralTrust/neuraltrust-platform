@@ -1,4 +1,4 @@
-{{- if and (eq (include "databridge.deploy" .) "true") .Values.podDisruptionBudget.enabled }}
+{{- if and (eq (include "databridge.deploy" .) "true") (eq (include "neuraltrust-platform.ha.pdbEnabled" (dict "ctx" . "local" .Values.podDisruptionBudget)) "true") }}
 {{- $replicas := int (.Values.replicas | default 2) }}
 {{- $minAvailable := .Values.podDisruptionBudget.minAvailable }}
 {{- $maxUnavailable := .Values.podDisruptionBudget.maxUnavailable }}

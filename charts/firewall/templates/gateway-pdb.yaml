@@ -5,7 +5,7 @@
 {{- if $autoscaling.enabled }}
   {{- $replicas = default 1 $autoscaling.minReplicas }}
 {{- end }}
-{{- if and $pdb.enabled (gt ($replicas | int) 1) }}
+{{- if and (eq (include "neuraltrust-platform.ha.pdbEnabled" (dict "ctx" . "local" $pdb)) "true") (gt ($replicas | int) 1) }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:

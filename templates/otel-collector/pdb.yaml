@@ -6,7 +6,7 @@
 {{- if $autoscaling.enabled -}}
   {{- $replicas = default 1 $autoscaling.minReplicas -}}
 {{- end -}}
-{{- if and $pdb.enabled (gt ($replicas | int) 1) }}
+{{- if and (eq (include "neuraltrust-platform.ha.pdbEnabled" (dict "ctx" . "local" $pdb)) "true") (gt ($replicas | int) 1) }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -15,13 +15,7 @@ metadata:
   labels:
     {{- include "neuraltrust-platform.otelCollector.labels" . | nindent 4 }}
 spec:
-  {{- if hasKey $pdb "maxUnavailable" }}
-  maxUnavailable: {{ $pdb.maxUnavailable }}
-  {{- else if hasKey $pdb "minAvailable" }}
-  minAvailable: {{ $pdb.minAvailable }}
-  {{- else }}
-  maxUnavailable: 1
-  {{- end }}
+  {{- include "neuraltrust-platform.ha.pdbSpec" (dict "ctx" . "local" $pdb) | nindent 2 }}
   selector:
     matchLabels:
       {{- include "neuraltrust-platform.otelCollector.selectorLabels" . | nindent 6 }}

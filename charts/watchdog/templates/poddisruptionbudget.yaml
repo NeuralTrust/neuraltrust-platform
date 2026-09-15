@@ -1,4 +1,4 @@
-{{- if and .Values.enabled .Values.podDisruptionBudget.enabled (gt (.Values.replicaCount | int) 1) }}
+{{- if and .Values.enabled (eq (include "neuraltrust-platform.ha.pdbEnabled" (dict "ctx" . "local" .Values.podDisruptionBudget)) "true") (gt (.Values.replicaCount | int) 1) }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -7,7 +7,7 @@ metadata:
   labels:
     {{- include "neuraltrust-watchdog.labels" . | nindent 4 }}
 spec:
-  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  {{- include "neuraltrust-platform.ha.pdbSpec" (dict "ctx" . "local" .Values.podDisruptionBudget) | nindent 2 }}
   selector:
     matchLabels:
       {{- include "neuraltrust-watchdog.selectorLabels" . | nindent 6 }}

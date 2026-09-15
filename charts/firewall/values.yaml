@@ -23,7 +23,6 @@ firewall:
       targetCPUUtilizationPercentage: 80
       targetMemoryUtilizationPercentage: 90
     podDisruptionBudget:
-      enabled: false
       maxUnavailable: 1
     # Extra env vars appended to the gateway container (list of EnvVar).
     extraEnv: []
@@ -65,7 +64,6 @@ firewall:
       targetCPUUtilizationPercentage: 80
       # No targetMemoryUtilizationPercentage: ML model RSS is constant per pod.
     podDisruptionBudget:
-      enabled: false
       maxUnavailable: 1
   # --- Workers (each gets Deployment, Service, HPA, PDB) ---
   # Per-worker extraEnv / extraEnvFrom default to empty; add them under a worker entry
