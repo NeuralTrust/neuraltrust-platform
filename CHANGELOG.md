@@ -4,6 +4,69 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Added
+
+- **Zone spreading and disruption budgets for the two workloads that had
+  neither.** `agentgateway` (proxy, MCP, admin) and `trustguard` (data, control)
+  are the components on the request path, and they were the only ones the chart
+  could not make zone-safe: no `PodDisruptionBudget` template, no `affinity`, no
+  `topologySpreadConstraints`. Setting those keys under either of them did
+  nothing, silently, while the documentation told operators to "run at least two
+  replicas". Five PDB templates and spread/affinity support close that.
+
+- **`global.highAvailability` — one switch for the whole platform.** Rather than
+  a per-component copy of the same three settings, every component now resolves
+  them the same way: an explicit per-component value wins, then
+  `global.highAvailability`, then a safe built-in default.
+
+  ```yaml
+  global:
+    highAvailability:
+      topologySpread:        # on by default, see below
+        enabled: true
+      podDisruptionBudget:   # opt-in
+        enabled: true
+  ```
+
+  An explicit per-component `podDisruptionBudget.enabled` still wins in **both**
+  directions, so a single component can opt out of a global enable.
+
+### Changed
+
+- **Replicas spread across zones and nodes by default.** Every workload now
+  renders `topologySpreadConstraints` for `topology.kubernetes.io/zone` and
+  `kubernetes.io/hostname` with `whenUnsatisfiable: ScheduleAnyway`. That is a
+  preference, not a requirement, so it cannot block scheduling on a single-zone
+  or single-node cluster — but it changes the pod template, so expect a rolling
+  restart on upgrade. Turn it off with
+  `global.highAvailability.topologySpread.enabled: false`.
+
+- **`agentgateway` and `trustguard` now default to `replicas: 2`.** They shipped
+  as singletons, so a single node drain took the request path with it. This
+  raises the pod count of an existing install on upgrade: five components move
+  from one replica to two (`agentgateway.{dataPlane,mcp,controlPlane}`,
+  `trustguard.{dataPlane,controlPlane}`), of which the admin and control planes
+  render in `external` mode only. Pin any of them back with
+  `<component>.replicas: 1`.
+
+- **PodDisruptionBudgets remain opt-in and never render on a single replica.**
+  A budget over one replica pins `disruptionsAllowed` at 0 and deadlocks every
+  node drain, so all of them keep the `replicas > 1` guard. Components that set
+  `podDisruptionBudget.enabled: true` in their own defaults — DataBridge and the
+  ClickStack ingest gateway — are unaffected by the global default and keep
+  their budgets.
+
+### Removed
+
+- **Per-component `podDisruptionBudget.enabled: false` defaults.** These restated
+  the off default and, once the global switch existed, would have shadowed it —
+  a global enable would silently have done nothing. Removed from
+  `control-plane-api`, `control-plane-app`, `data-plane-api`, the firewall
+  gateway and workers, the OTel collector, and `watchdog`. An operator who set
+  the key explicitly still wins; one who never set it now follows
+  `global.highAvailability`.
+
+
 ## [v2.13.4] — 2026-08-31
 
 ### Fixed

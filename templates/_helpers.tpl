@@ -2824,6 +2824,106 @@ tolerations:
 {{- end }}
 {{- end -}}
 
+{{/*
+High-availability primitives shared by every workload.
+
+All three resolve the same way: an explicit per-component value wins, then
+`global.highAvailability`, then a safe built-in default. One global switch can
+therefore raise the whole platform to a zone-redundant posture while a single
+component still opts out locally.
+*/}}
+
+{{/*
+Whether a PodDisruptionBudget should render for a component.
+An explicit per-component `enabled` wins in BOTH directions, so a component can
+opt out of a global enable.
+Usage:
+  {{- if eq (include "neuraltrust-platform.ha.pdbEnabled" (dict "ctx" . "local" $pdb)) "true" }}
+*/}}
+{{- define "neuraltrust-platform.ha.pdbEnabled" -}}
+{{- $local := default dict .local -}}
+{{- $global := default dict (default dict (default dict .ctx.Values.global).highAvailability).podDisruptionBudget -}}
+{{- if hasKey $local "enabled" -}}
+{{- if $local.enabled -}}true{{- end -}}
+{{- else if $global.enabled -}}
+true
+{{- end -}}
+{{- end -}}
+
+{{/*
+The budget itself — exactly one of maxUnavailable / minAvailable. Per-component
+keys win over `global.highAvailability.podDisruptionBudget`; the last resort is
+`maxUnavailable: 1`, which stays valid under an HPA.
+Usage:
+  {{- include "neuraltrust-platform.ha.pdbSpec" (dict "ctx" . "local" $pdb) | nindent 2 }}
+*/}}
+{{- define "neuraltrust-platform.ha.pdbSpec" -}}
+{{- $local := default dict .local -}}
+{{- $global := default dict (default dict (default dict .ctx.Values.global).highAvailability).podDisruptionBudget -}}
+{{- if hasKey $local "maxUnavailable" -}}
+maxUnavailable: {{ $local.maxUnavailable }}
+{{- else if hasKey $local "minAvailable" -}}
+minAvailable: {{ $local.minAvailable }}
+{{- else if hasKey $global "maxUnavailable" -}}
+maxUnavailable: {{ $global.maxUnavailable }}
+{{- else if hasKey $global "minAvailable" -}}
+minAvailable: {{ $global.minAvailable }}
+{{- else -}}
+maxUnavailable: 1
+{{- end -}}
+{{- end -}}
+
+{{/*
+Spread a component's replicas across zones and nodes.
+
+`local` is a full override — a list of topologySpreadConstraints used verbatim.
+Otherwise `global.highAvailability.topologySpread` generates one constraint per
+topology key, carrying the component's own selector labels.
+
+`whenUnsatisfiable` defaults to ScheduleAnyway, a preference rather than a
+requirement, so this never blocks scheduling on a single-zone or single-node
+cluster. Pass `labels` as rendered YAML of the pod selector labels.
+
+Usage:
+  {{- include "neuraltrust-platform.topologySpreadConstraints" (dict "ctx" . "local" .Values.dataPlane.topologySpreadConstraints "labels" (include "agentgateway.selectorLabels" .)) | nindent 6 }}
+*/}}
+{{- define "neuraltrust-platform.topologySpreadConstraints" -}}
+{{- $local := default (list) .local -}}
+{{- $cfg := default dict (default dict (default dict .ctx.Values.global).highAvailability).topologySpread -}}
+{{- $labels := .labels -}}
+{{- if $local -}}
+topologySpreadConstraints:
+  {{- toYaml $local | nindent 2 }}
+{{- else if $cfg.enabled -}}
+{{- $keys := default (list "topology.kubernetes.io/zone" "kubernetes.io/hostname") $cfg.topologyKeys -}}
+{{- $skew := default 1 $cfg.maxSkew -}}
+{{- $when := default "ScheduleAnyway" $cfg.whenUnsatisfiable -}}
+topologySpreadConstraints:
+{{- range $keys }}
+  - maxSkew: {{ $skew }}
+    topologyKey: {{ . }}
+    whenUnsatisfiable: {{ $when }}
+    labelSelector:
+      matchLabels:
+        {{- $labels | nindent 8 }}
+{{- end }}
+{{- end }}
+{{- end -}}
+
+{{/*
+Pod affinity / anti-affinity, merging `global.affinity` under a per-component
+override. Same precedence and shape as the nodeSelector helper above.
+*/}}
+{{- define "neuraltrust-platform.affinity" -}}
+{{- $global := default dict (default dict .ctx.Values.global).affinity -}}
+{{- $local := default dict .local -}}
+{{- $merged := merge (deepCopy $local) $global -}}
+{{- with $merged }}
+affinity:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- end -}}
+
 {{- define "neuraltrust-platform.nodeSelectorMap" -}}
 {{- $global := (default dict (default dict .ctx.Values.global).nodeSelector) -}}
 {{- $local := default dict .local -}}

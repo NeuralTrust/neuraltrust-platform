@@ -1,0 +1,25 @@
+{{- if eq (include "trustguard.enabled" .) "true" }}
+{{- $pdb := default dict .Values.dataPlane.podDisruptionBudget }}
+{{- $autoscaling := default dict .Values.dataPlane.autoscaling }}
+{{- $replicas := default 2 .Values.dataPlane.replicas }}
+{{- if $autoscaling.enabled }}
+  {{- $replicas = default 1 $autoscaling.minReplicas }}
+{{- end }}
+{{- /* A budget on a single replica makes disruptionsAllowed 0 and deadlocks
+       every node drain, so it only renders once there is something to spare. */}}
+{{- if and (eq (include "neuraltrust-platform.ha.pdbEnabled" (dict "ctx" . "local" $pdb)) "true") (gt ($replicas | int) 1) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Values.dataPlane.name }}
+  labels:
+    {{- include "trustguard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: data-plane
+spec:
+  {{- include "neuraltrust-platform.ha.pdbSpec" (dict "ctx" . "local" $pdb) | nindent 2 }}
+  selector:
+    matchLabels:
+      {{- include "trustguard.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: data-plane
+{{- end }}
+{{- end }}

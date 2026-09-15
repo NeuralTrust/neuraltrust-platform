@@ -151,6 +151,8 @@ spec:
           periodSeconds: 20
       {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" . "local" .Values.controlPlane.nodeSelector) | nindent 6 }}
       {{- include "neuraltrust-platform.tolerations" (dict "ctx" . "local" .Values.controlPlane.tolerations) | nindent 6 }}
+      {{- include "neuraltrust-platform.topologySpreadConstraints" (dict "ctx" . "local" .Values.controlPlane.topologySpreadConstraints "labels" (printf "%s\napp.kubernetes.io/component: control-plane" (include "agentgateway.selectorLabels" .))) | nindent 6 }}
+      {{- include "neuraltrust-platform.affinity" (dict "ctx" . "local" .Values.controlPlane.affinity) | nindent 6 }}
 ---
 apiVersion: v1
 kind: Service

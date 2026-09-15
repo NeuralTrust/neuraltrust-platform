@@ -161,7 +161,6 @@ tolerations: []
 affinity: {}
 priorityClassName: ""
 podDisruptionBudget:
-  enabled: false
   minAvailable: 1
 networkPolicy:
   enabled: false

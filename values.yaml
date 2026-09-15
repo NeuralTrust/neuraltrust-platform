@@ -429,6 +429,26 @@ global:
   storageClass: ""
   nodeSelector: {}
   tolerations: []
+  affinity: {} # Merged underneath any per-component affinity
+  # Availability posture for every workload. Per-component
+  # podDisruptionBudget / topologySpreadConstraints / affinity keys override it.
+  highAvailability:
+    # Spread replicas over zones, then nodes. ScheduleAnyway is a preference,
+    # not a requirement, so it never blocks scheduling on a single-zone or
+    # single-node cluster.
+    topologySpread:
+      enabled: true
+      maxSkew: 1
+      whenUnsatisfiable: ScheduleAnyway
+      topologyKeys:
+        - topology.kubernetes.io/zone
+        - kubernetes.io/hostname
+    # Protect every component from voluntary disruption in one switch. A budget
+    # only renders where replicas > 1, so single-replica installs are untouched
+    # and node drains keep working.
+    podDisruptionBudget:
+      enabled: false
+      maxUnavailable: 1
   proxy:
     enabled: false
     httpProxy: ""
@@ -523,7 +543,6 @@ global:
         targetCPUUtilizationPercentage: 80
         targetMemoryUtilizationPercentage: 90
       podDisruptionBudget:
-        enabled: false
         maxUnavailable: 1
       service:
         type: ClusterIP
@@ -752,7 +771,6 @@ control-plane-api:
           targetCPUUtilizationPercentage: 80
           targetMemoryUtilizationPercentage: 90
         podDisruptionBudget:
-          enabled: false
           maxUnavailable: 1
         extraEnv: []
         extraEnvFrom: []
@@ -794,7 +812,7 @@ control-plane-app:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.172.1"
+          tag: "v1.174.0"
           pullPolicy: IfNotPresent
         config:
           nodeEnv: production
@@ -848,7 +866,6 @@ control-plane-app:
           targetCPUUtilizationPercentage: 80
           targetMemoryUtilizationPercentage: 90
         podDisruptionBudget:
-          enabled: false
           maxUnavailable: 1
         extraEnv: []
         extraEnvFrom: []
@@ -873,7 +890,7 @@ control-plane-app:
 # stays agentgateway for now; K8s names stay agentgateway-*.
 agentgateway:
   image:
-    tag: "v0.58.0"
+    tag: "v0.58.3"
   # Empty host/port/sslMode/username/tls inherit from global.postgresql /
   # global.redis, then fall back to the in-cluster Services. Set them here only
   # to point this one service somewhere else.
@@ -901,7 +918,7 @@ agentgateway:
 # TrustGuard: control-plane + data-plane (/v1/evaluate).
 trustguard:
   image:
-    tag: "v0.44.2"
+    tag: "v0.45.2"
   # Empty host/port/sslMode/username/tls inherit — see the agentgateway note.
   database:
     sslMode: ""
@@ -1159,7 +1176,6 @@ data-plane-api:
           targetCPUUtilizationPercentage: 80
           targetMemoryUtilizationPercentage: 90
         podDisruptionBudget:
-          enabled: false
           maxUnavailable: 1
         resources:
           requests:
@@ -1246,7 +1262,6 @@ firewall:
         targetCPUUtilizationPercentage: 80
         targetMemoryUtilizationPercentage: 90
       podDisruptionBudget:
-        enabled: false
         maxUnavailable: 1
       extraEnv: []
       extraEnvFrom: []
@@ -1278,7 +1293,6 @@ firewall:
         maxReplicas: 2
         targetCPUUtilizationPercentage: 80
       podDisruptionBudget:
-        enabled: false
         maxUnavailable: 1
     workers:
       toxicity:

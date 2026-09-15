@@ -1,4 +1,4 @@
-{{- if and (eq (include "clickstack-ingest-gateway.deploy" .) "true") .Values.podDisruptionBudget.enabled }}
+{{- if and (eq (include "clickstack-ingest-gateway.deploy" .) "true") (eq (include "neuraltrust-platform.ha.pdbEnabled" (dict "ctx" . "local" .Values.podDisruptionBudget)) "true") }}
 {{- /* Losing this gateway stops telemetry from every remote data plane at once,
        and the senders retry for a bounded window before dropping batches. */}}
 apiVersion: policy/v1
