@@ -2713,6 +2713,70 @@ clickstack-collector-secrets
 {{- end }}
 
 {{/*
+Default OTLP endpoint for the platform's own services — control-plane-app,
+control-plane-api, data-plane-api and firewall.
+
+Each of those gates its whole OTel path on an endpoint being resolvable, so
+without a default they render as uninstrumented. This is the derivation the
+gateway, detector and watchdog charts already do, shared rather than copied.
+
+Priority:
+  1. global.observability.collector.endpoint — explicit, always wins.
+  2. The in-release ClickStack collector, in external/saas, when
+     global.observability.collector.autoDiscover is true (the default).
+  3. Empty — the caller omits the OTel ConfigMap and its envFrom entirely.
+
+Set autoDiscover=false to opt out. An empty `endpoint` cannot mean "opt out",
+because empty is what the chart has always shipped as its default.
+
+Hybrid is deliberately excluded: the control-plane components do not render
+there, and the hybrid egress collector carries enrolment-scoped product
+telemetry off-cluster — routing a deployment's own service logs through it
+would export data that mode exists to keep on-box.
+*/}}
+{{- define "neuraltrust-platform.observability.defaultOtlpEndpoint" -}}
+{{- $coll := default dict (default dict (default dict .Values.global).observability).collector -}}
+{{- $explicit := $coll.endpoint | default "" | toString | trim -}}
+{{- if $explicit -}}
+{{- $explicit -}}
+{{- else if eq (include "neuraltrust-platform.boolish" (dict "value" $coll.autoDiscover "default" true)) "true" -}}
+{{- if eq (include "neuraltrust-platform.isExternal" .) "true" -}}
+{{- include "neuraltrust-platform.clickstack.externalOtlpHTTPBaseEndpoint" . -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Whether a workload sending to the derived endpoint must present the collector's
+bearer token.
+
+The in-release collector answers 401 on :4318 without `authorization=<token>`,
+so an endpoint on its own buys nothing: the SDK exports, the collector rejects,
+and the drop is invisible from both ends. True only when the endpoint was
+derived — an operator who points these services at their own collector gets our
+token nowhere near it.
+*/}}
+{{- define "neuraltrust-platform.observability.otlpNeedsAuth" -}}
+{{- $coll := default dict (default dict (default dict .Values.global).observability).collector -}}
+{{- if not ($coll.endpoint | default "" | toString | trim) -}}
+{{- if eq (include "neuraltrust-platform.boolish" (dict "value" $coll.autoDiscover "default" true)) "true" -}}
+{{- if eq (include "neuraltrust-platform.isExternal" .) "true" -}}true{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+The OTLP auth header env entry, emitted only when the derived in-release
+collector is the destination. Renders nothing otherwise, so callers can include
+it unconditionally.
+*/}}
+{{- define "neuraltrust-platform.observability.otlpHeadersEnv" -}}
+{{- if eq (include "neuraltrust-platform.observability.otlpNeedsAuth" .) "true" -}}
+{{- include "neuraltrust-platform.clickstack.externalOtlpHeadersEnv" . -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Custom corporate CA certificate trust helpers.
 */}}
 {{- define "neuraltrust-platform.customCaCert.enabled" -}}

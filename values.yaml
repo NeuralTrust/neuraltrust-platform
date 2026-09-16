@@ -526,7 +526,17 @@ global:
     sendTraces: true
     collector:
       fullnameOverride: "otel-collector"
+      # Explicit OTLP destination for control-plane-app, control-plane-api,
+      # data-plane-api and firewall. Always wins when set. Empty means "derive"
+      # (see autoDiscover), not "off" — empty is what the chart has always
+      # shipped, so it cannot also carry an opt-out meaning.
       endpoint: ""
+      # With no explicit endpoint, external/saas installs route those four
+      # services at the in-release clickstack-collector and mount its bearer
+      # token. The console's audit trail travels this path, so leaving it on is
+      # what makes Telemetry -> Logs populate. Set false to leave them
+      # uninstrumented. Hybrid is unaffected.
+      autoDiscover: true
       # Bind host for health / OTLP / prometheus exporters. Default "::"
       # dual-stacks on Linux; set "0.0.0.0" only if bindv6only=1 breaks IPv4.
       listenHost: "::"
@@ -1333,7 +1343,10 @@ firewall:
       pythonDontWriteBytecode: "1"
       pythonPath: "/app"
       hfHome: "/root/.cache/huggingface"
-      otelEnabled: "false"
+      # "" follows the resolved endpoint: on external/saas the in-release
+      # ClickStack collector resolves, so the SDK comes up; in hybrid nothing
+      # resolves and it stays off. Set "true"/"false" to decide explicitly.
+      otelEnabled: ""
     secrets:
       jwtSecret: ""
       huggingFaceToken: ""

@@ -419,6 +419,10 @@ spec:
         {{- end }}
         {{- include "data-plane.envFrom" (dict "component" "api" "extraEnvFrom" $dpApiExtraEnvFrom "context" .) | nindent 8 }}
         env:
+        {{- /* The in-release collector rejects unauthenticated OTLP, so an
+               endpoint without this token exports into a 401 that is silent on
+               both sides. Empty unless that collector is the destination. */}}
+        {{- with (include "neuraltrust-platform.observability.otlpHeadersEnv" .) }}{{- . | nindent 10 }}{{- end }}
           - name: PORT
             value: "8000"
           - name: DATA_PLANE_JWT_SECRET

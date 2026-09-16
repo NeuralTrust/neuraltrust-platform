@@ -168,7 +168,10 @@ firewall:
     cudaMpsActiveThreadPercentage: "20"
     cudaMpsPinnedDeviceMemLimit: "3500M"
     applicationVersion: ""
-    otelEnabled: "false"
+    # "" follows the resolved endpoint: on external/saas the in-release
+    # ClickStack collector resolves, so the SDK comes up; in hybrid nothing
+    # resolves and it stays off. Set "true"/"false" to decide explicitly.
+    otelEnabled: ""
     # Empty by default. No customer install has a collector at a NeuralTrust
     # internal address, so a hostname here only produces exporter errors when an
     # operator enables OTel without also setting the umbrella-wide endpoint.
