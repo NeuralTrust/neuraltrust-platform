@@ -115,8 +115,9 @@ Helper that returns the resolved OTel collector endpoint for data-plane
 components. Resolution order:
   1. global.observability.collector.endpoint (umbrella-wide override)
   2. dataPlane.components.<name>.config.otelExporterOtlpEndpoint
-Empty string when neither is set — caller skips the OTel ConfigMap and
-envFrom block to preserve backward compat.
+Falls back to the umbrella derivation when neither is set; empty only when
+that derivation yields nothing (hybrid, or autoDiscover disabled), in which
+case the caller skips the OTel ConfigMap and envFrom block.
 Usage: {{ include "data-plane.otelEndpoint" (dict "component" "api" "context" .) }}
 */}}
 {{- define "data-plane.otelEndpoint" -}}
@@ -133,6 +134,11 @@ Usage: {{ include "data-plane.otelEndpoint" (dict "component" "api" "context" .)
 {{- $globalColl := default dict $globalObs.collector -}}
 {{- if $globalColl.endpoint -}}
   {{- $endpoint = $globalColl.endpoint -}}
+{{- end -}}
+{{- /* With neither override set, fall back to the umbrella derivation rather
+       than returning empty, which would suppress the whole OTel path. */ -}}
+{{- if not $endpoint -}}
+  {{- $endpoint = include "neuraltrust-platform.observability.defaultOtlpEndpoint" $ctx -}}
 {{- end -}}
 {{- $endpoint -}}
 {{- end }}

@@ -75,6 +75,11 @@ AWS region for RDS IAM token minting. Prefer
 {{- $globalObs := default dict (default dict $ctx.Values.global).observability -}}
 {{- $globalColl := default dict $globalObs.collector -}}
 {{- if $globalColl.endpoint -}}{{- $endpoint = $globalColl.endpoint -}}{{- end -}}
+{{- /* With neither override set, fall back to the umbrella derivation rather
+       than returning empty, which would suppress the whole OTel path. */ -}}
+{{- if not $endpoint -}}
+  {{- $endpoint = include "neuraltrust-platform.observability.defaultOtlpEndpoint" $ctx -}}
+{{- end -}}
 {{- $endpoint -}}
 {{- end }}
 

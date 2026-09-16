@@ -314,6 +314,10 @@ spec:
         {{- end }}
         {{- include "control-plane.envFrom" (dict "component" "app" "extraEnvFrom" $appExtraEnvFrom "context" .) | nindent 8 }}
         env:
+        {{- /* The in-release collector rejects unauthenticated OTLP, so an
+               endpoint without this token exports into a 401 that is silent on
+               both sides. Empty unless that collector is the destination. */}}
+        {{- with (include "neuraltrust-platform.observability.otlpHeadersEnv" .) }}{{- . | nindent 8 }}{{- end }}
         - name: NODE_ENV
           value: "{{ $nodeEnv }}"
         - name: PORT

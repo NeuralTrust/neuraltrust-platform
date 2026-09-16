@@ -195,6 +195,24 @@ document_named() {
   fi
 }
 
+# document_named returns the FIRST document carrying the name, and helm emits
+# manifests in install order, so a Service always precedes the Deployment it
+# shares a name with. Use this when the assertion is about one specific kind.
+document_named_kind() {
+  local file="$1" kind="$2" name="$3" out="$4"
+  awk -v want="$name" -v wantkind="kind: $kind" '
+    /^---$/ { if (keep && kindok) exit; buf = ""; keep = 0; kindok = 0; next }
+    { buf = buf $0 "\n" }
+    $0 == wantkind { kindok = 1 }
+    $0 == "  name: " want { keep = 1 }
+    END { if (keep && kindok) printf "%s", buf }
+  ' "$file" > "$out"
+  if [[ ! -s "$out" ]]; then
+    red "FAIL: no rendered $kind named $name in $file"
+    exit 1
+  fi
+}
+
 assert_occurrences() {
   local file="$1" needle="$2" expected="$3" msg="$4" count
   count="$(grep -cE -- "$needle" "$file" || true)"
@@ -1891,6 +1909,83 @@ render_default "$out10f_glob" \
 document_named "$out10f_glob" firewall-config "$TMP/firewall-config-umbrella.yaml"
 assert_contains "$TMP/firewall-config-umbrella.yaml" 'OTEL_EXPORTER_OTLP_ENDPOINT: "http://umbrella:4318"' \
   "firewall otel: umbrella endpoint overrides the per-component setting"
+
+# ---------------------------------------------------------------------------
+# 10g. Platform self-observability endpoint derivation
+# ---------------------------------------------------------------------------
+# control-plane-app, control-plane-api, data-plane-api and firewall each gate
+# their whole OTel path on a resolvable endpoint. control-plane-app is also the
+# only emitter of the audit records behind Telemetry -> Logs, so an unresolved
+# endpoint costs a product feature, not just troubleshooting signal.
+blue "==> Scenario 10g: platform OTLP endpoint derivation"
+
+CLICKSTACK_IN_RELEASE='http://clickstack-collector.default.svc.cluster.local:4318'
+
+out10g="$TMP/scenario-otel-derived.yaml"
+render_default "$out10g" --set global.deploymentMode=external
+
+for cm in control-plane-app-otel control-plane-api-otel data-plane-api-otel; do
+  document_named "$out10g" "$cm" "$TMP/$cm.yaml"
+  assert_contains "$TMP/$cm.yaml" "OTEL_EXPORTER_OTLP_ENDPOINT: \"$CLICKSTACK_IN_RELEASE\"" \
+    "otel derivation: $cm points at the in-release collector"
+done
+
+document_named "$out10g" firewall-config "$TMP/firewall-config-derived.yaml"
+assert_contains "$TMP/firewall-config-derived.yaml" "OTEL_EXPORTER_OTLP_ENDPOINT: \"$CLICKSTACK_IN_RELEASE\"" \
+  "otel derivation: firewall points at the in-release collector"
+assert_contains "$TMP/firewall-config-derived.yaml" 'OTEL_ENABLED: "true"' \
+  "otel derivation: firewall SDK gate follows the resolved endpoint"
+
+# The collector answers 401 on :4318 without the shared bearer token, so an
+# endpoint with no header exports into a rejection that is invisible from both
+# ends. These four assertions are the difference between wired and working.
+assert_env_value "$out10g" control-plane-app app OTEL_EXPORTER_OTLP_HEADERS \
+  'secretKeyRef:clickstack-collector-secrets/OTEL_EXPORTER_OTLP_HEADERS' \
+  "otel derivation: control-plane-app presents the collector token"
+assert_env_value "$out10g" control-plane-api control-plane-api OTEL_EXPORTER_OTLP_HEADERS \
+  'secretKeyRef:clickstack-collector-secrets/OTEL_EXPORTER_OTLP_HEADERS' \
+  "otel derivation: control-plane-api presents the collector token"
+assert_env_value "$out10g" data-plane-api api OTEL_EXPORTER_OTLP_HEADERS \
+  'secretKeyRef:clickstack-collector-secrets/OTEL_EXPORTER_OTLP_HEADERS' \
+  "otel derivation: data-plane-api presents the collector token"
+assert_env_value "$out10g" firewall gateway OTEL_EXPORTER_OTLP_HEADERS \
+  'secretKeyRef:clickstack-collector-secrets/OTEL_EXPORTER_OTLP_HEADERS' \
+  "otel derivation: firewall gateway presents the collector token"
+
+# An explicit endpoint still wins, and our collector's token goes nowhere near
+# a destination the operator chose.
+out10g_ov="$TMP/scenario-otel-override.yaml"
+render_default "$out10g_ov" --set global.deploymentMode=external \
+  --set global.observability.collector.endpoint=https://otel.operator.example:4318
+document_named "$out10g_ov" control-plane-app-otel "$TMP/cp-app-otel-override.yaml"
+assert_contains "$TMP/cp-app-otel-override.yaml" 'OTEL_EXPORTER_OTLP_ENDPOINT: "https://otel.operator.example:4318"' \
+  "otel derivation: an explicit endpoint overrides the derived one"
+assert_env_value "$out10g_ov" control-plane-app app OTEL_EXPORTER_OTLP_HEADERS ABSENT \
+  "otel derivation: the collector token is withheld from an operator endpoint"
+
+# autoDiscover=false is the opt-out. An empty endpoint cannot carry that
+# meaning, because empty is the shipped default.
+out10g_off="$TMP/scenario-otel-optout.yaml"
+render_default "$out10g_off" --set global.deploymentMode=external \
+  --set global.observability.collector.autoDiscover=false
+assert_not_contains "$out10g_off" 'name: control-plane-app-otel' \
+  "otel opt-out: autoDiscover=false suppresses the OTel ConfigMap"
+document_named "$out10g_off" firewall-config "$TMP/firewall-config-optout.yaml"
+assert_contains "$TMP/firewall-config-optout.yaml" 'OTEL_ENABLED: "false"' \
+  "otel opt-out: firewall SDK gate follows the absent endpoint"
+assert_env_value "$out10g_off" control-plane-app app OTEL_EXPORTER_OTLP_HEADERS ABSENT \
+  "otel opt-out: no collector token is mounted"
+
+# Hybrid is untouched: these components either do not render there, and the
+# egress collector carries enrolment-scoped product telemetry to SaaS rather
+# than a customer's own service logs.
+out10g_hy="$TMP/scenario-otel-hybrid.yaml"
+render_default "$out10g_hy"
+assert_not_contains "$out10g_hy" 'name: control-plane-app-otel' \
+  "otel derivation: hybrid renders no platform OTel ConfigMap"
+document_named "$out10g_hy" firewall-config "$TMP/firewall-config-hybrid.yaml"
+assert_contains "$TMP/firewall-config-hybrid.yaml" 'OTEL_ENABLED: "false"' \
+  "otel derivation: hybrid firewall stays off"
 
 # ---------------------------------------------------------------------------
 # 11. Positive hybrid product selection
@@ -5270,7 +5365,8 @@ render_default "$out40"
 
 for wl in agentgateway-proxy trustguard-data-plane; do
   doc="$TMP/ha-$wl.yaml"
-  document_named "$out40" "$wl" "$doc"
+  # Deployment, not the same-named Service that helm emits ahead of it.
+  document_named_kind "$out40" Deployment "$wl" "$doc"
   assert_contains "$doc" 'topologyKey: topology\.kubernetes\.io/zone' \
     "ha: $wl spreads across zones by default"
   assert_contains "$doc" 'topologyKey: kubernetes\.io/hostname' \
@@ -5313,8 +5409,12 @@ assert_pdb_absent "$out40" trustguard-data-plane \
 
 # DataBridge sets podDisruptionBudget.enabled itself, so it must keep its PDB
 # regardless of the global default — this is the regression that would silently
-# remove a budget from an existing cluster.
-assert_pdb_present "$out40" databridge \
+# remove a budget from an existing cluster. DataBridge is a SaaS-side relay and
+# renders in saas mode only, so the default (hybrid) render above cannot carry
+# the evidence.
+out40_saas="$TMP/ha-default-saas.yaml"
+render_default "$out40_saas" --set global.deploymentMode=saas
+assert_pdb_present "$out40_saas" databridge \
   "ha: databridge keeps its own PDB when the global switch is off"
 
 blue "==> Scenario 40b: one global switch raises every component"
@@ -5349,7 +5449,7 @@ blue "==> Scenario 40e: spread can be turned off"
 out40e="$TMP/ha-nospread.yaml"
 render_default "$out40e" --set global.highAvailability.topologySpread.enabled=false
 doc40e="$TMP/ha-nospread-proxy.yaml"
-document_named "$out40e" agentgateway-proxy "$doc40e"
+document_named_kind "$out40e" Deployment agentgateway-proxy "$doc40e"
 assert_not_contains "$doc40e" 'topologySpreadConstraints' \
   "ha: topologySpread.enabled=false removes the constraints"
 

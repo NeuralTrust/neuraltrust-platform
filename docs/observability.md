@@ -141,40 +141,60 @@ This is telemetry about the *processes* — traces and metrics for troubleshooti
 — and is distinct from the product event stream (`TELEMETRY_EXPORTERS_*`), which
 carries evaluation results and is always on.
 
-Verified against a live external/saas cluster and a live hybrid cluster:
+What each service is wired for, by deployment mode:
 
-| Service | Wired in external / saas | Wired in hybrid | Actually emitting |
-|---|---|---|---|
-| trustguard | yes — `OPENTELEMETRY_ENABLED=true` + traces/metrics endpoints | **no** — service name only | **yes**, the only one |
-| agentgateway | product-event OTLP only | product-event OTLP only | no |
-| firewall | `OTEL_ENABLED=false` | `OTEL_ENABLED=false` | no |
-| control-plane-api / app | only if an endpoint is set (see below) | n/a | no |
-| data-plane-api | only if an endpoint is set (see below) | only if set | no |
-| datacore, databridge, alertengine, trustlens, dataagent | not wired | not wired | no |
+| Service | Wired in external / saas | Wired in hybrid |
+|---|---|---|
+| trustguard | yes — `OPENTELEMETRY_ENABLED=true` + traces/metrics endpoints | **no** — service name only |
+| agentgateway | product-event OTLP only | product-event OTLP only |
+| firewall | yes — derived endpoint, `OTEL_ENABLED` follows it | no — nothing resolves, so the SDK stays off |
+| control-plane-api / app | yes — derived endpoint | n/a, neither renders in hybrid |
+| data-plane-api | yes — derived endpoint | only if an endpoint is set |
+| datacore, databridge, alertengine, trustlens, dataagent | not wired | not wired |
 
-Two mechanisms decide this, which is why the result is uneven:
+Every wired service resolves the same way: an explicit
+`global.observability.collector.endpoint` wins, and otherwise external and saas
+**derive** the in-release collector at
+`http://clickstack-collector.<namespace>.svc.cluster.local:4318`. Hybrid derives
+nothing, because those components either do not render there, and the hybrid
+egress collector carries enrolment-scoped product telemetry to SaaS rather than
+a customer's own service logs.
 
-* `agentgateway` and `trustguard` **derive** the in-cluster collector
-  (`http://clickstack-collector.<namespace>.svc.cluster.local:4318`) in external
-  mode, so they are wired with no operator input.
-* `control-plane-api`, `control-plane-app`, `data-plane-api` and `firewall` wire
-  OTel **only when `global.observability.collector.endpoint` is set**. It has no
-  default and `global.observability.enabled` is `false`, so out of the box their
-  OTel ConfigMaps do not render at all.
+Workloads sending to the derived endpoint also mount
+`OTEL_EXPORTER_OTLP_HEADERS` from the `clickstack-collector-secrets` Secret. The
+collector answers `401` on `:4318` without that bearer token, so an endpoint on
+its own is not enough — the SDK would export into a rejection that shows up
+nowhere. The token is mounted **only** for the derived endpoint; point these
+services at your own collector and it is withheld, so you configure that
+destination's auth yourself through the per-component settings.
 
-If you want process telemetry from those services on a cluster running the
-in-cluster ClickStack collector, set the endpoint explicitly:
+### Turning it off
 
 ```yaml
 global:
   observability:
     collector:
-      endpoint: "http://clickstack-collector.<namespace>.svc.cluster.local:4318"
+      autoDiscover: false   # leaves all four uninstrumented
 ```
 
-Self-observability is only worth enabling when something consumes it — watchdog
-RED and saturation checks, or your own dashboards. With `watchdog.enabled: false`
-and no Prometheus, leaving it off is a reasonable choice rather than a gap.
+An empty `endpoint` cannot mean "off": empty is the shipped default, and it is
+what tells the chart to derive. `autoDiscover` is the opt-out.
+
+### Why this is on by default
+
+For three of the four it is ordinary self-observability, worth having where
+something consumes it — watchdog RED and saturation checks, or your own
+dashboards.
+
+`control-plane-app` is different, and is the reason the default is on rather
+than off. It is the only emitter of the platform audit trail: every audit event
+leaves the console as an OTLP log record, and the Telemetry → Logs tab reads
+them back through DataCore. With no endpoint the OTel pipeline never
+initialises, the logger is a no-op, and those records are discarded inside the
+process — so the tab renders "No logs yet" on a deployment that is otherwise
+healthy, and the audit trail simply does not exist. That is a product feature,
+not troubleshooting output, so it is not something to leave to an operator to
+discover.
 
 ## Air-gapped external deployment
 

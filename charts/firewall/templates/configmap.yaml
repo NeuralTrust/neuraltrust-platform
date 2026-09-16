@@ -17,8 +17,23 @@ data:
   {{- if .Values.firewall.config.applicationVersion }}
   APPLICATION_VERSION: {{ .Values.firewall.config.applicationVersion | quote }}
   {{- end }}
-  OTEL_ENABLED: {{ .Values.firewall.config.otelEnabled | quote }}
-  {{- if eq (.Values.firewall.config.otelEnabled | toString) "true" }}
+  {{- /* An explicit "true"/"false" is honoured. Left unset (""), the SDK gate
+         follows the endpoint: gating it off while an endpoint resolves is the
+         shape that made this service look instrumented and emit nothing. The
+         endpoint block below sets $otelEndpoint, but OTEL_ENABLED is rendered
+         first, so resolve it here too. */ -}}
+  {{- $fwOtelEnabled := .Values.firewall.config.otelEnabled | default "" | toString | trim -}}
+  {{- if not $fwOtelEnabled -}}
+    {{- $fwResolved := .Values.firewall.config.otelExporterOtlpEndpoint -}}
+    {{- $fwGlobalColl := default dict (default dict (default dict .Values.global).observability).collector -}}
+    {{- if $fwGlobalColl.endpoint -}}{{- $fwResolved = $fwGlobalColl.endpoint -}}{{- end -}}
+    {{- if not $fwResolved -}}
+      {{- $fwResolved = include "neuraltrust-platform.observability.defaultOtlpEndpoint" . -}}
+    {{- end -}}
+    {{- $fwOtelEnabled = ternary "true" "false" (ne $fwResolved "") -}}
+  {{- end }}
+  OTEL_ENABLED: {{ $fwOtelEnabled | quote }}
+  {{- if eq $fwOtelEnabled "true" }}
   # Emit stable HTTP semconv (http.server.request.duration) so watchdog RED
   # alerting sees the same series the collector and GMP expect.
   OTEL_SEMCONV_STABILITY_OPT_IN: "http"
@@ -27,16 +42,22 @@ data:
     Endpoint resolution order:
       1. global.observability.collector.endpoint (umbrella-wide override)
       2. firewall.config.otelExporterOtlpEndpoint (per-component override)
+      3. the in-release ClickStack collector (external/saas, autoDiscover on)
     The umbrella override wins so an operator can flip every component to
     the in-chart collector with one knob without editing every subchart.
-    When neither resolves the key is omitted, so the SDK falls back to its own
-    default rather than being handed an empty endpoint it cannot dial.
+    The key is omitted only when none of the three resolves — hybrid, or
+    autoDiscover off — so the SDK falls back to its own default rather than
+    being handed an empty endpoint it cannot dial.
   */ -}}
   {{- $otelEndpoint := .Values.firewall.config.otelExporterOtlpEndpoint -}}
   {{- $globalObs := default dict (default dict .Values.global).observability -}}
   {{- $globalColl := default dict $globalObs.collector -}}
   {{- if $globalColl.endpoint -}}
     {{- $otelEndpoint = $globalColl.endpoint -}}
+  {{- end -}}
+  {{- /* With neither override set, fall back to the umbrella derivation. */ -}}
+  {{- if not $otelEndpoint -}}
+    {{- $otelEndpoint = include "neuraltrust-platform.observability.defaultOtlpEndpoint" . -}}
   {{- end }}
   {{- if $otelEndpoint }}
   OTEL_EXPORTER_OTLP_ENDPOINT: {{ $otelEndpoint | quote }}
