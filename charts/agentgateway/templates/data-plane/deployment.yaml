@@ -20,6 +20,11 @@ spec:
       labels:
         {{- include "agentgateway.labels" . | nindent 8 }}
         app.kubernetes.io/component: data-plane
+        {{- /* Pod-only: spec.selector.matchLabels above is immutable and uses the
+               strictly smaller agentgateway.selectorLabels. */}}
+        {{- with include "neuraltrust-platform.podLabels" (dict "ctx" .) }}
+        {{- . | nindent 8 }}
+        {{- end }}
       annotations:
         {{- /* AUT-403: roll when env ConfigMap / chart-managed Secret changes. */}}
         {{- include "neuraltrust-platform.checksumAnnotations" (dict "context" . "files" (list "/env-configmap.yaml" "/secrets.yaml")) | nindent 8 }}
@@ -93,6 +98,11 @@ spec:
         {{- end }}
         {{- if and (eq (include "neuraltrust-platform.isHybrid" .) "true") (eq (include "neuraltrust-platform.v2.hybridPg.chartManagedSecret" .) "true") }}
         {{- include "neuraltrust-platform.postgresEnv" (dict "ctx" . "skip" .Values.dataPlane.extraEnv) | nindent 8 }}
+        {{- end }}
+        {{- /* Outside the chart-managed-Secret gate: who owns POSTGRES_* has no
+               bearing on which cloud mints the token. */}}
+        {{- with include "neuraltrust-platform.postgres.cloudAuthEnv" (dict "ctx" . "skip" .Values.dataPlane.extraEnv) | trim }}
+        {{- . | nindent 8 }}
         {{- end }}
         {{- include "neuraltrust-platform.hybridRedisTlsEnv" . | nindent 8 }}
         {{- with .Values.dataPlane.extraEnv }}

@@ -21,7 +21,7 @@
 {{- $api := default dict .Values.dataPlane.components.api }}
 {{- $apiImage := default dict $api.image }}
 {{- $apiRepo := $apiImage.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api" }}
-{{- $apiTag := $apiImage.tag | default "v1.51.0" }}
+{{- $apiTag := $apiImage.tag | default "v1.51.1" }}
 {{- $apiPull := $apiImage.pullPolicy | default "IfNotPresent" }}
 {{- /* The ClickHouse DDL ships inside the data-plane-api image, so it always matches
        the application version that reads it. Setting clickhouse.configmap.name opts
@@ -49,6 +49,14 @@ spec:
       labels:
         app: api
         plane: data
+        {{- /* Pod-only, like `plane: data` above — the selector is `app: api`
+               alone. No Postgres env changes here: this service's documented
+               switch is POSTGRES_CONNECTION_TYPE (aurora|postgres), whose enum
+               has no Entra member yet, so the label is wired ahead of the
+               binary rather than a guessed variable name. */}}
+        {{- with include "neuraltrust-platform.podLabels" (dict "ctx" .) }}
+        {{- . | nindent 8 }}
+        {{- end }}
       {{- /* AUT-403: otel ConfigMap is the only chart-owned envFrom source.
              extraEnvFrom may point at operator Secrets — those are not checksummed. */}}
       {{- if include "data-plane.otelEndpoint" (dict "component" "api" "context" .) }}
@@ -103,7 +111,7 @@ spec:
         {{- if $renderChInit }}
         - name: clickhouse-migrations
           {{- $chMigrationRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickhouse-server" }}
-          {{- $chMigrationTag := "26.7" }}
+          {{- $chMigrationTag := "26.8" }}
           {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.clickhouse .Values.dataPlane.components.clickhouse.image }}
             {{- if .Values.dataPlane.components.clickhouse.image.repository }}{{- $chMigrationRepo = .Values.dataPlane.components.clickhouse.image.repository }}{{- end }}
             {{- if .Values.dataPlane.components.clickhouse.image.tag }}{{- $chMigrationTag = .Values.dataPlane.components.clickhouse.image.tag }}{{- end }}

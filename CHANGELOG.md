@@ -4,6 +4,97 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Added
+
+- **Microsoft Entra ID authentication for PostgreSQL, in hybrid mode.** The
+  chart could only ever emit `POSTGRES_LOGIN=aws`, so a customer running Azure
+  Database for PostgreSQL had no way to reach the Entra token path that
+  TrustGate (v0.61.0) and TrustGuard (v0.46.0) implement. One new block selects
+  it, and all three Azure identity shapes are supported:
+
+  ```yaml
+  global:
+    postgresql:
+      deploy: false
+      host: nt-pg.postgres.database.azure.com
+      user: nt-platform-umi   # the Entra principal, not a local role
+      sslMode: require        # required: a token is a bearer credential
+      authMode: iam
+    azureIdentity:
+      method: workload-identity   # | managed-identity | service-principal
+      clientId: <uuid>
+      tenantId: <uuid>
+      applyGlobally: true
+  ```
+
+  `authMode: iam` still answers *whether* a token is used; `azureIdentity.method`
+  answers *who mints it*. The provider is derived from that one key rather than
+  from `global.platform`, so an existing `platform: azure` install with AWS RDS
+  keeps minting RDS tokens and nothing changes without an explicit opt-in.
+
+  With `applyGlobally: true` every chart ServiceAccount is annotated with
+  `azure.workload.identity/client-id` and `/tenant-id`, and every pod that opens
+  a Postgres connection carries the `azure.workload.identity/use` label the AKS
+  webhook keys off. Both halves are required — annotating without labelling
+  fails silently — so the label is emitted independently of `applyGlobally`.
+
+  On the workload-identity path the chart deliberately emits **no** `AZURE_*`
+  credential environment: the webhook injects `AZURE_CLIENT_ID`,
+  `AZURE_TENANT_ID` and `AZURE_FEDERATED_TOKEN_FILE` itself, and only for names
+  the container has not already declared, so a chart-set value would win over
+  the ServiceAccount annotation and become a second source of truth.
+  `service-principal` injects its client secret by reference (required, never
+  optional) and `managed-identity` sets only `AZURE_CLIENT_ID`, and only when a
+  user-assigned identity is named.
+
+  `global.postgresql.azureScope` overrides the token audience for sovereign
+  clouds (Azure Government, Azure China).
+
+- **`AWS_REGION` now reaches hybrid pods under IAM auth.** It was emitted only
+  in external mode, so a hybrid RDS IAM install depended on node-level
+  configuration: the binaries hand the token request to the AWS SDK, which fails
+  with `aws region is required` when the default chain resolves nothing, and
+  IRSA supplies a role and a token file but never a region. Set
+  `global.postgresql.awsRegion` and it is now delivered.
+
+- **DataAgent authenticates with Entra too** (v0.7.0). It receives
+  `POSTGRES_LOGIN` and, for sovereign clouds, `POSTGRES_AZURE_SCOPE` — its own
+  spelling of the variable the gateways read as `DB_AZURE_SCOPE`.
+
+  Both are delivered **only** when the provider is Azure. DataAgent's
+  `POSTGRES_LOGIN` accepts `default` and `azure` and rejects anything else at
+  boot, so handing it the `aws` the shared Secret carries on an RDS IAM install
+  would turn a pod that merely could not authenticate into one that refuses to
+  start. It has no AWS token path to use the value for in any case.
+
+### Fixed
+
+- **An Entra install can no longer render with a TLS mode its own binaries
+  reject.** `global.postgresql.sslMode` defaults to the literal `prefer`, which
+  made the IAM ternary behind it unreachable, so `authMode: iam` silently
+  produced `POSTGRES_SSLMODE=prefer` and the pods refused their own config at
+  boot. The render now fails with the reason. Scoped to the Entra path — the
+  same latent default still affects AWS IAM and is tracked separately.
+
+### Known gaps
+
+- **`data-plane-api` cannot mint a token yet**, and IAM leaves
+  `POSTGRES_PASSWORD` empty, so on an Entra install it fails to connect while the
+  gateway, MCP, TrustGuard and DataAgent authenticate normally. It is wired ahead
+  of its binary with the workload-identity pod label, but intentionally gets no
+  environment switch: its documented key is `POSTGRES_CONNECTION_TYPE`
+  (`aurora|postgres`), which has no Entra member, and inventing one would publish
+  a contract the service does not implement. Set
+  `global.products.dataPlane: false` for a clean install in the meantime.
+
+- **`POSTGRES_CONNECTION_TYPE` stays `aurora` under Entra.** Its only reader is
+  the external-mode control-plane API, which never renders in hybrid, and
+  changing the value needs the Python enum to gain a member first.
+
+- **Hybrid Redis has no token-auth path** (`REDIS_LOGIN` is external-only), so
+  an Azure install should keep the in-cluster Redis rather than move to Azure
+  Cache with a static access key.
+
 ## [v2.13.10] — 2026-09-15
 
 ### Added

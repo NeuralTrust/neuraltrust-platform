@@ -458,6 +458,8 @@ for wl in agentgateway-proxy:proxy agentgateway-mcp:mcp trustguard-data-plane:da
     "hybrid: ${wl%%:*} receives only the datastore keys it reads"
 done
 # DataAgent builds its connection from discrete POSTGRES_* parts (RUN-1093).
+# No POSTGRES_LOGIN here: the agent rejects the "aws" this Secret carries on a
+# non-Azure install, so the key is only delivered on the Entra path (2c).
 assert_datastore_env "$out1" dataagent dataagent \
   'POSTGRES_DB,POSTGRES_HOST,POSTGRES_PASSWORD,POSTGRES_PORT,POSTGRES_SSLMODE,POSTGRES_USER' \
   "hybrid: DataAgent receives discrete POSTGRES_* parts"
@@ -784,6 +786,160 @@ assert_not_contains "$out2b" 'name: dataagent-secrets' \
   "autoGenerate=false: no TrustGate per-agent DB Secret"
 assert_not_contains "$out2b" 'name: dataagent-trustguard-secrets' \
   "autoGenerate=false: no TrustGuard per-agent DB Secret"
+
+# ---------------------------------------------------------------------------
+# 2c. Hybrid Postgres cloud identity: AWS IRSA and Azure Entra ID.
+#
+# POSTGRES_LOGIN in the shared Secret is the only token-auth switch that reaches
+# a hybrid pod, and the ServiceAccount annotation helper is shared by twelve
+# templates — so a regression in either is silent and wide. The AWS half is
+# backfilled here because the suite carried no IRSA assertion at all.
+# ---------------------------------------------------------------------------
+blue "==> Scenario 2c: hybrid Postgres cloud identity (IRSA + Entra ID)"
+
+out2c_aws="$TMP/scenario-hybrid-irsa.yaml"
+render_default "$out2c_aws" \
+  --set global.postgresql.deploy=false \
+  --set global.postgresql.host=pg.iam.example.com \
+  --set global.postgresql.authMode=iam \
+  --set global.postgresql.sslMode=require \
+  --set global.postgresql.awsRegion=eu-west-1 \
+  --set global.irsa.roleArn=arn:aws:iam::123456789012:role/neuraltrust \
+  --set global.irsa.applyGlobally=true
+
+# echo -n aws | base64 -> YXdz
+assert_contains "$out2c_aws" 'POSTGRES_LOGIN: "YXdz"' \
+  "hybrid IRSA: POSTGRES_LOGIN stays aws when no Azure identity is configured"
+assert_occurrences "$out2c_aws" 'eks\.amazonaws\.com/role-arn' 6 \
+  "hybrid IRSA: every hybrid ServiceAccount carries the role ARN"
+assert_contains "$out2c_aws" 'name: AWS_REGION' \
+  "hybrid IRSA: the region the SDK needs reaches the pods"
+assert_not_contains "$out2c_aws" 'azure\.workload\.identity' \
+  "hybrid IRSA: no Azure identity leaks into an AWS install"
+# DataAgent's POSTGRES_LOGIN accepts "default" and "azure" only and rejects
+# anything else at boot, so it must not be handed the "aws" this Secret carries.
+assert_datastore_env "$out2c_aws" dataagent dataagent \
+  'POSTGRES_DB,POSTGRES_HOST,POSTGRES_PASSWORD,POSTGRES_PORT,POSTGRES_SSLMODE,POSTGRES_USER' \
+  "hybrid IRSA: DataAgent is not handed a login value it rejects"
+assert_not_contains "$out2c_aws" 'name: POSTGRES_AZURE_SCOPE' \
+  "hybrid IRSA: no Azure scope on an AWS install"
+
+out2c_az="$TMP/scenario-hybrid-entra.yaml"
+render_default "$out2c_az" \
+  --set global.platform=azure \
+  --set global.postgresql.deploy=false \
+  --set global.postgresql.host=pg.postgres.database.azure.com \
+  --set global.postgresql.authMode=iam \
+  --set global.postgresql.sslMode=require \
+  --set global.postgresql.user=nt-umi \
+  --set global.azureIdentity.method=workload-identity \
+  --set global.azureIdentity.clientId=00000000-0000-0000-0000-000000000000 \
+  --set global.azureIdentity.tenantId=11111111-1111-1111-1111-111111111111 \
+  --set global.azureIdentity.applyGlobally=true \
+  --set global.postgresql.azureScope=https://ossrdbms-aad.database.usgovcloudapi.net/.default
+
+# echo -n azure | base64 -> YXp1cmU=
+assert_contains "$out2c_az" 'POSTGRES_LOGIN: "YXp1cmU="' \
+  "hybrid Entra: the shared Secret selects the Azure token provider"
+assert_occurrences "$out2c_az" 'azure\.workload\.identity/client-id' 6 \
+  "hybrid Entra: every hybrid ServiceAccount carries the client ID"
+assert_occurrences "$out2c_az" 'azure\.workload\.identity/tenant-id' 6 \
+  "hybrid Entra: every hybrid ServiceAccount carries the tenant ID"
+# proxy, mcp, trustguard data-plane, both DataAgents, data-plane-api. Without the
+# pod label the AKS webhook never fires and nothing is injected, silently.
+assert_occurrences "$out2c_az" 'azure\.workload\.identity/use' 6 \
+  "hybrid Entra: every Postgres client pod carries the webhook label"
+# The webhook injects these itself, and only for names the container has not
+# already declared — a chart-set value would win over the annotation.
+assert_not_contains "$out2c_az" 'name: AZURE_CLIENT_ID' \
+  "hybrid Entra: workload identity ships no credential env"
+assert_not_contains "$out2c_az" 'name: AZURE_CLIENT_SECRET' \
+  "hybrid Entra: no client secret on the federated path"
+assert_not_contains "$out2c_az" 'name: AWS_REGION' \
+  "hybrid Entra: no AWS region on an Azure install"
+# DataAgent spells its whole env family POSTGRES_*, so the scope variable is
+# POSTGRES_AZURE_SCOPE here and DB_AZURE_SCOPE on the gateways.
+assert_datastore_env "$out2c_az" dataagent dataagent \
+  'POSTGRES_AZURE_SCOPE,POSTGRES_DB,POSTGRES_HOST,POSTGRES_LOGIN,POSTGRES_PASSWORD,POSTGRES_PORT,POSTGRES_SSLMODE,POSTGRES_USER' \
+  "hybrid Entra: DataAgent receives the login switch and its own scope name"
+assert_contains "$out2c_az" 'name: DB_AZURE_SCOPE' \
+  "hybrid Entra: the gateways receive the scope under the name they read"
+# Pod-only. A label that reaches matchLabels is an immutable-field change and
+# every upgrade of an existing release would be rejected by the API server.
+assert_not_contains "$out2c_az" 'matchLabels:\n.*azure\.workload\.identity' \
+  "hybrid Entra: the webhook label never reaches an immutable selector"
+diff <(awk '/^  selector:/{f=4} f&&f--' "$out2c_aws") \
+     <(awk '/^  selector:/{f=4} f&&f--' "$out2c_az") >/dev/null \
+  && green "ok  - hybrid Entra: selectors identical to the AWS render" \
+  || { red "FAIL: hybrid Entra: selector blocks changed"; exit 1; }
+
+out2c_sp="$TMP/scenario-hybrid-entra-sp.yaml"
+render_default "$out2c_sp" \
+  --set global.postgresql.deploy=false \
+  --set global.postgresql.host=pg.postgres.database.azure.com \
+  --set global.postgresql.authMode=iam \
+  --set global.postgresql.sslMode=require \
+  --set global.azureIdentity.method=service-principal \
+  --set global.azureIdentity.clientId=cid \
+  --set global.azureIdentity.tenantId=tid \
+  --set global.azureIdentity.clientSecret.name=azure-sp \
+  --set global.postgresql.azureScope=https://ossrdbms-aad.database.usgovcloudapi.net/.default
+
+assert_contains "$out2c_sp" 'name: AZURE_CLIENT_SECRET' \
+  "hybrid Entra SP: the client secret is injected by reference"
+# Deliberately not optional: a wrong key must stop the pod rather than let the
+# credential chain fall through to another link.
+assert_not_contains "$out2c_sp" 'key: "AZURE_CLIENT_SECRET"\n              optional: true' \
+  "hybrid Entra SP: the client secret reference is required"
+assert_contains "$out2c_sp" 'value: "https://ossrdbms-aad.database.usgovcloudapi.net/.default"' \
+  "hybrid Entra SP: the sovereign-cloud scope override reaches the pods"
+assert_not_contains "$out2c_sp" 'azure\.workload\.identity' \
+  "hybrid Entra SP: no federation annotation or label off the workload-identity path"
+
+# Guards. Each is conjoined with authMode=iam so global.azureIdentity alone can
+# never stop a password install rendering.
+assert_render_fails_with "sslMode" "Entra guard: default sslMode=prefer is rejected" \
+  --set global.postgresql.deploy=false \
+  --set global.postgresql.host=pg.postgres.database.azure.com \
+  --set global.postgresql.authMode=iam \
+  --set global.azureIdentity.method=workload-identity \
+  --set global.azureIdentity.clientId=cid \
+  --set global.azureIdentity.applyGlobally=true
+for mode in external saas; do
+  assert_render_fails_with "hybrid only" "Entra guard: $mode mode is rejected" \
+    --set global.deploymentMode=$mode \
+    --set global.postgresql.deploy=false \
+    --set global.postgresql.host=pg.postgres.database.azure.com \
+    --set global.postgresql.authMode=iam \
+    --set global.postgresql.sslMode=require \
+    --set global.azureIdentity.method=workload-identity \
+    --set global.azureIdentity.clientId=cid \
+    --set global.azureIdentity.applyGlobally=true
+done
+assert_render_fails_with "clientSecret.name" "Entra guard: service-principal needs a Secret name" \
+  --set global.postgresql.deploy=false \
+  --set global.postgresql.host=pg.postgres.database.azure.com \
+  --set global.postgresql.authMode=iam \
+  --set global.postgresql.sslMode=require \
+  --set global.azureIdentity.method=service-principal \
+  --set global.azureIdentity.clientId=cid \
+  --set global.azureIdentity.tenantId=tid
+assert_render_fails_with "workload-identity, managed-identity, service-principal" \
+  "Entra guard: an unknown method lists the supported ones" \
+  --set global.azureIdentity.method=entra
+assert_render_fails_with "clientId" "Entra guard: applyGlobally needs a client ID" \
+  --set global.azureIdentity.method=workload-identity \
+  --set global.azureIdentity.applyGlobally=true
+
+# Regression fence: an install that never configures an Azure identity must be
+# untouched by any of the above.
+out2c_none="$TMP/scenario-hybrid-no-cloud-identity.yaml"
+render_default "$out2c_none"
+assert_not_contains "$out2c_none" 'azure\.workload\.identity' \
+  "no cloud identity: nothing Azure renders by default"
+assert_not_contains "$out2c_none" 'name: AZURE_' \
+  "no cloud identity: no Azure env renders by default"
+
 
 fi # suite_full (1d–2b)
 

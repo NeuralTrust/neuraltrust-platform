@@ -1116,6 +1116,163 @@ true
 {{- end }}
 
 {{/*
+Which cloud mints the short-lived Postgres token: "azure" | "aws".
+
+Derived from `global.azureIdentity.method` alone, deliberately. `authMode: iam`
+already answers WHETHER a token is used; this answers WHOSE, and the operator
+has to configure the identity block for Entra to work at all — so the two facts
+cannot disagree. Reading `global.platform` instead would silently flip an
+existing `platform: azure` + `authMode: iam` install from AWS to Entra with no
+values change, and a separate `authProvider` key would be a third value needing
+its own contradiction checks.
+
+An install that needs an Azure identity for something else while its database is
+RDS overrides POSTGRES_LOGIN through the service's own `extraEnv`, which the
+`skip` machinery in postgresEnv already honours.
+
+Usage: {{ include "neuraltrust-platform.postgres.tokenProvider" . }}
+*/}}
+{{- define "neuraltrust-platform.postgres.tokenProvider" -}}
+{{- $azure := default dict (default dict .Values.global).azureIdentity -}}
+{{- if $azure.method | default "" | toString | trim -}}azure{{- else -}}aws{{- end -}}
+{{- end }}
+
+{{/*
+POSTGRES_LOGIN for the shared postgresql-secrets Secret:
+  "default" — static POSTGRES_PASSWORD
+  "aws"     — RDS/Aurora IAM token (AWS SDK default chain, IRSA)
+  "azure"   — Entra ID token (azidentity DefaultAzureCredential)
+
+The caller passes its own IAM boolean rather than having this helper recompute
+one, because the two Secret emitters derive `$pgIam` differently and aligning
+them here would flip POSTGRES_LOGIN, POSTGRES_CONNECTION_TYPE and regenerate
+POSTGRES_PASSWORD on an existing install. That divergence is a separate fix.
+
+Usage: {{ include "neuraltrust-platform.postgres.login" (dict "ctx" . "iam" $pgIam) }}
+*/}}
+{{- define "neuraltrust-platform.postgres.login" -}}
+{{- if .iam -}}
+{{- include "neuraltrust-platform.postgres.tokenProvider" .ctx -}}
+{{- else -}}
+default
+{{- end -}}
+{{- end }}
+
+{{/*
+Cloud credential env for a Postgres token-auth client, beside postgresEnv.
+
+Hybrid delivered no region or identity env at all, so an AWS IAM install there
+depended on node-level AWS_REGION — the binaries hand the token request to the
+SDK, which fails with "aws region is required" when the default chain resolves
+nothing, and IRSA supplies a role and a token file but never a region.
+
+For workload identity the chart emits NO credential env: the AKS webhook injects
+AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_FEDERATED_TOKEN_FILE and the projected
+volume, and only for names the container has not already declared — so a
+chart-set value would win over the ServiceAccount annotation and become a second
+source of truth. It also keeps EnvironmentCredential, which sits ahead of
+WorkloadIdentityCredential in the chain, from ever constructing.
+
+`skip` takes the component's extraEnv: emitting a name the override also sets
+leaves two entries under one name, which is the $setElementOrder strategic-merge
+failure that breaks the next helm upgrade.
+
+`scopeVar` names the scope variable, because the two runtimes spell it
+differently: the gateways and TrustGuard read DB_AZURE_SCOPE, DataAgent reads
+POSTGRES_AZURE_SCOPE alongside its other POSTGRES_* names.
+
+Hybrid-only, gated here rather than at each call site so it cannot be forgotten:
+external mode already publishes AWS_REGION through the service env ConfigMap, and
+a second explicit entry would shadow it from a different source of truth.
+
+Usage: {{ include "neuraltrust-platform.postgres.cloudAuthEnv" (dict "ctx" . "skip" .Values.dataPlane.extraEnv) }}
+*/}}
+{{- define "neuraltrust-platform.postgres.cloudAuthEnv" -}}
+{{- $ctx := .ctx -}}
+{{- if eq (include "neuraltrust-platform.isHybrid" $ctx) "true" -}}
+{{- if eq (include "neuraltrust-platform.postgresRequired" $ctx) "true" -}}
+{{- if eq (include "neuraltrust-platform.postgres.iamAuth" (dict "ctx" $ctx "database" dict)) "true" -}}
+{{- $globalPg := default dict (default dict $ctx.Values.global).postgresql -}}
+{{- $azure := default dict (default dict $ctx.Values.global).azureIdentity -}}
+{{- $skip := list -}}
+{{- range $e := (default list .skip) -}}{{- $skip = append $skip $e.name -}}{{- end -}}
+{{- if eq (include "neuraltrust-platform.postgres.tokenProvider" $ctx) "azure" -}}
+{{- $method := $azure.method | toString | trim -}}
+{{- $clientId := $azure.clientId | default "" | toString -}}
+{{- if and (eq $method "managed-identity") $clientId (not (has "AZURE_CLIENT_ID" $skip)) }}
+{{- /* Selects which user-assigned identity IMDS should present; omitted for the
+       system-assigned identity, which needs no hint. */}}
+- name: AZURE_CLIENT_ID
+  value: {{ $clientId | quote }}
+{{- end }}
+{{- if eq $method "service-principal" }}
+{{- $secret := default dict $azure.clientSecret -}}
+{{- if not (has "AZURE_TENANT_ID" $skip) }}
+- name: AZURE_TENANT_ID
+  value: {{ $azure.tenantId | default "" | quote }}
+{{- end }}
+{{- if not (has "AZURE_CLIENT_ID" $skip) }}
+- name: AZURE_CLIENT_ID
+  value: {{ $clientId | quote }}
+{{- end }}
+{{- if not (has "AZURE_CLIENT_SECRET" $skip) }}
+{{- /* Required, not optional: a wrong key must stop the pod with
+       CreateContainerConfigError rather than let it reach Entra with no
+       credential and fall through to another link in the chain. */}}
+- name: AZURE_CLIENT_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: {{ $secret.name | default "" | quote }}
+      key: {{ $secret.key | default "AZURE_CLIENT_SECRET" | quote }}
+{{- end }}
+{{- end }}
+{{- $scopeVar := .scopeVar | default "DB_AZURE_SCOPE" -}}
+{{- with $globalPg.azureScope | default "" | toString | trim }}
+{{- if not (has $scopeVar $skip) }}
+- name: {{ $scopeVar }}
+  value: {{ . | quote }}
+{{- end }}
+{{- end }}
+{{- else -}}
+{{- with $globalPg.awsRegion | default "" | toString | trim }}
+{{- if not (has "AWS_REGION" $skip) }}
+- name: AWS_REGION
+  value: {{ . | quote }}
+{{- end }}
+{{- end }}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Pod labels a workload needs beyond its chart labels.
+
+Only the Azure Workload Identity marker today. The AKS mutating webhook keys off
+this label on the POD plus the client-id annotation on the ServiceAccount; with
+the label missing it never fires and nothing is injected, silently.
+
+Not gated on `applyGlobally`: the label and the annotation are independent halves
+of one mechanism, so an operator wiring per-service identities by hand would
+otherwise get annotated ServiceAccounts and no label. A label on a pod whose
+ServiceAccount carries no annotation is a harmless no-op.
+
+Deliberately not an operator-supplied map. Pod labels are appended below
+`spec.template.metadata.labels`, and an arbitrary key under `app.kubernetes.io/`
+would stop the template matching the immutable selector — the API server then
+rejects the Deployment outright.
+
+Usage: {{- include "neuraltrust-platform.podLabels" (dict "ctx" .) | nindent 8 }}
+*/}}
+{{- define "neuraltrust-platform.podLabels" -}}
+{{- $azure := default dict (default dict .ctx.Values.global).azureIdentity -}}
+{{- if eq ($azure.method | default "" | toString | trim) "workload-identity" -}}
+azure.workload.identity/use: "true"
+{{- end -}}
+{{- end -}}
+
+{{/*
 v2 PostgreSQL connection scalars. Callable from either umbrella or subchart
 contexts (subcharts see .Values.global via umbrella merge).
 */}}
@@ -2685,7 +2842,7 @@ true
 {{- $cfg := default dict (default dict (default dict .Values.global).clickstack).egress -}}
 {{- $img := default dict $cfg.image -}}
 {{- $repo := $img.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/opentelemetry-collector-contrib" -}}
-{{- $tag := $img.tag | default "0.158.0" -}}
+{{- $tag := $img.tag | default "0.160.0" -}}
 {{- printf "%s:%s" $repo $tag -}}
 {{- end }}
 
@@ -2833,7 +2990,14 @@ Custom corporate CA certificate trust helpers.
 {{- end }}
 
 {{/*
-AWS IRSA helpers.
+Cloud identity helpers.
+
+`serviceAccount.annotationsBlock` is the one place the platform stamps a cloud
+identity onto a ServiceAccount, and it is called by twelve of the fifteen
+ServiceAccount templates — including every one that renders in hybrid.
+Explicit per-service annotations are merged last so they always win over the
+global identity, which is what lets an operator run least-privilege per-service
+roles with applyGlobally=false.
 */}}
 {{- define "neuraltrust-platform.irsa.annotations" -}}
 {{- $irsa := (default dict (default dict .Values.global).irsa) -}}
@@ -2845,9 +3009,21 @@ eks.amazonaws.com/role-arn: {{ $irsa.roleArn | quote }}
 {{- define "neuraltrust-platform.serviceAccount.annotationsBlock" -}}
 {{- $ctx := .ctx -}}
 {{- $irsa := (default dict (default dict $ctx.Values.global).irsa) -}}
+{{- $azure := (default dict (default dict $ctx.Values.global).azureIdentity) -}}
 {{- $merged := dict -}}
 {{- if and $irsa.roleArn $irsa.applyGlobally -}}
 {{- $_ := set $merged "eks.amazonaws.com/role-arn" ($irsa.roleArn | toString) -}}
+{{- end -}}
+{{- /* Workload identity only: managed-identity and service-principal resolve
+       through IMDS and env, and annotating for them would advertise a federation
+       the identity does not have. The matching pod label is emitted by
+       neuraltrust-platform.podLabels — both halves are required before the AKS
+       webhook injects anything. */ -}}
+{{- if and (eq ($azure.method | default "" | toString | trim) "workload-identity") $azure.applyGlobally ($azure.clientId | default "" | toString | trim) -}}
+{{- $_ := set $merged "azure.workload.identity/client-id" ($azure.clientId | toString) -}}
+{{- with $azure.tenantId | default "" | toString | trim -}}
+{{- $_ := set $merged "azure.workload.identity/tenant-id" . -}}
+{{- end -}}
 {{- end -}}
 {{- range $k, $v := (default dict .annotations) -}}
 {{- $_ := set $merged $k $v -}}

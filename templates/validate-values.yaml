@@ -63,6 +63,54 @@ no Kubernetes resource when validation succeeds.
   {{- end -}}
 {{- end -}}
 
+{{- /* Azure Entra ID identity for Postgres token auth. Every rule below is
+       conjoined with authMode=iam: global.azureIdentity may legitimately be set
+       for something other than the database, and on its own it must never stop
+       a password install from rendering. */ -}}
+{{- $azureIdentity := default dict $global.azureIdentity -}}
+{{- $azureMethod := $azureIdentity.method | default "" | toString | trim -}}
+{{- if $azureMethod -}}
+  {{- $azureMethods := list "workload-identity" "managed-identity" "service-principal" -}}
+  {{- if not (has $azureMethod $azureMethods) -}}
+    {{- fail (printf "global.azureIdentity.method must be one of: workload-identity, managed-identity, service-principal (got %q). Leave it empty for AWS IAM or password auth." $azureMethod) -}}
+  {{- end -}}
+  {{- $azurePg := default dict $global.postgresql -}}
+  {{- if eq ($azurePg.authMode | default "password" | toString | lower) "iam" -}}
+    {{- /* datacore, alertengine, control-plane-api and control-plane-app all
+           mint AWS RDS tokens and have no Entra path, so they would attempt
+           password auth against a server that has no password. Fail rather than
+           ship that silently. saas renders the same control plane as external,
+           hence $controlPlaneInCluster rather than a bare external check. */ -}}
+    {{- if $controlPlaneInCluster -}}
+      {{- fail (printf "global.azureIdentity.method is set with global.postgresql.authMode=iam in %q mode, but Entra ID Postgres auth is supported in hybrid only: DataCore, AlertEngine and the control-plane API/app have no Entra token path and would fall back to password auth against a passwordless server. Use global.deploymentMode=hybrid, or global.postgresql.authMode=password." $mode) -}}
+    {{- end -}}
+    {{- /* The chart default is "prefer", so this is not a theoretical guard: an
+           operator who does not override sslMode gets pods that reject their own
+           config at boot with no chart-side signal. */ -}}
+    {{- $azureSecureSsl := list "require" "verify-ca" "verify-full" -}}
+    {{- $azureSslMode := $azurePg.sslMode | default "" | toString | trim | lower -}}
+    {{- if not (has $azureSslMode $azureSecureSsl) -}}
+      {{- fail (printf "global.postgresql.sslMode must be require, verify-ca or verify-full for Entra ID token auth (got %q). The token is a bearer credential, so TrustGate and TrustGuard reject anything weaker at boot." $azureSslMode) -}}
+    {{- end -}}
+  {{- end -}}
+  {{- if eq $azureMethod "service-principal" -}}
+    {{- $azureSecret := default dict $azureIdentity.clientSecret -}}
+    {{- range $field, $value := dict "tenantId" ($azureIdentity.tenantId | default "" | toString | trim) "clientId" ($azureIdentity.clientId | default "" | toString | trim) -}}
+      {{- if not $value -}}
+        {{- fail (printf "global.azureIdentity.%s is required when method=service-principal." $field) -}}
+      {{- end -}}
+    {{- end -}}
+    {{- if not ($azureSecret.name | default "" | toString | trim) -}}
+      {{- fail "global.azureIdentity.clientSecret.name is required when method=service-principal: the secret is injected by reference so it never passes through values or Helm release history." -}}
+    {{- end -}}
+  {{- end -}}
+  {{- if and (eq $azureMethod "workload-identity") $azureIdentity.applyGlobally -}}
+    {{- if not ($azureIdentity.clientId | default "" | toString | trim) -}}
+      {{- fail "global.azureIdentity.clientId is required when method=workload-identity and applyGlobally=true: it is the azure.workload.identity/client-id annotation the AKS webhook resolves. Set applyGlobally=false to annotate each ServiceAccount yourself." -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+
 {{- /* MCP OAuth needs the control-plane app as its authorization server, and that
        app only exists in external mode — a hybrid install talks to the hosted
        platform instead. Enabling it in hybrid would point TrustGate at an issuer

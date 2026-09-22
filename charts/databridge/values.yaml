@@ -13,7 +13,7 @@ nameOverride: ""
 fullnameOverride: "databridge"
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/databridge
-  tag: "v0.4.2"
+  tag: "v0.4.4"
   pullPolicy: IfNotPresent
 imagePullSecrets: "gcr-secret"
 serviceAccount:
