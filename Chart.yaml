@@ -9,14 +9,14 @@ icon: https://neuraltrust.ai/favicon.ico
 dependencies:
   # In-cluster analytics store (external mode).
   - name: clickhouse
-    version: 1.0.5
+    version: 1.0.6
     repository: file://./charts/clickhouse
     condition: infrastructure.clickhouse.deploy
     tags:
       - infrastructure
   # Analytics / evaluation API. Gated by global.products.dataPlane in hybrid.
   - name: data-plane-api
-    version: 1.7.3
+    version: 1.7.4
     repository: file://./charts/data-plane-api
     tags:
       - neuraltrust
@@ -30,7 +30,7 @@ dependencies:
       - v2
   # Control-plane App/UI — external only.
   - name: control-plane-app
-    version: 0.1.44
+    version: 0.1.45
     repository: file://./charts/control-plane-app
     tags:
       - neuraltrust
@@ -38,14 +38,14 @@ dependencies:
   # TrustGate (values: agentgateway; K8s: agentgateway-*). Hybrid gated by
   # global.products.trustgate.
   - name: agentgateway
-    version: 0.1.63
+    version: 0.1.64
     repository: file://./charts/agentgateway
     tags:
       - neuraltrust
       - v2
   # TrustGuard. Hybrid gated by global.products.trustguard.
   - name: trustguard
-    version: 0.1.52
+    version: 0.1.53
     repository: file://./charts/trustguard
     tags:
       - neuraltrust
@@ -59,21 +59,21 @@ dependencies:
       - v2
   # DataAgent (hybrid; agentgateway.dataagent / trustguard.dataagent).
   - name: dataagent
-    version: 0.1.17
+    version: 0.1.19
     repository: file://./charts/dataagent
     tags:
       - neuraltrust
       - v2
   # DataCore — v2 external only.
   - name: datacore
-    version: 0.1.23
+    version: 0.1.24
     repository: file://./charts/datacore
     tags:
       - neuraltrust
       - v2
   # DataBridge — saas only. Brokers data planes running outside this cluster.
   - name: databridge
-    version: 0.1.1
+    version: 0.1.2
     repository: file://./charts/databridge
     tags:
       - neuraltrust
@@ -88,14 +88,14 @@ dependencies:
       - v2
   # ClickStack OTel collector — v2 external only.
   - name: clickstack-otel-collector
-    version: 0.1.6
+    version: 0.1.7
     repository: file://./charts/clickstack-otel-collector
     tags:
       - neuraltrust
       - v2
   # AlertEngine — v2 external only.
   - name: alertengine
-    version: 0.1.11
+    version: 0.1.12
     repository: file://./charts/alertengine
     tags:
       - neuraltrust
@@ -103,13 +103,13 @@ dependencies:
   # Firewall is part of TrustGuard. Templates follow the TrustGuard product
   # gate in hybrid; always on in external.
   - name: firewall
-    version: 2.1.15
+    version: 2.1.16
     repository: file://./charts/firewall
     tags:
       - neuraltrust
   # Watchdog — optional self-monitoring/self-healing.
   - name: watchdog
-    version: 0.3.15
+    version: 0.3.16
     repository: file://./charts/watchdog
     condition: watchdog.enabled
     tags:

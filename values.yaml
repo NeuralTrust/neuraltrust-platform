@@ -314,6 +314,11 @@ global:
     # awsRegion is required for IAM token minting on control-plane api/app.
     authMode: "password"
     awsRegion: ""
+    # Entra ID scope requested for the Postgres token, when the token provider is
+    # Azure (see global.azureIdentity). Empty uses the public-cloud default,
+    # https://ossrdbms-aad.database.windows.net/.default — override only for
+    # sovereign clouds (Azure Government, Azure China).
+    azureScope: ""
     # Naming a Secret here hands it to you wholesale: the chart injects it with
     # envFrom and cannot rename its keys, so use the variable names your services
     # read. Leave empty to let the chart write the canonical POSTGRES_* family and
@@ -462,6 +467,34 @@ global:
   irsa:
     roleArn: ""
     applyGlobally: false
+  # Azure Entra ID identity for token-authenticated Postgres (hybrid). This block
+  # is what selects Entra as the token provider: with `method` empty nothing
+  # renders and `global.postgresql.authMode: iam` keeps resolving to AWS exactly
+  # as before, so an install that never sets it is unchanged.
+  #
+  #   workload-identity  federated to the ServiceAccount (AKS). The webhook
+  #                      injects AZURE_CLIENT_ID/TENANT_ID/FEDERATED_TOKEN_FILE
+  #                      itself, so the chart sets only the annotation and the
+  #                      pod label and deliberately emits no credential env.
+  #   managed-identity   user-assigned identity read over IMDS; clientId selects
+  #                      which one, empty means the system-assigned identity.
+  #   service-principal  clientSecret.name must hold the secret; it is injected
+  #                      by reference so it never passes through values.
+  #
+  # DB_USER must be the Entra principal, not a local Postgres role, and
+  # global.postgresql.sslMode must be require/verify-ca/verify-full.
+  #
+  # Image floor: trustguard v0.46.0, agentgateway v0.61.0 — the chart defaults
+  # meet it. An older pinned tag rejects POSTGRES_LOGIN=azure at boot, which is
+  # fail-closed but stops the pod.
+  azureIdentity:
+    method: "" # "" | workload-identity | managed-identity | service-principal
+    clientId: ""
+    tenantId: ""
+    applyGlobally: false # true ⇒ annotate every chart ServiceAccount
+    clientSecret: # service-principal only; never inline the secret
+      name: ""
+      key: "AZURE_CLIENT_SECRET"
   psc:
     negNames: {}
   ingress:
@@ -652,7 +685,7 @@ clickhouse:
   imagePullSecrets: "gcr-secret"
   image:
     repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickhouse-server
-    tag: "26.7"
+    tag: "26.8"
     pullPolicy: IfNotPresent
   global:
     imagePullSecrets: []
@@ -822,7 +855,7 @@ control-plane-app:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.174.0"
+          tag: "v1.181.1"
           pullPolicy: IfNotPresent
         config:
           nodeEnv: production
@@ -900,7 +933,7 @@ control-plane-app:
 # stays agentgateway for now; K8s names stay agentgateway-*.
 agentgateway:
   image:
-    tag: "v0.58.3"
+    tag: "v0.61.0"
   # Empty host/port/sslMode/username/tls inherit from global.postgresql /
   # global.redis, then fall back to the in-cluster Services. Set them here only
   # to point this one service somewhere else.
@@ -928,7 +961,7 @@ agentgateway:
 # TrustGuard: control-plane + data-plane (/v1/evaluate).
 trustguard:
   image:
-    tag: "v0.45.2"
+    tag: "v0.46.0"
   # Empty host/port/sslMode/username/tls inherit — see the agentgateway note.
   database:
     sslMode: ""
@@ -959,7 +992,7 @@ trustlens:
 # agentgateway.dataagent / trustguard.dataagent.
 dataagent:
   image:
-    tag: "v0.6.2"
+    tag: "v0.7.0"
   databridge:
     # Empty derives from global.saasRegion (databridge.<saas domain>:443).
     addr: ""
@@ -972,7 +1005,7 @@ dataagent:
 # `global.postgresql` block.
 datacore:
   image:
-    tag: "v0.23.0"
+    tag: "v0.25.0"
   database:
     # Empty inherits global.postgresql, then control-plane-postgresql:5432.
     # name/user stay per-service: external gives each service its own role+DB.
@@ -996,7 +1029,7 @@ datacore:
 # Ignored in hybrid and external.
 databridge:
   image:
-    tag: "v0.4.2"
+    tag: "v0.4.4"
   replicas: 2
   peers:
     discovery: "headless"
@@ -1048,7 +1081,7 @@ clickstack-ingest-gateway:
 # ClickStack OTel collector (v2 external only): OTLP-to-ClickHouse pipeline.
 clickstack-otel-collector:
   image:
-    tag: "2.34.0"
+    tag: "2.38.0"
     repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickstack-otel-collector
   # Empty endpoint is composed from global.clickhouse (scheme follows
   # global.clickhouse.tls), then http://clickhouse:8123 (AUT-636). Set it
@@ -1060,7 +1093,7 @@ clickstack-otel-collector:
 alertengine:
   enabled: true
   image:
-    tag: "v0.8.1"
+    tag: "v0.9.0"
   database:
     # Empty inherits global.postgresql, then control-plane-postgresql:5432.
     # name/user stay per-service: external gives each service its own role+DB.
@@ -1173,7 +1206,7 @@ data-plane-api:
                   memory: 128Mi
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.51.0
+          tag: v1.51.1
           pullPolicy: IfNotPresent
         accessMode: ReadWriteOnce
         huggingfaceToken: ""
@@ -1254,7 +1287,7 @@ firewall:
       replicas: 2
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-        tag: "v2.28.3"
+        tag: "v2.29.0"
         pullPolicy: IfNotPresent
       resources:
         requests:
@@ -1280,7 +1313,7 @@ firewall:
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
         # Keep in lockstep with gateway.image.tag.
-        tag: "v2.28.3"
+        tag: "v2.29.0"
         pullPolicy: IfNotPresent
       replicas: 1
       resources:
