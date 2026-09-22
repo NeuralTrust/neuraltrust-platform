@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.13.12] — 2026-09-22
+
 ### Added
 
 - **Microsoft Entra ID authentication for PostgreSQL, in hybrid mode.** The
