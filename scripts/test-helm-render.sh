@@ -836,7 +836,8 @@ render_default "$out2c_az" \
   --set global.azureIdentity.clientId=00000000-0000-0000-0000-000000000000 \
   --set global.azureIdentity.tenantId=11111111-1111-1111-1111-111111111111 \
   --set global.azureIdentity.applyGlobally=true \
-  --set global.postgresql.azureScope=https://ossrdbms-aad.database.usgovcloudapi.net/.default
+  --set global.postgresql.azureScope=https://ossrdbms-aad.database.usgovcloudapi.net/.default \
+  --set data-plane-api.dataPlane.components.api.database.postgresql.migration.enabled=false
 
 # echo -n azure | base64 -> YXp1cmU=
 assert_contains "$out2c_az" 'POSTGRES_LOGIN: "YXp1cmU="' \
@@ -864,6 +865,24 @@ assert_datastore_env "$out2c_az" dataagent dataagent \
   "hybrid Entra: DataAgent receives the login switch and its own scope name"
 assert_contains "$out2c_az" 'name: DB_AZURE_SCOPE' \
   "hybrid Entra: the gateways receive the scope under the name they read"
+# data-plane-api's enum is azure_ad|password, NOT the iam|password the shared
+# postgresql-secrets key of the same name carries for the Next.js app. It raises
+# at boot on anything else, so this must be a literal and never that Secret key.
+assert_env_value "$out2c_az" data-plane-api api POSTGRES_AUTH_MODE azure_ad \
+  "hybrid Entra: data-plane-api gets its own auth-mode vocabulary"
+assert_not_contains "$out2c_aws" 'name: POSTGRES_AUTH_MODE' \
+  "hybrid IRSA: data-plane-api is not handed an auth mode it rejects"
+# psql from a plain postgres image cannot mint an Entra token, and an
+# initContainer that never connects blocks the pod from starting at all.
+assert_render_fails_with "migration" "Entra guard: the psql migration initContainer is rejected" \
+  --set global.postgresql.deploy=false \
+  --set global.postgresql.host=pg.postgres.database.azure.com \
+  --set global.postgresql.authMode=iam \
+  --set global.postgresql.sslMode=require \
+  --set global.azureIdentity.method=workload-identity \
+  --set global.azureIdentity.clientId=cid \
+  --set global.azureIdentity.applyGlobally=true \
+  --set data-plane-api.dataPlane.components.api.database.postgresql.migration.enabled=true
 # Pod-only. A label that reaches matchLabels is an immutable-field change and
 # every upgrade of an existing release would be rejected by the API server.
 assert_not_contains "$out2c_az" 'matchLabels:\n.*azure\.workload\.identity' \
@@ -883,7 +902,8 @@ render_default "$out2c_sp" \
   --set global.azureIdentity.clientId=cid \
   --set global.azureIdentity.tenantId=tid \
   --set global.azureIdentity.clientSecret.name=azure-sp \
-  --set global.postgresql.azureScope=https://ossrdbms-aad.database.usgovcloudapi.net/.default
+  --set global.postgresql.azureScope=https://ossrdbms-aad.database.usgovcloudapi.net/.default \
+  --set data-plane-api.dataPlane.components.api.database.postgresql.migration.enabled=false
 
 assert_contains "$out2c_sp" 'name: AZURE_CLIENT_SECRET' \
   "hybrid Entra SP: the client secret is injected by reference"
