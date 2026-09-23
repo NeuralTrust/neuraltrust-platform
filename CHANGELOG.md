@@ -59,6 +59,14 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
   IRSA supplies a role and a token file but never a region. Set
   `global.postgresql.awsRegion` and it is now delivered.
 
+- **data-plane-api authenticates with Entra too** (v1.53.0). It receives
+  `POSTGRES_AUTH_MODE=azure_ad` as a **literal**, never the `postgresql-secrets`
+  key of the same name: that key carries `iam`/`password` for the Next.js app,
+  while this service's enum is `azure_ad`/`password` and it raises at boot on
+  anything else. One variable name, two vocabularies — wiring the Secret key
+  through would stop the pod. `POSTGRES_SSL` is deliberately left unset, because
+  the client defaults it to `require` on this path.
+
 - **DataAgent authenticates with Entra too** (v0.7.0). It receives
   `POSTGRES_LOGIN` and, for sovereign clouds, `POSTGRES_AZURE_SCOPE` — its own
   spelling of the variable the gateways read as `DB_AZURE_SCOPE`.
@@ -80,14 +88,19 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ### Known gaps
 
-- **`data-plane-api` cannot mint a token yet**, and IAM leaves
-  `POSTGRES_PASSWORD` empty, so on an Entra install it fails to connect while the
-  gateway, MCP, TrustGuard and DataAgent authenticate normally. It is wired ahead
-  of its binary with the workload-identity pod label, but intentionally gets no
-  environment switch: its documented key is `POSTGRES_CONNECTION_TYPE`
-  (`aurora|postgres`), which has no Entra member, and inventing one would publish
-  a contract the service does not implement. Set
-  `global.products.dataPlane: false` for a clean install in the meantime.
+- **The data-plane-api schema migration cannot run under Entra.** It is an
+  initContainer running `psql` from a plain `postgres` image with `PGPASSWORD`,
+  with no Azure credential chain and no way to mint a token. Left enabled it
+  never connects and blocks the pod from starting, so the chart now refuses to
+  render and names the key to turn it off. Apply the schema out of band instead —
+  `psql` accepts an Entra token as the password
+  (`az account get-access-token --resource-type oss-rdbms`) — and the bundled DDL
+  is idempotent, so re-running is safe.
+
+- **Sovereign clouds reach only three of the four clients.**
+  `global.postgresql.azureScope` is honoured by the gateways, TrustGuard and
+  DataAgent; data-plane-api hardcodes the public-cloud scope, so Azure Government
+  and Azure China need a change in that service before its data plane works.
 
 - **`POSTGRES_CONNECTION_TYPE` stays `aurora` under Entra.** Its only reader is
   the external-mode control-plane API, which never renders in hybrid, and

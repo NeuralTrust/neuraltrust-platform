@@ -1924,6 +1924,22 @@ needs this tunable. Prefer `global.postgresql.connectionLimit`, else 15.
   value: {{ include "neuraltrust-platform.dataPlaneApi.postgresSchema" . | quote }}
 - name: PGSSLMODE
   value: {{ $pg.sslMode | default "prefer" | quote }}
+{{- /* Entra ID token auth. This is a literal, NOT the postgresql-secrets key of
+       the same name: that key carries "iam"/"password" for the Next.js app,
+       while this service's enum is "azure_ad"/"password" and it raises at boot
+       on anything else. Same variable name, two different vocabularies — wiring
+       the Secret key here would stop the pod.
+       No scope variable: this client hardcodes the public-cloud scope, so
+       global.postgresql.azureScope cannot reach it and a sovereign-cloud install
+       needs a new release rather than a values change.
+       POSTGRES_SSL is left unset on purpose — the client defaults it to
+       "require" under azure_ad, which is what this path demands anyway. */}}
+{{- if eq (include "neuraltrust-platform.postgres.tokenProvider" .) "azure" }}
+{{- if eq (include "neuraltrust-platform.postgres.iamAuth" (dict "ctx" . "database" dict)) "true" }}
+- name: POSTGRES_AUTH_MODE
+  value: "azure_ad"
+{{- end }}
+{{- end }}
 {{- end -}}
 
 {{/*
