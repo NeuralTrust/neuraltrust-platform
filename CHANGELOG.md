@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.14.0] — 2026-09-24
+
 ### Changed
 
 - **The data-plane-api PostgreSQL schema is applied by the API image itself.**
