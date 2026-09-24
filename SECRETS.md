@@ -675,7 +675,9 @@ install, missing Secrets/keys are created; later upgrades reuse them with `looku
   `data-plane-api.dataPlane.components.api.database.postgresql.{host,port,user,database}`
   (they override the matching Secret key) and/or point `…database.postgresql.existingSecret.name`
   (with an optional `keys` map) at a pre-created Secret holding the password. A
-  `postgres-migrations` initContainer applies the idempotent tables and indexes.
+  `postgres-migrations` initContainer runs the API image with the API's own
+  environment and applies the idempotent tables and indexes, so it needs no
+  credential of its own — under Entra ID it uses the same token path as the API.
   The schema defaults to `public`; set `…database.postgresql.schema` to use a
   custom pre-created schema. The configured role needs `USAGE` and `CREATE` on
   that schema, but does not need database-level `CREATE`.

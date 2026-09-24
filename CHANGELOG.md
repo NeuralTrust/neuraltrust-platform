@@ -4,6 +4,82 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Changed
+
+- **The data-plane-api PostgreSQL schema is applied by the API image itself.**
+  The `postgres-migrations` initContainer now runs `python -m src.migrate` from
+  the data-plane-api image, with the same environment as the api container,
+  instead of `psql` from a separate `postgres` image. It connects through the
+  same code as the API, so the migration succeeds exactly when the API can
+  connect — with a static password or an Entra ID token — and Entra installs no
+  longer have to disable it and apply the schema by hand.
+
+  It waits up to about four minutes for the server, retrying only errors that
+  clear on their own; bad credentials, a missing database and TLS certificate
+  errors fail on the first attempt. It keeps the advisory lock the psql script
+  took, so replicas starting together serialise — including old and new pods
+  during a rolling upgrade. The chart no longer renders the
+  `data-plane-postgres-init` ConfigMap or carries its own copy of the DDL, which
+  now has a single source in the image.
+
+  **Image floor:** data-plane-api v1.54.0. With an older
+  `dataPlane.components.api.image.tag` pinned, the initContainer fails with
+  `No module named src.migrate` and the API never starts. Pin the chart version
+  instead, or set `migration.enabled: false` and apply the schema out of band.
+
+### Fixed
+
+- **data-plane-api under managed identity and service principal.** Only workload
+  identity worked: the other two methods resolve through environment variables
+  the AKS webhook does not inject, and the chart never delivered them to this
+  service. Both of its containers now receive `AZURE_CLIENT_ID`, plus
+  `AZURE_TENANT_ID` and the client secret by reference for a service principal.
+
+- **Sovereign clouds for data-plane-api.** It now reads `POSTGRES_AZURE_SCOPE`,
+  so `global.postgresql.azureScope` reaches all four Postgres clients.
+
+### Removed
+
+- **`dataPlane.components.api.database.postgresql.migration.image`.** There is
+  no separate migration image any more; an override is now ignored.
+
+- **The render guard that refused Entra installs with the migration enabled.**
+
+### Upgrade notes
+
+- **A psql-sized `migration.resources` will be OOM-killed.** The default is now
+  empty, falling back to `api.initContainerResources` and then 250m/256Mi
+  requests, 500m/512Mi limits. An overlay that copied the old 64Mi/128Mi block
+  should delete it or raise it.
+
+## [v2.13.13] — 2026-09-23
+
+### Added
+
+- **data-plane-api authenticates with Entra too** (v1.53.0). It receives
+  `POSTGRES_AUTH_MODE=azure_ad` as a **literal**, never the `postgresql-secrets`
+  key of the same name: that key carries `iam`/`password` for the Next.js app,
+  while this service's enum is `azure_ad`/`password` and it raises at boot on
+  anything else. One variable name, two vocabularies — wiring the Secret key
+  through would stop the pod. `POSTGRES_SSL` is deliberately left unset, because
+  the client defaults it to `require` on this path.
+
+### Known gaps
+
+- **The data-plane-api schema migration cannot run under Entra.** It is an
+  initContainer running `psql` from a plain `postgres` image with `PGPASSWORD`,
+  with no Azure credential chain and no way to mint a token. Left enabled it
+  never connects and blocks the pod from starting, so the chart now refuses to
+  render and names the key to turn it off. Apply the schema out of band instead —
+  `psql` accepts an Entra token as the password
+  (`az account get-access-token --resource-type oss-rdbms`) — and the bundled DDL
+  is idempotent, so re-running is safe.
+
+- **Sovereign clouds reach only three of the four clients.**
+  `global.postgresql.azureScope` is honoured by the gateways, TrustGuard and
+  DataAgent; data-plane-api hardcodes the public-cloud scope, so Azure Government
+  and Azure China need a change in that service before its data plane works.
+
 ## [v2.13.12] — 2026-09-22
 
 ### Added
@@ -59,14 +135,6 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
   IRSA supplies a role and a token file but never a region. Set
   `global.postgresql.awsRegion` and it is now delivered.
 
-- **data-plane-api authenticates with Entra too** (v1.53.0). It receives
-  `POSTGRES_AUTH_MODE=azure_ad` as a **literal**, never the `postgresql-secrets`
-  key of the same name: that key carries `iam`/`password` for the Next.js app,
-  while this service's enum is `azure_ad`/`password` and it raises at boot on
-  anything else. One variable name, two vocabularies — wiring the Secret key
-  through would stop the pod. `POSTGRES_SSL` is deliberately left unset, because
-  the client defaults it to `require` on this path.
-
 - **DataAgent authenticates with Entra too** (v0.7.0). It receives
   `POSTGRES_LOGIN` and, for sovereign clouds, `POSTGRES_AZURE_SCOPE` — its own
   spelling of the variable the gateways read as `DB_AZURE_SCOPE`.
@@ -87,20 +155,6 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
   same latent default still affects AWS IAM and is tracked separately.
 
 ### Known gaps
-
-- **The data-plane-api schema migration cannot run under Entra.** It is an
-  initContainer running `psql` from a plain `postgres` image with `PGPASSWORD`,
-  with no Azure credential chain and no way to mint a token. Left enabled it
-  never connects and blocks the pod from starting, so the chart now refuses to
-  render and names the key to turn it off. Apply the schema out of band instead —
-  `psql` accepts an Entra token as the password
-  (`az account get-access-token --resource-type oss-rdbms`) — and the bundled DDL
-  is idempotent, so re-running is safe.
-
-- **Sovereign clouds reach only three of the four clients.**
-  `global.postgresql.azureScope` is honoured by the gateways, TrustGuard and
-  DataAgent; data-plane-api hardcodes the public-cloud scope, so Azure Government
-  and Azure China need a change in that service before its data plane works.
 
 - **`POSTGRES_CONNECTION_TYPE` stays `aurora` under Entra.** Its only reader is
   the external-mode control-plane API, which never renders in hybrid, and
@@ -265,7 +319,6 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ### Changed
 
-
 - **`infrastructure.clickhouse.external` is deprecated and fails closed (AUT-636).**
   The keys remain so an existing `values.yaml` still installs, but the block is inert.
   Setting `external.host` with no endpoint named anywhere a consumer reads is now a
@@ -278,7 +331,6 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
   restated the endpoint at all four per-consumer keys — and blanket-rejecting the key
   would have broken the one values file that got it right. That example still renders,
   asserted in the suite.
-
 
 - **The `imagePullSecrets` precedence split is now documented rather than unified
   (AUT-427).** Product subcharts pin `imagePullSecrets: "gcr-secret"` in their own
@@ -331,7 +383,6 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
   is only visible via `kubectl describe`, `SECRETS.md` now says so at the point an
   operator builds the Secret. Both halves are pinned by render assertions so the
   decision cannot drift silently.
-
 
 - **A DataBridge outage longer than five minutes silently dropped telemetry
   (AUT-510).** A data plane holds no long-lived telemetry credential: the egress
@@ -2368,7 +2419,6 @@ Chart 2.1.0 simplifies the Platform v2 hybrid contract to "one Postgres block, o
 
 - **Kafka bootstrap resolution** — components no longer hardcode `kafka:9092` when `global.kafka.bootstrapServers` is configured (with `infrastructure.kafka.deploy: false`). Override per component only when needed (e.g. `neuraltrust-data-plane.dataPlane.components.kafka.connect.bootstrapServers`).
 - **Removed `infrastructure.kafka.external`** — external broker settings live only under `global.kafka` (visible to all subcharts). No clients had adopted the old alias path.
-
 
 ### Changed
 

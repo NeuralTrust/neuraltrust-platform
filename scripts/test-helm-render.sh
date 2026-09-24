@@ -312,7 +312,7 @@ assert_env_value() {
     docs.each do |d|
       spec = d.dig("spec", "template", "spec")
       next unless spec && d.dig("metadata", "name") == want_w
-      (spec["containers"] || []).each do |c|
+      ((spec["containers"] || []) + (spec["initContainers"] || [])).each do |c|
         next unless c["name"] == want_c
         seen = true
         e = (c["env"] || []).find { |x| x["name"] == want_n }
@@ -339,6 +339,36 @@ assert_env_value() {
     exit 1
   fi
   green "ok  - $msg"
+}
+
+# The data-plane Postgres schema is applied by the API image itself
+# (`python -m src.migrate`), so the initContainer must be that exact image, with
+# no psql image, no chart-rendered DDL ConfigMap and no volume to mount it.
+assert_pg_migration_runner() {
+  local file="$1" label="$2" result
+  if ! result="$(ruby -ryaml -e '
+    docs = []
+    YAML.load_stream(File.read(ARGV.fetch(0), encoding: "UTF-8")) { |d| docs << d if d.is_a?(Hash) }
+    d = docs.find { |x| x["kind"] == "Deployment" && x.dig("metadata", "name") == "data-plane-api" }
+    abort "no data-plane-api Deployment" unless d
+    spec = d.dig("spec", "template", "spec")
+    init = (spec["initContainers"] || []).find { |c| c["name"] == "postgres-migrations" }
+    abort "no postgres-migrations initContainer" unless init
+    api = spec["containers"].find { |c| c["name"] == "api" }
+    abort "image #{init["image"]} != api #{api["image"]}" unless init["image"] == api["image"]
+    abort "pull policy differs" unless init["imagePullPolicy"] == api["imagePullPolicy"]
+    abort "command #{init["command"].inspect}" unless init["command"] == ["python", "-m", "src.migrate"]
+    images = ((spec["initContainers"] || []) + spec["containers"]).map { |c| c["image"] }
+    abort "psql image still in data-plane-api: #{images.inspect}" if images.any? { |i| i =~ %r{/postgres:} }
+    abort "postgres-init-db volume still mounted" if (spec["volumes"] || []).any? { |v| v["name"] == "postgres-init-db" }
+    abort "data-plane-postgres-init ConfigMap still rendered" if docs.any? { |x| x["kind"] == "ConfigMap" && x.dig("metadata", "name") == "data-plane-postgres-init" }
+    puts "ok"
+  ' "$file" 2>&1)"; then
+    red "FAIL: $label"
+    red "  $result"
+    exit 1
+  fi
+  green "ok  - $label"
 }
 
 # Asserts a key is present/absent in a specific Secret. Scoped to one document so
@@ -495,10 +525,15 @@ assert_contains "$out1_pg_preserve" '- secretRef:'$'\n''            name: "postg
   "hybrid with preserveExistingSecrets: Postgres envFrom passthrough is kept"
 assert_contains "$out1" 'name: POSTGRES_SCHEMA'$'\n''          value: "public"' \
   "data-plane PostgreSQL: default schema reaches the runtime"
-assert_contains "$out1" 'SET search_path TO public;' \
+assert_pg_migration_runner "$out1" \
+  "data-plane PostgreSQL: schema applied by the API image, no psql image or DDL ConfigMap"
+assert_env_value "$out1" data-plane-api postgres-migrations POSTGRES_SCHEMA public \
   "data-plane PostgreSQL: default schema reaches the migration"
-assert_contains "$out1" 'CREATE TABLE IF NOT EXISTS tests' \
-  "data-plane PostgreSQL: migration uses the configured search path"
+assert_env_value "$out1" data-plane-api postgres-migrations PYTHONPATH /app \
+  "data-plane PostgreSQL: migration runs from the image's package root"
+# The chart carries no DDL at all now; these fence any reintroduction.
+assert_not_contains "$out1" 'CREATE TABLE IF NOT EXISTS tests' \
+  "data-plane PostgreSQL: chart renders no schema DDL of its own"
 assert_not_contains "$out1" 'CREATE SCHEMA IF NOT EXISTS' \
   "data-plane PostgreSQL: migration does not require database CREATE"
 assert_contains "$out1" 'name: redis-secrets' \
@@ -752,12 +787,15 @@ assert_contains "$out2" 'name: POSTGRES_SCHEMA'$'\n''          value: "tenant_sc
   "external PG: configured schema reaches the runtime"
 assert_not_contains "$out2" 'CREATE SCHEMA IF NOT EXISTS' \
   "external PG: custom schema does not require database CREATE"
-assert_contains "$out2" 'SET search_path TO tenant_schema;' \
+assert_pg_migration_runner "$out2" \
+  "external PG: schema applied by the API image"
+assert_env_value "$out2" data-plane-api postgres-migrations POSTGRES_SCHEMA tenant_schema \
   "external PG: configured schema reaches the migration"
-assert_contains "$out2" 'CREATE TABLE IF NOT EXISTS tests' \
-  "external PG: migration uses the configured search path"
-assert_not_contains "$out2" 'SET search_path TO public;' \
-  "external PG: migration has no stale default schema"
+assert_env_value "$out2" data-plane-api postgres-migrations POSTGRES_HOST \
+  secretKeyRef:postgresql-secrets/POSTGRES_HOST \
+  "external PG: migration connects to the same endpoint as the API"
+assert_not_contains "$out2" 'SET search_path TO' \
+  "external PG: chart renders no search_path of its own"
 assert_render_fails "invalid data-plane PostgreSQL schema fails render" \
   --set data-plane-api.dataPlane.components.api.database.postgresql.schema=invalid-schema
 
@@ -836,8 +874,7 @@ render_default "$out2c_az" \
   --set global.azureIdentity.clientId=00000000-0000-0000-0000-000000000000 \
   --set global.azureIdentity.tenantId=11111111-1111-1111-1111-111111111111 \
   --set global.azureIdentity.applyGlobally=true \
-  --set global.postgresql.azureScope=https://ossrdbms-aad.database.usgovcloudapi.net/.default \
-  --set data-plane-api.dataPlane.components.api.database.postgresql.migration.enabled=false
+  --set global.postgresql.azureScope=https://ossrdbms-aad.database.usgovcloudapi.net/.default
 
 # echo -n azure | base64 -> YXp1cmU=
 assert_contains "$out2c_az" 'POSTGRES_LOGIN: "YXp1cmU="' \
@@ -872,17 +909,17 @@ assert_env_value "$out2c_az" data-plane-api api POSTGRES_AUTH_MODE azure_ad \
   "hybrid Entra: data-plane-api gets its own auth-mode vocabulary"
 assert_not_contains "$out2c_aws" 'name: POSTGRES_AUTH_MODE' \
   "hybrid IRSA: data-plane-api is not handed an auth mode it rejects"
-# psql from a plain postgres image cannot mint an Entra token, and an
-# initContainer that never connects blocks the pod from starting at all.
-assert_render_fails_with "migration" "Entra guard: the psql migration initContainer is rejected" \
-  --set global.postgresql.deploy=false \
-  --set global.postgresql.host=pg.postgres.database.azure.com \
-  --set global.postgresql.authMode=iam \
-  --set global.postgresql.sslMode=require \
-  --set global.azureIdentity.method=workload-identity \
-  --set global.azureIdentity.clientId=cid \
-  --set global.azureIdentity.applyGlobally=true \
-  --set data-plane-api.dataPlane.components.api.database.postgresql.migration.enabled=true
+# The schema runner is the API image with the API's environment, so it takes
+# the same Entra token path — the migration renders under Entra, no opt-out.
+assert_pg_migration_runner "$out2c_az" \
+  "hybrid Entra: the schema migration runs under Entra through the API image"
+for c in api postgres-migrations; do
+  assert_env_value "$out2c_az" data-plane-api "$c" POSTGRES_AUTH_MODE azure_ad \
+    "hybrid Entra: data-plane-api/$c authenticates with an Entra token"
+  assert_env_value "$out2c_az" data-plane-api "$c" POSTGRES_AZURE_SCOPE \
+    https://ossrdbms-aad.database.usgovcloudapi.net/.default \
+    "hybrid Entra: data-plane-api/$c receives the sovereign-cloud scope"
+done
 # Pod-only. A label that reaches matchLabels is an immutable-field change and
 # every upgrade of an existing release would be rejected by the API server.
 assert_not_contains "$out2c_az" 'matchLabels:\n.*azure\.workload\.identity' \
@@ -902,8 +939,7 @@ render_default "$out2c_sp" \
   --set global.azureIdentity.clientId=cid \
   --set global.azureIdentity.tenantId=tid \
   --set global.azureIdentity.clientSecret.name=azure-sp \
-  --set global.postgresql.azureScope=https://ossrdbms-aad.database.usgovcloudapi.net/.default \
-  --set data-plane-api.dataPlane.components.api.database.postgresql.migration.enabled=false
+  --set global.postgresql.azureScope=https://ossrdbms-aad.database.usgovcloudapi.net/.default
 
 assert_contains "$out2c_sp" 'name: AZURE_CLIENT_SECRET' \
   "hybrid Entra SP: the client secret is injected by reference"
@@ -915,6 +951,57 @@ assert_contains "$out2c_sp" 'value: "https://ossrdbms-aad.database.usgovcloudapi
   "hybrid Entra SP: the sovereign-cloud scope override reaches the pods"
 assert_not_contains "$out2c_sp" 'azure\.workload\.identity' \
   "hybrid Entra SP: no federation annotation or label off the workload-identity path"
+# Service principal resolves through env, never through the webhook, so both
+# data-plane-api containers need it; before this they only worked under
+# workload identity.
+for c in api postgres-migrations; do
+  assert_env_value "$out2c_sp" data-plane-api "$c" AZURE_TENANT_ID tid \
+    "hybrid Entra SP: data-plane-api/$c receives the tenant"
+  assert_env_value "$out2c_sp" data-plane-api "$c" AZURE_CLIENT_ID cid \
+    "hybrid Entra SP: data-plane-api/$c receives the client ID"
+  assert_env_value "$out2c_sp" data-plane-api "$c" AZURE_CLIENT_SECRET \
+    secretKeyRef:azure-sp/AZURE_CLIENT_SECRET \
+    "hybrid Entra SP: data-plane-api/$c receives the secret by reference"
+done
+
+out2c_mi="$TMP/scenario-hybrid-entra-mi.yaml"
+render_default "$out2c_mi" \
+  --set global.postgresql.deploy=false \
+  --set global.postgresql.host=pg.postgres.database.azure.com \
+  --set global.postgresql.authMode=iam \
+  --set global.postgresql.sslMode=require \
+  --set global.azureIdentity.method=managed-identity \
+  --set global.azureIdentity.clientId=umi-cid
+for c in api postgres-migrations; do
+  assert_env_value "$out2c_mi" data-plane-api "$c" AZURE_CLIENT_ID umi-cid \
+    "hybrid Entra MI: data-plane-api/$c selects the user-assigned identity"
+  assert_env_value "$out2c_mi" data-plane-api "$c" AZURE_CLIENT_SECRET ABSENT \
+    "hybrid Entra MI: data-plane-api/$c carries no client secret"
+done
+
+# An operator override must win once, not twice: a duplicate env name is the
+# $setElementOrder patch failure that breaks the next helm upgrade.
+out2c_override="$TMP/scenario-hybrid-entra-mi-override.yaml"
+render_default "$out2c_override" \
+  --set global.postgresql.deploy=false \
+  --set global.postgresql.host=pg.postgres.database.azure.com \
+  --set global.postgresql.authMode=iam \
+  --set global.postgresql.sslMode=require \
+  --set global.azureIdentity.method=managed-identity \
+  --set global.azureIdentity.clientId=umi-cid \
+  --set 'data-plane-api.dataPlane.components.api.extraEnv[0].name=AZURE_CLIENT_ID' \
+  --set 'data-plane-api.dataPlane.components.api.extraEnv[0].value=operator-cid'
+ruby -ryaml -e '
+  docs = []
+  YAML.load_stream(File.read(ARGV[0])) { |d| docs << d if d.is_a?(Hash) }
+  spec = docs.find { |x| x["kind"] == "Deployment" && x.dig("metadata", "name") == "data-plane-api" }.dig("spec", "template", "spec")
+  (spec["containers"] + spec["initContainers"]).select { |c| %w[api postgres-migrations].include?(c["name"]) }.each do |c|
+    hits = c["env"].select { |e| e["name"] == "AZURE_CLIENT_ID" }
+    abort "#{c["name"]}: #{hits.size} AZURE_CLIENT_ID entries" unless hits.size == 1 && hits[0]["value"] == "operator-cid"
+  end
+' "$out2c_override" \
+  && green "ok  - hybrid Entra MI: an extraEnv override appears once on both containers" \
+  || { red "FAIL: hybrid Entra MI: extraEnv override duplicated or lost"; exit 1; }
 
 # Guards. Each is conjoined with authMode=iam so global.azureIdentity alone can
 # never stop a password install rendering.
@@ -960,6 +1047,108 @@ assert_not_contains "$out2c_none" 'azure\.workload\.identity' \
 assert_not_contains "$out2c_none" 'name: AZURE_' \
   "no cloud identity: no Azure env renders by default"
 
+
+# ---------------------------------------------------------------------------
+# 2d. The schema runner connects exactly as the API does.
+#
+# The runner succeeds only when it reaches Postgres the way the API does, so
+# every connection-affecting input the api container gets — custom CA, proxy
+# (the Entra token call is outbound HTTPS), mounted secrets, extraEnvFrom —
+# must reach the initContainer too, under the same hardening.
+# ---------------------------------------------------------------------------
+blue "==> Scenario 2d: data-plane schema runner parity with the api container"
+parity_values="$TMP/pg-runner-parity.yaml"
+cat > "$parity_values" <<'EOF'
+global:
+  customCaCert:
+    enabled: true
+    secretName: corp-ca
+  proxy:
+    enabled: true
+    httpsProxy: "http://proxy.corp.example:3128"
+data-plane-api:
+  dataPlane:
+    components:
+      api:
+        extraEnvFrom:
+          - secretRef:
+              name: operator-pg-tuning
+        extraVolumes:
+          - name: secrets-store
+            emptyDir: {}
+        extraVolumeMounts:
+          - name: secrets-store
+            mountPath: /etc/secrets
+            readOnly: true
+EOF
+out2d="$TMP/scenario-pg-runner-parity.yaml"
+render_default "$out2d" -f "$parity_values"
+ruby -ryaml -e '
+  docs = []
+  YAML.load_stream(File.read(ARGV[0])) { |d| docs << d if d.is_a?(Hash) }
+  spec = docs.find { |x| x["kind"] == "Deployment" && x.dig("metadata", "name") == "data-plane-api" }.dig("spec", "template", "spec")
+  api = spec["containers"].find { |c| c["name"] == "api" }
+  init = spec["initContainers"].find { |c| c["name"] == "postgres-migrations" }
+  names = ->(c) { (c["env"] || []).map { |e| e["name"] } }
+  missing = %w[PGSSLROOTCERT SSL_CERT_FILE REQUESTS_CA_BUNDLE HTTPS_PROXY NO_PROXY] - names.(init)
+  abort "env missing on initContainer: #{missing}" unless missing.empty?
+  mounts = ->(c) { (c["volumeMounts"] || []).map { |m| [m["name"], m["mountPath"]] } }
+  gap = mounts.(api) - mounts.(init)
+  abort "api mounts absent from initContainer: #{gap}" unless gap.empty?
+  from = ->(c) { (c["envFrom"] || []).map { |e| (e["secretRef"] || e["configMapRef"])["name"] } }
+  abort "extraEnvFrom not on initContainer: #{from.(init)}" unless from.(init).include?("operator-pg-tuning")
+  abort "initContainer rootfs is writable" unless init.dig("securityContext", "readOnlyRootFilesystem") == true
+' "$out2d" \
+  && green "ok  - schema runner: CA, proxy, mounts, envFrom and hardening match the api container" \
+  || { red "FAIL: schema runner diverges from the api container"; exit 1; }
+
+# Resources: migration.resources, then api.initContainerResources, then a
+# Python-sized default. The old psql-sized 64Mi/128Mi default would OOM-kill it.
+out2d_res="$TMP/scenario-pg-runner-resources.yaml"
+render_default "$out2d_res" \
+  --set data-plane-api.dataPlane.components.api.initContainerResources.limits.memory=700Mi
+pg_runner_memory_limit() {
+  ruby -ryaml -e '
+    docs = []
+    YAML.load_stream(File.read(ARGV[0])) { |d| docs << d if d.is_a?(Hash) }
+    spec = docs.find { |x| x["kind"] == "Deployment" && x.dig("metadata", "name") == "data-plane-api" }.dig("spec", "template", "spec")
+    puts spec["initContainers"].find { |c| c["name"] == "postgres-migrations" }.dig("resources", "limits", "memory")
+  ' "$1"
+}
+out2d_res2="$TMP/scenario-pg-runner-resources-explicit.yaml"
+render_default "$out2d_res2" \
+  --set data-plane-api.dataPlane.components.api.initContainerResources.limits.memory=700Mi \
+  --set data-plane-api.dataPlane.components.api.database.postgresql.migration.resources.limits.memory=900Mi
+for case in "$out2d:512Mi:Python-sized default" \
+            "$out2d_res:700Mi:api.initContainerResources applies when migration.resources is empty" \
+            "$out2d_res2:900Mi:migration.resources wins over api.initContainerResources"; do
+  file="${case%%:*}"; rest="${case#*:}"; want="${rest%%:*}"; what="${rest#*:}"
+  got="$(pg_runner_memory_limit "$file")"
+  [[ "$got" == "$want" ]] && green "ok  - schema runner resources: $what" \
+    || { red "FAIL: schema runner resources: $what (want $want, got $got)"; exit 1; }
+done
+
+# migration.image is retired. An overlay still setting it must keep installing,
+# and the override must not smuggle the psql image back in.
+out2d_legacy="$TMP/scenario-pg-runner-legacy-image-key.yaml"
+render_default "$out2d_legacy" \
+  --set data-plane-api.dataPlane.components.api.database.postgresql.migration.image.repository=registry.example/mirror/postgres \
+  --set data-plane-api.dataPlane.components.api.database.postgresql.migration.image.tag=17-alpine \
+  --set data-plane-api.dataPlane.components.api.database.postgresql.migration.image.pullPolicy=Always
+assert_pg_migration_runner "$out2d_legacy" \
+  "schema runner: a retired migration.image override still installs and is ignored"
+
+out2d_off="$TMP/scenario-pg-runner-off.yaml"
+render_default "$out2d_off" \
+  --set data-plane-api.dataPlane.components.api.database.postgresql.migration.enabled=false
+assert_not_contains "$out2d_off" 'name: postgres-migrations' \
+  "schema runner: migration.enabled=false still opts out"
+out2d_ch="$TMP/scenario-pg-runner-clickhouse.yaml"
+render_default "$out2d_ch" --set global.deploymentMode=external
+assert_not_contains "$out2d_ch" 'name: postgres-migrations' \
+  "schema runner: ClickHouse backend renders no Postgres migration"
+assert_contains "$out2d_ch" 'name: clickhouse-migrations' \
+  "schema runner: ClickHouse backend keeps its own migration"
 
 fi # suite_full (1d–2b)
 
@@ -5636,6 +5825,31 @@ if grep -qE 'define "neuraltrust-platform\.clickhouse\.(host|port|user|database)
   exit 1
 fi
 green "ok  - the four dead infrastructure-reading ClickHouse helpers stay deleted"
+
+# ---------------------------------------------------------------------------
+# Release gate: the schema runner exists only in data-plane-api images newer
+# than v1.53.1. Every Postgres install runs `python -m src.migrate` in an
+# initContainer, so a chart whose default tag predates it would stop every one
+# of them at "No module named src.migrate". Checked on all three places the
+# default tag lives, since bump-images updates them together and a partial
+# revert would leave one behind.
+# ---------------------------------------------------------------------------
+blue "==> Release gate: default data-plane-api image carries the schema runner"
+runner_floor_exclusive="v1.53.1"
+dpa_default_tags=(
+  "values.yaml:$(ruby -ryaml -e 'puts YAML.load_file(ARGV[0]).dig("data-plane-api", "dataPlane", "components", "api", "image", "tag")' "$CHART_DIR/values.yaml")"
+  "deployment.yaml:$(sed -nE 's/.*\$apiTag := \$apiImage\.tag \| default "([^"]+)".*/\1/p' "$CHART_DIR/charts/data-plane-api/templates/api/deployment.yaml")"
+  "_helpers.tpl:$(sed -nE 's/.*\$apiTag := "([^"]+)".*/\1/p' "$CHART_DIR/charts/data-plane-api/templates/_helpers.tpl" | head -1)"
+)
+for entry in "${dpa_default_tags[@]}"; do
+  where="${entry%%:*}"; tag="${entry#*:}"
+  newest="$(printf '%s\n%s\n' "$runner_floor_exclusive" "$tag" | sort -V | tail -1)"
+  if [[ -z "$tag" || "$tag" == "$runner_floor_exclusive" || "$newest" != "$tag" ]]; then
+    red "FAIL: data-plane-api default tag in $where is '${tag:-<unset>}', which predates the schema runner (must be newer than $runner_floor_exclusive)"
+    exit 1
+  fi
+  green "ok  - data-plane-api default tag in $where ($tag) carries the schema runner"
+done
 
 green ""
 green "All v2 render scenarios passed."
