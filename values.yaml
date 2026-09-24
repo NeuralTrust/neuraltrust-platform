@@ -795,7 +795,7 @@ control-plane-api:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api"
-          tag: "v1.27.1"
+          tag: "v1.28.0"
           pullPolicy: IfNotPresent
         config:
           controlPlaneApiUrl: ""
@@ -855,7 +855,7 @@ control-plane-app:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.183.1"
+          tag: "v1.183.3"
           pullPolicy: IfNotPresent
         config:
           nodeEnv: production
@@ -933,7 +933,7 @@ control-plane-app:
 # stays agentgateway for now; K8s names stay agentgateway-*.
 agentgateway:
   image:
-    tag: "v0.61.1"
+    tag: "v0.63.0"
   # Empty host/port/sslMode/username/tls inherit from global.postgresql /
   # global.redis, then fall back to the in-cluster Services. Set them here only
   # to point this one service somewhere else.
@@ -961,7 +961,7 @@ agentgateway:
 # TrustGuard: control-plane + data-plane (/v1/evaluate).
 trustguard:
   image:
-    tag: "v0.47.0"
+    tag: "v0.48.0"
   # Empty host/port/sslMode/username/tls inherit — see the agentgateway note.
   database:
     sslMode: ""
@@ -1005,7 +1005,7 @@ dataagent:
 # `global.postgresql` block.
 datacore:
   image:
-    tag: "v0.25.0"
+    tag: "v0.25.1"
   database:
     # Empty inherits global.postgresql, then control-plane-postgresql:5432.
     # name/user stay per-service: external gives each service its own role+DB.
@@ -1191,22 +1191,20 @@ data-plane-api:
                 user: "POSTGRES_USER"
                 password: "POSTGRES_PASSWORD"
                 database: "POSTGRES_DB"
+            # Applies the schema before the API starts, from the API image itself
+            # (`python -m src.migrate`) with the API's own environment, so it works
+            # under every auth mode the API does, Entra ID included. Set enabled
+            # false only to apply the schema out of band.
+            # Image floor: data-plane-api v1.54.0 — older images have no
+            # src.migrate, and the initContainer fails before the API can start.
             migration:
               enabled: true
-              image:
-                repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/postgres
-                tag: "17-alpine"
-                pullPolicy: IfNotPresent
-              resources:
-                requests:
-                  cpu: 100m
-                  memory: 64Mi
-                limits:
-                  cpu: 500m
-                  memory: 128Mi
+              # Empty ⇒ api.initContainerResources, then 250m/256Mi requests and
+              # 500m/512Mi limits. A Python process needs more than psql did.
+              resources: {}
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.53.0
+          tag: v1.54.0
           pullPolicy: IfNotPresent
         accessMode: ReadWriteOnce
         huggingfaceToken: ""
