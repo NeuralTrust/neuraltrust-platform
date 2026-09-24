@@ -21,7 +21,7 @@
 {{- $api := default dict .Values.dataPlane.components.api }}
 {{- $apiImage := default dict $api.image }}
 {{- $apiRepo := $apiImage.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api" }}
-{{- $apiTag := $apiImage.tag | default "v1.53.0" }}
+{{- $apiTag := $apiImage.tag | default "v1.54.0" }}
 {{- $apiPull := $apiImage.pullPolicy | default "IfNotPresent" }}
 {{- /* The ClickHouse DDL ships inside the data-plane-api image, so it always matches
        the application version that reads it. Setting clickhouse.configmap.name opts
@@ -50,10 +50,8 @@ spec:
         app: api
         plane: data
         {{- /* Pod-only, like `plane: data` above — the selector is `app: api`
-               alone. No Postgres env changes here: this service's documented
-               switch is POSTGRES_CONNECTION_TYPE (aurora|postgres), whose enum
-               has no Entra member yet, so the label is wired ahead of the
-               binary rather than a guessed variable name. */}}
+               alone. Carries the workload-identity marker, which the AKS webhook
+               honours for the postgres-migrations initContainer as well. */}}
         {{- with include "neuraltrust-platform.podLabels" (dict "ctx" .) }}
         {{- . | nindent 8 }}
         {{- end }}
@@ -327,17 +325,16 @@ spec:
           {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 10 }}
         {{- end }}
         {{- if $renderPgInit }}
+        {{- /* The schema is applied by the application image itself, through the
+               same connection code and the same environment as the api container
+               below, so it succeeds exactly when the app can connect — static
+               password or an Entra ID token alike. It waits for the server, takes
+               a transaction-scoped advisory lock so replicas serialise, and runs
+               the idempotent DDL shipped in the image. Under workload identity the
+               AKS webhook injects the federated token into initContainers too. */}}
         - name: postgres-migrations
-          {{- $pgMigRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/postgres" }}
-          {{- $pgMigTag := "17-alpine" }}
-          {{- $pgMigPull := "IfNotPresent" }}
-          {{- if $pgMigration.image }}
-            {{- if $pgMigration.image.repository }}{{- $pgMigRepo = $pgMigration.image.repository }}{{- end }}
-            {{- if $pgMigration.image.tag }}{{- $pgMigTag = $pgMigration.image.tag }}{{- end }}
-            {{- if $pgMigration.image.pullPolicy }}{{- $pgMigPull = $pgMigration.image.pullPolicy }}{{- end }}
-          {{- end }}
-          image: {{ include "data-plane.image" (dict "repository" $pgMigRepo "tag" $pgMigTag "global" .Values.global) | quote }}
-          imagePullPolicy: {{ $pgMigPull }}
+          image: {{ include "data-plane.image" (dict "repository" $apiRepo "tag" $apiTag "global" .Values.global) | quote }}
+          imagePullPolicy: {{ $apiPull }}
           {{- if .Values.securityHardening }}
           securityContext:
             allowPrivilegeEscalation: false
@@ -345,67 +342,49 @@ spec:
             capabilities:
               drop: ["ALL"]
           {{- end }}
-          command:
-          - /bin/sh
-          - -c
-          - |
-            set -eu
-            echo "Applying PostgreSQL schema migrations..."
-            export PGPASSWORD="${POSTGRES_PASSWORD}"
-
-            # Wait for PostgreSQL to accept connections.
-            ATTEMPT=0
-            MAX_ATTEMPTS=60
-            until pg_isready -h "${POSTGRES_HOST}" -p "${POSTGRES_PORT}" -U "${POSTGRES_USER}" -t 2 >/dev/null 2>&1; do
-              ATTEMPT=$((ATTEMPT + 1))
-              if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
-                echo "ERROR: PostgreSQL did not become ready in time"
-                exit 1
-              fi
-              [ $((ATTEMPT % 5)) -eq 0 ] && echo "Waiting for PostgreSQL... ($ATTEMPT/$MAX_ATTEMPTS)"
-              sleep 2
-            done
-            echo "PostgreSQL is ready; applying idempotent schema in a single advisory-locked transaction..."
-
-            # A transaction-scoped advisory lock serializes concurrent replicas so
-            # they never race on CREATE ... IF NOT EXISTS. The bundled DDL is
-            # idempotent; ON_ERROR_STOP makes any failure fatal.
-            psql --set=ON_ERROR_STOP=1 \
-              -h "${POSTGRES_HOST}" \
-              -p "${POSTGRES_PORT}" \
-              -U "${POSTGRES_USER}" \
-              -d "${POSTGRES_DATABASE}" <<'EOSQL'
-            BEGIN;
-            SELECT pg_advisory_xact_lock(8274123);
-            \i /postgres-init/init-db.sql
-            COMMIT;
-            EOSQL
-
-            echo "PostgreSQL schema migration completed."
+          command: ["python", "-m", "src.migrate"]
+          {{- $pgInitExtraEnvFrom := list }}
+          {{- if $api.extraEnvFrom }}{{- $pgInitExtraEnvFrom = $api.extraEnvFrom }}{{- end }}
+          {{- with include "data-plane.envFrom" (dict "component" "api" "extraEnvFrom" $pgInitExtraEnvFrom "context" .) | trim }}
+          {{- . | nindent 10 }}
+          {{- end }}
           env:
+          - name: PYTHONPATH
+            value: "/app"
           {{- include "neuraltrust-platform.dataPlaneApi.postgresEnv" . | nindent 10 }}
           {{- if include "neuraltrust-platform.customCaCert.enabled" . }}
           - name: PGSSLROOTCERT
             value: {{ include "neuraltrust-platform.customCaCert.path" . | quote }}
           {{- end }}
+          {{- if eq (include "neuraltrust-platform.postgres.tokenProvider" .) "azure" }}
+          {{- with include "neuraltrust-platform.postgres.cloudAuthEnv" (dict "ctx" . "skip" $api.extraEnv "scopeVar" "POSTGRES_AZURE_SCOPE") | trim }}
+          {{- . | nindent 10 }}
+          {{- end }}
+          {{- end }}
+          {{- with $api.extraEnv }}
+          {{- toYaml . | nindent 10 }}
+          {{- end }}
+          {{- include "neuraltrust-platform.proxy-env" . | nindent 10 }}
+          {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "python" "ctx" .) | nindent 10 }}
           resources:
-            {{- if $pgMigration.resources }}
-            {{- toYaml $pgMigration.resources | nindent 12 }}
+            {{- $pgInitResources := $pgMigration.resources | default $api.initContainerResources }}
+            {{- if $pgInitResources }}
+            {{- toYaml $pgInitResources | nindent 12 }}
             {{- else }}
             requests:
-              cpu: 100m
-              memory: 64Mi
+              cpu: 250m
+              memory: 256Mi
             limits:
               cpu: 500m
-              memory: 128Mi
+              memory: 512Mi
             {{- end }}
           volumeMounts:
-          - name: postgres-init-db
-            mountPath: /postgres-init
-            readOnly: true
           - name: tmp
             mountPath: /tmp
           {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 10 }}
+          {{- with $api.extraVolumeMounts }}
+          {{- include "neuraltrust-platform.extraVolumeMounts" (dict "items" .) | nindent 10 }}
+          {{- end }}
         {{- end }}
       {{- end }}
       containers:
@@ -514,6 +493,13 @@ spec:
           {{- if include "neuraltrust-platform.customCaCert.enabled" . }}
           - name: PGSSLROOTCERT
             value: {{ include "neuraltrust-platform.customCaCert.path" . | quote }}
+          {{- end }}
+          {{- /* Managed identity and service principal resolve through env, not
+                 the webhook, so without this only workload identity worked. */}}
+          {{- if eq (include "neuraltrust-platform.postgres.tokenProvider" .) "azure" }}
+          {{- with include "neuraltrust-platform.postgres.cloudAuthEnv" (dict "ctx" . "skip" $api.extraEnv "scopeVar" "POSTGRES_AZURE_SCOPE") | trim }}
+          {{- . | nindent 10 }}
+          {{- end }}
           {{- end }}
           {{- else }}
           # App defaults SQL_DATABASE to postgres when unset; must be explicit for ClickHouse.
@@ -676,14 +662,6 @@ spec:
       - name: init-db
         configMap:
           name: {{ $chInitConfigMap }}
-          items:
-            - key: init-db.sql
-              path: init-db.sql
-      {{- end }}
-      {{- if $renderPgInit }}
-      - name: postgres-init-db
-        configMap:
-          name: data-plane-postgres-init
           items:
             - key: init-db.sql
               path: init-db.sql

@@ -42,8 +42,10 @@ and **raw `postgres`** so payloads stay in the local PostgreSQL for
 DataAgent. There is no hybrid raw-OTLP dual-write. `data-plane-api` is
 **opt-in** (`global.products.dataPlane`) and, when selected, defaults to
 the umbrella-managed **PostgreSQL** (`SQL_DATABASE=postgres`). Its schema
-is applied by a `postgres-migrations` initContainer (idempotent,
-advisory-locked). The backend can be pinned to `postgres` explicitly, or
+is applied by a `postgres-migrations` initContainer that runs the
+data-plane-api image itself (`python -m src.migrate`), so it connects with the
+same credentials as the API — including Entra ID tokens — and applies the
+idempotent DDL shipped in the image under an advisory lock. The backend can be pinned to `postgres` explicitly, or
 pointed at an external ClickHouse via a dotted
 `data-plane-api.dataPlane.components.clickhouse.host`. In-cluster
 ClickHouse deploys only in external mode.
@@ -333,8 +335,9 @@ them before install and the Job does not render; point the chart at the instance
 via `global.postgresql.deploy: false` + host/user/password (or set
 `global.postgresql.existingSecret.name`). The `data-plane-api` read shim runs on
 PostgreSQL by default in hybrid, sharing the same `postgresql-secrets` — a
-`postgres-migrations` initContainer applies its own schema
-(`neuraltrust` schema + `tests`/`test_runs` tables). Point it at an
+`postgres-migrations` initContainer applies its `tests`/`test_runs` tables
+and indexes into the configured schema (`public` by default; a custom schema
+must already exist). Point it at an
 external/managed ClickHouse instead by naming it once at `global.clickhouse`, or
 with a dotted `data-plane-api.dataPlane.components.clickhouse.host` (and its
 `existingSecret`) to move this service alone, or force the backend with

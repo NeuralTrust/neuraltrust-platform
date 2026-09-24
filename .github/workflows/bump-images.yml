@@ -83,7 +83,7 @@ on:
         required: false
         default: ""
       postgres_tag:
-        description: "postgres tag (e.g. 17-alpine). Empty = latest matching N-alpine from AR (in-cluster postgres + migration initContainers)."
+        description: "postgres tag (e.g. 17-alpine). Empty = latest matching N-alpine from AR (in-cluster postgres + control-plane-api wait initContainer)."
         required: false
         default: ""
       fetch_latest:
@@ -247,7 +247,7 @@ jobs:
           echo "| alertengine | \`${ALERTENGINE:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| clickhouse-server | \`${CLICKHOUSE:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| redis-stack-server | \`${REDIS:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| postgres (in-cluster + migrations) | \`${POSTGRES:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| postgres (in-cluster) | \`${POSTGRES:-skipped}\` |" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Update values.yaml and template defaults
         id: update
@@ -559,7 +559,7 @@ jobs:
           fi
 
           # =============================================
-          # 11. Infrastructure: Postgres (in-cluster + migration initContainers)
+          # 11. Infrastructure: Postgres (in-cluster + control-plane-api wait initContainer)
           # =============================================
           TAG="${{ steps.tags.outputs.postgres }}"
           if [[ -n "$TAG" ]]; then
@@ -572,8 +572,6 @@ jobs:
             fi
             update_template_tag "charts/control-plane-api/templates/api/deployment.yaml" "pgWaitImageTag" "$TAG"
             if [[ "$TEMPLATE_TAG_CHANGED" == "1" ]]; then BUMP_CONTROL_PLANE_API=true; fi
-            update_template_tag "charts/data-plane-api/templates/api/deployment.yaml" "pgMigTag" "$TAG"
-            if [[ "$TEMPLATE_TAG_CHANGED" == "1" ]]; then BUMP_DATA_PLANE_API=true; fi
           fi
 
           # =============================================
