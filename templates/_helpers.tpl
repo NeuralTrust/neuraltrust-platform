@@ -1177,9 +1177,10 @@ WorkloadIdentityCredential in the chain, from ever constructing.
 leaves two entries under one name, which is the $setElementOrder strategic-merge
 failure that breaks the next helm upgrade.
 
-`scopeVar` names the scope variable, because the two runtimes spell it
-differently: the gateways and TrustGuard read DB_AZURE_SCOPE, DataAgent reads
-POSTGRES_AZURE_SCOPE alongside its other POSTGRES_* names.
+`scopeVar` names the scope variable, because the runtimes spell it
+differently: the gateways and TrustGuard read DB_AZURE_SCOPE, while DataAgent
+and data-plane-api read POSTGRES_AZURE_SCOPE alongside their other POSTGRES_*
+names.
 
 Hybrid-only, gated here rather than at each call site so it cannot be forgotten:
 external mode already publishes AWS_REGION through the service env ConfigMap, and
@@ -1929,9 +1930,8 @@ needs this tunable. Prefer `global.postgresql.connectionLimit`, else 15.
        while this service's enum is "azure_ad"/"password" and it raises at boot
        on anything else. Same variable name, two different vocabularies — wiring
        the Secret key here would stop the pod.
-       No scope variable: this client hardcodes the public-cloud scope, so
-       global.postgresql.azureScope cannot reach it and a sovereign-cloud install
-       needs a new release rather than a values change.
+       The scope and the credential env come from postgres.cloudAuthEnv, which
+       the api and postgres-migrations containers include next to this helper.
        POSTGRES_SSL is left unset on purpose — the client defaults it to
        "require" under azure_ad, which is what this path demands anyway. */}}
 {{- if eq (include "neuraltrust-platform.postgres.tokenProvider" .) "azure" }}

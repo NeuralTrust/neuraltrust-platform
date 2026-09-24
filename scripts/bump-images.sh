@@ -293,7 +293,6 @@ set_fallback templates/redis/_helpers.tpl tag "$REDIS" || true
 set_tag '.global.postgresql.image.tag' "$POSTGRES" "postgres (in-cluster)" || true
 set_fallback templates/postgresql/deployment.yaml tag "$POSTGRES" || true
 set_fallback charts/control-plane-api/templates/api/deployment.yaml pgWaitImageTag "$POSTGRES" && touch_dir control-plane-api
-set_fallback charts/data-plane-api/templates/api/deployment.yaml    pgMigTag       "$POSTGRES" && touch_dir data-plane-api
 set_fallback charts/data-plane-api/templates/api/deployment.yaml    chMigrationTag "$CLICKHOUSE" && touch_dir data-plane-api
 
 # otel-collector-contrib fallback is an inline `default "X.Y.Z"`, not a $var.

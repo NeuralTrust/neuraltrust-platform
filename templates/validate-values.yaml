@@ -109,25 +109,6 @@ no Kubernetes resource when validation succeeds.
       {{- fail "global.azureIdentity.clientId is required when method=workload-identity and applyGlobally=true: it is the azure.workload.identity/client-id annotation the AKS webhook resolves. Set applyGlobally=false to annotate each ServiceAccount yourself." -}}
     {{- end -}}
   {{- end -}}
-  {{- if eq ($azurePg.authMode | default "password" | toString | lower) "iam" -}}
-    {{- /* The data-plane-api schema migration runs psql from a plain postgres
-           image with PGPASSWORD. That image has no Azure credential chain and no
-           way to mint an Entra token, so under token auth it cannot connect and
-           the initContainer blocks the pod from ever starting. The API itself is
-           fine (v1.53.0+ speaks azure_ad), so the fix is to turn the
-           initContainer off and apply the schema out of band. */ -}}
-    {{- if eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "dataPlane")) "true" -}}
-      {{- if eq (include "neuraltrust-platform.dataPlaneApi.sqlBackend" .) "postgres" -}}
-        {{- $dpaPg := include "neuraltrust-platform.dataPlaneApi.postgresConfig" . | fromYaml -}}
-        {{- $dpaMigration := default dict $dpaPg.migration -}}
-        {{- $dpaMigrationEnabled := true -}}
-        {{- if hasKey $dpaMigration "enabled" -}}{{- $dpaMigrationEnabled = $dpaMigration.enabled -}}{{- end -}}
-        {{- if $dpaMigrationEnabled -}}
-          {{- fail "data-plane-api's schema migration initContainer runs psql with PGPASSWORD and cannot mint an Entra ID token, so it would block the pod from starting. Set data-plane-api.dataPlane.components.api.database.postgresql.migration.enabled=false and apply the schema out of band (psql accepts an Entra token as the password: az account get-access-token --resource-type oss-rdbms), or set global.products.dataPlane=false." -}}
-        {{- end -}}
-      {{- end -}}
-    {{- end -}}
-  {{- end -}}
 {{- end -}}
 
 {{- /* MCP OAuth needs the control-plane app as its authorization server, and that
