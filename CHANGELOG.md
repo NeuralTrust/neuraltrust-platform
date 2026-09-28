@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.14.2] — 2026-09-28
+
 ### Fixed
 
 - **control-plane-api v1.27.1+ no longer crash-loops with
