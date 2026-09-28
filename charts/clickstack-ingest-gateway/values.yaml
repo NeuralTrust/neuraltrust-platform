@@ -19,7 +19,7 @@ image:
   # global.observability.collector and global.clickstack.egress: all three are
   # the same upstream image and bump-images.yml moves them together.
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/opentelemetry-collector-contrib
-  tag: "0.158.0"
+  tag: "0.160.0"
   pullPolicy: IfNotPresent
 # Empty falls back to global.imagePullSecrets; "none" suppresses it entirely
 # (a mirror in the same project needs no credentials).
