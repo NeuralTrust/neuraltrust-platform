@@ -2858,7 +2858,7 @@ true
 {{- $cfg := default dict (default dict (default dict .Values.global).clickstack).egress -}}
 {{- $img := default dict $cfg.image -}}
 {{- $repo := $img.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/opentelemetry-collector-contrib" -}}
-{{- $tag := $img.tag | default "0.160.0" -}}
+{{- $tag := $img.tag | default "0.161.0" -}}
 {{- printf "%s:%s" $repo $tag -}}
 {{- end }}
 
