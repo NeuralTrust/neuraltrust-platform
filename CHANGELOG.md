@@ -4,6 +4,14 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Fixed
+
+- **control-plane-api v1.27.1+ no longer crash-loops with
+  `DATA_PLANE_JWT_SECRET is not set`.** The image now reads the data-plane JWT
+  secret from `DATA_PLANE_JWT_SECRET`, while the chart only set
+  `DEFAULT_DATA_PLANE_JWT_SECRET`. The api container now receives both names
+  from the same secret key, so older pinned images keep working.
+
 ## [v2.14.0] — 2026-09-24
 
 ### Changed
