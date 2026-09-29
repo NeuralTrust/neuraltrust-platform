@@ -145,17 +145,18 @@ spec:
         {{- if not (has "POSTGRES_PASSWORD" $skip) }}
         {{- include "neuraltrust-platform.postgresql.passwordEnv" (dict "ctx" . "secret" $pgSecret) | nindent 8 }}
         {{- end }}
-        {{- /* Azure only, deliberately. DataAgent's POSTGRES_LOGIN accepts
-               "default" and "azure" and rejects anything else at boot, so handing
-               it the "aws" this Secret carries on an RDS IAM install would turn a
-               pod that merely could not authenticate into one that refuses to
-               start. It has no AWS token path to use the value for anyway, and
-               omitting the key leaves it on exactly the behaviour it has today.
-               Optional, like SSLMODE: a key the agent can live without must not
-               hold the pod in CreateContainerConfigError.
-               The scope variable is POSTGRES_AZURE_SCOPE here, not the gateways'
-               DB_AZURE_SCOPE — DataAgent spells its whole family POSTGRES_*. */}}
-        {{- if eq (include "neuraltrust-platform.postgres.tokenProvider" .) "azure" }}
+        {{- /* POSTGRES_LOGIN is the token-auth switch, delivered for every
+               provider as the gateways get it: "default" on a password install,
+               "aws" or "azure" under IAM. Without it an RDS IAM install left the
+               agent on password auth with an empty password. Image floor: v0.8.0 —
+               v0.7.0 rejects "aws" at boot, which the render suite gates.
+               Optional, like SSLMODE: an operator-owned Secret without the key
+               leaves the agent on password auth rather than in
+               CreateContainerConfigError.
+               cloudAuthEnv emits nothing on a password install, AWS_REGION for
+               AWS and the credential env for Azure. The scope variable is
+               POSTGRES_AZURE_SCOPE here, not the gateways' DB_AZURE_SCOPE —
+               DataAgent spells its whole family POSTGRES_*. */}}
         {{- if not (has "POSTGRES_LOGIN" $skip) }}
         - name: POSTGRES_LOGIN
           valueFrom:
@@ -166,7 +167,6 @@ spec:
         {{- end }}
         {{- with include "neuraltrust-platform.postgres.cloudAuthEnv" (dict "ctx" . "skip" .Values.extraEnv "scopeVar" "POSTGRES_AZURE_SCOPE") | trim }}
         {{- . | nindent 8 }}
-        {{- end }}
         {{- end }}
         {{- end }}
         {{- if $egressEnabled }}
