@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.15.0] — 2026-09-29
+
 ### Fixed
 
 - **DataAgent authenticates to an RDS/Aurora IAM database** (v0.8.0). On a
