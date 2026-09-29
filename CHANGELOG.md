@@ -4,6 +4,34 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Fixed
+
+- **DataAgent authenticates to an RDS/Aurora IAM database** (v0.8.0). On a
+  hybrid install with `global.postgresql.authMode: iam` the chart withheld
+  `POSTGRES_LOGIN` from DataAgent, because v0.7.0 rejected `aws` at boot, so the
+  agent tried password auth with the empty password an IAM install carries and
+  could not reach its store while the gateways authenticated fine. Both
+  DataAgents now receive `POSTGRES_LOGIN` for every provider — `default` on a
+  password install — and `AWS_REGION` from `global.postgresql.awsRegion` under
+  AWS IAM. They sign an RDS IAM token per connection with the ServiceAccount's
+  IRSA role (`global.irsa`), exactly as TrustGate and TrustGuard do.
+
+  **Image floor:** dataagent v0.8.0, the chart default. A pinned v0.7.0 now
+  fails at boot on an AWS IAM install instead of failing to authenticate; a
+  password or Entra install is unaffected.
+
+### Changed
+
+- **Hybrid AWS IAM installs must use a TLS `sslMode`.** Rendering now fails
+  unless `global.postgresql.sslMode` is `require`, `verify-ca` or `verify-full`
+  (or empty, which resolves to `require`) when a hybrid install uses AWS IAM
+  with TrustGate or TrustGuard enabled. `values.yaml` ships `prefer`, which
+  shadows the IAM default, and TrustGate, TrustGuard and DataAgent all reject a
+  token login over anything weaker at boot — so such an install already
+  crash-looped; it now gets a clear error at render instead. External and saas
+  modes, data-plane-only hybrid installs and operator-owned
+  `global.postgresql.existingSecret` Secrets are not checked.
+
 ## [v2.14.2] — 2026-09-28
 
 ### Fixed

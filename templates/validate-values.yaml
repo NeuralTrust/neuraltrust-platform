@@ -111,6 +111,33 @@ no Kubernetes resource when validation succeeds.
   {{- end -}}
 {{- end -}}
 
+{{- /* The AWS half of the rule above. In hybrid the gateways and both DataAgents
+       read the shared Secret's POSTGRES_SSLMODE beside POSTGRES_LOGIN=aws, and
+       all three reject a token login over anything weaker than require at boot.
+       values.yaml ships sslMode: prefer, which shadows the chart's IAM default of
+       require, so an operator who only sets authMode: iam would otherwise get
+       pods that refuse their own config with no chart-side signal. An empty value
+       takes that require default, hence the default here.
+       Scoped to exactly the installs that break, so no working one stops
+       rendering: external and saas are left out (their IAM clients have their own
+       per-service sslMode and some accept prefer); a data-plane-only hybrid runs
+       no TrustGate, TrustGuard or DataAgent; and an operator-owned or preserved
+       Secret carries its own POSTGRES_SSLMODE, which values cannot see. */ -}}
+{{- if and
+  (eq (include "neuraltrust-platform.isHybrid" .) "true")
+  (eq (include "neuraltrust-platform.postgres.tokenProvider" .) "aws")
+  (eq (include "neuraltrust-platform.postgres.iamAuth" (dict "ctx" . "database" dict)) "true")
+  (eq (include "neuraltrust-platform.postgresRequired" .) "true")
+  (eq (include "neuraltrust-platform.dataagent.required" .) "true")
+  (eq (include "neuraltrust-platform.v2.hybridPg.chartManagedSecret" .) "true")
+-}}
+  {{- $awsSecureSsl := list "require" "verify-ca" "verify-full" -}}
+  {{- $awsSslMode := (default dict $global.postgresql).sslMode | default "require" | toString | trim | lower -}}
+  {{- if not (has $awsSslMode $awsSecureSsl) -}}
+    {{- fail (printf "global.postgresql.sslMode must be require, verify-ca or verify-full for AWS RDS IAM token auth in hybrid (got %q). The token is a bearer credential, so TrustGate, TrustGuard and DataAgent reject anything weaker at boot." $awsSslMode) -}}
+  {{- end -}}
+{{- end -}}
+
 {{- /* MCP OAuth needs the control-plane app as its authorization server, and that
        app only exists in external mode — a hybrid install talks to the hosted
        platform instead. Enabling it in hybrid would point TrustGate at an issuer
