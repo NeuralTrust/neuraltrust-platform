@@ -488,13 +488,13 @@ for wl in agentgateway-proxy:proxy agentgateway-mcp:mcp trustguard-data-plane:da
     "hybrid: ${wl%%:*} receives only the datastore keys it reads"
 done
 # DataAgent builds its connection from discrete POSTGRES_* parts (RUN-1093).
-# No POSTGRES_LOGIN here: the agent rejects the "aws" this Secret carries on a
-# non-Azure install, so the key is only delivered on the Entra path (2c).
+# POSTGRES_LOGIN resolves to "default" on this password install, as it does for
+# the gateways above; the IAM providers are covered in 2c.
 assert_datastore_env "$out1" dataagent dataagent \
-  'POSTGRES_DB,POSTGRES_HOST,POSTGRES_PASSWORD,POSTGRES_PORT,POSTGRES_SSLMODE,POSTGRES_USER' \
+  'POSTGRES_DB,POSTGRES_HOST,POSTGRES_LOGIN,POSTGRES_PASSWORD,POSTGRES_PORT,POSTGRES_SSLMODE,POSTGRES_USER' \
   "hybrid: DataAgent receives discrete POSTGRES_* parts"
 assert_datastore_env "$out1" dataagent-trustguard dataagent \
-  'POSTGRES_DB,POSTGRES_HOST,POSTGRES_PASSWORD,POSTGRES_PORT,POSTGRES_SSLMODE,POSTGRES_USER' \
+  'POSTGRES_DB,POSTGRES_HOST,POSTGRES_LOGIN,POSTGRES_PASSWORD,POSTGRES_PORT,POSTGRES_SSLMODE,POSTGRES_USER' \
   "hybrid: TrustGuard DataAgent receives discrete POSTGRES_* parts"
 # A wholesale Postgres envFrom creeping back would silently undo the collapse.
 assert_no_envfrom_secret "$out1" postgresql-secrets \
@@ -854,11 +854,16 @@ assert_contains "$out2c_aws" 'name: AWS_REGION' \
   "hybrid IRSA: the region the SDK needs reaches the pods"
 assert_not_contains "$out2c_aws" 'azure\.workload\.identity' \
   "hybrid IRSA: no Azure identity leaks into an AWS install"
-# DataAgent's POSTGRES_LOGIN accepts "default" and "azure" only and rejects
-# anything else at boot, so it must not be handed the "aws" this Secret carries.
-assert_datastore_env "$out2c_aws" dataagent dataagent \
-  'POSTGRES_DB,POSTGRES_HOST,POSTGRES_PASSWORD,POSTGRES_PORT,POSTGRES_SSLMODE,POSTGRES_USER' \
-  "hybrid IRSA: DataAgent is not handed a login value it rejects"
+# Without POSTGRES_LOGIN the agent stayed on password auth with the empty
+# password an IAM install carries, while the gateways authenticated fine. Both
+# instances render from one template, so both are checked.
+for agent in dataagent dataagent-trustguard; do
+  assert_datastore_env "$out2c_aws" "$agent" dataagent \
+    'POSTGRES_DB,POSTGRES_HOST,POSTGRES_LOGIN,POSTGRES_PASSWORD,POSTGRES_PORT,POSTGRES_SSLMODE,POSTGRES_USER' \
+    "hybrid IRSA: $agent receives the login switch"
+  assert_env_value "$out2c_aws" "$agent" dataagent AWS_REGION "eu-west-1" \
+    "hybrid IRSA: $agent receives the region the SDK signs the token for"
+done
 assert_not_contains "$out2c_aws" 'name: POSTGRES_AZURE_SCOPE' \
   "hybrid IRSA: no Azure scope on an AWS install"
 
@@ -1037,6 +1042,50 @@ assert_render_fails_with "workload-identity, managed-identity, service-principal
 assert_render_fails_with "clientId" "Entra guard: applyGlobally needs a client ID" \
   --set global.azureIdentity.method=workload-identity \
   --set global.azureIdentity.applyGlobally=true
+
+# The AWS half. values.yaml ships sslMode: prefer, so an operator who sets only
+# authMode: iam must be stopped at render rather than by three crash-looping
+# workloads. Every case outside the ones that break must keep rendering.
+aws_iam_args=(
+  --set global.postgresql.deploy=false
+  --set global.postgresql.host=pg.iam.example.com
+  --set global.postgresql.authMode=iam
+  --set global.postgresql.awsRegion=eu-west-1
+)
+assert_render_fails_with "sslMode must be require, verify-ca or verify-full for AWS RDS IAM" \
+  "AWS IAM guard: default sslMode=prefer is rejected in hybrid" \
+  "${aws_iam_args[@]}"
+assert_render_fails_with "sslMode must be require, verify-ca or verify-full for AWS RDS IAM" \
+  "AWS IAM guard: disable is rejected in hybrid" \
+  "${aws_iam_args[@]}" --set global.postgresql.sslMode=disable
+aws_guard_passes() {
+  local msg="$1"
+  shift
+  if ! helm template test "$CHART_DIR" --namespace default -f "$CHART_DIR/values-required.yaml" \
+      "${CLICKSTACK_DEFAULT_ARGS[@]}" "${aws_iam_args[@]}" "$@" >/dev/null 2>&1; then
+    red "FAIL: $msg"
+    exit 1
+  fi
+  green "ok  - $msg"
+}
+aws_guard_passes "AWS IAM guard: an empty sslMode takes the chart's require default" \
+  --set global.postgresql.sslMode=
+aws_guard_passes "AWS IAM guard: verify-full passes, case-insensitively" \
+  --set global.postgresql.sslMode=VERIFY-FULL
+aws_guard_passes "AWS IAM guard: an operator-owned Secret carries its own sslmode" \
+  --set global.postgresql.existingSecret.name=operator-pg
+aws_guard_passes "AWS IAM guard: a data-plane-only hybrid runs no token-login client" \
+  --set global.products.trustgate=false --set global.products.trustguard=false
+for mode in external saas; do
+  aws_guard_passes "AWS IAM guard: $mode keeps its per-service sslMode" \
+    --set global.deploymentMode=$mode
+done
+if ! helm template test "$CHART_DIR" --namespace default -f "$CHART_DIR/values-required.yaml" \
+    "${CLICKSTACK_DEFAULT_ARGS[@]}" >/dev/null 2>&1; then
+  red "FAIL: AWS IAM guard: a password install with sslMode=prefer must render"
+  exit 1
+fi
+green "ok  - AWS IAM guard: a password install with sslMode=prefer renders"
 
 # Regression fence: an install that never configures an Azure identity must be
 # untouched by any of the above.
@@ -5849,6 +5898,28 @@ for entry in "${dpa_default_tags[@]}"; do
     exit 1
   fi
   green "ok  - data-plane-api default tag in $where ($tag) carries the schema runner"
+done
+
+# ---------------------------------------------------------------------------
+# Release gate: every hybrid DataAgent now receives POSTGRES_LOGIN, and v0.7.0
+# rejects the "aws" an RDS IAM install carries at boot. A default tag at or
+# below it would turn a store DataAgent could not authenticate to into a pod
+# that never starts. Checked in both places the default lives.
+# ---------------------------------------------------------------------------
+blue "==> Release gate: default DataAgent image accepts POSTGRES_LOGIN=aws"
+dataagent_floor_exclusive="v0.7.0"
+dataagent_default_tags=(
+  "values.yaml:$(ruby -ryaml -e 'puts YAML.load_file(ARGV[0]).dig("dataagent", "image", "tag")' "$CHART_DIR/values.yaml")"
+  "charts/dataagent/values.yaml:$(ruby -ryaml -e 'puts YAML.load_file(ARGV[0]).dig("image", "tag")' "$CHART_DIR/charts/dataagent/values.yaml")"
+)
+for entry in "${dataagent_default_tags[@]}"; do
+  where="${entry%%:*}"; tag="${entry#*:}"
+  newest="$(printf '%s\n%s\n' "$dataagent_floor_exclusive" "$tag" | sort -V | tail -1)"
+  if [[ -z "$tag" || "$tag" == "$dataagent_floor_exclusive" || "$newest" != "$tag" ]]; then
+    red "FAIL: DataAgent default tag in $where is '${tag:-<unset>}', which rejects POSTGRES_LOGIN=aws (must be newer than $dataagent_floor_exclusive)"
+    exit 1
+  fi
+  green "ok  - DataAgent default tag in $where ($tag) accepts POSTGRES_LOGIN=aws"
 done
 
 green ""

@@ -311,7 +311,9 @@ global:
     # services share one Postgres, or when replica counts go up.
     connectionLimit: 15
     # authMode: password | iam (external Postgres only; ignored when deploy=true).
-    # awsRegion is required for IAM token minting on control-plane api/app.
+    # awsRegion is required for IAM token minting on control-plane api/app, and
+    # in hybrid reaches the gateways and DataAgents as AWS_REGION. Hybrid IAM
+    # needs sslMode require/verify-ca/verify-full; DataAgent floor v0.8.0.
     authMode: "password"
     awsRegion: ""
     # Entra ID scope requested for the Postgres token, when the token provider is
@@ -484,8 +486,8 @@ global:
   # DB_USER must be the Entra principal, not a local Postgres role, and
   # global.postgresql.sslMode must be require/verify-ca/verify-full.
   #
-  # Image floor: trustguard v0.46.0, agentgateway v0.61.0 — the chart defaults
-  # meet it. An older pinned tag rejects POSTGRES_LOGIN=azure at boot, which is
+  # Image floor: trustguard v0.46.0, agentgateway v0.61.0, dataagent v0.7.0 —
+  # the chart defaults meet it. An older pinned tag rejects POSTGRES_LOGIN=azure at boot, which is
   # fail-closed but stops the pod.
   azureIdentity:
     method: "" # "" | workload-identity | managed-identity | service-principal
@@ -855,7 +857,7 @@ control-plane-app:
         replicaCount: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.186.0"
+          tag: "v1.187.0"
           pullPolicy: IfNotPresent
         config:
           nodeEnv: production
@@ -933,7 +935,7 @@ control-plane-app:
 # stays agentgateway for now; K8s names stay agentgateway-*.
 agentgateway:
   image:
-    tag: "v0.63.0"
+    tag: "v0.63.2"
   # Empty host/port/sslMode/username/tls inherit from global.postgresql /
   # global.redis, then fall back to the in-cluster Services. Set them here only
   # to point this one service somewhere else.
@@ -992,7 +994,7 @@ trustlens:
 # agentgateway.dataagent / trustguard.dataagent.
 dataagent:
   image:
-    tag: "v0.7.0"
+    tag: "v0.8.0"
   databridge:
     # Empty derives from global.saasRegion (databridge.<saas domain>:443).
     addr: ""
