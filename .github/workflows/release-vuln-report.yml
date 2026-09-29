@@ -1,0 +1,233 @@
+name: Release vulnerability report
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Tag or branch to report on. Blank uses the selected branch.
+        type: string
+        required: false
+        default: ''
+
+concurrency:
+  group: release-vuln-report-${{ github.event.release.tag_name || inputs.ref || github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  YQ_VERSION: v4.52.4
+  TRIVY_VERSION: v0.71.0
+  TRIVY_VULN_SEVERITY_SOURCE: amazon,bitnami,oracle-oval,alma,rocky,nvd,photon,julia,azure,ghsa,redhat,ubuntu,auto
+
+jobs:
+  report:
+    name: Scan chart images
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    continue-on-error: true
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.ref || github.ref }}
+          persist-credentials: false
+
+      - name: Install yq
+        run: |
+          set -euo pipefail
+          sudo wget -qO /usr/local/bin/yq \
+            "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+          sudo chmod +x /usr/local/bin/yq
+
+      # Same pinned installer the trivy-action release uses internally.
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@3fb12ec12f41e471780db15c232d5dd185dcb514 # v0.2.6
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          cache: true
+
+      - name: Authenticate to Google Cloud
+        id: gcp_auth
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.PLATFORM_WIF_PROVIDER }}
+          service_account: ${{ secrets.PLATFORM_WIF_SERVICE_ACCOUNT }}
+          token_format: access_token
+          create_credentials_file: false
+
+      - name: Scan images
+        id: scan
+        env:
+          ACCESS_TOKEN: ${{ steps.gcp_auth.outputs.access_token }}
+          REPORT_DIR: ${{ runner.temp }}/vuln-report
+        run: |
+          set -uo pipefail
+          mkdir -p "$REPORT_DIR/json"
+          results="$REPORT_DIR/results.tsv"
+          : > "$results"
+
+          chart_version="$(yq eval '.version' Chart.yaml)"
+          echo "chart_version=${chart_version}" >> "$GITHUB_OUTPUT"
+
+          # Every `repo:tag` cell of the release-notes image table, deduplicated.
+          # shellcheck disable=SC2016 # the backticks are literal markdown
+          ./scripts/release-images-markdown.sh \
+            | grep -oE '`[^`]+:[^`]+`' | tr -d '`' | sort -u > "$REPORT_DIR/images.txt"
+          echo "Images to scan:"; cat "$REPORT_DIR/images.txt"
+
+          cut -d/ -f1 "$REPORT_DIR/images.txt" | sort -u | while read -r registry; do
+            echo "$ACCESS_TOKEN" | docker login -u oauth2accesstoken --password-stdin "$registry" >/dev/null \
+              || echo "::warning::Registry login failed for ${registry}"
+          done
+
+          trivy image --download-db-only --quiet \
+            || echo "::warning::Vulnerability DB download failed; scans below will report errors"
+
+          while read -r image; do
+            [[ -z "$image" ]] && continue
+            name="${image##*/}"
+            out="$REPORT_DIR/json/${name//:/_}.json"
+            if trivy image --quiet --skip-db-update --timeout 30m \
+                 --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed \
+                 --format json --output "$out" "$image"; then
+              critical="$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length' "$out")"
+              high="$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH")] | length' "$out")"
+              printf '%s\tok\t%s\t%s\n' "$name" "$critical" "$high" >> "$results"
+            else
+              echo "::warning::Scan failed for ${image}"
+              printf '%s\terror\t-\t-\n' "$name" >> "$results"
+            fi
+          done < "$REPORT_DIR/images.txt"
+
+          # Always succeed: a failed scan is a row in the report, not a failed job.
+          exit 0
+
+      - name: Build report
+        id: report
+        env:
+          REPORT_DIR: ${{ runner.temp }}/vuln-report
+          CHART_VERSION: ${{ steps.scan.outputs.chart_version }}
+        run: |
+          set -uo pipefail
+          results="$REPORT_DIR/results.tsv"
+          md="$REPORT_DIR/report.md"
+
+          total_images="$(wc -l < "$results" | tr -d ' ')"
+          errors="$(awk -F'\t' '$2=="error"' "$results" | wc -l | tr -d ' ')"
+          affected="$(awk -F'\t' '$2=="ok" && ($3+$4)>0' "$results" | wc -l | tr -d ' ')"
+          critical="$(awk -F'\t' '$2=="ok"{s+=$3} END{print s+0}' "$results")"
+          high="$(awk -F'\t' '$2=="ok"{s+=$4} END{print s+0}' "$results")"
+          unique="$(jq -rs '[.[].Results[]?.Vulnerabilities[]?.VulnerabilityID] | unique | length' "$REPORT_DIR"/json/*.json 2>/dev/null || echo 0)"
+
+          {
+            echo "## Image vulnerability report — chart ${CHART_VERSION}"
+            echo
+            echo "Fixable HIGH/CRITICAL findings (\`--ignore-unfixed\`), severity source \`${TRIVY_VULN_SEVERITY_SOURCE}\`. Report only — the release is not blocked."
+            echo
+            echo "**${affected} of ${total_images} images** have findings: ${high} HIGH, ${critical} CRITICAL, ${unique} unique CVEs. Scan errors: ${errors}."
+            echo
+            echo "| Image | HIGH | CRITICAL | Status |"
+            echo "|---|--:|--:|---|"
+            sort -t$'\t' -k2,2 -k4,4nr "$results" \
+              | awk -F'\t' '{ st = ($2=="error") ? "scan error" : ((($3+$4)>0) ? "findings" : "clean"); printf "| `%s` | %s | %s | %s |\n", $1, $4, $3, st }'
+            echo
+            for f in "$REPORT_DIR"/json/*.json; do
+              [[ -f "$f" ]] || continue
+              rows="$(jq -r '[.Results[]? | .Target as $t | .Vulnerabilities[]? | [.Severity, .VulnerabilityID, .PkgName, .InstalledVersion, (.FixedVersion // "")]] | unique[] | "| \(.[0]) | \(.[1]) | \(.[2]) | \(.[3]) | \(.[4]) |"' "$f")"
+              [[ -z "$rows" ]] && continue
+              echo "<details><summary><code>$(jq -r '.ArtifactName' "$f")</code></summary>"
+              echo
+              echo "| Severity | ID | Package | Installed | Fixed |"
+              echo "|---|---|---|---|---|"
+              echo "$rows"
+              echo
+              echo "</details>"
+              echo
+            done
+          } > "$md"
+
+          # The step summary caps at 1 MiB; the full report is also an artifact.
+          head -c 900000 "$md" >> "$GITHUB_STEP_SUMMARY"
+
+          {
+            echo "total_images=${total_images}"
+            echo "affected=${affected}"
+            echo "errors=${errors}"
+            echo "critical=${critical}"
+            echo "high=${high}"
+            echo "unique=${unique}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: vuln-report-${{ steps.scan.outputs.chart_version || 'unknown' }}
+          path: ${{ runner.temp }}/vuln-report
+          retention-days: 90
+
+      - name: Notify Slack
+        if: always()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          REPORT_DIR: ${{ runner.temp }}/vuln-report
+          CHART_VERSION: ${{ steps.scan.outputs.chart_version || 'unknown' }}
+          TOTAL_IMAGES: ${{ steps.report.outputs.total_images || '0' }}
+          AFFECTED: ${{ steps.report.outputs.affected || '0' }}
+          ERRORS: ${{ steps.report.outputs.errors || '0' }}
+          CRITICAL: ${{ steps.report.outputs.critical || '0' }}
+          HIGH: ${{ steps.report.outputs.high || '0' }}
+          UNIQUE: ${{ steps.report.outputs.unique || '0' }}
+          REPORT_OUTCOME: ${{ steps.report.outcome }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -uo pipefail
+          if [[ -z "$SLACK_WEBHOOK_URL" ]]; then
+            echo "::warning::No Slack webhook configured; the report was not posted."
+            exit 0
+          fi
+
+          if [[ "$REPORT_OUTCOME" != "success" ]]; then
+            color="#dc3545"
+            headline="Vulnerability report for chart ${CHART_VERSION} did not complete"
+            lines="The scan job failed before a report was built."
+          else
+            if (( ERRORS > 0 )); then color="#dc3545"
+            elif (( AFFECTED > 0 )); then color="#f0ad4e"
+            else color="#28a745"; fi
+            headline="Chart ${CHART_VERSION}: ${AFFECTED}/${TOTAL_IMAGES} images with fixable HIGH/CRITICAL CVEs"
+            lines="$(awk -F'\t' '
+                $2=="error" { printf "• `%s` — scan error\n", $1; next }
+                ($3+$4)>0   { printf "• `%s` — %s HIGH, %s CRITICAL\n", $1, $4, $3 }
+              ' <(sort -t$'\t' -k4,4nr "$REPORT_DIR/results.tsv"))"
+            [[ -z "$lines" ]] && lines="All images clean."
+            lines="${lines}"$'\n'"Total: ${HIGH} HIGH, ${CRITICAL} CRITICAL, ${UNIQUE} unique CVEs. Report only — the release was not blocked."
+          fi
+
+          payload="$(jq -n \
+            --arg color "$color" \
+            --arg headline "$headline" \
+            --arg lines "${lines:0:2900}" \
+            --arg repo "$REPO" \
+            --arg url "$RUN_URL" \
+            '{
+              "attachments": [{
+                "color": $color,
+                "blocks": [
+                  { "type": "section", "text": { "type": "mrkdwn", "text": ("*" + $headline + "*") } },
+                  { "type": "section", "text": { "type": "mrkdwn", "text": $lines } },
+                  { "type": "context", "elements": [ { "type": "mrkdwn", "text": ("<" + $url + "|Full report> · " + $repo) } ] }
+                ]
+              }]
+            }')"
+
+          curl -sf "$SLACK_WEBHOOK_URL" -H 'Content-Type: application/json' -d "$payload" \
+            || echo "::warning::Slack notification failed"
