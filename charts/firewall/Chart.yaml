@@ -2,5 +2,5 @@ apiVersion: v2
 name: firewall
 description: Firewall API components for NeuralTrust (gateway + workers)
 type: application
-version: 2.1.18
-appVersion: "v2.30.1"
+version: 2.1.19
+appVersion: "v2.31.0"
