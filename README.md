@@ -313,9 +313,11 @@ per cloud in the public docs:
 - AlertEngine: external-mode alert evaluation and SIEM/integration forwarding
   (`alertengine.enabled: false` to omit it)
 
-**Firewall is not optional.** It deploys with TrustGuard in both modes and
-cannot be switched off — `firewall.enabled`, `firewall.firewall.enabled`, and
-`trustguard.firewall.enabled` are no-ops. Its CPU workers are the largest memory
+**Firewall follows TrustGuard.** It deploys with TrustGuard in both modes —
+`firewall.enabled`, `firewall.firewall.enabled`, and `trustguard.firewall.enabled`
+are no-ops. The one way to leave it out is `global.firewall.deploy: false`, which
+points TrustGuard at a firewall you already run (`global.firewall.baseURL` plus its
+`JWT_SECRET`; see [VALUES_SCENARIOS.md](./VALUES_SCENARIOS.md)). Its CPU workers are the largest memory
 consumer in the data path, so size for them whenever TrustGuard is on. Choose
 CPU or GPU workers via
 [`values-dataplane-gpu.yaml.example`](./values-dataplane-gpu.yaml.example).

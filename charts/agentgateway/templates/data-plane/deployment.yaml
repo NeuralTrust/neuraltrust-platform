@@ -88,10 +88,10 @@ spec:
         {{- /* Signing key for the {"purpose":"firewall"} JWT the proxy mints when
                asking the firewall for a complexity score (AUT-402). Same shared
                firewall JWT_SECRET the workers verify with, so no separate token is
-               provisioned. Only wired when the firewall is deployed, matching the
-               FIREWALL_BASE_URL gate in the ConfigMap. */}}
-        {{- if eq (include "firewall.enabled" .) "true" }}
-        {{- include "neuraltrust-platform.platformSecretEnv" (dict "ctx" . "keys" (dict "FIREWALL_SECRET_KEY" "JWT_SECRET") "skip" .Values.dataPlane.extraEnv) | nindent 8 }}
+               provisioned. Only wired when a firewall is reachable (deployed here or
+               external), matching the FIREWALL_BASE_URL gate in the ConfigMap. */}}
+        {{- if eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustguard")) "true" }}
+        {{- include "neuraltrust-platform.firewall.secretEnv" (dict "ctx" . "envName" "FIREWALL_SECRET_KEY" "skip" .Values.dataPlane.extraEnv) | nindent 8 }}
         {{- end }}
         {{- with include "agentgateway.datastoreCredentialEnv" . }}
         {{- . | nindent 8 }}

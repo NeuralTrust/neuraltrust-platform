@@ -1,5 +1,6 @@
 # Positive TrustGuard hybrid slice (TrustGuard + Firewall + its DataAgent).
-# Firewall always follows TrustGuard and has no separate enable flag.
+# Firewall follows TrustGuard; to use one you already run instead, uncomment the
+# global.firewall block below.
 # Use a distinct DataAgent enrolment Secret from the TrustGate slice.
 #
 #   helm upgrade --install neuraltrust-platform <chart> \
@@ -10,6 +11,12 @@
 global:
   products:
     trustguard: true
+  # firewall:
+  #   deploy: false
+  #   baseURL: "http://firewall.<namespace>.svc.cluster.local"
+  #   existingSecret:
+  #     name: "<secret holding the external firewall JWT_SECRET>"
+  #     key: "JWT_SECRET"
 
 trustguard:
   configSync:

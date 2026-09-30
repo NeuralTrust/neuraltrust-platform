@@ -107,6 +107,15 @@ global:
     trustgate: false
     trustguard: false
     dataPlane: false
+  # deploy=false skips the firewall subchart and points TrustGuard (and TrustGate
+  # complexity scoring) at a firewall you already run. Both then need baseURL and
+  # the firewall's JWT_SECRET, from existingSecret or global.platformSecret.
+  firewall:
+    deploy: true
+    baseURL: "" # e.g. http://firewall.<namespace>.svc.cluster.local
+    existingSecret:
+      name: "" # Secret in this namespace holding the external firewall's JWT_SECRET
+      key: "JWT_SECRET"
   # v2 knobs: shared client_credentials pair AgentGateway presents to
   # TrustGuard. Both sides read the same Secret so id/secret stay in sync.
   v2:

@@ -472,9 +472,28 @@ Secret produces a pod that cannot start. Fail at render instead.
        allowed — both sides then agree, which is the only thing being enforced. */ -}}
 {{- $sharedSecretName := (default dict (default dict $global.platformSecret).existingSecret).name | default "" -}}
 
+{{- /* External firewall (global.firewall.deploy=false). Nothing in this release
+       verifies the firewall JWT any more, so TrustGuard and TrustGate must sign
+       with the key the external firewall holds. A chart-generated key can never
+       match it, and the legacy firewall-secrets is not rendered, so a missing
+       source is rejected here rather than surfacing as 401s at request time. */ -}}
+{{- $gFw := default dict $global.firewall -}}
+{{- $gFwSecretName := (default dict $gFw.existingSecret).name | default "" -}}
+{{- $fwExternal := eq (include "neuraltrust-platform.firewall.external" .) "true" -}}
+{{- if $fwExternal -}}
+  {{- if not (regexMatch "^https?://[^/]" ($gFw.baseURL | default "" | toString)) -}}
+    {{- fail (printf "global.firewall.deploy=false requires global.firewall.baseURL to be the external firewall's http(s) URL (for example http://firewall.<namespace>.svc.cluster.local), got %q." ($gFw.baseURL | default "" | toString)) -}}
+  {{- end -}}
+  {{- if not (or $gFwSecretName $sharedSecretName) -}}
+    {{- fail "global.firewall.deploy=false requires the external firewall's JWT_SECRET: set global.firewall.existingSecret.name (a Secret in this namespace, key global.firewall.existingSecret.key) or global.platformSecret.existingSecret.name carrying JWT_SECRET. A chart-generated key would not match the external firewall and every firewall call would fail authentication." -}}
+  {{- end -}}
+{{- else if and (or $gFw.baseURL $gFwSecretName) (eq (include "neuraltrust-platform.firewall.deploy" .) "true") -}}
+  {{- fail "global.firewall.baseURL / global.firewall.existingSecret only apply with global.firewall.deploy=false; this release deploys its own firewall and would ignore them. Remove them, or set global.firewall.deploy=false to use the external firewall." -}}
+{{- end -}}
+
 {{- $tgFwRef := (default dict (default dict (default dict .Values.trustguard).firewall).existingSecret).name | default "" -}}
-{{- if and $tgFwRef (ne $tgFwRef $sharedSecretName) -}}
-  {{- fail (printf "trustguard.firewall.existingSecret.name=%q points only TrustGuard at that Secret. The firewall gateway and every firewall worker are a sibling subchart and cannot read a value under trustguard.*, so they keep reading the chart's Secret. TrustGuard would sign its {\"purpose\":\"firewall\"} JWT with your key while the firewall verifies with the chart's, and every firewall call would fail authentication. To supply your own Secret for both sides, set global.platformSecret.existingSecret.name instead (see SECRETS.md for the logical key names it must carry)." $tgFwRef) -}}
+{{- if and $tgFwRef (ne $tgFwRef $sharedSecretName) (not (and $fwExternal (eq $tgFwRef $gFwSecretName))) -}}
+  {{- fail (printf "trustguard.firewall.existingSecret.name=%q points only TrustGuard at that Secret. The firewall gateway and every firewall worker are a sibling subchart and cannot read a value under trustguard.*, so they keep reading the chart's Secret. TrustGuard would sign its {\"purpose\":\"firewall\"} JWT with your key while the firewall verifies with the chart's, and every firewall call would fail authentication. To supply your own Secret for both sides, set global.platformSecret.existingSecret.name instead (see SECRETS.md for the logical key names it must carry). With an external firewall (global.firewall.deploy=false), set global.firewall.existingSecret.name to the same Secret." $tgFwRef) -}}
 {{- end -}}
 
 {{- $dpApiVals := default dict (index .Values "data-plane-api") -}}

@@ -103,12 +103,18 @@ spec:
         {{- end }}
         {{- $fw := default dict .Values.firewall }}
         {{- $fwSecret := default dict $fw.existingSecret }}
+        {{- $fwSecretName := $fwSecret.name | default "" }}
+        {{- $fwSecretKey := $fwSecret.key | default "JWT_SECRET" }}
+        {{- if not $fwSecretName }}
+        {{- $fwSecretName = include "neuraltrust-platform.firewall.externalSecretName" . }}
+        {{- $fwSecretKey = include "neuraltrust-platform.firewall.externalSecretKey" . }}
+        {{- end }}
         - name: NEURAL_TRUST_FIREWALL_SECRET_KEY
           valueFrom:
             secretKeyRef:
-              {{- if $fwSecret.name }}
-              name: {{ $fwSecret.name | quote }}
-              key: {{ $fwSecret.key | default "JWT_SECRET" | quote }}
+              {{- if $fwSecretName }}
+              name: {{ $fwSecretName | quote }}
+              key: {{ $fwSecretKey | quote }}
               {{- else }}
               {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "JWT_SECRET") | nindent 14 }}
               {{- end }}

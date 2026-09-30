@@ -402,8 +402,10 @@ ClickStack
 - AlertEngine: set `alertengine.enabled: false` to omit rule evaluation and SIEM
 forwarding
 
-**Firewall is not optional** in external — it always deploys with TrustGuard and
-cannot be switched off. The only choice is CPU workers (default) or GPU via
+**Firewall follows TrustGuard** in external — it deploys with it unless
+`global.firewall.deploy: false` points TrustGuard at a firewall you already run
+(`global.firewall.baseURL` plus its `JWT_SECRET`). Deployed here, the choice is CPU
+workers (default) or GPU via
 `[values-dataplane-gpu.yaml.example](./values-dataplane-gpu.yaml.example)`.
 
 ## Validate before rollout
