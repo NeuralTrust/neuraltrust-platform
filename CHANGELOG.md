@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.17.0] — 2026-09-30
+
 ### Added
 
 - **TrustGuard can use a firewall you already run.** `global.firewall.deploy:
