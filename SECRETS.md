@@ -465,8 +465,9 @@ Created only when explicitly enabled. None are auto-generated — operators brin
 
 ### Firewall
 
-Created when TrustGuard is selected (`global.products.trustguard: true` in
-hybrid; always in external). Firewall always accompanies TrustGuard:
+Created when this release deploys the firewall: TrustGuard is selected
+(`global.products.trustguard: true` in hybrid; always in external) and
+`global.firewall.deploy` is left at `true`:
 
 | Kubernetes Secret | Key | Required | Description |
 |---|---|---|---|
@@ -475,10 +476,18 @@ hybrid; always in external). Firewall always accompanies TrustGuard:
 
 In external mode the Control Plane validates firewall tokens, so
 `control-plane-api.controlPlane.secrets.firewallJwtSecret` (`FIREWALL_JWT_SECRET`)
-must match `firewall-secrets` `JWT_SECRET`. The app's `FIREWALL_API_URL` derives
-itself from `control-plane-secrets/FIREWALL_API_URL`, pointing at the in-cluster
-firewall Service when TrustGuard is selected and falling back to the data-plane
-otherwise.
+must match `firewall-secrets` `JWT_SECRET`. The app's `FIREWALL_API_URL` is read
+from `control-plane-secrets/FIREWALL_API_URL`, which carries exactly
+`control-plane-api.controlPlane.secrets.firewallApiUrl` — the chart does not
+derive it, so set it when the app should reach the firewall.
+
+**External firewall (`global.firewall.deploy: false`).** Nothing in the release
+verifies the firewall JWT, so no `firewall-secrets` is created and nothing
+generates a key. TrustGuard (`NEURAL_TRUST_FIREWALL_SECRET_KEY`) and TrustGate
+(`FIREWALL_SECRET_KEY`) sign with the external firewall's `JWT_SECRET`, read from
+`global.firewall.existingSecret.{name,key}` — a Secret you create in the release
+namespace — or, when that is unset, from `global.platformSecret.existingSecret`.
+The render fails if neither is set.
 
 ### Docker registry
 

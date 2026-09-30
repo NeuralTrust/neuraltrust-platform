@@ -1,9 +1,10 @@
 {{/*
-Firewall follows TrustGuard product selection.
-Hybrid: on when global.products.trustguard is true. External: always on.
+Whether this release deploys the firewall. It follows TrustGuard product
+selection (hybrid: global.products.trustguard; external: always on), unless
+global.firewall.deploy=false points TrustGuard at a firewall run elsewhere.
 */}}
 {{- define "firewall.enabled" -}}
-{{- if eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustguard")) "true" -}}true{{- end -}}
+{{- include "neuraltrust-platform.firewall.deploy" . -}}
 {{- end }}
 
 {{/*

@@ -27,7 +27,8 @@ config:
   #
   # Leave the key ABSENT (the default) to derive
   # http://firewall.<namespace>.svc.cluster.local whenever the firewall is
-  # deployed, which it is whenever TrustGuard is. Set it to "" to opt out and keep
+  # deployed, which it is whenever TrustGuard is (global.firewall.baseURL when
+  # global.firewall.deploy=false). Set it to "" to opt out and keep
   # the round-robin fallback, or to a URL when the firewall runs outside this
   # release. Scoring also needs FIREWALL_SECRET_KEY, wired from the shared firewall
   # JWT_SECRET in the data-plane Deployment; with either missing the client stays

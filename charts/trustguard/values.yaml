@@ -160,10 +160,11 @@ platform:
   baseURL: ""
 # Firewall client (prompt_guard / toxicity / prompt_moderation plugins).
 # TrustGuard reads NEURAL_TRUST_FIREWALL_BASE_URL + NEURAL_TRUST_FIREWALL_SECRET_KEY
-# (derives the Token header from the JWT secret). Firewall always accompanies
-# TrustGuard; the umbrella's global.products.trustguard flag gates both charts.
+# (derives the Token header from the JWT secret). Firewall accompanies TrustGuard
+# (global.products.trustguard gates both) unless global.firewall.deploy=false
+# points it at an external firewall.
 firewall:
-  # Empty ⇒ http://firewall.<release-namespace>.svc.cluster.local (stable Service).
+  # Empty ⇒ the in-release firewall Service, or global.firewall.baseURL when external.
   baseURL: ""
   # Empty ⇒ the shared platform Secret (see global.platformSecret). Set name to
   # point TrustGuard at a Secret you manage instead.

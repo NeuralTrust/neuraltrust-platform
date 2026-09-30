@@ -179,6 +179,26 @@ Layer `values-dataplane-gpu.yaml.example` over `values-required.yaml`. Replace
 the generic image registry and scheduling labels with values for the GPU pool.
 The gateway remains CPU-only; workers request GPUs.
 
+## Scenario: external Firewall
+
+When a firewall already runs in the cluster (for example one GPU-backed firewall
+shared by several releases), keep TrustGuard but leave the firewall subchart out:
+
+```yaml
+global:
+  firewall:
+    deploy: false
+    baseURL: "http://firewall.<namespace>.svc.cluster.local"
+    existingSecret:
+      name: "<secret holding that firewall's JWT_SECRET>"
+      key: "JWT_SECRET"
+```
+
+TrustGuard and TrustGate complexity scoring call `baseURL` and sign with that
+key. No firewall gateway, workers, `firewall-config` or `firewall-secrets` render.
+The Secret lives in the release namespace and must carry the same `JWT_SECRET`
+the external firewall verifies with; see [SECRETS.md](./SECRETS.md#firewall).
+
 ## Scenario: no hosted telemetry egress
 
 Layer `values-observability-self-hosted.yaml.example`. This disables hosted

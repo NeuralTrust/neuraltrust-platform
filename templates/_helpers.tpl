@@ -1094,6 +1094,86 @@ Secret, never a ConfigMap).
 {{- end }}
 
 {{/*
+Firewall placement. The firewall follows TrustGuard: whenever TrustGuard is on,
+this release deploys the firewall subchart — unless global.firewall.deploy=false,
+in which case TrustGuard and TrustGate call a firewall the operator runs
+elsewhere, at global.firewall.baseURL.
+
+Under `global` because the firewall, TrustGuard and agentgateway are sibling
+subcharts: none of them can read a value under another's root.
+
+  firewall.deploy    "true" when this release runs the firewall.
+  firewall.external  "true" when TrustGuard is on and the firewall runs elsewhere.
+*/}}
+{{- define "neuraltrust-platform.firewall.deploy" -}}
+{{- if eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustguard")) "true" -}}
+{{- $fw := default dict (default dict .Values.global).firewall -}}
+{{- $deploy := true -}}
+{{- if hasKey $fw "deploy" -}}{{- $deploy = $fw.deploy -}}{{- end -}}
+{{- if $deploy -}}true{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{- define "neuraltrust-platform.firewall.external" -}}
+{{- if and (eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustguard")) "true") (ne (include "neuraltrust-platform.firewall.deploy" .) "true") -}}true{{- end -}}
+{{- end }}
+
+{{/*
+Firewall gateway base URL for TrustGuard and TrustGate complexity scoring: the
+in-release `firewall` Service when deployed, global.firewall.baseURL when
+external, empty when TrustGuard is off.
+*/}}
+{{- define "neuraltrust-platform.firewall.baseURL" -}}
+{{- if eq (include "neuraltrust-platform.firewall.deploy" .) "true" -}}
+{{- printf "http://firewall.%s.svc.cluster.local" .Release.Namespace -}}
+{{- else if eq (include "neuraltrust-platform.firewall.external" .) "true" -}}
+{{- (default dict (default dict .Values.global).firewall).baseURL | default "" | toString | trimSuffix "/" -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Operator Secret carrying an external firewall's JWT_SECRET. Name is empty unless
+the firewall is external and global.firewall.existingSecret.name is set; callers
+then keep their in-release source.
+*/}}
+{{- define "neuraltrust-platform.firewall.externalSecretName" -}}
+{{- if eq (include "neuraltrust-platform.firewall.external" .) "true" -}}
+{{- (default dict (default dict (default dict .Values.global).firewall).existingSecret).name | default "" -}}
+{{- end -}}
+{{- end }}
+
+{{- define "neuraltrust-platform.firewall.externalSecretKey" -}}
+{{- (default dict (default dict (default dict .Values.global).firewall).existingSecret).key | default "JWT_SECRET" -}}
+{{- end }}
+
+{{/*
+Env entry carrying the firewall JWT signing key.
+Usage: include "neuraltrust-platform.firewall.secretEnv" (dict "ctx" . "envName" "FIREWALL_SECRET_KEY" "skip" .Values.dataPlane.extraEnv)
+
+External firewall with global.firewall.existingSecret → that Secret. Otherwise
+exactly the shared-Secret JWT_SECRET entry platformSecretEnv has always emitted.
+*/}}
+{{- define "neuraltrust-platform.firewall.secretEnv" -}}
+{{- $ctx := .ctx -}}
+{{- $name := include "neuraltrust-platform.firewall.externalSecretName" $ctx -}}
+{{- if $name -}}
+{{- $skip := list -}}
+{{- range (default list .skip) }}
+  {{- if .name }}{{- $skip = append $skip .name }}{{- end }}
+{{- end }}
+{{- if not (has .envName $skip) }}
+- name: {{ .envName }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ $name | quote }}
+      key: {{ include "neuraltrust-platform.firewall.externalSecretKey" $ctx | quote }}
+{{- end }}
+{{- else -}}
+{{- include "neuraltrust-platform.platformSecretEnv" (dict "ctx" $ctx "keys" (dict .envName "JWT_SECRET") "skip" .skip) -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Per-service Postgres IAM resolution (AUT-392).
 
 An explicit `<service>.database.iamAuth` true/false always wins, so mixed-auth

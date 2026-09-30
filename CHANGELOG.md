@@ -4,6 +4,22 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Added
+
+- **TrustGuard can use a firewall you already run.** `global.firewall.deploy:
+  false` skips the firewall subchart — gateway, workers, ConfigMap and
+  `firewall-secrets` — and points TrustGuard, and TrustGate complexity scoring, at
+  `global.firewall.baseURL`. Both sign their firewall JWT with the external
+  firewall's `JWT_SECRET`, read from `global.firewall.existingSecret` (or from
+  `global.platformSecret.existingSecret`). Use it when several releases share one
+  firewall, for example one GPU-backed firewall serving several namespaces.
+
+  **Fail-closed:** with `deploy: false` the render fails unless `baseURL` is an
+  http(s) URL and one of those two Secrets is set, because a chart-generated key
+  cannot match the external firewall and every call would fail authentication.
+  Setting `baseURL` or `existingSecret` while the firewall is still deployed also
+  fails, since they would be ignored. Unset, the chart renders exactly as before.
+
 ## [v2.15.0] — 2026-09-29
 
 ### Fixed

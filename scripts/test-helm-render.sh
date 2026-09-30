@@ -2065,6 +2065,63 @@ render_default "$out10b4" --set agentgateway.config.firewallBaseURL=""
 assert_not_contains "$out10b4" '^  FIREWALL_BASE_URL' \
   "complexity: firewallBaseURL=\"\" opts out of scoring"
 
+blue "==> Scenario 10b4b: external Firewall (global.firewall.deploy=false)"
+FW_EXTERNAL_ARGS=(
+  --set global.firewall.deploy=false
+  --set global.firewall.baseURL=http://firewall.firewall.svc.cluster.local/
+  --set global.firewall.existingSecret.name=firewall-jwt
+)
+for fw_mode in hybrid external; do
+  out10b4b="$TMP/scenario-firewall-external-$fw_mode.yaml"
+  render_default "$out10b4b" --set global.deploymentMode="$fw_mode" "${FW_EXTERNAL_ARGS[@]}"
+  assert_not_contains "$out10b4b" 'name: firewall$' \
+    "external firewall ($fw_mode): no in-release Firewall gateway"
+  assert_not_contains "$out10b4b" 'name: prompt-moderation-worker' \
+    "external firewall ($fw_mode): no in-release Firewall workers"
+  assert_not_contains "$out10b4b" 'name: firewall-secrets$' \
+    "external firewall ($fw_mode): no firewall-secrets (nothing here verifies the JWT)"
+  assert_not_contains "$out10b4b" 'name: firewall-config$' \
+    "external firewall ($fw_mode): no firewall ConfigMap"
+  # Trailing slash trimmed: TrustGate appends /v1/complexity to this base.
+  assert_contains "$out10b4b" 'NEURAL_TRUST_FIREWALL_BASE_URL: "http://firewall\.firewall\.svc\.cluster\.local"$' \
+    "external firewall ($fw_mode): TrustGuard calls the external URL"
+  assert_contains "$out10b4b" '^  FIREWALL_BASE_URL: "http://firewall\.firewall\.svc\.cluster\.local"$' \
+    "external firewall ($fw_mode): TrustGate complexity scoring calls the external URL"
+  # Both signers must use the external firewall's key, or every call is a 401.
+  fw_refs="$TMP/scenario-firewall-external-$fw_mode-refs.txt"
+  grep -A4 -E 'name: (NEURAL_TRUST_FIREWALL_SECRET_KEY|FIREWALL_SECRET_KEY)$' "$out10b4b" \
+    | grep -E '^ +name: "' > "$fw_refs" || true
+  assert_contains "$fw_refs" 'name: "firewall-jwt"' \
+    "external firewall ($fw_mode): signing keys come from global.firewall.existingSecret"
+  assert_not_contains "$fw_refs" 'name: "(platform-secrets|firewall-secrets)"' \
+    "external firewall ($fw_mode): no signer left on a chart-generated key"
+done
+out10b4b="$TMP/scenario-firewall-external-trustguard-off.yaml"
+render_default "$out10b4b" "${HYBRID_NO_PRODUCTS[@]}" --set global.products.trustgate=true \
+  --set global.firewall.deploy=false
+assert_not_contains "$out10b4b" 'FIREWALL_BASE_URL|FIREWALL_SECRET_KEY' \
+  "external firewall: inert while TrustGuard is off"
+assert_render_fails_with "requires global.firewall.baseURL" \
+  "external firewall: missing baseURL fails the render" \
+  --set global.firewall.deploy=false --set global.firewall.existingSecret.name=firewall-jwt
+assert_render_fails_with "requires global.firewall.baseURL" \
+  "external firewall: baseURL without a scheme fails the render" \
+  --set global.firewall.deploy=false --set global.firewall.baseURL=firewall \
+  --set global.firewall.existingSecret.name=firewall-jwt
+assert_render_fails_with "requires the external firewall's JWT_SECRET" \
+  "external firewall: no key source fails the render" \
+  --set global.firewall.deploy=false --set global.firewall.baseURL=http://firewall.firewall.svc.cluster.local
+assert_render_fails_with "only apply with global.firewall.deploy=false" \
+  "external firewall keys are rejected while the firewall is deployed" \
+  --set global.firewall.baseURL=http://firewall.firewall.svc.cluster.local
+# trustguard.firewall.existingSecret is allowed once it names the same Secret as
+# the external firewall's: both signers then agree.
+out10b4b="$TMP/scenario-firewall-external-aligned.yaml"
+render_default "$out10b4b" "${FW_EXTERNAL_ARGS[@]}" \
+  --set trustguard.firewall.existingSecret.name=firewall-jwt
+assert_contains "$out10b4b" 'NEURAL_TRUST_FIREWALL_BASE_URL: "http://firewall\.firewall\.svc\.cluster\.local"$' \
+  "external firewall: trustguard.firewall.existingSecret aligned with global renders"
+
 blue "==> Scenario 10b5: data-plane-api PrometheusRule (AUT-406)"
 # The v1-era rule was gated on a helper that always returned true, so it never
 # rendered in v2 and was deleted. These assertions stop the coverage silently
