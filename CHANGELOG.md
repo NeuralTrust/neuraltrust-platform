@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v2.18.0] — 2026-10-05
+
 ### Added
 
 - **External installs can leave a product out.** `global.products` used to be
