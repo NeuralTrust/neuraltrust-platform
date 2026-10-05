@@ -108,9 +108,9 @@ global:
   # Firewall follows TrustGuard. In external the console also reads audit logs
   # and activity from data-plane-api, so keep dataPlane on there.
   products: {}
-    # trustgate: true
-    # trustguard: true
-    # dataPlane: true
+  # trustgate: true
+  # trustguard: true
+  # dataPlane: true
   # deploy=false skips the firewall subchart and points TrustGuard (and TrustGate
   # complexity scoring) at a firewall you already run. Both then need baseURL and
   # the firewall's JWT_SECRET, from existingSecret or global.platformSecret.
@@ -800,7 +800,7 @@ control-plane-api:
         replicas: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api"
-          tag: "v1.28.1"
+          tag: "v1.28.2"
           pullPolicy: IfNotPresent
         config:
           controlPlaneApiUrl: ""
@@ -860,7 +860,7 @@ control-plane-app:
         replicas: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.190.3"
+          tag: "v1.190.4"
           pullPolicy: IfNotPresent
         config:
           nodeEnv: production
@@ -1208,7 +1208,7 @@ data-plane-api:
               resources: {}
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.55.0
+          tag: v1.55.1
           pullPolicy: IfNotPresent
         accessMode: ReadWriteOnce
         huggingfaceToken: ""
@@ -1288,7 +1288,7 @@ firewall:
       replicas: 2
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-        tag: "v2.32.0"
+        tag: "v2.32.1"
         pullPolicy: IfNotPresent
       resources:
         requests:
@@ -1314,7 +1314,7 @@ firewall:
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
         # Keep in lockstep with gateway.image.tag.
-        tag: "v2.32.0"
+        tag: "v2.32.1"
         pullPolicy: IfNotPresent
       replicas: 1
       resources:

@@ -61,6 +61,14 @@ If the destination already holds that version tag with *different* content, the
 run fails rather than silently replacing it. That normally means a tag was
 rebuilt upstream. Confirm it is intended, then re-run with `overwrite` enabled.
 
+### Approvals
+
+A run asks for approval twice: once when the mirror jobs start, and once more
+before the pipelines start. GitHub gates each job that uses an environment, and
+all mirror jobs reach the gate together, so one approval covers them. Whoever
+started the run cannot approve it. Repository administrators can bypass the gate
+on their own runs instead.
+
 ### After a partial failure
 
 Copies are independent, so one failure does not abandon the rest. Use GitHub's
@@ -103,17 +111,27 @@ The customer's role must trust this repository *and* the environment:
 Scoping to the environment rather than the repository is the point: without it,
 any branch here could assume the role.
 
-The role needs `ecr:GetAuthorizationToken`, push on each destination repository,
-and `codepipeline:StartPipelineExecution` on each pipeline. It does **not** need
-`ecr:CreateRepository` — the workflow checks the repositories exist and fails
-early if one is missing, since creating them is the customer's side of the
-boundary.
+The role needs these actions, in **every** region the workflow targets:
+
+| Action | Resource | Used for |
+|---|---|---|
+| `ecr:GetAuthorizationToken` | `*` | Registry login |
+| `ecr:DescribeRepositories` | each destination repository | The existence check a `dry_run` performs |
+| `ecr:BatchGetImage` | each destination repository | Digest comparison and re-tagging |
+| `ecr:BatchCheckLayerAvailability`, `ecr:InitiateLayerUpload`, `ecr:UploadLayerPart`, `ecr:CompleteLayerUpload`, `ecr:PutImage` | each destination repository | Push |
+| `codepipeline:StartPipelineExecution` | each pipeline | Starting the deployment |
+
+It does **not** need `ecr:CreateRepository` — the workflow checks the
+repositories exist and fails early if one is missing, since creating them is the
+customer's side of the boundary. A failed check says which it is: a missing
+repository, or a policy that does not grant `ecr:DescribeRepositories` on it.
 
 `PLATFORM_WIF_PROVIDER` and `PLATFORM_WIF_SERVICE_ACCOUNT` already exist at
 repository level and are reused here. The bound service account needs **read on
-the source Artifact Registry repository**. It currently writes to `helm-charts`
-and lists tags for `bump-images`, which is not the same permission as pulling
-image layers — confirm it before the first run, or let a `dry_run` surface it.
+the source Artifact Registry repository**, which it has.
+
+Run logs in this repository are public. The AWS account id is masked in them;
+the role ARN is masked because it is a secret.
 
 ## Changing the image list
 
