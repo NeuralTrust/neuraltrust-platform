@@ -24,6 +24,19 @@ data:
   {{- $rateLimit := false }}
   {{- if hasKey .Values.config "rateLimitEnabled" }}{{- $rateLimit = .Values.config.rateLimitEnabled }}{{- end }}
   RATE_LIMIT_ENABLED: {{ $rateLimit | quote }}
+  {{- /* Single-operator installs reach private upstreams, so the outbound guard is
+         opened by default. hasKey keeps an explicit false (shared gateway) from
+         being read as absent. PROVIDER_ALLOW_PRIVATE_NETWORKS is the pre-rename
+         name still read by TrustGate releases that predate
+         OUTBOUND_ALLOW_PRIVATE_NETWORKS; remove it once every supported
+         TrustGate image reads the new one. */}}
+  {{- $allowPrivate := true }}
+  {{- if hasKey .Values.config "outboundAllowPrivateNetworks" }}{{- $allowPrivate = .Values.config.outboundAllowPrivateNetworks }}{{- end }}
+  OUTBOUND_ALLOW_PRIVATE_NETWORKS: {{ $allowPrivate | quote }}
+  PROVIDER_ALLOW_PRIVATE_NETWORKS: {{ $allowPrivate | quote }}
+  {{- $ambient := true }}
+  {{- if hasKey .Values.config "modelArmorAllowAmbientIdentity" }}{{- $ambient = .Values.config.modelArmorAllowAmbientIdentity }}{{- end }}
+  MODEL_ARMOR_ALLOW_AMBIENT_IDENTITY: {{ $ambient | quote }}
   {{- if $isHybrid }}
   # v2 hybrid: DB_HOST/DB_PORT/DB_USER/DB_NAME/DB_PASSWORD/DB_SSL_MODE are supplied
   # through the shared `postgresql-secrets` Secret (via envFrom on the Deployment).

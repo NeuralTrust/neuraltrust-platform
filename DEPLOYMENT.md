@@ -112,6 +112,32 @@ Hybrid needs outbound TCP 443 to the control plane it dials:
   `deploymentMode: saas` install): allowlist *that* operator's four endpoints
   instead — [`docs/saas-mode.md`](./docs/saas-mode.md#quick-start).
 
+### Private upstreams (outbound guard)
+
+TrustGate refuses tenant-configured outbound URLs (model providers, Azure
+endpoints, OIDC and introspection hosts, STS, OTLP collectors) that resolve to a
+private, loopback or link-local address, unless the operator opts in. It also
+refuses Model Armor authentication through the gateway's own identity
+(Workload Identity, ADC, impersonation) unless the operator opts in.
+
+A hybrid, external or saas install serves a single operator and normally targets
+that operator's private model hosts, Azure private endpoints and internal IdPs,
+so the chart opts in by default:
+
+| Value | Env var rendered | Default |
+|---|---|---|
+| `agentgateway.config.outboundAllowPrivateNetworks` | `OUTBOUND_ALLOW_PRIVATE_NETWORKS` and `PROVIDER_ALLOW_PRIVATE_NETWORKS` (same value) | `true` |
+| `agentgateway.config.modelArmorAllowAmbientIdentity` | `MODEL_ARMOR_ALLOW_AMBIENT_IDENTITY` | `true` |
+
+`PROVIDER_ALLOW_PRIVATE_NETWORKS` is the name older TrustGate images read; newer
+ones read `OUTBOUND_ALLOW_PRIVATE_NETWORKS`. Both are set so the order in which
+images and the chart roll out does not matter.
+
+Turn them **off** (`false`) only when the gateway is shared by tenants who must
+not be able to aim it at your internal network or borrow its cloud identity. The
+variables are rendered into the `agentgateway-env-vars` ConfigMap, so they reach
+the admin (external and saas), proxy and MCP workloads together.
+
 ## 4. Configure cluster integration
 
 Set the provider, base domain, storage class, and optional registry mirror:

@@ -577,6 +577,22 @@ assert_contains "$out1" 'RATE_LIMIT_ENABLED: "false"' \
   "hybrid: plan/tier rate limiting is explicitly off"
 assert_not_contains "$out1" 'RATE_LIMIT_ENABLED: "true"' \
   "hybrid: no workload turns plan/tier rate limiting on by default"
+
+# Single-operator installs reach private upstreams; the outbound guard must be
+# opened by default (both the new and the pre-rename name) and only on the
+# gateway env ConfigMap, never on another product.
+for _v in OUTBOUND_ALLOW_PRIVATE_NETWORKS PROVIDER_ALLOW_PRIVATE_NETWORKS MODEL_ARMOR_ALLOW_AMBIENT_IDENTITY; do
+  assert_contains "$out1" "^  ${_v}: \"true\"" \
+    "hybrid: ${_v} defaults to true on the gateway env ConfigMap"
+done
+out1_guard="$TMP/hybrid-guard-on.yaml"
+render_default "$out1_guard" \
+  --set agentgateway.config.outboundAllowPrivateNetworks=false \
+  --set agentgateway.config.modelArmorAllowAmbientIdentity=false
+for _v in OUTBOUND_ALLOW_PRIVATE_NETWORKS PROVIDER_ALLOW_PRIVATE_NETWORKS MODEL_ARMOR_ALLOW_AMBIENT_IDENTITY; do
+  assert_contains "$out1_guard" "^  ${_v}: \"false\"" \
+    "hybrid: ${_v} is overridable to false for a shared gateway"
+done
 assert_not_contains "$out1" 'name: trustguard-telemetry' \
   "hybrid: no TrustGuard telemetry ConfigMap"
 assert_not_contains "$out1" 'name: agentgateway-telemetry' \
@@ -1214,6 +1230,10 @@ assert_contains "$out3" 'RATE_LIMIT_ENABLED: "false"' \
   "external: plan/tier rate limiting is explicitly off"
 assert_not_contains "$out3" 'RATE_LIMIT_ENABLED: "true"' \
   "external: no workload turns plan/tier rate limiting on by default"
+assert_contains "$out3" '^  OUTBOUND_ALLOW_PRIVATE_NETWORKS: "true"' \
+  "external: outbound private-network guard is opened by default"
+assert_contains "$out3" '^  MODEL_ARMOR_ALLOW_AMBIENT_IDENTITY: "true"' \
+  "external: Model Armor ambient identity is allowed by default"
 assert_contains "$out3" 'name: control-plane-app' \
   "external: control-plane-app Deployment/Service renders"
 assert_contains "$out3" 'name: AUTH_EMAIL_FORCE_ENV' \
