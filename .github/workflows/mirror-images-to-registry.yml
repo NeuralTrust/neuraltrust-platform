@@ -137,9 +137,8 @@ jobs:
       id-token: write
     strategy:
       fail-fast: false
-      # The firewall image is ~8 GB and goes to every region; throttle so a full
-      # run does not saturate the runner's network.
-      max-parallel: 4
+      # No max-parallel: each matrix job runs on its own runner, and a throttled
+      # job reaches the environment gate later and asks for approval again.
       matrix:
         region: [eu-west-1, us-west-2]
         image:
@@ -204,6 +203,8 @@ jobs:
           aws-region: ${{ matrix.region }}
           # The role caps sessions at three hours, sized for the firewall image.
           role-duration-seconds: 10800
+          # Run logs of this public repository are world-readable.
+          mask-aws-account-id: true
 
       - name: Mirror
         if: env.SELECTED == 'true'
@@ -233,10 +234,22 @@ jobs:
             crane auth login "$ecr_host" -u AWS --password-stdin
 
           # The role can push but not create, so a missing repository is a
-          # customer-side change rather than something this run can fix.
-          aws ecr describe-repositories --region "$REGION" \
-            --repository-names "$DEST_REPOSITORY" \
-            --query 'repositories[0].repositoryUri' --output text
+          # customer-side change rather than something this run can fix. Both
+          # failures below are theirs to fix; name which one it is.
+          if ! describe_out="$(aws ecr describe-repositories --region "$REGION" \
+                --repository-names "$DEST_REPOSITORY" \
+                --query 'repositories[0].repositoryUri' --output text 2>&1)"; then
+            case "$describe_out" in
+              *RepositoryNotFoundException*)
+                echo "::error::${DEST_REPOSITORY} does not exist in ${REGION}; the customer must create it" ;;
+              *AccessDenied*)
+                echo "::error::the role is not allowed ecr:DescribeRepositories on ${DEST_REPOSITORY} in ${REGION}; the customer's IAM policy must grant it" ;;
+              *)
+                echo "::error::checking ${DEST_REPOSITORY} in ${REGION} failed: ${describe_out}" ;;
+            esac
+            exit 1
+          fi
+          echo "$describe_out"
 
           src="${SOURCE_REGISTRY}/${IMAGE_NAME}:${version}"
           dest="${ecr_host}/${DEST_REPOSITORY}"
@@ -262,7 +275,9 @@ jobs:
           fi
 
           if [[ "$DRY_RUN" == "true" ]]; then
-            echo "dry run: would copy $src to ${dest}:${version}" \
+            action="copy $src to"
+            [[ "$skip_copy" == "true" ]] && action="re-tag the already mirrored"
+            echo "dry run: would ${action} ${dest}:${version}" \
                  "and tag it ${ENVIRONMENT_TAG}, chart-${chart_version}"
             exit 0
           fi
@@ -309,6 +324,7 @@ jobs:
           role-to-assume: ${{ secrets.MIRROR_AWS_ROLE_ARN }}
           # Credentials are global; each call below names its own region.
           aws-region: eu-west-1
+          mask-aws-account-id: true
 
       - name: Start pipelines
         run: |
