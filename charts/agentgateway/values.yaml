@@ -61,6 +61,23 @@ config:
   # why the key is always rendered rather than left unset. Set true only when
   # gateways in this cluster really carry entitlements.
   rateLimitEnabled: false
+  # Outbound private-network guard. TrustGate refuses tenant-configured URLs
+  # (providers, Azure endpoints, OIDC/introspection/STS, OTLP, ...) that resolve
+  # to private, loopback or link-local addresses unless the operator opts in.
+  # This chart deploys single-operator installs (hybrid, external, saas), whose
+  # gateways legitimately reach the operator's own private model hosts, Azure
+  # private endpoints, internal IdPs and collectors, so the chart opts in by
+  # default. Set false ONLY if this gateway is shared by tenants who must not be
+  # able to point it at your internal network. Rendered as
+  # OUTBOUND_ALLOW_PRIVATE_NETWORKS and, until the TrustGate release that renames
+  # it ships everywhere, PROVIDER_ALLOW_PRIVATE_NETWORKS (same value).
+  outboundAllowPrivateNetworks: true
+  # Model Armor auth through the gateway's own identity (Workload Identity / ADC /
+  # impersonation). TrustGate refuses it by default so a shared gateway's identity
+  # cannot be borrowed by a tenant. A single-operator install that relies on
+  # Workload Identity for Model Armor needs it on; set false for a shared gateway.
+  # Rendered as MODEL_ARMOR_ALLOW_AMBIENT_IDENTITY.
+  modelArmorAllowAmbientIdentity: true
 # PostgreSQL connection (external-capable). Password lives in the secret.
 # In v2 hybrid this block is IGNORED — hybrid workloads envFrom the shared
 # `postgresql-secrets` rendered from `global.postgresql.*` (default user +

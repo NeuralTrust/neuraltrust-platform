@@ -4,6 +4,22 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Added
+
+- **Hybrid, external and saas gateways keep reaching private upstreams.**
+  TrustGate now refuses tenant-configured outbound URLs that resolve to private,
+  loopback or link-local addresses, and refuses Model Armor auth through the
+  gateway's own identity, unless the operator opts in. A single-operator install
+  legitimately needs both, so the agentgateway env ConfigMap now renders
+  `OUTBOUND_ALLOW_PRIVATE_NETWORKS`, `PROVIDER_ALLOW_PRIVATE_NETWORKS` (the
+  pre-rename name, same value, to be dropped once the renamed TrustGate release
+  is the floor) and `MODEL_ARMOR_ALLOW_AMBIENT_IDENTITY`, all `"true"`. Controlled
+  by `agentgateway.config.outboundAllowPrivateNetworks` and
+  `agentgateway.config.modelArmorAllowAmbientIdentity`. Set them to `false` only
+  for a gateway shared by tenants who must not reach your internal network. No
+  other rendered resource changes; pods roll once because the ConfigMap checksum
+  changes. See [DEPLOYMENT.md](./DEPLOYMENT.md#private-upstreams-outbound-guard).
+
 ## [v2.17.0] — 2026-09-30
 
 ### Added
