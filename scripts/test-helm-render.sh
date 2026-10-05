@@ -2582,6 +2582,44 @@ assert_contains "$out11e" 'name: data-plane-api' \
   "external no-products: data-plane-api renders"
 assert_contains "$out11e" 'name: firewall$' \
   "external no-products: Firewall renders"
+assert_contains "$out11e" 'name: complexity-worker$' \
+  "external no-products: the TrustGate complexity worker renders"
+
+blue "==> Scenario 11e2: external TrustGuard-only overlay opts TrustGate out"
+# External is opt-out: unset products are on (11e), an explicit false removes
+# the product and everything that exists only to serve it.
+out11e2="$TMP/scenario-external-trustguard-only.yaml"
+helm template test "$CHART_DIR" --namespace default \
+  -f "$CHART_DIR/values-external.yaml.example" \
+  -f "$CHART_DIR/values-external-trustguard-only.yaml.example" > "$out11e2"
+validate_yaml "$out11e2"
+for _gone in agentgateway-admin agentgateway-proxy agentgateway-mcp agentgateway-secrets \
+             complexity-worker neuraltrust-platform-mcp-signing-key \
+             neuraltrust-platform-agentgateway-m2m-keys; do
+  assert_not_contains "$out11e2" "^  name: \"?${_gone}\"?$" \
+    "external trustguard-only: $_gone is not rendered"
+done
+for _kept in trustguard-control-plane trustguard-data-plane firewall toxicity-worker \
+             control-plane-app control-plane-api data-plane-api datacore alertengine-api clickhouse; do
+  assert_contains "$out11e2" "^  name: \"?${_kept}\"?$" \
+    "external trustguard-only: $_kept still renders"
+done
+# The app must not reference agentgateway-secrets / SERVER_SECRET_KEY: nothing
+# writes it here, and a required secretKeyRef would stop the pod.
+assert_not_contains "$out11e2" 'name: AGENTGATEWAY_|name: MCP_OAUTH_|name: AGENTGATEWAY_M2M_' \
+  "external trustguard-only: the app carries no TrustGate, MCP OAuth or M2M env"
+assert_not_contains "$out11e2" 'SERVER_SECRET_KEY' \
+  "external trustguard-only: SERVER_SECRET_KEY is neither generated nor referenced"
+assert_contains "$out11e2" 'name: TRUSTGUARD_JWT_SECRET' \
+  "external trustguard-only: the app keeps its TrustGuard credentials"
+assert_render_fails_with 'global.mcpOAuth.enabled=true requires TrustGate' \
+  "external trustguard-only: forcing MCP OAuth on is rejected" \
+  --set global.deploymentMode=external --set global.products.trustgate=false \
+  --set global.mcpOAuth.enabled=true
+assert_render_fails_with 'global.agentgatewayM2m.enabled=true requires TrustGate' \
+  "external trustguard-only: forcing Admin API machine credentials on is rejected" \
+  --set global.deploymentMode=external --set global.products.trustgate=false \
+  --set global.agentgatewayM2m.enabled=true
 
 blue "==> Scenario 11f: global.saasRegion picks the SaaS behind a hybrid install"
 # EU is the default, so an install that never sets the knob must render the
@@ -5520,8 +5558,8 @@ pull_secrets_of() {
 }
 
 # --- 1. the default install is byte-identical to before the refactor -------
-# The nine delegating wrappers must not change what a default render emits;
-# every product workload still pulls with gcr-secret from its own values pin.
+# The delegating wrappers must not change what a default render emits; every
+# product workload still pulls with gcr-secret, now from the resolver's default.
 out10c2="$TMP/scenario-pullsecret-default.yaml"
 render_default "$out10c2" --set global.deploymentMode=external \
   --set watchdog.enabled=true --set clickhouse.backup.enabled=true
@@ -5651,6 +5689,131 @@ render_default "$out10c2jn" --set global.deploymentMode=external \
   --set data-plane-api.dataPlane.imagePullSecrets=none
 assert_not_contains "$out10c2jn" 'K8S_JOB_IMAGE_PULL_SECRET' \
   "data-plane-api omits the Job pull-secret env entirely when set to \"none\""
+
+# --- 7. global.imagePullSecrets alone reaches every workload --------------
+# The product charts used to pin gcr-secret in their own values, so a mirrored
+# install had to clear every pin by hand before the global list counted. The
+# pins are gone; the gcr-secret default lives in the shared resolver instead.
+_PULL_WORKLOADS=("Deployment:datacore" "Deployment:firewall" "Deployment:toxicity-worker"
+  "Deployment:alertengine-api" "Deployment:clickstack-collector"
+  "Deployment:agentgateway-proxy" "Deployment:trustguard-data-plane"
+  "Deployment:data-plane-api" "Deployment:control-plane-app" "Deployment:redis"
+  "StatefulSet:clickhouse" "StatefulSet:neuraltrust-watchdog")
+out10c2go="$TMP/scenario-pullsecret-global-only.yaml"
+render_default "$out10c2go" --set global.deploymentMode=external \
+  --set watchdog.enabled=true \
+  --set data-plane-api.dataPlane.components.api.k8sJobs.enabled=true \
+  --set 'global.imagePullSecrets={mirror-registry}'
+for _w in "${_PULL_WORKLOADS[@]}"; do
+  _got=$(pull_secrets_of "$out10c2go" "${_w%%:*}" "${_w##*:}")
+  if [[ "$_got" != "mirror-registry" ]]; then
+    red "FAIL: global-only: ${_w##*:} ignored global.imagePullSecrets (got: ${_got:-<none>}, want mirror-registry)"
+    exit 1
+  fi
+done
+green "ok  - global.imagePullSecrets alone reaches every chart family, with no per-chart key"
+jobsecret=$(yq eval 'select(.kind == "Deployment" and .metadata.name == "data-plane-api")
+  | .spec.template.spec.containers[0].env[] | select(.name == "K8S_JOB_IMAGE_PULL_SECRET") | .value' "$out10c2go")
+if [[ "$jobsecret" != "mirror-registry" ]]; then
+  red "FAIL: K8S_JOB_IMAGE_PULL_SECRET did not follow the global list (got: ${jobsecret:-<none>})"
+  exit 1
+fi
+green "ok  - data-plane-api forwards the global pull secret to the Jobs it spawns"
+
+# --- 8. global ["none"] now suppresses the product charts too -------------
+# Before, their gcr-secret pin outranked the global opt-out, so an IAM cluster
+# still referenced a Secret it never created.
+out10c2gn="$TMP/scenario-pullsecret-global-none-products.yaml"
+render_default "$out10c2gn" --set global.deploymentMode=external \
+  --set watchdog.enabled=true --set 'global.imagePullSecrets={none}'
+for _w in "${_PULL_WORKLOADS[@]}"; do
+  _got=$(pull_secrets_of "$out10c2gn" "${_w%%:*}" "${_w##*:}")
+  if [[ -n "$_got" ]]; then
+    red "FAIL: global [none]: ${_w##*:} still carries a pull secret (got: $_got)"
+    exit 1
+  fi
+done
+green "ok  - global [\"none\"] suppresses pull secrets on every chart family"
+
+# --- 9. an explicit empty key keeps its old meaning -----------------------
+# "" / [] were the documented IAM opt-out before the pins went away. Unset now
+# falls back to gcr-secret, so an empty value must NOT: it takes the global list
+# when there is one and otherwise renders nothing. At data-plane-api's component
+# tier "" always meant none outright, and still does even with a global list.
+out10c2e="$TMP/scenario-pullsecret-empty-key.yaml"
+render_default "$out10c2e" --set global.deploymentMode=external \
+  --set watchdog.enabled=true \
+  --set datacore.imagePullSecrets="" \
+  --set firewall.firewall.imagePullSecrets="" \
+  --set 'watchdog.imagePullSecrets={}' \
+  --set data-plane-api.dataPlane.imagePullSecrets=""
+for _w in "Deployment:datacore" "Deployment:firewall" "StatefulSet:neuraltrust-watchdog" \
+          "Deployment:data-plane-api"; do
+  _got=$(pull_secrets_of "$out10c2e" "${_w%%:*}" "${_w##*:}")
+  if [[ -n "$_got" ]]; then
+    red "FAIL: empty key, no global: ${_w##*:} gained a pull secret (got: $_got)"
+    exit 1
+  fi
+done
+_got=$(pull_secrets_of "$out10c2e" Deployment alertengine-api)
+if [[ "$_got" != "gcr-secret" ]]; then
+  red "FAIL: unset key, no global: alertengine-api lost the gcr-secret default (got: ${_got:-<none>})"
+  exit 1
+fi
+green "ok  - an empty key renders no pull secret while an unset key keeps gcr-secret"
+out10c2eg="$TMP/scenario-pullsecret-empty-key-global.yaml"
+render_default "$out10c2eg" --set global.deploymentMode=external \
+  --set datacore.imagePullSecrets="" \
+  --set data-plane-api.dataPlane.imagePullSecrets="" \
+  --set 'global.imagePullSecrets={mirror-registry}'
+_got=$(pull_secrets_of "$out10c2eg" Deployment datacore)
+_dpa=$(pull_secrets_of "$out10c2eg" Deployment data-plane-api)
+if [[ "$_got" != "mirror-registry" || -n "$_dpa" ]]; then
+  red "FAIL: empty key + global: datacore=${_got:-<none>} (want mirror-registry), data-plane-api=${_dpa:-<none>} (want none)"
+  exit 1
+fi
+green "ok  - an empty product key takes the global list; data-plane-api's \"\" still means none"
+
+# =========================================================================
+# Scenario 10c2r — one replica key: `replicas`, with `replicaCount` as alias
+# =========================================================================
+# control-plane-api, control-plane-app, clickhouse and watchdog were the only
+# charts keyed on `replicaCount`. They now read `replicas` like every other
+# chart, and keep honouring `replicaCount` because live overlays still set it.
+
+replicas_of() {
+  yq eval "select(.kind == \"$2\" and .metadata.name == \"$3\") | .spec.replicas" "$1"
+}
+_REPLICA_WORKLOADS=("Deployment:control-plane-api:3" "Deployment:control-plane-app:4"
+  "StatefulSet:clickhouse:2" "StatefulSet:neuraltrust-watchdog:2")
+for _key in replicas replicaCount; do
+  outrep="$TMP/scenario-replicas-$_key.yaml"
+  render_default "$outrep" --set global.deploymentMode=external --set watchdog.enabled=true \
+    --set "control-plane-api.controlPlane.components.api.$_key=3" \
+    --set "control-plane-app.controlPlane.components.app.$_key=4" \
+    --set "clickhouse.$_key=2" --set "watchdog.$_key=2"
+  for _w in "${_REPLICA_WORKLOADS[@]}"; do
+    IFS=: read -r _k _n _want <<<"$_w"
+    _got=$(replicas_of "$outrep" "$_k" "$_n")
+    if [[ "$_got" != "$_want" ]]; then
+      red "FAIL: $_key: $_n replicas=$_got, want $_want"
+      exit 1
+    fi
+  done
+  green "ok  - \`$_key\` sets replicas on control-plane api/app, clickhouse and watchdog"
+done
+
+# The alias wins over the new key: no chart default sets it, so it is always
+# the operator's own override.
+outrepb="$TMP/scenario-replicas-both.yaml"
+render_default "$outrepb" --set global.deploymentMode=external \
+  --set control-plane-api.controlPlane.components.api.replicas=3 \
+  --set control-plane-api.controlPlane.components.api.replicaCount=5
+if [[ "$(replicas_of "$outrepb" Deployment control-plane-api)" != "5" ]]; then
+  red "FAIL: replicaCount did not win over replicas on control-plane-api"
+  exit 1
+fi
+green "ok  - an operator's replicaCount still wins over the chart's replicas default"
 
 # =========================================================================
 # Scenario 10c3 — an external ClickHouse reaches every consumer (AUT-636)

@@ -13,21 +13,18 @@ enabled: false
 fullnameOverride: "neuraltrust-watchdog"
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/watchdog
-  tag: v0.33.1 # defaults to .Chart.AppVersion
+  tag: v0.34.0 # defaults to .Chart.AppVersion
   pullPolicy: IfNotPresent
-# Pull secret(s) for private nt-docker images.
-# Defaults to gcr-secret like the rest of the chart. Set to [] on clusters that
-# pull via IAM / Workload Identity and have no pull Secret.
-imagePullSecrets:
-  - name: gcr-secret
+# imagePullSecrets: unset → global.imagePullSecrets → gcr-secret. Set to [] on
+# clusters that pull via IAM / Workload Identity and have no pull Secret.
 # Watchdog is a singleton controller, not a stateless service: HPA is
-# unsupported and replicaCount stays 1. A second replica would duplicate
+# unsupported and replicas stays 1. A second replica would duplicate
 # healing actions/notifications, tail every pod twice, and double per-check
 # metric series. Scale vertically (resources below) and by scoping logExport
 # sources / the enabled check set. Active/passive HA via k8s Lease leader
 # election is an optional, deferrable follow-up — not load-based
-# scaling — so replicaCount > 1 is unsafe until that lands.
-replicaCount: 1
+# scaling — so replicas > 1 is unsafe until that lands.
+replicas: 1
 resources:
   requests:
     cpu: 50m

@@ -21,9 +21,8 @@ image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/opentelemetry-collector-contrib
   tag: "0.161.0"
   pullPolicy: IfNotPresent
-# Empty falls back to global.imagePullSecrets; "none" suppresses it entirely
-# (a mirror in the same project needs no credentials).
-imagePullSecrets: "gcr-secret"
+# imagePullSecrets: unset → global.imagePullSecrets → gcr-secret; "" → global
+# only; "none" suppresses. Accepts a name or a list of names / {name:} maps.
 serviceAccount:
   create: true
   name: "clickstack-ingest-gateway"

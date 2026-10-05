@@ -9,11 +9,10 @@ fullnameOverride: "agentgateway"
 securityHardening: true
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/agentgateway
-  tag: "v0.63.4"
+  tag: "v0.63.8"
   pullPolicy: IfNotPresent
-# Image pull secret name (string) or list. "none"/"" suppresses it.
-# Falls back to global.imagePullSecrets when empty.
-imagePullSecrets: "gcr-secret"
+# imagePullSecrets: unset → global.imagePullSecrets → gcr-secret; "" → global
+# only; "none" suppresses. Accepts a name or a list of names / {name:} maps.
 serviceAccount:
   create: true
   name: "agentgateway"

@@ -1,6 +1,6 @@
 {{- if eq (include "firewall.enabled" .) "true" }}
 {{- range $workerName, $workerCfg := .Values.firewall.workers }}
-{{- if $workerCfg.enabled }}
+{{- if eq (include "firewall.workerEnabled" (dict "ctx" $ "name" $workerName "cfg" $workerCfg)) "true" }}
 ---
 apiVersion: v1
 kind: Service

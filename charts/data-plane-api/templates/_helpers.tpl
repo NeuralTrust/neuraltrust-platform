@@ -61,40 +61,40 @@ Usage: {{ include "data-plane.image" (dict "repository" .Values.dataPlane.compon
 {{- end }}
 
 {{/*
-Resolve the single data-plane image pull secret NAME in priority order:
-  1. .Values.imagePullSecrets             (subchart root, set via parent's `neuraltrust-data-plane.imagePullSecrets`)
+Resolve data-plane imagePullSecrets as an inlineable YAML block, in priority order:
+  1. .Values.imagePullSecrets             (subchart root)
   2. .Values.dataPlane.imagePullSecrets   (component-tier override)
-  3. "gcr-secret"                          (hardcoded default for backward compat)
-The literal string "none" or "" suppresses it entirely (used to opt out when
-nodes pull via IAM / Workload Identity and no Secret exists).
-Returns the resolved secret name, or empty string when suppressed.
-Usage: {{ include "data-plane.imagePullSecretName" . }}
-*/}}
-{{- define "data-plane.imagePullSecretName" -}}
-{{- $imagePullSecret := "gcr-secret" -}}
-{{- if .Values.imagePullSecrets -}}
-  {{- $imagePullSecret = .Values.imagePullSecrets -}}
-{{- else if and .Values.dataPlane (hasKey .Values.dataPlane "imagePullSecrets") -}}
-  {{- /* Assign unconditionally so "none"/"" opt out (the guard below suppresses them). */ -}}
-  {{- $imagePullSecret = .Values.dataPlane.imagePullSecrets -}}
-{{- end -}}
-{{- if and $imagePullSecret (ne $imagePullSecret "none") (ne $imagePullSecret "") -}}
-{{- $imagePullSecret -}}
-{{- end -}}
-{{- end }}
-
-{{/*
-Resolve data-plane imagePullSecrets as an inlineable YAML block. Wraps
-`data-plane.imagePullSecretName` and renders nothing when suppressed.
+  3. global.imagePullSecrets
+  4. "gcr-secret"
+Delegates to the shared product-chart resolver, so "none" (at any level, or
+global ["none"]) suppresses it for clusters that pull via IAM / Workload Identity.
+An explicit "" at the component tier has always meant "no pull secret" here, so it
+is passed on as "none" rather than falling through to the global list.
 Usage:
   spec:
     {{- include "data-plane.imagePullSecrets" . | nindent 6 }}
 */}}
 {{- define "data-plane.imagePullSecrets" -}}
-{{- $name := include "data-plane.imagePullSecretName" . -}}
-{{- if $name -}}
-imagePullSecrets:
-  - name: {{ $name }}
+{{- $args := dict "global" .Values.global -}}
+{{- if .Values.imagePullSecrets -}}
+  {{- $_ := set $args "local" .Values.imagePullSecrets -}}
+{{- else if and .Values.dataPlane (hasKey .Values.dataPlane "imagePullSecrets") -}}
+  {{- $v := .Values.dataPlane.imagePullSecrets -}}
+  {{- $_ := set $args "local" (ternary "none" $v (empty $v)) -}}
+{{- end -}}
+{{- include "neuraltrust-platform.subchart.imagePullSecrets" $args -}}
+{{- end }}
+
+{{/*
+The single pull secret NAME the API forwards to the Jobs it spawns
+(K8S_JOB_IMAGE_PULL_SECRET): the first entry `data-plane.imagePullSecrets`
+resolves, or empty when suppressed.
+Usage: {{ include "data-plane.imagePullSecretName" . }}
+*/}}
+{{- define "data-plane.imagePullSecretName" -}}
+{{- $block := include "data-plane.imagePullSecrets" . | fromYaml -}}
+{{- with $block.imagePullSecrets -}}
+{{- (first .).name -}}
 {{- end -}}
 {{- end }}
 
@@ -212,7 +212,7 @@ both the API Deployment and its Jobs.
 */}}
 {{- define "data-plane.api.k8sJobs.image" -}}
 {{- $apiRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api" -}}
-{{- $apiTag := "v1.54.2" -}}
+{{- $apiTag := "v1.55.0" -}}
 {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.image -}}
   {{- if .Values.dataPlane.components.api.image.repository -}}{{- $apiRepo = .Values.dataPlane.components.api.image.repository -}}{{- end -}}
   {{- if .Values.dataPlane.components.api.image.tag -}}{{- $apiTag = .Values.dataPlane.components.api.image.tag -}}{{- end -}}

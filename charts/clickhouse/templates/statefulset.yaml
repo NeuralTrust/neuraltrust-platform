@@ -7,7 +7,7 @@ metadata:
     {{- include "clickhouse.labels" . | nindent 4 }}
 spec:
   serviceName: {{ include "clickhouse.fullname" . }}-headless
-  replicas: {{ .Values.replicaCount | default 1 }}
+  replicas: {{ include "neuraltrust-platform.replicas" (dict "values" .Values "default" 1) }}
   selector:
     matchLabels:
       {{- include "clickhouse.selectorLabels" . | nindent 6 }}

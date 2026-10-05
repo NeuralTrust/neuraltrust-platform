@@ -100,13 +100,17 @@ global:
       # Omit user/password for an unauthenticated relay.
       user: ""
       password: ""
-  # Hybrid product selection (positive opt-in). Defaults are all false so
-  # overlays only declare what they want. External mode ignores these flags
-  # and always deploys the full product stack. Firewall follows TrustGuard.
-  products:
-    trustgate: false
-    trustguard: false
-    dataPlane: false
+  # Product selection. Every flag is left unset on purpose, because unset means
+  # opposite things per mode:
+  #   hybrid           — opt-in: a product deploys only when set to true.
+  #   external / saas  — opt-out: everything deploys unless set to false, e.g.
+  #                      trustgate: false for a TrustGuard-only install.
+  # Firewall follows TrustGuard. In external the console also reads audit logs
+  # and activity from data-plane-api, so keep dataPlane on there.
+  products: {}
+    # trustgate: true
+    # trustguard: true
+    # dataPlane: true
   # deploy=false skips the firewall subchart and points TrustGuard (and TrustGate
   # complexity scoring) at a firewall you already run. Both then need baseURL and
   # the firewall's JWT_SECRET, from existingSecret or global.platformSecret.
@@ -162,22 +166,13 @@ global:
   # Optional global pull-secret list. Accepts names or {name:} maps. A "none"
   # element suppresses pull secrets entirely (IAM / Workload Identity clusters).
   #
-  # Two families, and the difference is deliberate (AUT-427):
-  #   * control-plane app/api, postgresql, redis and the OTel collector default in
-  #     the TEMPLATE, so leaving their key unset falls through to this list.
-  #   * the product subcharts (agentgateway, alertengine, clickhouse, clickstack-*,
-  #     dataagent, databridge, datacore, firewall, trustguard, trustlens, watchdog)
-  #     pin `imagePullSecrets: "gcr-secret"` in their own values.yaml, so that pin
-  #     wins and this list is ignored until you clear it.
+  # Every workload resolves the same way: its own key → this list → gcr-secret.
+  # So one entry here points the whole release at a mirror's credentials; set a
+  # component's own key (e.g. datacore.imagePullSecrets) only to send that one
+  # somewhere else. data-plane-api reads data-plane-api.dataPlane.imagePullSecrets.
   #
-  # So to point a product chart at your own registry, set BOTH:
-  #   global.imagePullSecrets: ["my-registry"]
-  #   datacore.imagePullSecrets: ""      # clear the pin so the global wins
-  #
-  # Unifying the two families would change rendered output for every install that
-  # relies on the pin winning today, which is why the split is documented rather
-  # than removed. data-plane-api is a third case: it ignores this list by design
-  # and resolves from `data-plane-api.dataPlane.imagePullSecrets`.
+  # An empty component key ("" or []) is not the same as leaving it unset: it
+  # takes this list when set, and otherwise renders no pull secret at all.
   imagePullSecrets: []
   autoGenerateSecrets: true
   preserveExistingSecrets: false
@@ -316,7 +311,7 @@ global:
     password: "" # Empty auto-generates and stores it in postgresql-secrets
     sslMode: prefer
     # Prisma pool size baked into the generated DSN. Multiplies with app
-    # replicaCount against the server's max_connections — lower it when many
+    # replicas against the server's max_connections — lower it when many
     # services share one Postgres, or when replica counts go up.
     connectionLimit: 15
     # authMode: password | iam (external Postgres only; ignored when deploy=true).
@@ -692,8 +687,7 @@ infrastructure:
 clickhouse:
   securityHardening: true
   fullnameOverride: "clickhouse"
-  replicaCount: 1
-  imagePullSecrets: "gcr-secret"
+  replicas: 1
   image:
     repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickhouse-server
     tag: "26.8"
@@ -803,7 +797,7 @@ control-plane-api:
           tls:
             enabled: true
             secretName: ""
-        replicaCount: 2
+        replicas: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api"
           tag: "v1.28.1"
@@ -863,10 +857,10 @@ control-plane-app:
           tls:
             enabled: true
             secretName: ""
-        replicaCount: 2
+        replicas: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v1.188.1"
+          tag: "v1.190.3"
           pullPolicy: IfNotPresent
         config:
           nodeEnv: production
@@ -944,7 +938,7 @@ control-plane-app:
 # stays agentgateway for now; K8s names stay agentgateway-*.
 agentgateway:
   image:
-    tag: "v0.63.4"
+    tag: "v0.63.8"
   # Empty host/port/sslMode/username/tls inherit from global.postgresql /
   # global.redis, then fall back to the in-cluster Services. Set them here only
   # to point this one service somewhere else.
@@ -1016,7 +1010,7 @@ dataagent:
 # `global.postgresql` block.
 datacore:
   image:
-    tag: "v0.25.1"
+    tag: "v0.26.0"
   database:
     # Empty inherits global.postgresql, then control-plane-postgresql:5432.
     # name/user stay per-service: external gives each service its own role+DB.
@@ -1128,7 +1122,6 @@ data-plane-api:
   securityHardening: true
   dataPlane:
     enabled: true
-    imagePullSecrets: "gcr-secret"
     serviceAccount:
       create: true
       name: data-plane
@@ -1215,7 +1208,7 @@ data-plane-api:
               resources: {}
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.54.2
+          tag: v1.55.0
           pullPolicy: IfNotPresent
         accessMode: ReadWriteOnce
         huggingfaceToken: ""
@@ -1291,12 +1284,11 @@ data-plane-api:
 firewall:
   securityHardening: true
   firewall:
-    imagePullSecrets: "gcr-secret"
     gateway:
       replicas: 2
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-        tag: "v2.31.1"
+        tag: "v2.32.0"
         pullPolicy: IfNotPresent
       resources:
         requests:
@@ -1322,7 +1314,7 @@ firewall:
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
         # Keep in lockstep with gateway.image.tag.
-        tag: "v2.31.1"
+        tag: "v2.32.0"
         pullPolicy: IfNotPresent
       replicas: 1
       resources:

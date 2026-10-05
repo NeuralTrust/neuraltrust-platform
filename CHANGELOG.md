@@ -4,6 +4,52 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Added
+
+- **External installs can leave a product out.** `global.products` used to be
+  ignored in external and saas mode, so a self-hosted install always carried
+  TrustGate even where only TrustGuard was wanted. External is now opt-out: an
+  unset flag still means on — a default external install renders exactly what it
+  did — and `false` removes that product. For TrustGuard only, layer
+  `values-external-trustguard-only.yaml.example` (`global.products.trustgate:
+  false`). That drops TrustGate's workloads, Ingresses and Secrets, plus what
+  exists only to serve it: the firewall `complexity` worker, the MCP OAuth
+  signing key and the Admin API machine-credential keys, and the console's
+  gateway env. Forcing `global.mcpOAuth.enabled` or `global.agentgatewayM2m.enabled`
+  on without TrustGate now fails the render.
+
+  The flags' chart defaults moved from `false` to unset, which hybrid has always
+  read as off, so hybrid is unchanged — except that a hybrid install without
+  TrustGate no longer runs the idle `complexity` worker. **One external case
+  changes:** an external values file that copied the old `products: {trustgate:
+  false, ...}` defaults now gets exactly what it says. Remove those keys to keep
+  the full stack.
+
+### Changed
+
+- **One replica key across the chart: `replicas`.** control-plane-api,
+  control-plane-app, clickhouse and watchdog were the only components keyed on
+  `replicaCount`; they now read `replicas` like every other chart. `replicaCount`
+  is a deprecated alias and still works — when both are set it wins, since it can
+  only come from your own values. Rendered output is unchanged.
+
+### Fixed
+
+- **`global.imagePullSecrets` now reaches every workload.** The product subcharts
+  (agentgateway, alertengine, clickhouse, clickstack-*, dataagent, databridge,
+  datacore, firewall, trustguard, trustlens, watchdog) and data-plane-api pinned
+  `gcr-secret` in their own values, so the global list was ignored until each pin
+  was cleared by hand. The pins are gone and the default moved into the shared
+  resolver: a workload's own key → `global.imagePullSecrets` → `gcr-secret`, the
+  order control-plane app/api already used (AUT-390). One global entry now points
+  a whole mirrored release at its registry credentials.
+
+  **Rendered output changes only where `global.imagePullSecrets` is set and a
+  product chart's key is not:** those pods move from `gcr-secret` to the global
+  list. With the global list empty every workload still pulls with `gcr-secret`,
+  and an explicit per-chart value — a name, `"none"`, `""` or `[]` — means
+  exactly what it did before.
+
 ## [v2.17.0] — 2026-09-30
 
 ### Added

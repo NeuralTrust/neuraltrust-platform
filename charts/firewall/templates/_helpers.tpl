@@ -1,10 +1,22 @@
 {{/*
 Whether this release deploys the firewall. It follows TrustGuard product
-selection (hybrid: global.products.trustguard; external: always on), unless
+selection (global.products.trustguard: opt-in in hybrid, opt-out in external), unless
 global.firewall.deploy=false points TrustGuard at a firewall run elsewhere.
 */}}
 {{- define "firewall.enabled" -}}
 {{- include "neuraltrust-platform.firewall.deploy" . -}}
+{{- end }}
+
+{{/*
+Whether one firewall worker renders: its own `enabled` flag, plus the product it
+serves. `complexity` answers only TrustGate's smart-routing scorer, so a release
+with global.products.trustgate=false leaves it out rather than idling a model pod.
+Usage: {{ include "firewall.workerEnabled" (dict "ctx" $ "name" $workerName "cfg" $workerCfg) }}
+*/}}
+{{- define "firewall.workerEnabled" -}}
+{{- if .cfg.enabled -}}
+{{- if or (ne .name "complexity") (eq (include "neuraltrust-platform.product.enabled" (dict "ctx" .ctx "product" "trustgate")) "true") -}}true{{- end -}}
+{{- end -}}
 {{- end }}
 
 {{/*

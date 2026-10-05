@@ -13,7 +13,8 @@ image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/alertengine
   tag: "v0.9.1"
   pullPolicy: IfNotPresent
-imagePullSecrets: "gcr-secret"
+# imagePullSecrets: unset → global.imagePullSecrets → gcr-secret; "" → global
+# only; "none" suppresses. Accepts a name or a list of names / {name:} maps.
 serviceAccount:
   create: true
   name: "alertengine"

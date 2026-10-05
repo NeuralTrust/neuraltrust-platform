@@ -1,6 +1,6 @@
 {{/*
 True when TrustGuard templates should render.
-Hybrid: global.products.trustguard must be true. External: always on.
+Hybrid: global.products.trustguard must be true. External: on unless global.products.trustguard=false.
 */}}
 {{- define "trustguard.enabled" -}}
 {{- if eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustguard")) "true" -}}true{{- end -}}

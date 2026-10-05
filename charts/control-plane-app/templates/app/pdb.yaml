@@ -4,7 +4,7 @@
 {{- $app := default dict $components.app }}
 {{- $autoscaling := default dict $app.autoscaling }}
 {{- $pdb := default dict $app.podDisruptionBudget }}
-{{- $replicas := default 1 $app.replicaCount }}
+{{- $replicas := include "neuraltrust-platform.replicas" (dict "values" $app "default" 1) | int }}
 {{- if $autoscaling.enabled }}
   {{- $replicas = default 1 $autoscaling.minReplicas }}
 {{- end }}

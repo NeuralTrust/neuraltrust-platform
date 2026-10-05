@@ -11,8 +11,8 @@ image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickstack-otel-collector
   tag: "2.39.1"
   pullPolicy: IfNotPresent
-# Private AR image — default pull secret (set "none" to opt out for Workload Identity).
-imagePullSecrets: "gcr-secret"
+# imagePullSecrets: unset → global.imagePullSecrets → gcr-secret; "" → global
+# only; "none" suppresses. Accepts a name or a list of names / {name:} maps.
 serviceAccount:
   create: true
   name: "clickstack-collector"

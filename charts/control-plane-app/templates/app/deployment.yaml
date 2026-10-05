@@ -12,7 +12,7 @@ metadata:
 {{- $autoscaling := default dict $app.autoscaling }}
 spec:
   {{- if not $autoscaling.enabled }}
-  replicas: {{ default 1 $app.replicaCount }}
+  replicas: {{ include "neuraltrust-platform.replicas" (dict "values" $app "default" 1) }}
   {{- end }}
   {{- /* Surge first; keep full capacity during rollout (avoid 25%/25% default). */}}
   strategy:
@@ -64,7 +64,7 @@ spec:
       initContainers:
       - name: init-db
         {{- $initImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
-        {{- $initImageTag := "v1.188.1" }}
+        {{- $initImageTag := "v1.190.3" }}
         {{- $initPullPolicy := "IfNotPresent" }}
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.image }}
           {{- if .Values.controlPlane.components.app.image.repository }}{{- $initImageRepo = .Values.controlPlane.components.app.image.repository }}{{- end }}
@@ -239,7 +239,7 @@ spec:
       containers:
       - name: app
         {{- $appImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
-        {{- $appImageTag := "v1.188.1" }}
+        {{- $appImageTag := "v1.190.3" }}
         {{- $appPullPolicy := "IfNotPresent" }}
         {{- $appPort := 3000 }}
         {{- $nodeEnv := "production" }}
@@ -704,6 +704,11 @@ spec:
         {{- /* v2 backend services the console (BFF) calls. Core backend
                credentials are required so the app fails closed on an incomplete
                external install. AlertEngine and TrustLens remain optional. */}}
+        {{- /* A product left out with global.products.<name>=false gets no URL and no
+               secretKeyRef: its Secret is never written, so a required ref would
+               stop the pod. The app reads these lazily, so it starts without them and
+               only a call to that backend fails, with "... is not set". */}}
+        {{- if eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustgate")) "true" }}
         - name: AGENTGATEWAY_URL
           value: "{{ $agentgatewayUrl }}"
         - name: AGENTGATEWAY_PROXY_URL
@@ -712,6 +717,8 @@ spec:
           valueFrom:
             secretKeyRef:
               {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "SERVER_SECRET_KEY") | nindent 14 }}
+        {{- end }}
+        {{- if eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustguard")) "true" }}
         - name: TRUSTGUARD_URL
           value: "{{ $trustguardUrl }}"
         {{- with $trustguardPublicUrl }}
@@ -722,6 +729,7 @@ spec:
           valueFrom:
             secretKeyRef:
               {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "ADMIN_JWT_SECRET") | nindent 14 }}
+        {{- end }}
         - name: DATACORE_URL
           value: "{{ $datacoreUrl }}"
         - name: DATACORE_METRICS_ENABLED
@@ -747,7 +755,7 @@ spec:
                into hybrid Helm / Docker install snippets. Without these the app
                falls back to NeuralTrust production SaaS defaults and remote
                planes dial the wrong control plane. extraEnv still wins. */}}
-        {{- if and (eq (include "neuraltrust-platform.isSaas" .) "true") (not (has "CONFIG_SYNC_GRPC_ENDPOINT" $ownEnv)) }}
+        {{- if and (eq (include "neuraltrust-platform.isSaas" .) "true") (eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustgate")) "true") (not (has "CONFIG_SYNC_GRPC_ENDPOINT" $ownEnv)) }}
         - name: CONFIG_SYNC_GRPC_ENDPOINT
           value: {{ printf "%s:443" (include "neuraltrust-platform.configSync.publicHost" (dict "ctx" . "product" "agentgateway")) | quote }}
         {{- end }}
