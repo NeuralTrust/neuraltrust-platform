@@ -733,13 +733,16 @@ nothing for "none". Fixing that once is why they now delegate here instead of ea
 keeping a copy. charts/clickhouse, charts/firewall and charts/watchdog inlined their
 own variants and delegate here too.
 
-Precedence: local key → global.imagePullSecrets. There is deliberately **no**
-`gcr-secret` literal, unlike the controlPlane and postgresql helpers above: these
-charts pin the key in their own values.yaml, so a template fallback would be
-unreachable. The consequence — an operator must set the subchart key to "" before
-`global.imagePullSecrets` can win — is documented next to `global.imagePullSecrets`
-in values.yaml. Emptying those nine pins is the larger change AUT-427 deliberately
-did not make.
+Precedence: local key → global.imagePullSecrets → `gcr-secret`, the same order
+as the controlPlane helper above. The product charts used to pin "gcr-secret" in
+their own values.yaml, so the global list never won unless the operator cleared
+each pin; the default now lives here instead and the pins are gone.
+
+Unset and empty are deliberately different, so no existing values file changes
+meaning:
+  * unset (nil)     → global, else `gcr-secret`
+  * "" or []        → global, else nothing (the established IAM opt-out)
+  * "none"          → nothing, at either level
 
 Accepts a string or a list of strings / {name:} maps on either side. A "none" at
 either level suppresses entirely and clears anything already collected, matching
@@ -750,6 +753,7 @@ the controlPlane helper's semantics so there is one rule to learn.
 {{- define "neuraltrust-platform.subchart.imagePullSecrets" -}}
 {{- $global := default dict .global -}}
 {{- $src := .local -}}
+{{- $fallback := kindIs "invalid" .local -}}
 {{- if not $src -}}
   {{- $src = $global.imagePullSecrets -}}
 {{- end -}}
@@ -773,11 +777,31 @@ the controlPlane helper's semantics so there is one rule to learn.
     {{- end -}}
   {{- end -}}
 {{- end -}}
+{{- if and $fallback (not $suppress) (eq (len $secrets) 0) -}}
+  {{- $secrets = append $secrets "gcr-secret" -}}
+{{- end -}}
 {{- if and (not $suppress) (gt (len $secrets) 0) -}}
 imagePullSecrets:
 {{- range $secrets }}
   - name: {{ . }}
 {{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Replica count for a workload. Every chart names the key `replicas`; four used
+`replicaCount` (control-plane-api, control-plane-app, clickhouse, watchdog) and
+still accept it as a deprecated alias. The alias wins when set: no chart default
+carries it any more, so a value there can only be an operator's override.
+
+  {{ include "neuraltrust-platform.replicas" (dict "values" $api "default" 2) }}
+*/}}
+{{- define "neuraltrust-platform.replicas" -}}
+{{- $v := default dict .values -}}
+{{- if not (kindIs "invalid" $v.replicaCount) -}}
+{{- default .default $v.replicaCount | int -}}
+{{- else -}}
+{{- default .default $v.replicas | int -}}
 {{- end -}}
 {{- end -}}
 
@@ -1618,18 +1642,20 @@ ClickHouse is allowed to render only in v2 external.
 
 {{/*
 Product enable flag from the shared global.products contract.
-- external: always on (full stack; product flags are ignored)
+- external / saas: opt-out — on unless the flag is explicitly false, so an
+  install that never set global.products still deploys the full stack
 - hybrid: positive opt-in — true only when the flag is explicitly true
+values.yaml leaves every flag unset for exactly this reason: a `false` default
+would switch every product off in external.
 Usage: {{ include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustgate") }}
 */}}
 {{- define "neuraltrust-platform.product.enabled" -}}
-{{- if eq (include "neuraltrust-platform.isExternal" .ctx) "true" -}}
-true
-{{- else -}}
 {{- $products := default dict (default dict .ctx.Values.global).products -}}
-{{- $on := false -}}
-{{- if hasKey $products .product -}}{{- $on = index $products .product -}}{{- end -}}
-{{- if $on -}}true{{- end -}}
+{{- $flag := index $products .product -}}
+{{- if eq (include "neuraltrust-platform.isExternal" .ctx) "true" -}}
+{{- if not (and (kindIs "bool" $flag) (not $flag)) -}}true{{- end -}}
+{{- else if $flag -}}
+true
 {{- end -}}
 {{- end }}
 
@@ -1884,7 +1910,7 @@ redis
 Prisma `connection_limit` for the generated Postgres DSN.
 
 Each app pod opens up to this many connections, so it multiplies with
-replicaCount against the server's max_connections. A shared or small Postgres
+replicas against the server's max_connections. A shared or small Postgres
 needs this tunable. Prefer `global.postgresql.connectionLimit`, else 15.
 */}}
 {{- define "neuraltrust-platform.postgresql.connectionLimit" -}}
@@ -3504,16 +3530,16 @@ consumer is PKCS#8-only and therefore needs a hook Job). Rotating it invalidates
 every access token still in flight, so it is only ever generated when absent.
 */}}
 {{- define "neuraltrust-platform.platformSecret.registry" -}}
-SERVER_SECRET_KEY: {legacyName: agentgateway-secrets, legacyKey: SERVER_SECRET_KEY, generate: random, length: 64, requires: external trustgate}
-ADMIN_JWT_SECRET: {legacyName: trustguard-secrets, legacyKey: ADMIN_JWT_SECRET, generate: random, length: 64, requires: external trustguard}
-TRUSTGUARD_TOKEN_SIGNING_SECRET: {legacyName: trustguard-secrets, legacyKey: TRUSTGUARD_TOKEN_SIGNING_SECRET, generate: random, length: 64, requires: external trustguard}
-REDIS_EVENTS_SECRET: {legacyName: trustguard-secrets, legacyKey: REDIS_EVENTS_SECRET, generate: random, length: 64, requires: external trustguard}
+SERVER_SECRET_KEY: {legacyName: agentgateway-secrets, legacyKey: SERVER_SECRET_KEY, generate: random, length: 64, requires: trustgate}
+ADMIN_JWT_SECRET: {legacyName: trustguard-secrets, legacyKey: ADMIN_JWT_SECRET, generate: random, length: 64, requires: trustguard}
+TRUSTGUARD_TOKEN_SIGNING_SECRET: {legacyName: trustguard-secrets, legacyKey: TRUSTGUARD_TOKEN_SIGNING_SECRET, generate: random, length: 64, requires: trustguard}
+REDIS_EVENTS_SECRET: {legacyName: trustguard-secrets, legacyKey: REDIS_EVENTS_SECRET, generate: random, length: 64, requires: trustguard}
 AUTH_JWT_HS256_SECRET: {legacyName: datacore-secrets, legacyKey: AUTH_JWT_HS256_SECRET, generate: random, length: 64, requires: external}
 AUTH_JWT_SECRET: {legacyName: alertengine-secrets, legacyKey: AUTH_JWT_SECRET, generate: random, length: 64, requires: alertengine}
 APP_ENCRYPTION_KEY: {legacyName: alertengine-secrets, legacyKey: APP_ENCRYPTION_KEY, generate: random, length: 32, requires: alertengine}
 TRUSTLENS_JWT_SECRET: {legacyName: trustlens-secrets, legacyKey: JWT_SECRET, generate: random, length: 64, requires: trustlens}
 ENCRYPTION_KEYSET: {legacyName: trustlens-secrets, legacyKey: ENCRYPTION_KEYSET, generate: random, length: 64, requires: trustlens}
-JWT_SECRET: {legacyName: firewall-secrets, legacyKey: JWT_SECRET, generate: random, length: 64, requires: external trustguard}
+JWT_SECRET: {legacyName: firewall-secrets, legacyKey: JWT_SECRET, generate: random, length: 64, requires: trustguard}
 DATA_PLANE_JWT_SECRET: {legacyName: data-plane-jwt-secret, legacyKey: DATA_PLANE_JWT_SECRET, generate: random, length: 64, requires: external dataPlane watchdog}
 CONTROL_PLANE_JWT_SECRET: {legacyName: control-plane-secrets, legacyKey: CONTROL_PLANE_JWT_SECRET, generate: random, length: 64, requires: external watchdog}
 AUTH_SECRET: {legacyName: control-plane-secrets, legacyKey: AUTH_SECRET, generate: random, length: 64, requires: external}
@@ -3688,6 +3714,8 @@ key will exist.
        sides: the login would fail anyway, and the Job would leave a credential
        nobody reads. */ -}}
 {{- if ne (include "neuraltrust-platform.mcpOAuth.clientSecretDeliverable" .) "true" -}}{{- $wanted = false -}}{{- end -}}
+{{- /* TrustGate is the only client; a TrustGuard-only install has no use for the key. */ -}}
+{{- if ne (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustgate")) "true" -}}{{- $wanted = false -}}{{- end -}}
 {{- if and $wanted
       (eq (include "neuraltrust-platform.isExternal" .) "true")
       (ne (include "neuraltrust-platform.mcpOAuth.signingKeyPresent" .) "true") -}}
@@ -3733,6 +3761,11 @@ validate-values with a message about the mode, so this helper stays silent.
 {{- $explicit := eq $intent "on" -}}
 {{- if eq $intent "off" -}}
 {{- else if ne (include "neuraltrust-platform.isExternal" .) "true" -}}
+{{- else if ne (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustgate")) "true" -}}
+{{- /* TrustGate is the only OAuth client; without it there is nothing to log in to. */ -}}
+{{- if $explicit -}}
+{{- fail "global.mcpOAuth.enabled=true requires TrustGate: it is the only client of the app's MCP authorization server, and global.products.trustgate=false leaves it out of this release. Drop global.mcpOAuth.enabled, or re-enable TrustGate." -}}
+{{- end -}}
 {{- /* Both sides must read one client secret from a Secret this chart writes. */ -}}
 {{- else if ne (include "neuraltrust-platform.mcpOAuth.clientSecretDeliverable" .) "true" -}}
 {{- if $explicit -}}
@@ -3913,6 +3946,7 @@ whether a pair will exist.
 {{- if eq (include "neuraltrust-platform.agentgatewayM2m.privateKeyPresent" .) "true" -}}{{- $wanted = false -}}{{- end -}}
 {{- if include "neuraltrust-platform.agentgatewayM2m.publicKeys" . -}}{{- $wanted = false -}}{{- end -}}
 {{- if not (include "neuraltrust-platform.agentgatewayM2m.issuer" .) -}}{{- $wanted = false -}}{{- end -}}
+{{- if ne (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustgate")) "true" -}}{{- $wanted = false -}}{{- end -}}
 {{- if and $wanted (eq (include "neuraltrust-platform.isExternal" .) "true") -}}
 true
 {{- end -}}
@@ -3928,6 +3962,10 @@ pair that will exist by the time pods start.
 {{- else if ne (include "neuraltrust-platform.isExternal" .) "true" -}}
 {{- if eq $intent "on" -}}
 {{- fail "global.agentgatewayM2m.enabled requires global.deploymentMode=external or saas: the Admin API and the control-plane app that mints machine-credential tokens are not deployed in hybrid." -}}
+{{- end -}}
+{{- else if ne (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustgate")) "true" -}}
+{{- if eq $intent "on" -}}
+{{- fail "global.agentgatewayM2m.enabled=true requires TrustGate: the credentials authenticate to its Admin API, and global.products.trustgate=false leaves it out of this release. Drop global.agentgatewayM2m.enabled, or re-enable TrustGate." -}}
 {{- end -}}
 {{- else if not (include "neuraltrust-platform.agentgatewayM2m.issuer" .) -}}
 {{- if eq $intent "on" -}}

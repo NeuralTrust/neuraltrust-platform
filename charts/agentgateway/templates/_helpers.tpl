@@ -1,6 +1,6 @@
 {{/*
 True when TrustGate (AgentGateway) templates should render.
-Hybrid: global.products.trustgate must be true. External: always on.
+Hybrid: global.products.trustgate must be true. External: on unless global.products.trustgate=false.
 */}}
 {{- define "agentgateway.enabled" -}}
 {{- if eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustgate")) "true" -}}true{{- end -}}

@@ -1,7 +1,7 @@
 {{- if eq (include "firewall.enabled" .) "true" }}
 {{- $defaults := .Values.firewall.workerDefaults }}
 {{- range $workerName, $workerCfg := .Values.firewall.workers }}
-{{- if $workerCfg.enabled }}
+{{- if eq (include "firewall.workerEnabled" (dict "ctx" $ "name" $workerName "cfg" $workerCfg)) "true" }}
 {{- $autoscaling := $workerCfg.autoscaling | default $defaults.autoscaling }}
 {{- if and $autoscaling $autoscaling.enabled }}
 ---

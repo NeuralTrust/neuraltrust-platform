@@ -1,7 +1,7 @@
 {{- if eq (include "firewall.enabled" .) "true" }}
 {{- $defaults := .Values.firewall.workerDefaults }}
 {{- range $workerName, $workerCfg := .Values.firewall.workers }}
-{{- if $workerCfg.enabled }}
+{{- if eq (include "firewall.workerEnabled" (dict "ctx" $ "name" $workerName "cfg" $workerCfg)) "true" }}
 {{- $pdb := $workerCfg.podDisruptionBudget | default $defaults.podDisruptionBudget }}
 {{- $autoscaling := $workerCfg.autoscaling | default $defaults.autoscaling | default dict }}
 {{- $replicas := $workerCfg.replicas | default ($defaults.replicas | default 1) }}

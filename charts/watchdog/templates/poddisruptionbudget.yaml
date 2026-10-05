@@ -1,4 +1,4 @@
-{{- if and .Values.enabled (eq (include "neuraltrust-platform.ha.pdbEnabled" (dict "ctx" . "local" .Values.podDisruptionBudget)) "true") (gt (.Values.replicaCount | int) 1) }}
+{{- if and .Values.enabled (eq (include "neuraltrust-platform.ha.pdbEnabled" (dict "ctx" . "local" .Values.podDisruptionBudget)) "true") (gt (include "neuraltrust-platform.replicas" (dict "values" .Values "default" 1) | int) 1) }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:

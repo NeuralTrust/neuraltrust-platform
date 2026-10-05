@@ -122,11 +122,13 @@ Set `configSync.enabled: false` only when runtime configuration is populated
 and managed in PostgreSQL out of band. The hybrid chart does not deploy local
 TrustGate or TrustGuard control planes to do that.
 
-### Positive product selection (hybrid only)
+### Product selection
 
 Hybrid installs choose products with positive `global.products` flags.
-Chart defaults are all `false`; validation fails if none are selected.
-External mode ignores these flags and always deploys the full product stack.
+Chart defaults leave every flag unset; in hybrid that means off, and validation
+fails if none are selected.
+External mode inverts them: an unset flag means on, so the full stack deploys
+unless a product is set to `false` (e.g. `trustgate: false` for TrustGuard only).
 
 | Slice | Flags | DataAgent |
 |---|---|---|

@@ -40,7 +40,7 @@ metadata:
   labels:
     {{- include "neuraltrust-watchdog.labels" . | nindent 4 }}
 spec:
-  replicas: {{ .Values.replicaCount }}
+  replicas: {{ include "neuraltrust-platform.replicas" (dict "values" .Values "default" 1) }}
   serviceName: {{ include "neuraltrust-watchdog.fullname" . }}
   podManagementPolicy: OrderedReady
   updateStrategy:

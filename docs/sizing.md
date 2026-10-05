@@ -43,7 +43,7 @@ GPU Firewall workers need a separate GPU pool — see
 Defaults are intentionally conservative and portable. Common adjustments:
 
 - **Scale out** busy gateways (`agentgateway.proxy` / `mcp`, TrustGuard data plane)
-  with higher `replicaCount` or enable HPA when your cluster has metrics.
+  with higher `replicas` or enable HPA when your cluster has metrics.
 - **Right-size** Firewall workers if you run a subset of detectors, or move
   heavy workers to GPU.
 - **Use managed PostgreSQL and Redis** so datastore capacity is independent of

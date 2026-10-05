@@ -13,7 +13,7 @@ your environment. For the default hosted-control-plane path, see the
 |                         | `hybrid` (default)                                 | `external`                                                |
 | ----------------------- | -------------------------------------------------- | --------------------------------------------------------- |
 | Console / control plane | Hosted by NeuralTrust                              | `control-plane-app` + `control-plane-api` in your cluster |
-| Product selection       | `global.products` flags, at least one `true`       | **Flags ignored** — full stack always deploys             |
+| Product selection       | `global.products` flags, at least one `true`       | Opt-out — every product deploys unless set to `false`    |
 | Analytics store         | Hosted, via enrolment-backed OTLP egress           | In-cluster or managed **ClickHouse**                      |
 | Telemetry collector     | `clickstack-egress-collector` sidecar on DataAgent | `clickstack-collector` Deployment writing to ClickHouse   |
 | DataAgent               | One per enabled product                            | **Never renders**                                         |
@@ -120,7 +120,12 @@ global:
       enabled: false
 ```
 
-`global.products` flags are not needed — external always deploys the full stack.
+`global.products` flags are not needed — external deploys every product unless
+one is set to `false`. For a TrustGuard-only install, layer
+[`values-external-trustguard-only.yaml.example`](./values-external-trustguard-only.yaml.example)
+on top: it sets `global.products.trustgate: false`, which removes TrustGate, the
+firewall complexity worker and the MCP OAuth / Admin API machine-credential keys.
+Keep `dataPlane` on — the console reads audit logs and activity from data-plane-api.
 `hostedExport.enabled: false` removes the umbrella collector's hosted telemetry
 exporter; keep it `false` for no-egress deployments.
 
@@ -220,8 +225,9 @@ contains:
 
 
 Absent in external: `dataagent`, `dataagent-trustguard`, and the
-`clickstack-egress-collector` sidecar. External never enrols a DataAgent, so
-`global.products` is ignored — every component above renders regardless.
+`clickstack-egress-collector` sidecar. External never enrols a DataAgent.
+Every component above renders unless its product is turned off with
+`global.products.<name>: false`.
 
 The analytics path is:
 
@@ -371,7 +377,8 @@ override `global.observability.collector.image.repository`; that one repository
 is pinned in full and `imageRegistry` does not rewrite it.
 
 Create the pull Secret for your mirror as `gcr-secret`, the name every component
-defaults to. The umbrella collector keeps collecting locally, ClickStack keeps
+defaults to, or name it in `global.imagePullSecrets` — every component falls back
+to that list before the default. The umbrella collector keeps collecting locally, ClickStack keeps
 writing to your ClickHouse, and AlertEngine keeps forwarding to destinations
 reachable from the cluster.
 

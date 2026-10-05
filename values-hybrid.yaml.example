@@ -8,7 +8,7 @@
 #   values-trustgate.yaml.example
 #   values-trustguard.yaml.example
 #   values-red-teaming.yaml.example
-# External mode ignores global.products and always deploys the full stack.
+# External mode inverts this: every product deploys unless set to false.
 #
 # Never commit real tokens, passwords, or customer identifiers.
 # For the minimal starting point, see values-required.yaml.

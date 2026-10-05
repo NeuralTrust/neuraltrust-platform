@@ -15,7 +15,8 @@ image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/databridge
   tag: "v0.4.4"
   pullPolicy: IfNotPresent
-imagePullSecrets: "gcr-secret"
+# imagePullSecrets: unset → global.imagePullSecrets → gcr-secret; "" → global
+# only; "none" suppresses. Accepts a name or a list of names / {name:} maps.
 serviceAccount:
   create: true
   name: "databridge"

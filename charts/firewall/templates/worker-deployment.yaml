@@ -1,7 +1,7 @@
 {{- if eq (include "firewall.enabled" .) "true" }}
 {{- $defaults := .Values.firewall.workerDefaults }}
 {{- range $workerName, $workerCfg := .Values.firewall.workers }}
-{{- if $workerCfg.enabled }}
+{{- if eq (include "firewall.workerEnabled" (dict "ctx" $ "name" $workerName "cfg" $workerCfg)) "true" }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -91,7 +91,7 @@ spec:
         - name: worker
           {{- $wImage := $workerCfg.image | default $defaults.image }}
           {{- $wRepo := $wImage.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu" }}
-          {{- $wTag := $wImage.tag | default "v2.31.1" }}
+          {{- $wTag := $wImage.tag | default "v2.32.0" }}
           image: {{ include "firewall.image" (dict "repository" $wRepo "tag" $wTag "global" $.Values.global) | quote }}
           imagePullPolicy: {{ $wImage.pullPolicy | default "IfNotPresent" }}
           {{- /* The firewall image CMD (`python -m src.serve`) dual-binds to 0.0.0.0

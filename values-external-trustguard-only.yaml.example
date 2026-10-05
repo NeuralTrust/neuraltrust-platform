@@ -1,0 +1,18 @@
+# External, TrustGuard only: layer over values-external.yaml.example.
+#
+#   helm upgrade --install neuraltrust-platform <chart> \
+#     -f values-external.yaml.example \
+#     -f values-external-trustguard-only.yaml.example
+#
+# External deploys every product by default; this opts TrustGate out. It removes
+# agentgateway-admin/-proxy/-mcp, their Ingresses and Secrets, the firewall
+# complexity worker (it serves only TrustGate's smart routing), and the MCP OAuth
+# and Admin API machine-credential keys, whose only client is TrustGate.
+#
+# TrustGuard, the Firewall, the console, data-plane-api, DataCore, AlertEngine
+# and ClickHouse still deploy. Keep data-plane-api: the console reads audit logs
+# and activity from it.
+
+global:
+  products:
+    trustgate: false

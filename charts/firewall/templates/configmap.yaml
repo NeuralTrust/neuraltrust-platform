@@ -74,7 +74,7 @@ data:
   REDIS_URL: {{ $redisUrl | quote }}
   {{- end }}
   {{- range $workerName, $workerCfg := .Values.firewall.workers }}
-  {{- if $workerCfg.enabled }}
+  {{- if eq (include "firewall.workerEnabled" (dict "ctx" $ "name" $workerName "cfg" $workerCfg)) "true" }}
   {{- $envKey := printf "%s_WORKER_URL" ($workerName | upper | replace "-" "_") }}
   {{ $envKey }}: {{ printf "http://%s-worker:80" $workerName | quote }}
   {{- end }}

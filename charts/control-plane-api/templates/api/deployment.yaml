@@ -14,7 +14,7 @@ metadata:
 {{- $autoscaling := default dict $api.autoscaling }}
 spec:
   {{- if not $autoscaling.enabled }}
-  replicas: {{ default 2 $api.replicaCount }}
+  replicas: {{ include "neuraltrust-platform.replicas" (dict "values" $api "default" 2) }}
   {{- end }}
   selector:
     matchLabels:
