@@ -62,7 +62,7 @@ config:
   # gateways in this cluster really carry entitlements.
   rateLimitEnabled: false
   # Outbound private-network guard. TrustGate refuses tenant-configured URLs
-  # (providers, Azure endpoints, OIDC/introspection/STS, OTLP, ...) that resolve
+  # (model providers, guardrail services such as Azure Content Safety) that resolve
   # to private, loopback or link-local addresses unless the operator opts in.
   # This chart deploys single-operator installs (hybrid, external, saas), whose
   # gateways legitimately reach the operator's own private model hosts, Azure

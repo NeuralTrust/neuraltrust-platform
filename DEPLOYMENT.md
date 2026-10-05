@@ -114,9 +114,9 @@ Hybrid needs outbound TCP 443 to the control plane it dials:
 
 ### Private upstreams (outbound guard)
 
-TrustGate refuses tenant-configured outbound URLs (model providers, Azure
-endpoints, OIDC and introspection hosts, STS, OTLP collectors) that resolve to a
-private, loopback or link-local address, unless the operator opts in. It also
+TrustGate refuses tenant-configured outbound URLs (model providers, guardrail
+services such as Azure Content Safety, and the other outbound endpoints a gateway
+can be pointed at) that resolve to a private, loopback or link-local address, unless the operator opts in. It also
 refuses Model Armor authentication through the gateway's own identity
 (Workload Identity, ADC, impersonation) unless the operator opts in.
 
