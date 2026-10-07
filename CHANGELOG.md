@@ -4,6 +4,17 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Removed
+
+- **watchdog: remote desired-state sync and in-cluster Helm applier.** The
+  watchdog binary no longer pulls desired state or applies image tags to the
+  platform release, so the chart drops `watchdog.desiredState`,
+  `watchdog.platformState` and `watchdog.rbac.platformApply`, together with the
+  env, Helm scratch volumes, token Secret and read-only `-platform-diff`
+  Role/RoleBinding they rendered. All three defaulted off, so a default install
+  renders exactly as before; stale keys in your values are ignored, and a
+  chart-managed token Secret from a previous release is pruned on upgrade.
+
 ## [v2.18.0] — 2026-10-05
 
 ### Added
