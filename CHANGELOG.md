@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v3.0.0] — 2026-10-07
+
 ### Removed
 
 - **watchdog: remote desired-state sync and in-cluster Helm applier.** The
