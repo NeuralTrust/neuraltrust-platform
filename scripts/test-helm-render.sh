@@ -1733,6 +1733,14 @@ if awk '/name: neuraltrust-watchdog-config/,/^---/' "$out6wd_h" | grep -q 'click
   exit 1
 fi
 green "ok  - watchdog hybrid: no runner.clickstack default (central SaaS evaluates RED)"
+# Retired remote desired-state / in-cluster Helm applier wiring: stale keys
+# in an operator's values must render nothing.
+out6wd_ds="$TMP/scenario-watchdog-retired-desired-state.yaml"
+render_default "$out6wd_ds" --set watchdog.enabled=true \
+  --set watchdog.desiredState.enabled=true --set watchdog.desiredState.token.value=x \
+  --set watchdog.platformState.enabled=true --set watchdog.rbac.platformApply.enabled=true
+assert_not_contains "$out6wd_ds" 'desiredState:|platformState:|WATCHDOG_INGEST_TOKEN|HELM_REGISTRY_CONFIG|HELM_CONFIG_HOME|name: helm-work|-platform-diff' \
+  "watchdog: retired desired-state / platform applier keys render nothing"
 
 # ---------------------------------------------------------------------------
 # 7. Retired helpers / values must not appear in the values contract or rendered output

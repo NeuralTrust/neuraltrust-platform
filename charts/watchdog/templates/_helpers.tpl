@@ -147,19 +147,6 @@ Resolve secret name for the slack webhook.
 {{- end }}
 
 {{/*
-Resolve secret name for the deploy-api ingest token (WATCHDOG_INGEST_TOKEN).
-Prefer an operator-provided existingSecret; otherwise the chart manages a
-Secret named "<fullname>-deploy-api" rendered from desiredState.token.value.
-*/}}
-{{- define "neuraltrust-watchdog.desiredStateTokenSecretName" -}}
-{{- if .Values.desiredState.token.existingSecret -}}
-{{- .Values.desiredState.token.existingSecret -}}
-{{- else -}}
-{{- printf "%s-deploy-api" (include "neuraltrust-watchdog.fullname" .) -}}
-{{- end -}}
-{{- end }}
-
-{{/*
 Namespace for platform-scoped check targets. Empty platformNamespace => release ns.
 */}}
 {{- define "neuraltrust-watchdog.platformNamespace" -}}
