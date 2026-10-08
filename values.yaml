@@ -163,6 +163,9 @@ global:
   # Base domain used for URL generation (<hostPrefix>.<domain>).
   domain: "neuraltrust.ai"
   imageRegistry: "" # Global registry mirror; empty = per-component defaults
+  # "all" also moves the OTel collector images onto imageRegistry. Unset keeps
+  # them on the default registry, as before.
+  imageRegistryScope: ""
   # Optional global pull-secret list. Accepts names or {name:} maps. A "none"
   # element suppresses pull secrets entirely (IAM / Workload Identity clusters).
   #

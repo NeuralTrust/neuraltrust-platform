@@ -50,12 +50,9 @@ This creates `gcr-secret`. Every component defaults to that name, so pulling
 directly from the NeuralTrust registry needs no values changes.
 
 If your cluster cannot reach that registry, mirror the images into your own and
-set `global.imageRegistry`, keeping the repository names and tags. Note that
-`imageRegistry` does not rewrite the OTel collector images — override
-`global.clickstack.egress.image.repository` (hybrid) and
-`global.observability.collector.image.repository` (when observability is on)
-as well, then confirm with
-`helm template ... | grep image:`. Full guidance:
+set `global.imageRegistry`, keeping the repository names and tags, plus
+`global.imageRegistryScope: all` so the OTel collector images move too. Confirm
+with `helm template ... | grep image:`. Full guidance:
 [Container images](https://docs.neuraltrust.ai/neuraltrust/deployment/images).
 
 ### 3. Create the four operator-supplied Secrets

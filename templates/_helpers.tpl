@@ -2963,9 +2963,24 @@ true
 {{- define "neuraltrust-platform.clickstackEgress.image" -}}
 {{- $cfg := default dict (default dict (default dict .Values.global).clickstack).egress -}}
 {{- $img := default dict $cfg.image -}}
-{{- $repo := $img.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/opentelemetry-collector-contrib" -}}
-{{- $tag := $img.tag | default "0.161.0" -}}
+{{- include "neuraltrust-platform.collectorImage" (dict "repository" $img.repository "tag" $img.tag "global" .Values.global) -}}
+{{- end }}
+
+{{/*
+OTel collector image. global.imageRegistry rewrites it only with
+global.imageRegistryScope=all, so mirrors that still pull the collector from the
+default registry keep doing so. A repository the operator changed always wins.
+*/}}
+{{- define "neuraltrust-platform.collectorImage" -}}
+{{- $default := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/opentelemetry-collector-contrib" -}}
+{{- $repo := .repository | default $default -}}
+{{- $tag := .tag | default "0.161.0" -}}
+{{- $global := default dict .global -}}
+{{- if and (eq $repo $default) (eq (toString $global.imageRegistryScope) "all") -}}
+{{- include "neuraltrust-platform.image" (dict "repository" $repo "tag" $tag "global" $global) -}}
+{{- else -}}
 {{- printf "%s:%s" $repo $tag -}}
+{{- end -}}
 {{- end }}
 
 {{- define "neuraltrust-platform.clickstack.otlpEnv" -}}
