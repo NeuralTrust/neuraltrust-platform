@@ -1,0 +1,42 @@
+name: Render diff
+
+# What an existing install would see change on upgrade. See scripts/render-diff.rb.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    paths:
+      - "Chart.yaml"
+      - "values*.yaml"
+      - "*.yaml.example"
+      - "templates/**"
+      - "charts/**"
+      - "scripts/render-diff.rb"
+
+concurrency:
+  group: render-diff-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  diff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.21.3
+      - name: Diff against the merge base
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          ruby scripts/render-diff.rb "$(git merge-base "$BASE_SHA" HEAD)" \
+            --labels "$LABELS" --summary summary.md || status=$?
+          cat summary.md >> "$GITHUB_STEP_SUMMARY"
+          exit "${status:-0}"
