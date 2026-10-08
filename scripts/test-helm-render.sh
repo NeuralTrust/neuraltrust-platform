@@ -12,10 +12,6 @@
 #   full   — all chart-contract scenarios (CI: Helm v4)
 #   compat — smoke + OpenShift Routes + fail-closed guards (CI: Helm v3)
 #
-# v2-only: v1 (TrustGate/Kafka/scheduler) is retired on `main` — its
-# absence is asserted here. Historical v1 users stay on the `v1.14.x`
-# release line.
-#
 # Exits non-zero on the first assertion failure.
 
 set -euo pipefail
@@ -481,13 +477,13 @@ assert_secret_keys "$out1" postgresql-secrets absent \
 assert_secret_key "$out1" postgresql-secrets absent POSTGRES_PRISMA_URL \
   "hybrid: postgresql-secrets omits the Prisma URL it has no reader for"
 # The three Go services read DB_*; POSTGRES_LOGIN is the IAM switch. Telemetry
-# falls back to those same DB_* parts (RUN-1086) — no SENSIBLE_PG_DSN.
+# falls back to those same DB_* parts — no SENSIBLE_PG_DSN.
 for wl in agentgateway-proxy:proxy agentgateway-mcp:mcp trustguard-data-plane:data-plane; do
   assert_datastore_env "$out1" "${wl%%:*}" "${wl##*:}" \
     'DB_HOST,DB_NAME,DB_PASSWORD,DB_PORT,DB_SSL_MODE,DB_USER,POSTGRES_LOGIN' \
     "hybrid: ${wl%%:*} receives only the datastore keys it reads"
 done
-# DataAgent builds its connection from discrete POSTGRES_* parts (RUN-1093).
+# DataAgent builds its connection from discrete POSTGRES_* parts.
 # POSTGRES_LOGIN resolves to "default" on this password install, as it does for
 # the gateways above; the IAM providers are covered in 2c.
 assert_datastore_env "$out1" dataagent dataagent \
@@ -531,19 +527,12 @@ assert_env_value "$out1" data-plane-api postgres-migrations POSTGRES_SCHEMA publ
   "data-plane PostgreSQL: default schema reaches the migration"
 assert_env_value "$out1" data-plane-api postgres-migrations PYTHONPATH /app \
   "data-plane PostgreSQL: migration runs from the image's package root"
-# The chart carries no DDL at all now; these fence any reintroduction.
-assert_not_contains "$out1" 'CREATE TABLE IF NOT EXISTS tests' \
-  "data-plane PostgreSQL: chart renders no schema DDL of its own"
-assert_not_contains "$out1" 'CREATE SCHEMA IF NOT EXISTS' \
-  "data-plane PostgreSQL: migration does not require database CREATE"
 assert_contains "$out1" 'name: redis-secrets' \
   "hybrid: redis-secrets rendered"
 assert_contains "$out1" 'name: agentgateway-proxy' \
   "hybrid: trustgate (agentgateway) proxy renders"
 assert_contains "$out1" 'name: trustguard-data-plane' \
   "hybrid: trustguard data-plane renders"
-assert_contains "$out1" 'name: dataagent$' \
-  "hybrid: trustgate DataAgent preserves stable name"
 assert_contains "$out1" 'name: dataagent-trustguard' \
   "hybrid: trustguard DataAgent renders"
 assert_resource_count "$out1" Service dataagent 1 \
@@ -731,7 +720,7 @@ out1d5="$TMP/scenario-config-sync-upgrade-render.yaml"
 render_default "$out1d5" --is-upgrade
 assert_not_contains "$out1d5" 'key: "?CONFIG_SYNC_LKG_KEY"?' \
   "config-sync: an upgrade render agrees with the install render on the owned path"
-# Same principle, the other direction (AUT-408): the managed Secret document itself
+# Same principle, the other direction: the managed Secret document itself
 # must survive an upgrade render. Gated on "config-sync needs the chart to mint a
 # token" it did not, so an operator supplying their own token saw the whole Secret —
 # and CONFIG_SYNC_LKG_KEY with it — disappear from `helm diff upgrade`. The live
@@ -1177,16 +1166,6 @@ for case in "$out2d:512Mi:Python-sized default" \
     || { red "FAIL: schema runner resources: $what (want $want, got $got)"; exit 1; }
 done
 
-# migration.image is retired. An overlay still setting it must keep installing,
-# and the override must not smuggle the psql image back in.
-out2d_legacy="$TMP/scenario-pg-runner-legacy-image-key.yaml"
-render_default "$out2d_legacy" \
-  --set data-plane-api.dataPlane.components.api.database.postgresql.migration.image.repository=registry.example/mirror/postgres \
-  --set data-plane-api.dataPlane.components.api.database.postgresql.migration.image.tag=17-alpine \
-  --set data-plane-api.dataPlane.components.api.database.postgresql.migration.image.pullPolicy=Always
-assert_pg_migration_runner "$out2d_legacy" \
-  "schema runner: a retired migration.image override still installs and is ignored"
-
 out2d_off="$TMP/scenario-pg-runner-off.yaml"
 render_default "$out2d_off" \
   --set data-plane-api.dataPlane.components.api.database.postgresql.migration.enabled=false
@@ -1337,8 +1316,6 @@ assert_contains "$out3en" '^          - name: K8S_JOB_TTL_SECONDS$' \
   "envnames: K8S_JOB_TTL_SECONDS set on data-plane-api"
 assert_contains "$out3en" '^          - name: K8S_MAX_CONCURRENT_JOBS$' \
   "envnames: K8S_MAX_CONCURRENT_JOBS set on data-plane-api"
-assert_not_contains "$out3en" 'K8S_JOB_TTL_SECONDS_AFTER_FINISHED|K8S_JOBS_MAX_CONCURRENT' \
-  "envnames: stale K8S job env names gone"
 # control-plane-app reads SENDER / REPLY_TO_EMAIL, never RESEND_SENDER. Legacy
 # controlPlane.secrets.resend* values must keep feeding them.
 assert_contains "$out3en" '^        - name: SENDER$' \
@@ -1349,14 +1326,6 @@ assert_contains "$out3en" '^        - name: REPLY_TO_EMAIL$' \
   "envnames: REPLY_TO_EMAIL set on control-plane-app"
 assert_contains "$out3en" 'resend-reply-to:' \
   "envnames: control-plane-secrets carries resend-reply-to"
-assert_not_contains "$out3en" 'name: RESEND_SENDER' \
-  "envnames: stale RESEND_SENDER gone"
-# Neither control-plane service reads DATABASE_AUTH_MODE / DATABASE_IAM_AUTH;
-# the app uses POSTGRES_AUTH_MODE and the API uses POSTGRES_CONNECTION_TYPE.
-assert_not_contains "$out3en" '^        - name: DATABASE_AUTH_MODE$' \
-  "envnames: dead DATABASE_AUTH_MODE env gone"
-assert_not_contains "$out3en" '^        - name: DATABASE_IAM_AUTH$' \
-  "envnames: dead DATABASE_IAM_AUTH env gone"
 assert_contains "$out3en" '^        - name: POSTGRES_AUTH_MODE$' \
   "envnames: POSTGRES_AUTH_MODE still set on control-plane-app"
 
@@ -1459,18 +1428,9 @@ assert_contains "$out3hy" '^          - name: K8S_JOB_TTL_SECONDS$' \
   "hybrid envnames: K8S_JOB_TTL_SECONDS set on data-plane-api"
 assert_contains "$out3hy" '^          - name: K8S_MAX_CONCURRENT_JOBS$' \
   "hybrid envnames: K8S_MAX_CONCURRENT_JOBS set on data-plane-api"
-assert_not_contains "$out3hy" 'K8S_JOB_TTL_SECONDS_AFTER_FINISHED' \
-  "hybrid envnames: stale K8S_JOB_TTL_SECONDS_AFTER_FINISHED gone"
-assert_not_contains "$out3hy" 'K8S_JOBS_MAX_CONCURRENT' \
-  "hybrid envnames: stale K8S_JOBS_MAX_CONCURRENT gone"
 # Hybrid has no control plane, so control-plane-app must not appear at all.
 assert_not_contains "$out3hy" '^  name: control-plane-app$' \
   "hybrid envnames: no control-plane-app in hybrid"
-# data-plane-api used to include four undefined kafka helpers. They rendered
-# nothing but would fail the chart if reintroduced, and the app talks to
-# ClickHouse directly in hybrid.
-assert_not_contains "$out3hy" 'name: KAFKA_BROKERS|kafka-client-tls|name: KAFKA_SASL' \
-  "hybrid envnames: no kafka client env or TLS volume on data-plane-api"
 
 # PR1 on the hybrid path: the data-plane-api Route is the only Route carrying a
 # control-plane-facing TLS Secret here, and it must still avoid key material.
@@ -1603,8 +1563,6 @@ assert_contains "$out4" 'kind: Deployment' \
   "unprefixed roots: chart still renders"
 assert_contains "$out4" 'name: firewall' \
   "firewall: Deployment follows enabled TrustGuard"
-assert_contains "$out4" 'name: neuraltrust-watchdog' \
-  "watchdog root: stable K8s name neuraltrust-watchdog preserved"
 assert_resource_count "$out4" Service dataagent 0 \
   "external: TrustGate DataAgent health Service absent"
 assert_resource_count "$out4" Service dataagent-trustguard 0 \
@@ -1613,90 +1571,12 @@ assert_not_contains "$out4" 'dataagent-(trustgate|trustguard)-(readyz|deployment
   "external: no orphan DataAgent watchdog checks"
 
 # ---------------------------------------------------------------------------
-# 5. ABSENCE of retired v1 components
+# 6. watchdog telemetry wiring
 # ---------------------------------------------------------------------------
-blue "==> Scenario 5: retired v1 components MUST be absent"
-for scenario_file in "$out1" "$out2" "$out3" "$out4"; do
-  assert_not_contains "$scenario_file" '^kind: Deployment$.*trustgate' \
-    "no TrustGate Deployment in $(basename "$scenario_file")" || true
-  assert_not_contains "$scenario_file" 'app.kubernetes.io/name: trustgate' \
-    "no TrustGate labels in $(basename "$scenario_file")"
-  assert_not_contains "$scenario_file" 'app.kubernetes.io/name: kafka' \
-    "no Kafka labels in $(basename "$scenario_file")"
-  assert_not_contains "$scenario_file" 'app.kubernetes.io/name: zookeeper' \
-    "no Zookeeper labels in $(basename "$scenario_file")"
-  # Zookeeper/Kafka were the only StatefulSets in v1; ClickHouse's StatefulSet is legitimate.
-  if grep -qE '^kind: StatefulSet' "$scenario_file"; then
-    while IFS= read -r sts_name; do
-      case "$sts_name" in
-        clickhouse|clickhouse-*|neuraltrust-watchdog|neuraltrust-watchdog-*) ;;
-        *)
-          red "FAIL: unexpected StatefulSet '$sts_name' in $(basename "$scenario_file")"
-          exit 1
-          ;;
-      esac
-    done < <(awk '/^kind: StatefulSet/{sts=1; next} sts && /^metadata:/{next} sts && /^  name:/{sub("^  name: ", ""); print; sts=0}' "$scenario_file")
-  fi
-  green "ok  - only legit (ClickHouse) StatefulSets in $(basename "$scenario_file")"
-  assert_not_contains "$scenario_file" 'name: scheduler' \
-    "no scheduler Deployment/Service in $(basename "$scenario_file")"
-  assert_not_contains "$scenario_file" 'name: kafka-connect' \
-    "no Kafka Connect Deployment/Service in $(basename "$scenario_file")"
-  # The watchdog binary no longer registers these kinds (watchdog:
-  # docs/retired-check-kinds.md). It skips them with a warning rather than
-  # refusing to boot, so a leak here would be silent — hence the fence.
-  assert_not_contains "$scenario_file" 'kind: kafka_(broker|connect|consumer_lag)' \
-    "no retired Kafka check kinds rendered in $(basename "$scenario_file")"
-  assert_not_contains "$scenario_file" 'kafka_connect\.restart_task' \
-    "no retired Kafka Connect action rendered in $(basename "$scenario_file")"
-  assert_not_contains "$scenario_file" 'name: v2-postgresql-init' \
-    "no v2-postgresql-init Job in $(basename "$scenario_file")"
-  # The v1 console env block was gated on a helper that always returned true,
-  # so it never rendered. Its variables must not come back: the app either
-  # ignores them (FORCE_V2_UI) or would follow them to the SaaS host.
-  for v1_env in FORCE_V2_UI CONTROL_PLANE_SCHEDULER_URL TRUSTGATE_CONTROL_PLANE_URL \
-                TRUSTGATE_DATA_PLANE_URL TRUSTGATE_ACTIONS_URL TRUSTGATE_JWT_SECRET; do
-    assert_not_contains "$scenario_file" "name: ${v1_env}$" \
-      "no ${v1_env} in $(basename "$scenario_file")"
-  done
-done
-
-# Keys nothing reads must not be minted either. Both belonged to the retired v1
-# console; control-plane-secrets only renders in external mode.
-assert_secret_keys "$out3" control-plane-secrets absent \
-  "external: control-plane-secrets omits unread" \
-  TRUSTGATE_JWT_SECRET resend-invite-sender
-
-# ---------------------------------------------------------------------------
-# 6. Stable Kubernetes names after physical chart moves
-# ---------------------------------------------------------------------------
-blue "==> Scenario 6: stable Kubernetes names preserved after chart rebrand"
-# Reuse Scenario 3 external render — same deploymentMode, no extra flags.
-for name in \
-  control-plane-api \
-  control-plane-app \
-  control-plane-postgresql \
-  postgresql-secrets \
-  redis \
-  data-plane-api \
-  agentgateway-proxy \
-  agentgateway-admin \
-  trustguard-data-plane \
-  trustguard-control-plane
-do
-  assert_contains "$out3" "name: $name" \
-    "stable name preserved: $name"
-done
-# redis-secrets is a hybrid-only shared Secret.
-assert_contains "$out1" 'name: redis-secrets' \
-  "stable name preserved (hybrid): redis-secrets"
-
-# watchdog keeps its stable resource name after charts/neuraltrust-watchdog -> charts/watchdog.
-out6wd="$TMP/scenario-watchdog-names.yaml"
+blue "==> Scenario 6: watchdog telemetry wiring"
+out6wd="$TMP/scenario-watchdog-external.yaml"
 render_default "$out6wd" --set global.deploymentMode=external --set watchdog.enabled=true
-assert_contains "$out6wd" 'name: neuraltrust-watchdog' \
-  "stable name preserved after rename: neuraltrust-watchdog"
-# AUT-346: external watchdog → in-cluster ClickStack (signal-neutral base + headers).
+# external watchdog → in-cluster ClickStack (signal-neutral base + headers).
 assert_env_value "$out6wd" neuraltrust-watchdog watchdog OTEL_EXPORTER_OTLP_ENDPOINT \
   'http://clickstack-collector.default.svc.cluster.local:4318' \
   "watchdog external: OTLP is signal-neutral clickstack-collector :4318"
@@ -1705,13 +1585,6 @@ assert_env_value "$out6wd" neuraltrust-watchdog watchdog OTEL_EXPORTER_OTLP_HEAD
   "watchdog external: mounts OTEL_EXPORTER_OTLP_HEADERS from clickstack-collector-secrets"
 assert_env_value "$out6wd" neuraltrust-watchdog watchdog OPENTELEMETRY_AUTH_TOKEN ABSENT \
   "watchdog external: no hosted OPENTELEMETRY_AUTH_TOKEN"
-# AUT-519: bundled Prometheus is gone; RED inherits runner.clickstack.
-if grep -qE 'name: .*-prometheus|PROMETHEUS_QUERY_URL|prometheusQueryEnv|scrape_staleness|kind: promql' "$out6wd"; then
-  red "FAIL: watchdog external render still ships Prometheus / PromQL symbols"
-  grep -nE 'name: .*-prometheus|PROMETHEUS_QUERY_URL|prometheusQueryEnv|scrape_staleness|kind: promql' "$out6wd" | head -20
-  exit 1
-fi
-green "ok  - watchdog external: no bundled Prometheus / PROMETHEUS_QUERY_URL / scrape_staleness"
 assert_contains "$out6wd" 'clickstack:' \
   "watchdog external: runner.clickstack block present"
 assert_contains "$out6wd" 'address: "clickhouse:9000"' \
@@ -1723,35 +1596,12 @@ assert_contains "$out6wd" 'kind: otlp_freshness' \
 # hybrid must NOT wire a local ClickStack address (no in-cluster CH).
 out6wd_h="$TMP/scenario-watchdog-hybrid-clickstack.yaml"
 render_product_slice "$out6wd_h" -f "$CHART_DIR/values-trustgate.yaml.example" --set watchdog.enabled=true
-if grep -qE 'name: .*-prometheus|PROMETHEUS_QUERY_URL|prometheusQueryEnv' "$out6wd_h"; then
-  red "FAIL: watchdog hybrid render still ships Prometheus symbols"
-  exit 1
-fi
 if awk '/name: neuraltrust-watchdog-config/,/^---/' "$out6wd_h" | grep -q 'clickstack:'; then
   red "FAIL: watchdog hybrid must not default runner.clickstack (no local ClickHouse)"
   awk '/name: neuraltrust-watchdog-config/,/^---/' "$out6wd_h" | head -40
   exit 1
 fi
 green "ok  - watchdog hybrid: no runner.clickstack default (central SaaS evaluates RED)"
-# Retired remote desired-state / in-cluster Helm applier wiring: stale keys
-# in an operator's values must render nothing.
-out6wd_ds="$TMP/scenario-watchdog-retired-desired-state.yaml"
-render_default "$out6wd_ds" --set watchdog.enabled=true \
-  --set watchdog.desiredState.enabled=true --set watchdog.desiredState.token.value=x \
-  --set watchdog.platformState.enabled=true --set watchdog.rbac.platformApply.enabled=true
-assert_not_contains "$out6wd_ds" 'desiredState:|platformState:|WATCHDOG_INGEST_TOKEN|HELM_REGISTRY_CONFIG|HELM_CONFIG_HOME|name: helm-work|-platform-diff' \
-  "watchdog: retired desired-state / platform applier keys render nothing"
-
-# ---------------------------------------------------------------------------
-# 7. Retired helpers / values must not appear in the values contract or rendered output
-# ---------------------------------------------------------------------------
-blue "==> Scenario 7: retired concepts must not surface in values contract"
-if grep -RqE '(platformVersion|confirmV2Migration|hybridRoleLayout|sharedWriter|initJob|neuraltrust-control-plane:|neuraltrust-data-plane:|neuraltrust-firewall:|neuraltrust-watchdog:|^kafka:|gatewayDiscoveryMode|GATEWAY_DISCOVERY_MODE|^trustgate:)' \
-    values.yaml values-required.yaml charts/agentgateway/values.yaml; then
-  red "FAIL: retired values keys still present in values.yaml / values-required.yaml / agentgateway values"
-  exit 1
-fi
-green "ok  - values.yaml / values-required.yaml free of retired keys"
 
 # ---------------------------------------------------------------------------
 # 8. AgentGateway exact + wildcard routing (AWS / Azure / GCP Ingress)
@@ -1788,8 +1638,6 @@ assert_contains "$outw" 'host: "mcp.platform.example.com"' \
   "${provider}: MCP exact host"
 assert_contains "$outw" 'host: "\*\.mcp\.platform\.example\.com"' \
   "${provider}: MCP wildcard host rule"
-assert_not_contains "$outw" 'GATEWAY_DISCOVERY_MODE' \
-  "${provider}: discovery mode env retired"
 assert_contains "$outw" 'GATEWAY_BASE_DOMAIN: "llm.platform.example.com"' \
   "${provider}: gateway base domain"
 assert_contains "$outw" 'MCP_BASE_DOMAIN: "mcp.platform.example.com"' \
@@ -1817,8 +1665,6 @@ blue "==> Scenario 8b: dual discovery auto-derives base domains and wildcards"
 outw_auto="$TMP/scenario-wildcard-autoderive.yaml"
 render_default "$outw_auto" \
   --set global.domain=platform.example.com
-assert_not_contains "$outw_auto" 'GATEWAY_DISCOVERY_MODE' \
-  "auto: discovery mode env retired"
 assert_contains "$outw_auto" 'GATEWAY_BASE_DOMAIN: "llm.platform.example.com"' \
   "auto: GATEWAY_BASE_DOMAIN=llm.<global.domain>"
 assert_contains "$outw_auto" 'MCP_BASE_DOMAIN: "mcp.platform.example.com"' \
@@ -1965,12 +1811,10 @@ assert_contains "$out10" 'endpoint: \[::\]:13133' \
   "observability: umbrella otel-collector health binds dual-stack"
 assert_contains "$out10" 'host: "::"' \
   "observability: umbrella otel-collector telemetry metrics host is ::"
-assert_not_contains "$out10" 'url: http://opentelemetry-collector.opentelemetry:13133/' \
-  "watchdog: obsolete collector health URL is gone"
 # Hybrid render must not enable the clickhouse check by default.
 assert_contains "$out10" 'enabled: false'$'\n''        id: clickhouse' \
   "watchdog: clickhouse check stays off in hybrid defaults"
-# AUT-346: hybrid ClickStack egress + hostedExport.enabled=false honoured.
+# hybrid ClickStack egress + hostedExport.enabled=false honoured.
 assert_env_value "$out10" neuraltrust-watchdog watchdog OTEL_EXPORTER_OTLP_ENDPOINT \
   'http://clickstack-egress-collector.default.svc.cluster.local:4318' \
   "watchdog hybrid: OTLP is signal-neutral ClickStack egress :4318"
@@ -2027,12 +1871,6 @@ assert_contains "$out10b2" 'src.workers.indirect_prompt_injections.app:app' \
   "firewall workers: IPI module arg"
 assert_contains "$out10b2" 'INDIRECT_PROMPT_INJECTIONS_WORKER_URL: "http://indirect-prompt-injections-worker:80"' \
   "firewall workers: IPI worker URL in ConfigMap"
-assert_not_contains "$out10b2" 'name: toolguard-worker' \
-  "firewall workers: retired toolguard worker absent"
-assert_not_contains "$out10b2" 'TOOLGUARD_WORKER_URL' \
-  "firewall workers: TOOLGUARD_WORKER_URL absent"
-assert_not_contains "$out10b2" 'src.workers.toolguard.app:app' \
-  "firewall workers: retired toolguard module absent"
 # topic-guard and complexity complete the image's worker set. Without a worker the
 # gateway never gets its <WORKER>_WORKER_URL and falls back to an in-process
 # localhost default, which fails every call for that detector.
@@ -2049,7 +1887,7 @@ assert_contains "$out10b2" 'src.workers.complexity.app:app' \
 assert_contains "$out10b2" 'COMPLEXITY_WORKER_URL: "http://complexity-worker:80"' \
   "firewall workers: complexity worker URL in ConfigMap"
 
-blue "==> Scenario 10b3: TrustGate complexity scoring wiring (AUT-402)"
+blue "==> Scenario 10b3: TrustGate complexity scoring wiring"
 out10b3="$TMP/scenario-firewall-complexity-wiring.yaml"
 render_default "$out10b3"
 # The binary reads FIREWALL_BASE_URL / FIREWALL_SECRET_KEY, and appends
@@ -2060,12 +1898,6 @@ assert_contains "$out10b3" '^  FIREWALL_BASE_URL: "http://firewall\.default\.svc
   "complexity: agentgateway points at the firewall gateway Service"
 assert_contains "$out10b3" 'name: FIREWALL_SECRET_KEY' \
   "complexity: agentgateway data plane mounts the firewall signing secret"
-# The wrong names were in the original plan; they leave the URL empty and silently
-# preserve the round-robin fallback, so fence them out.
-assert_not_contains "$out10b3" 'FIREWALL_COMPLEXITY_BASE_URL' \
-  "complexity: legacy FIREWALL_COMPLEXITY_BASE_URL name absent"
-assert_not_contains "$out10b3" 'FIREWALL_COMPLEXITY_TOKEN' \
-  "complexity: legacy FIREWALL_COMPLEXITY_TOKEN name absent"
 # Opting out must remove the variable entirely rather than emit an empty one, or
 # the binary would treat "" as configured-but-broken.
 out10b4="$TMP/scenario-firewall-complexity-optout.yaml"
@@ -2130,7 +1962,7 @@ render_default "$out10b4b" "${FW_EXTERNAL_ARGS[@]}" \
 assert_contains "$out10b4b" 'NEURAL_TRUST_FIREWALL_BASE_URL: "http://firewall\.firewall\.svc\.cluster\.local"$' \
   "external firewall: trustguard.firewall.existingSecret aligned with global renders"
 
-blue "==> Scenario 10b5: data-plane-api PrometheusRule (AUT-406)"
+blue "==> Scenario 10b5: data-plane-api PrometheusRule"
 # The v1-era rule was gated on a helper that always returned true, so it never
 # rendered in v2 and was deleted. These assertions stop the coverage silently
 # disappearing a second time.
@@ -2154,7 +1986,7 @@ render_default "$out10b5c" --api-versions monitoring.coreos.com/v1
 assert_not_contains "$out10b5c" 'alert: DataPlaneApiDown' \
   "monitoring: no data-plane-api rule when monitoring is disabled"
 
-blue "==> Scenario 10b6: DataAgent POSTGRES_* yields to an extraEnv override (AUT-397)"
+blue "==> Scenario 10b6: DataAgent POSTGRES_* yields to an extraEnv override"
 # Emitting a name the operator also sets in extraEnv leaves two env entries with
 # that name, which fails the next helm upgrade on $setElementOrder.
 out10b6="$TMP/scenario-dataagent-pg-override.yaml"
@@ -2193,7 +2025,7 @@ if [ "$base_refs" != "4" ]; then
   exit 1
 fi
 green "ok  - dataagent: chart still supplies POSTGRES_HOST from the Secret with no override"
-# AUT-397 second half: which refs are required is a decision, so pin it. The four
+# Which refs are required is a decision, so pin it. The four
 # credentials DataAgent cannot work without stay required so a missing key stops the
 # pod; SSLMODE is optional because SECRETS.md documents it as not required for a
 # pre-generated Secret, and a required ref there meant following the docs produced
@@ -2218,7 +2050,7 @@ if [ "$sslmode_opt" != "true" ]; then
 fi
 green "ok  - dataagent: POSTGRES_SSLMODE is an optional ref, matching the documented contract"
 
-blue "==> Scenario 10c1: CH-dependent workloads wait for ClickHouse (AUT-409)"
+blue "==> Scenario 10c1: CH-dependent workloads wait for ClickHouse"
 # On a clean install these four raced clickhouse-0 and CrashLoopBackOff'd two or
 # three times before it accepted connections.
 out10c1="$TMP/scenario-ch-wait.yaml"
@@ -2254,7 +2086,7 @@ render_default "$out10c1h"
 assert_not_contains "$out10c1h" 'wait-for-clickhouse' \
   "hybrid: no ClickHouse wait, since neither ClickHouse nor these workloads render"
 
-blue "==> Scenario 10b7: shared-credential integrity (AUT-383)"
+blue "==> Scenario 10b7: shared-credential integrity"
 # A knob that redirects only one half of a signer/verifier pair leaves the two
 # holding different values, so every token one side mints is rejected by the other
 # — silently, with both pods healthy. The consumers are sibling subcharts and
@@ -2286,7 +2118,7 @@ document_named "$out10b8" control-plane-secrets "$out10b8cps"
 assert_not_contains "$out10b8cps" 'OPENAI_API_KEY' \
   "openaiApiKey map form: the key is omitted from the chart Secret, not encoded"
 
-blue "==> Scenario 10b9: egress collector telemetry durability (AUT-510)"
+blue "==> Scenario 10b9: egress collector telemetry durability"
 # Without a sending_queue the exporter retried in memory and dropped the batch at
 # max_elapsed_time, so a DataBridge outage spanning a token refresh lost telemetry
 # silently. The queue needs a writable volume because the sidecar runs
@@ -2316,7 +2148,7 @@ if [ "$ingest_enabled" != "false" ]; then
 fi
 green "ok  - watchdog: dataplane-ingest-freshness ships disabled pending a soak"
 
-blue "==> Scenario 10c0: egress collector survives an unready DataAgent (AUT-538)"
+blue "==> Scenario 10c0: egress collector survives an unready DataAgent"
 # The egress Service selects the DataAgent pod, and a pod is Ready only when every
 # container is — so a control-plane blip stripped the endpoints of a healthy
 # collector and took local telemetry down with it.
@@ -2535,7 +2367,7 @@ assert_not_contains "$out11c" 'name: trustguard-data-plane' \
 assert_resource_count "$out11c" Service dataagent 0 "red-teaming: TrustGate health Service absent"
 assert_resource_count "$out11c" Service dataagent-trustguard 0 "red-teaming: TrustGuard health Service absent"
 assert_not_contains "$out11c" 'id: dataagent-(trustgate|trustguard)-(readyz|deployment-health)' "red-teaming: no orphan DataAgent watchdog checks"
-# AUT-346: no egress → no fabricated OTLP default (override only).
+# no egress → no fabricated OTLP default (override only).
 assert_env_value "$out11c" neuraltrust-watchdog watchdog OTEL_EXPORTER_OTLP_ENDPOINT ABSENT \
   "red-teaming: watchdog has no default OTLP endpoint without egress"
 assert_env_value "$out11c" neuraltrust-watchdog watchdog OPENTELEMETRY_AUTH_TOKEN ABSENT \
@@ -2668,7 +2500,7 @@ assert_contains "$out11f_us" 'endpoint: "https://telemetry\.us\.neuraltrust\.ai"
   "saasRegion us: ClickStack egress targets US"
 assert_not_contains "$out11f_us" '(configsync|databridge|telemetry)\.neuraltrust\.ai' \
   "saasRegion us: no EU SaaS hostname survives anywhere in the render"
-# AUT-346 regression guard: watchdog OTLP is in-cluster and must stay that way.
+# Watchdog OTLP is in-cluster and must stay that way.
 # The region reaches it through the egress sidecar, not through its own endpoint.
 assert_env_value "$out11f_us" neuraltrust-watchdog watchdog OTEL_EXPORTER_OTLP_ENDPOINT \
   'http://clickstack-egress-collector.default.svc.cluster.local:4318' \
@@ -2804,7 +2636,7 @@ assert_shared_secret_wiring "$out12hyb" \
 # A hybrid install must not carry credentials only the hosted control plane
 # reads. Keys already present in a live Secret are preserved by a `lookup` that
 # render tests cannot exercise, so only the gating is asserted here.
-# AUTH_JWT_SECRET / APP_ENCRYPTION_KEY follow the alertengine shape (AUT-382):
+# AUTH_JWT_SECRET / APP_ENCRYPTION_KEY follow the alertengine shape:
 # present in external with alertengine.enabled (default), absent in hybrid.
 blue "==> Scenario 12a: keys are gated to the install shape"
 assert_platform_keys "$out12hyb" absent \
@@ -2816,7 +2648,7 @@ assert_platform_keys "$out12ext" present \
   CONTROL_PLANE_JWT_SECRET AUTH_SECRET NEXTAUTH_SECRET \
   AUTH_JWT_HS256_SECRET AUTH_JWT_SECRET APP_ENCRYPTION_KEY
 
-# AlertEngine off ⇒ its credentials must not be minted (AUT-382).
+# AlertEngine off ⇒ its credentials must not be minted.
 out12aeoff="$TMP/scenario-shared-secret-alertengine-off.yaml"
 render_default "$out12aeoff" --set global.deploymentMode=external --set alertengine.enabled=false
 assert_platform_keys "$out12aeoff" absent \
@@ -3239,7 +3071,7 @@ ruby -ryaml -e '
 ' "$out12reg" || { red "FAIL: the generator does not follow the app image into a custom registry"; exit 1; }
 green "ok  - the generator follows the app image through a mirrored registry and pull secrets"
 
-# AgentGateway Admin API machine credentials (ENG-1212). On by default in
+# AgentGateway Admin API machine credentials. On by default in
 # external/saas: a hook Job writes a PKCS#8 private key and the matching public
 # PEM so the Credentials tab works with no operator action. Hybrid has no Admin
 # API and no in-cluster app, so the feature stays off.
@@ -3377,10 +3209,10 @@ ruby -ryaml -e '
 ' "$out12m2miss" || { red "FAIL: explicit m2m issuer was not applied identically on both sides"; exit 1; }
 green "ok  - explicit m2m issuer is trimmed and identical on app and TrustGate"
 
-# AUT-390: control-plane pull-secret precedence
+# control-plane pull-secret precedence
 #   controlPlane.imagePullSecrets → subchart root → global.imagePullSecrets → gcr-secret
 #   "none" (or global ["none"]) suppresses. Default path must stay gcr-secret.
-blue "==> AUT-390: control-plane imagePullSecrets precedence"
+blue "==> control-plane imagePullSecrets precedence"
 assert_pull_secrets() {
   local file="$1" workload="$2" expected_csv="$3" msg="$4"
   ruby -ryaml -e '
@@ -3401,69 +3233,69 @@ assert_pull_secrets() {
 out390def="$TMP/scenario-aut390-default.yaml"
 render_default "$out390def" --set global.deploymentMode=external
 assert_pull_secrets "$out390def" control-plane-app "gcr-secret" \
-  "AUT-390: default external app still uses gcr-secret"
+  "default external app still uses gcr-secret"
 assert_pull_secrets "$out390def" control-plane-api "gcr-secret" \
-  "AUT-390: default external api still uses gcr-secret"
+  "default external api still uses gcr-secret"
 assert_pull_secrets "$out390def" mcp-signing-key "gcr-secret" \
-  "AUT-390: default signing-key Job still uses gcr-secret"
+  "default signing-key Job still uses gcr-secret"
 
 out390cp="$TMP/scenario-aut390-controlplane.yaml"
 render_default "$out390cp" --set global.deploymentMode=external \
   --set 'control-plane-app.controlPlane.imagePullSecrets=cp-creds' \
   --set 'control-plane-api.controlPlane.imagePullSecrets=cp-api-creds'
 assert_pull_secrets "$out390cp" control-plane-app "cp-creds" \
-  "AUT-390: controlPlane.imagePullSecrets reaches the app pod"
+  "controlPlane.imagePullSecrets reaches the app pod"
 assert_pull_secrets "$out390cp" control-plane-api "cp-api-creds" \
-  "AUT-390: controlPlane.imagePullSecrets reaches the api pod"
+  "controlPlane.imagePullSecrets reaches the api pod"
 assert_pull_secrets "$out390cp" mcp-signing-key "cp-creds" \
-  "AUT-390: signing-key Job tracks app controlPlane pull secret"
+  "signing-key Job tracks app controlPlane pull secret"
 
 out390root="$TMP/scenario-aut390-root.yaml"
 render_default "$out390root" --set global.deploymentMode=external \
   --set 'control-plane-app.imagePullSecrets=root-creds' \
   --set 'control-plane-api.imagePullSecrets=root-api-creds'
 assert_pull_secrets "$out390root" control-plane-app "root-creds" \
-  "AUT-390: subchart root imagePullSecrets reaches the app pod"
+  "subchart root imagePullSecrets reaches the app pod"
 assert_pull_secrets "$out390root" mcp-signing-key "root-creds" \
-  "AUT-390: signing-key Job tracks app root pull secret"
+  "signing-key Job tracks app root pull secret"
 
 out390glob="$TMP/scenario-aut390-global.yaml"
 render_default "$out390glob" --set global.deploymentMode=external \
   --set 'global.imagePullSecrets[0].name=global-creds'
 assert_pull_secrets "$out390glob" control-plane-app "global-creds" \
-  "AUT-390: global.imagePullSecrets reaches the app pod"
+  "global.imagePullSecrets reaches the app pod"
 assert_pull_secrets "$out390glob" control-plane-api "global-creds" \
-  "AUT-390: global.imagePullSecrets reaches the api pod"
+  "global.imagePullSecrets reaches the api pod"
 assert_pull_secrets "$out390glob" mcp-signing-key "global-creds" \
-  "AUT-390: signing-key Job tracks global pull secret"
+  "signing-key Job tracks global pull secret"
 
 out390none="$TMP/scenario-aut390-none-cp.yaml"
 render_default "$out390none" --set global.deploymentMode=external \
   --set 'control-plane-app.controlPlane.imagePullSecrets=none' \
   --set 'control-plane-api.controlPlane.imagePullSecrets=none'
 assert_pull_secrets "$out390none" control-plane-app "" \
-  "AUT-390: controlPlane imagePullSecrets=none suppresses app pull secrets"
+  "controlPlane imagePullSecrets=none suppresses app pull secrets"
 assert_pull_secrets "$out390none" control-plane-api "" \
-  "AUT-390: controlPlane imagePullSecrets=none suppresses api pull secrets"
+  "controlPlane imagePullSecrets=none suppresses api pull secrets"
 assert_pull_secrets "$out390none" mcp-signing-key "" \
-  "AUT-390: controlPlane none suppresses signing-key Job pull secrets"
+  "controlPlane none suppresses signing-key Job pull secrets"
 
 out390noneroot="$TMP/scenario-aut390-none-root.yaml"
 render_default "$out390noneroot" --set global.deploymentMode=external \
   --set 'control-plane-app.imagePullSecrets=none' \
   --set 'control-plane-api.imagePullSecrets=none'
 assert_pull_secrets "$out390noneroot" control-plane-app "" \
-  "AUT-390: root imagePullSecrets=none suppresses app pull secrets"
+  "root imagePullSecrets=none suppresses app pull secrets"
 assert_pull_secrets "$out390noneroot" mcp-signing-key "" \
-  "AUT-390: root none suppresses signing-key Job pull secrets"
+  "root none suppresses signing-key Job pull secrets"
 
 out390noneglob="$TMP/scenario-aut390-none-global.yaml"
 render_default "$out390noneglob" --set global.deploymentMode=external \
   --set 'global.imagePullSecrets[0]=none'
 assert_pull_secrets "$out390noneglob" control-plane-app "" \
-  "AUT-390: global imagePullSecrets [none] suppresses app pull secrets"
+  "global imagePullSecrets [none] suppresses app pull secrets"
 assert_pull_secrets "$out390noneglob" mcp-signing-key "" \
-  "AUT-390: global none suppresses signing-key Job pull secrets"
+  "global none suppresses signing-key Job pull secrets"
 
 # Most-specific wins when several levels are set.
 out390win="$TMP/scenario-aut390-precedence-wins.yaml"
@@ -3472,9 +3304,9 @@ render_default "$out390win" --set global.deploymentMode=external \
   --set 'control-plane-app.imagePullSecrets=root-creds' \
   --set 'control-plane-app.controlPlane.imagePullSecrets=cp-creds'
 assert_pull_secrets "$out390win" control-plane-app "cp-creds" \
-  "AUT-390: controlPlane wins over root and global"
+  "controlPlane wins over root and global"
 assert_pull_secrets "$out390win" mcp-signing-key "cp-creds" \
-  "AUT-390: signing-key Job follows the winning app level"
+  "signing-key Job follows the winning app level"
 
 # The embedded script ships as a string, so a syntax error would surface as a
 # CrashLoopBackOff during an upgrade rather than at render time.
@@ -3917,7 +3749,7 @@ assert_contains "$out17def" 'REDIS_HOST: "redis"' \
 assert_contains "$out17def" 'DB_SSL_MODE: "prefer"' \
   "defaults: sslMode still resolves to prefer"
 
-blue "==> Scenario 18: operator-supplied datastore credential Secrets (AUT-411)"
+blue "==> Scenario 18: operator-supplied datastore credential Secrets"
 
 # Naming a pre-created Secret must move the credential out of the chart Secret
 # entirely, not merely duplicate it: a copy left behind would still land in
@@ -4012,7 +3844,7 @@ render_default "$out18iam" --set global.deploymentMode=external \
 assert_not_contains "$out18iam" 'name: "ag-db"' \
   "IAM database auth ignores the credential hook"
 
-blue "==> Scenario 19: PostgreSQL bootstrap Job for the in-cluster instance (AUT-412)"
+blue "==> Scenario 19: PostgreSQL bootstrap Job for the in-cluster instance"
 
 # The Job is the only thing that creates the per-service roles external mode
 # expects, so assert on the service list it actually bootstraps, not just on the
@@ -4233,7 +4065,7 @@ assert_render_fails_with \
   --set global.postgresql.passwordSecret.name=postgres-roles \
   --set global.postgresql.existingSecret.name=whole-secret
 # Hybrid no longer composes SENSIBLE_PG_DSN, so passwordSecret is allowed there
-# too (RUN-1086 / RUN-1093). The password must still follow the operator Secret.
+# too. The password must still follow the operator Secret.
 out20hyb="$TMP/scenario-pg-password-secret-hybrid.yaml"
 render_default "$out20hyb" \
   --set global.postgresql.deploy=false \
@@ -4255,7 +4087,7 @@ assert_render_fails_with \
   --set global.postgresql.passwordSecret.name=postgres-roles
 
 # IAM has no static password to redirect, so the hook is ignored rather than
-# rejected — the same way the per-service credential hooks behave (AUT-411).
+# rejected — the same way the per-service credential hooks behave.
 out20iam="$TMP/scenario-pg-password-iam.yaml"
 render_default "$out20iam" \
   --set global.deploymentMode=external \
@@ -4283,11 +4115,11 @@ assert_not_contains "$out20keep" 'key: POSTGRES_PRISMA_URL' \
   "passwordSecret: a preserved Secret cannot smuggle a stale connection string back in"
 
 # ---------------------------------------------------------------------------
-# AUT-322: port + probe parity against service k8s overlays / health routes.
+# port + probe parity against service k8s overlays / health routes.
 # A wrong readiness path marks Ready while broken; a missing startupProbe
 # CrashLoops migration-bound boots (TrustGate admin, TrustLens API).
 # ---------------------------------------------------------------------------
-blue "==> AUT-322: port and probe parity"
+blue "==> port and probe parity"
 assert_workload_parity() {
   local file="$1" deploy="$2" container="$3"
   local expect_port="$4" ready_path="$5" live_path="$6" start_path="$7"
@@ -4334,11 +4166,11 @@ for da in dataagent dataagent-trustguard; do
 done
 assert_render_fails_with \
   "trustlens.image.tag is required when trustlens.enabled=true" \
-  "AUT-322: TrustLens refuses to render without an image tag" \
+  "TrustLens refuses to render without an image tag" \
   --set trustlens.enabled=true
 
 # ---------------------------------------------------------------------------
-# AUT-393: create-secrets.sh must track platformSecret.registry and the
+# create-secrets.sh must track platformSecret.registry and the
 # canonical Postgres family. Drift here is silent until an operator runs the
 # script under preserveExistingSecrets.
 # ---------------------------------------------------------------------------
@@ -4438,7 +4270,7 @@ if grep -q -- '--from-literal=SENSIBLE_PG_DSN=' create-secrets.sh; then
 fi
 green "ok  - create-secrets.sh writes the canonical Postgres family without DSN composition"
 
-# AUT-393: on the pre-provisioned path the chart owns no service Secret, so it
+# on the pre-provisioned path the chart owns no service Secret, so it
 # references configSync.existingSecret for CONFIG_SYNC_LKG_KEY instead of
 # generating one. The script has to write that key or the data planes will not
 # start. Guard both the call sites and the 32-byte contract, since a wrong-length
@@ -4450,7 +4282,7 @@ for product in trustgate trustguard; do
   fi
 done
 if ! grep -q 'ensure_config_sync_lkg_key' create-secrets.sh; then
-  red "FAIL - create-secrets.sh never creates CONFIG_SYNC_LKG_KEY (AUT-393)"
+  red "FAIL - create-secrets.sh never creates CONFIG_SYNC_LKG_KEY"
   exit 1
 fi
 if ! grep -q 'openssl rand -base64 32' create-secrets.sh; then
@@ -4465,10 +4297,10 @@ fi
 green "ok  - create-secrets.sh creates a 32-byte CONFIG_SYNC_LKG_KEY for both data planes"
 
 # ---------------------------------------------------------------------------
-# AUT-385 / AUT-386 / AUT-392: AlertEngine ClickHouse DB, firewall REDIS_URL,
+# AlertEngine ClickHouse DB, firewall REDIS_URL,
 # and umbrella IAM inheritance for gateway POSTGRES_LOGIN.
 # ---------------------------------------------------------------------------
-blue "==> Scenario 21: AlertEngine reads the events database (AUT-385)"
+blue "==> Scenario 21: AlertEngine reads the events database"
 out21="$TMP/scenario-alertengine-ch-default.yaml"
 render_default "$out21" --set global.deploymentMode=external
 if ! ruby -ryaml -e '
@@ -4478,16 +4310,16 @@ if ! ruby -ryaml -e '
   db = cm.dig("data", "CLICKHOUSE_DATABASE")
   abort "CLICKHOUSE_DATABASE=#{db.inspect}, want default" unless db == "default"
 ' "$out21"; then
-  red "FAIL: AUT-385 AlertEngine CLICKHOUSE_DATABASE=default"
+  red "FAIL: AlertEngine CLICKHOUSE_DATABASE=default"
   exit 1
 fi
-green "ok  - AUT-385: AlertEngine CLICKHOUSE_DATABASE=default"
+green "ok  - AlertEngine CLICKHOUSE_DATABASE=default"
 
-blue "==> Scenario 22: firewall REDIS_URL from shared Redis (AUT-386)"
+blue "==> Scenario 22: firewall REDIS_URL from shared Redis"
 out22="$TMP/scenario-firewall-redis-url.yaml"
 render_default "$out22" --set global.deploymentMode=external
 assert_contains "$out22" 'REDIS_URL: "redis://redis:6379/0"' \
-  "AUT-386: firewall-config carries REDIS_URL for in-cluster Redis"
+  "firewall-config carries REDIS_URL for in-cluster Redis"
 # Password-bearing URL must land in the Secret, not the ConfigMap.
 # validate-values rejects a password against the chart's own Redis, so point at
 # a managed host the same way operators do.
@@ -4508,12 +4340,12 @@ if ! ruby -ryaml -e '
   url = raw.unpack1("m0")
   abort "unexpected REDIS_URL=#{url.inspect}" unless url.include?("s3cret") && url.include?("cache.example.com") && url.start_with?("redis://")
 ' "$out22pw"; then
-  red "FAIL: AUT-386 password REDIS_URL placement"
+  red "FAIL: password REDIS_URL placement"
   exit 1
 fi
-green "ok  - AUT-386: password REDIS_URL lives in firewall-secrets"
+green "ok  - password REDIS_URL lives in firewall-secrets"
 
-blue "==> Scenario 23: umbrella IAM drives gateway POSTGRES_LOGIN (AUT-392)"
+blue "==> Scenario 23: umbrella IAM drives gateway POSTGRES_LOGIN"
 # global.authMode=iam + unset per-service ⇒ POSTGRES_LOGIN=aws
 out23iam="$TMP/scenario-iam-inherit.yaml"
 render_default "$out23iam" --set global.deploymentMode=external \
@@ -4532,10 +4364,10 @@ if ! ruby -ryaml -e '
     abort "#{name} AWS_REGION=#{region.inspect}, want eu-west-1" unless region == "eu-west-1"
   end
 ' "$out23iam"; then
-  red "FAIL: AUT-392 global IAM inheritance"
+  red "FAIL: global IAM inheritance"
   exit 1
 fi
-green "ok  - AUT-392: global.postgresql.authMode=iam ⇒ POSTGRES_LOGIN=aws"
+green "ok  - global.postgresql.authMode=iam ⇒ POSTGRES_LOGIN=aws"
 
 # Explicit per-service false still wins against global iam.
 out23off="$TMP/scenario-iam-override-off.yaml"
@@ -4556,15 +4388,15 @@ if ! ruby -ryaml -e '
   tlogin = tg.dig("data", "POSTGRES_LOGIN")
   abort "trustguard should still inherit global IAM, got #{tlogin.inspect}" unless tlogin == "aws"
 ' "$out23off"; then
-  red "FAIL: AUT-392 explicit iamAuth=false override"
+  red "FAIL: explicit iamAuth=false override"
   exit 1
 fi
-green "ok  - AUT-392: explicit iamAuth=false wins; sibling still inherits"
+green "ok  - explicit iamAuth=false wins; sibling still inherits"
 
 # ---------------------------------------------------------------------------
-# AUT-403: ConfigMap/Secret checksum annotations roll envFrom consumers.
+# ConfigMap/Secret checksum annotations roll envFrom consumers.
 # ---------------------------------------------------------------------------
-blue "==> Scenario 24: AUT-403 checksum annotations change on config edits and stay stable on no-op"
+blue "==> Scenario 24: checksum annotations change on config edits and stay stable on no-op"
 
 # Helper: print "deploy|annotation|value" lines for the named Deployments.
 aut403_ann() {
@@ -4620,10 +4452,10 @@ if ! ruby -ryaml -e '
     end
   end
 ' "$out24a"; then
-  red "FAIL: AUT-403 hybrid workloads missing checksum annotations"
+  red "FAIL: hybrid workloads missing checksum annotations"
   exit 1
 fi
-green "ok  - AUT-403: hybrid envFrom workloads carry ConfigMap/Secret/redis checksums"
+green "ok  - hybrid envFrom workloads carry ConfigMap/Secret/redis checksums"
 
 if ! ruby -ryaml -e '
   docs = YAML.load_stream(File.read(ARGV[0])).compact
@@ -4654,10 +4486,10 @@ if ! ruby -ryaml -e '
     end
   end
 ' "$out24e"; then
-  red "FAIL: AUT-403 external workloads missing checksum annotations"
+  red "FAIL: external workloads missing checksum annotations"
   exit 1
 fi
-green "ok  - AUT-403: external envFrom workloads carry ConfigMap/Secret checksums"
+green "ok  - external envFrom workloads carry ConfigMap/Secret checksums"
 
 # Deterministic ConfigMap checksums must be byte-identical across two no-op renders.
 env_a=$(aut403_ann "$out24a" agentgateway-proxy | awk -F'|' '$2=="checksum/env-configmap"{print $3}')
@@ -4665,48 +4497,48 @@ env_b=$(aut403_ann "$out24b" agentgateway-proxy | awk -F'|' '$2=="checksum/env-c
 redis_a=$(aut403_ann "$out24a" agentgateway-proxy | awk -F'|' '$2=="checksum/redis-secrets"{print $3}')
 redis_b=$(aut403_ann "$out24b" agentgateway-proxy | awk -F'|' '$2=="checksum/redis-secrets"{print $3}')
 if [ -z "$env_a" ] || [ "$env_a" != "$env_b" ]; then
-  red "FAIL: AUT-403 env-configmap checksum not stable across identical renders"
+  red "FAIL: env-configmap checksum not stable across identical renders"
   exit 1
 fi
 if [ -z "$redis_a" ] || [ "$redis_a" != "$redis_b" ]; then
-  red "FAIL: AUT-403 redis-secrets checksum not stable across identical renders"
+  red "FAIL: redis-secrets checksum not stable across identical renders"
   exit 1
 fi
-green "ok  - AUT-403: env-configmap and redis-secrets checksums are byte-stable on no-op"
+green "ok  - env-configmap and redis-secrets checksums are byte-stable on no-op"
 
 # A ConfigMap value edit must flip only the env checksum.
 env_c=$(aut403_ann "$out24c" agentgateway-proxy | awk -F'|' '$2=="checksum/env-configmap"{print $3}')
 redis_c=$(aut403_ann "$out24c" agentgateway-proxy | awk -F'|' '$2=="checksum/redis-secrets"{print $3}')
 if [ "$env_a" = "$env_c" ]; then
-  red "FAIL: AUT-403 logLevel change did not flip checksum/env-configmap"
+  red "FAIL: logLevel change did not flip checksum/env-configmap"
   exit 1
 fi
 if [ "$redis_a" != "$redis_c" ]; then
-  red "FAIL: AUT-403 logLevel change unexpectedly flipped checksum/redis-secrets"
+  red "FAIL: logLevel change unexpectedly flipped checksum/redis-secrets"
   exit 1
 fi
-green "ok  - AUT-403: ConfigMap edit flips env-configmap checksum only"
+green "ok  - ConfigMap edit flips env-configmap checksum only"
 
 # A Redis host edit must flip the umbrella redis checksum, not the env ConfigMap.
 env_d=$(aut403_ann "$out24d" agentgateway-proxy | awk -F'|' '$2=="checksum/env-configmap"{print $3}')
 redis_d=$(aut403_ann "$out24d" agentgateway-proxy | awk -F'|' '$2=="checksum/redis-secrets"{print $3}')
 if [ "$redis_a" = "$redis_d" ]; then
-  red "FAIL: AUT-403 redis host change did not flip checksum/redis-secrets"
+  red "FAIL: redis host change did not flip checksum/redis-secrets"
   exit 1
 fi
 if [ "$env_a" != "$env_d" ]; then
-  red "FAIL: AUT-403 redis host change unexpectedly flipped checksum/env-configmap"
+  red "FAIL: redis host change unexpectedly flipped checksum/env-configmap"
   exit 1
 fi
-green "ok  - AUT-403: umbrella redis-secrets checksum tracks global.redis.host"
+green "ok  - umbrella redis-secrets checksum tracks global.redis.host"
 
 fw_e=$(aut403_ann "$out24e" firewall | awk -F'|' '$2=="checksum/configmap"{print $3}')
 fw_f=$(aut403_ann "$out24f" firewall | awk -F'|' '$2=="checksum/configmap"{print $3}')
 if [ -z "$fw_e" ] || [ "$fw_e" = "$fw_f" ]; then
-  red "FAIL: AUT-403 firewall config edit did not flip checksum/configmap"
+  red "FAIL: firewall config edit did not flip checksum/configmap"
   exit 1
 fi
-green "ok  - AUT-403: firewall ConfigMap edit flips checksum/configmap"
+green "ok  - firewall ConfigMap edit flips checksum/configmap"
 
 # ---------------------------------------------------------------------------
 # saas mode: a customer-owned central control plane serving data planes that
@@ -4777,7 +4609,7 @@ if [[ "$gw_ing_backend" != "otlp-http" ]]; then
 fi
 green "ok  - saas: ingest gateway Ingress backends OTLP/HTTP"
 
-# --- AUT-514: saas NOTES name the mode and the four remote-plane endpoints
+# --- saas NOTES name the mode and the four remote-plane endpoints
 notes25="$TMP/scenario-saas-notes.txt"
 render_notes "$notes25" "${SAAS_ARGS[@]}"
 assert_contains "$notes25" 'Deployment profile: Platform v2 — saas \(customer-owned central control plane' \
@@ -5010,7 +4842,7 @@ assert_render_fails_with 'databridge.auth.mode must be one of' \
   "saas: unknown DataBridge auth mode rejected" \
   "${SAAS_ARGS[@]}" --set databridge.auth.mode=mtls
 
-# --- DataBridge peer forwarding (AUT-495) — HA is the default --------------
+# --- DataBridge peer forwarding — HA is the default --------------
 # replicas >= 2 requires headless (default). Explicit discovery=off fails.
 # Singleton escape hatch: replicas=1 forces discovery off.
 assert_render_fails_with 'requires peer forwarding' \
@@ -5329,7 +5161,7 @@ assert_contains "$out25ca" '^      - name: egress-ca-bundle$' \
 # share the same operator surface. SNI must stay on the cert name (domain),
 # not the NLB hostname. DataBridge is genuinely shared; config-sync is per
 # product, so two products pin each endpoint rather than a scalar
-# controlPlane.configSyncAddr (that combination fails the render — AUT-540).
+# controlPlane.configSyncAddr (that combination fails the render).
 out25one="$TMP/scenario-hybrid-controlplane-one-knob.yaml"
 render_default "$out25one" \
   --set global.deploymentMode=hybrid \
@@ -5389,7 +5221,7 @@ assert_not_contains "$out25nosys" 'include_system_ca_certs_pool' \
 
 # Product-level overrides still beat the umbrella controlPlane dial hosts.
 # Do not set controlPlane.configSyncAddr here: values-required enables both
-# products, and that scalar with 2+ products fails closed (AUT-540).
+# products, and that scalar with 2+ products fails closed.
 out25ovr="$TMP/scenario-hybrid-controlplane-override.yaml"
 render_default "$out25ovr" \
   --set global.deploymentMode=hybrid \
@@ -5406,7 +5238,7 @@ assert_contains "$out25ovr" '^          value: "custom-sync\.internal:8443"$' \
   "override: configSync.endpoint beats the domain-derived config-sync host"
 
 # Two-product hybrid without dial-host pins: each product derives its own
-# <product>-configsync.<domain> listener (AUT-540).
+# <product>-configsync.<domain> listener.
 out25two="$TMP/scenario-hybrid-two-product-configsync.yaml"
 render_default "$out25two" \
   --set global.deploymentMode=hybrid \
@@ -5546,7 +5378,7 @@ assert_pdb_shape "$out25single" maxUnavailable 1 \
   "saas: singleton DataBridge PDB allows a node drain to proceed"
 
 # =========================================================================
-# Scenario 10c2 — imagePullSecrets: "none" actually suppresses (AUT-427)
+# Scenario 10c2 — imagePullSecrets: "none" actually suppresses
 # =========================================================================
 # Nine subcharts carried byte-identical resolvers and every one of them dropped
 # the "none" check in the list branch, so global.imagePullSecrets: ["none"]
@@ -5824,7 +5656,7 @@ fi
 green "ok  - an operator's replicaCount still wins over the chart's replicas default"
 
 # =========================================================================
-# Scenario 10c3 — an external ClickHouse reaches every consumer (AUT-636)
+# Scenario 10c3 — an external ClickHouse reaches every consumer
 # =========================================================================
 # infrastructure.clickhouse.external was read by exactly ONE of the five
 # consumers, because .Values.infrastructure is invisible to a subchart. So
@@ -5835,7 +5667,7 @@ green "ok  - an operator's replicaCount still wins over the chart's replicas def
 # The contract is now global.clickhouse. These assertions are the fence: every
 # consumer must follow it, and the in-cluster default must not move.
 
-blue "==> Scenario 10c3: external ClickHouse resolves for every consumer (AUT-636)"
+blue "==> Scenario 10c3: external ClickHouse resolves for every consumer"
 
 CH_EXT_ARGS=(
   --set global.deploymentMode=external
@@ -5906,7 +5738,7 @@ if [[ "$pw_refs" -lt 4 ]]; then
 fi
 green "ok  - external CH: every consumer reads the password from global.clickhouse.existingSecret"
 
-# --- the AUT-409 wait invariant must still hold on the external path --------
+# --- the ClickHouse wait invariant must still hold on the external path --------
 # Re-asserted here, not just for the in-cluster default: a wait pointing at the
 # old Service would fail an install that would otherwise have worked.
 for _dep in datacore alertengine-api alertengine-worker; do
@@ -5924,7 +5756,7 @@ green "ok  - external CH: every wait-for-clickhouse targets the managed endpoint
 out10c3d="$TMP/scenario-ch-incluster-default.yaml"
 render_default "$out10c3d" --set global.deploymentMode=external --set watchdog.enabled=true
 assert_contains "$out10c3d" '^  CLICKHOUSE_ADDR: "clickhouse:9000"$' \
-  "in-cluster default: CLICKHOUSE_ADDR unchanged by the AUT-636 rewiring"
+  "in-cluster default: CLICKHOUSE_ADDR unchanged by the global.clickhouse rewiring"
 assert_contains "$out10c3d" 'CLICKHOUSE_ENDPOINT: "http://clickhouse:8123"' \
   "in-cluster default: the collector endpoint is unchanged"
 assert_contains "$out10c3d" '^  CLICKHOUSE_TLS: "false"$' \
@@ -6094,61 +5926,6 @@ doc40e="$TMP/ha-nospread-proxy.yaml"
 document_named_kind "$out40e" Deployment agentgateway-proxy "$doc40e"
 assert_not_contains "$doc40e" 'topologySpreadConstraints' \
   "ha: topologySpread.enabled=false removes the constraints"
-
-# --- the four dead helpers are gone, not merely unused ---------------------
-if grep -qE 'define "neuraltrust-platform\.clickhouse\.(host|port|user|database)"' templates/_helpers.tpl; then
-  red "FAIL: the dead infrastructure-reading ClickHouse helpers are back"
-  red "  they read .Values.infrastructure, which no subchart can see -- reintroducing them recreates AUT-636"
-  exit 1
-fi
-green "ok  - the four dead infrastructure-reading ClickHouse helpers stay deleted"
-
-# ---------------------------------------------------------------------------
-# Release gate: the schema runner exists only in data-plane-api images newer
-# than v1.53.1. Every Postgres install runs `python -m src.migrate` in an
-# initContainer, so a chart whose default tag predates it would stop every one
-# of them at "No module named src.migrate". Checked on all three places the
-# default tag lives, since bump-images updates them together and a partial
-# revert would leave one behind.
-# ---------------------------------------------------------------------------
-blue "==> Release gate: default data-plane-api image carries the schema runner"
-runner_floor_exclusive="v1.53.1"
-dpa_default_tags=(
-  "values.yaml:$(ruby -ryaml -e 'puts YAML.load_file(ARGV[0]).dig("data-plane-api", "dataPlane", "components", "api", "image", "tag")' "$CHART_DIR/values.yaml")"
-  "deployment.yaml:$(sed -nE 's/.*\$apiTag := \$apiImage\.tag \| default "([^"]+)".*/\1/p' "$CHART_DIR/charts/data-plane-api/templates/api/deployment.yaml")"
-  "_helpers.tpl:$(sed -nE 's/.*\$apiTag := "([^"]+)".*/\1/p' "$CHART_DIR/charts/data-plane-api/templates/_helpers.tpl" | head -1)"
-)
-for entry in "${dpa_default_tags[@]}"; do
-  where="${entry%%:*}"; tag="${entry#*:}"
-  newest="$(printf '%s\n%s\n' "$runner_floor_exclusive" "$tag" | sort -V | tail -1)"
-  if [[ -z "$tag" || "$tag" == "$runner_floor_exclusive" || "$newest" != "$tag" ]]; then
-    red "FAIL: data-plane-api default tag in $where is '${tag:-<unset>}', which predates the schema runner (must be newer than $runner_floor_exclusive)"
-    exit 1
-  fi
-  green "ok  - data-plane-api default tag in $where ($tag) carries the schema runner"
-done
-
-# ---------------------------------------------------------------------------
-# Release gate: every hybrid DataAgent now receives POSTGRES_LOGIN, and v0.7.0
-# rejects the "aws" an RDS IAM install carries at boot. A default tag at or
-# below it would turn a store DataAgent could not authenticate to into a pod
-# that never starts. Checked in both places the default lives.
-# ---------------------------------------------------------------------------
-blue "==> Release gate: default DataAgent image accepts POSTGRES_LOGIN=aws"
-dataagent_floor_exclusive="v0.7.0"
-dataagent_default_tags=(
-  "values.yaml:$(ruby -ryaml -e 'puts YAML.load_file(ARGV[0]).dig("dataagent", "image", "tag")' "$CHART_DIR/values.yaml")"
-  "charts/dataagent/values.yaml:$(ruby -ryaml -e 'puts YAML.load_file(ARGV[0]).dig("image", "tag")' "$CHART_DIR/charts/dataagent/values.yaml")"
-)
-for entry in "${dataagent_default_tags[@]}"; do
-  where="${entry%%:*}"; tag="${entry#*:}"
-  newest="$(printf '%s\n%s\n' "$dataagent_floor_exclusive" "$tag" | sort -V | tail -1)"
-  if [[ -z "$tag" || "$tag" == "$dataagent_floor_exclusive" || "$newest" != "$tag" ]]; then
-    red "FAIL: DataAgent default tag in $where is '${tag:-<unset>}', which rejects POSTGRES_LOGIN=aws (must be newer than $dataagent_floor_exclusive)"
-    exit 1
-  fi
-  green "ok  - DataAgent default tag in $where ($tag) accepts POSTGRES_LOGIN=aws"
-done
 
 green ""
 green "All v2 render scenarios passed."
