@@ -4,6 +4,17 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Added
+
+- **`global.imageRegistryScope: all` moves every image onto your mirror.**
+  `global.imageRegistry` already rewrote every image except the OpenTelemetry
+  collector (the hybrid egress sidecar and the self-hosted observability
+  collector), which needed two extra overrides. With `imageRegistryScope: all`,
+  those follow `imageRegistry` too. It is opt-in: an install that mirrors
+  everything else but still pulls the collector from the NeuralTrust registry
+  renders exactly as before. A collector repository you set yourself is never
+  rewritten.
+
 ## [v3.0.0] — 2026-10-07
 
 ### Removed
