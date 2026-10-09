@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v3.0.1] — 2026-10-09
+
 ### Added
 
 - **`global.imageRegistryScope: all` moves every image onto your mirror.**
