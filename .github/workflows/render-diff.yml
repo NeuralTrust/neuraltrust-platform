@@ -1,18 +1,13 @@
 name: Render diff
 
 # What an existing install would see change on upgrade. See scripts/render-diff.rb.
+# A required check, so it runs on every PR: a path filter would leave PRs that
+# skip it waiting forever.
 
 on:
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, labeled, unlabeled]
-    paths:
-      - "Chart.yaml"
-      - "values*.yaml"
-      - "*.yaml.example"
-      - "templates/**"
-      - "charts/**"
-      - "scripts/render-diff.rb"
 
 concurrency:
   group: render-diff-${{ github.ref }}
@@ -23,6 +18,7 @@ permissions:
 
 jobs:
   diff:
+    name: Render diff
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

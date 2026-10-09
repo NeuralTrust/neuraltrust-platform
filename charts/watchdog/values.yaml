@@ -13,7 +13,7 @@ enabled: false
 fullnameOverride: "neuraltrust-watchdog"
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/watchdog
-  tag: v0.34.1 # defaults to .Chart.AppVersion
+  tag: v0.35.3 # defaults to .Chart.AppVersion
   pullPolicy: IfNotPresent
 # imagePullSecrets: unset → global.imagePullSecrets → gcr-secret. Set to [] on
 # clusters that pull via IAM / Workload Identity and have no pull Secret.
