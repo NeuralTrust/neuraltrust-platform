@@ -1417,6 +1417,17 @@ its own `postgresql-secrets` — every consumer envFrom's that Secret directly.
 {{- $existing.name | default "postgresql-secrets" -}}
 {{- end }}
 
+{{/*
+"true" when the operator named their own Secret for the shared Postgres
+credential (global.postgresql.existingSecret.name). Consumers then reference it
+as required, so a missing or misspelt Secret stops the pod with an error naming
+it, instead of starting the pod without database settings.
+*/}}
+{{- define "neuraltrust-platform.v2.hybridPg.operatorSecret" -}}
+{{- $pg := default dict (default dict .Values.global).postgresql -}}
+{{- if (default dict $pg.existingSecret).name -}}true{{- end -}}
+{{- end }}
+
 {{- define "neuraltrust-platform.v2.hybridPg.chartManagedSecret" -}}
 {{- $global := default dict .Values.global -}}
 {{- $pg := default dict $global.postgresql -}}
