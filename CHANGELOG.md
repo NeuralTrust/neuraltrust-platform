@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v3.0.3] — 2026-10-13
+
 ### Fixed
 
 - **A missing Redis or PostgreSQL Secret of your own now stops the pod instead
