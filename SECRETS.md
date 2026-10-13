@@ -322,7 +322,7 @@ when convenient — it is validated at render time, `extraEnv` is not.
 | `postgresql-secrets` | `POSTGRES_DB` | Yes (if pre-generating) | Database name |
 | `postgresql-secrets` | `POSTGRES_SSLMODE` | No | `sslmode` for the connection. Referenced optionally everywhere, so omitting it falls back to each service's own libpq default rather than blocking a pod. |
 | `postgresql-secrets` | `POSTGRES_LOGIN` | No | `default`, `aws` (RDS IAM) or `azure` (Entra ID). The token-auth switch TrustGate, TrustGuard and DataAgent read; with `aws` or `azure` they reject a `POSTGRES_SSLMODE` weaker than `require` at boot. |
-| `postgresql-secrets` | `POSTGRES_AUTH_MODE` | No | `password` (default) or `iam`. Read by the Next.js app (`lib/db/postgresConfig.ts`). |
+| `postgresql-secrets` | `POSTGRES_AUTH_MODE` | No | `password` (default) or `iam`. `iam` only with `global.postgresql.deploy: false`: the chart's own PostgreSQL has no token login, so `authMode: iam` is ignored there and all three switches stay on password. Read by the Next.js app (`lib/db/postgresConfig.ts`). |
 | `postgresql-secrets` | `POSTGRES_CONNECTION_TYPE` | No | `postgres` (password) or `aurora` (IAM). Read by the Python API (`src/database.py`). |
 
 > **Pre-generating `postgresql-secrets` with a DataAgent on the Postgres store.**
