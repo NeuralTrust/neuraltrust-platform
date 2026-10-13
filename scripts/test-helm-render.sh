@@ -1102,6 +1102,112 @@ if ! helm template test "$CHART_DIR" --namespace default -f "$CHART_DIR/values-r
 fi
 green "ok  - AWS IAM guard: a password install with sslMode=prefer renders"
 
+# External and saas are not failed (that would break values files that render
+# today); the same trap is reported as a NOTES.txt warning, per gateway, and
+# only for a gateway that actually logs in with a token.
+for mode in external saas; do
+  notes_iam="$TMP/notes-$mode-aws-iam.txt"
+  render_notes "$notes_iam" "${aws_iam_args[@]}" --set global.deploymentMode=$mode
+  assert_contains "$notes_iam" 'TrustGate uses PostgreSQL IAM token auth with sslMode "prefer"' \
+    "AWS IAM warning: $mode TrustGate on default sslMode=prefer is warned about"
+  assert_contains "$notes_iam" 'TrustGuard uses PostgreSQL IAM token auth with sslMode "prefer"' \
+    "AWS IAM warning: $mode TrustGuard on default sslMode=prefer is warned about"
+done
+notes_iam="$TMP/notes-external-aws-iam-require.txt"
+render_notes "$notes_iam" "${aws_iam_args[@]}" --set global.deploymentMode=external \
+  --set global.postgresql.sslMode=require
+assert_not_contains "$notes_iam" '^Warnings' \
+  "AWS IAM warning: external with sslMode=require has nothing to warn about"
+notes_iam="$TMP/notes-external-aws-iam-mixed.txt"
+render_notes "$notes_iam" "${aws_iam_args[@]}" --set global.deploymentMode=external \
+  --set trustguard.database.iamAuth=false --set agentgateway.database.sslMode=verify-full
+assert_not_contains "$notes_iam" '^Warnings' \
+  "AWS IAM warning: a password gateway and a per-service verify-full gateway are not warned about"
+notes_iam="$TMP/notes-hybrid-default.txt"
+render_notes "$notes_iam"
+assert_contains "$notes_iam" 'NeuralTrust Platform has been deployed' \
+  "NOTES: renders for the default hybrid install"
+assert_not_contains "$notes_iam" '^Warnings' \
+  "NOTES: the default hybrid install has no warnings"
+
+# Both emitters of postgresql-secrets must agree on IAM: platform-secrets.yaml
+# (autoGenerateSecrets=true) and postgresql/secrets.yaml (false) used to decide
+# it differently, so deploy=true + authMode=iam produced a token login against
+# the chart's own Postgres from one and a password login from the other.
+pg_secret_data() {  # file -> the decoded postgresql-secrets data, sorted
+  ruby -ryaml -rbase64 -e '
+    d = []
+    YAML.load_stream(File.read(ARGV.fetch(0))) { |x| d << x if x.is_a?(Hash) }
+    s = d.find { |x| x["kind"] == "Secret" && x.dig("metadata", "name") == "postgresql-secrets" }
+    abort "postgresql-secrets not rendered" if s.nil?
+    (s["data"] || {}).sort.each { |k, v| puts "#{k}=#{Base64.decode64(v)}" }
+  ' "$1"
+}
+for shape in "in-cluster:--set global.postgresql.authMode=iam --set global.postgresql.password=pw-test" \
+             "managed:--set global.postgresql.deploy=false --set global.postgresql.host=pg.iam.example.com --set global.postgresql.authMode=iam --set global.postgresql.sslMode=require"; do
+  label="${shape%%:*}"
+  read -r -a args <<< "${shape#*:}"
+  for mode in hybrid external; do
+    out_auto="$TMP/pg-emitter-$label-$mode-auto.yaml"
+    out_fallback="$TMP/pg-emitter-$label-$mode-fallback.yaml"
+    render_default "$out_auto" --set global.deploymentMode=$mode "${args[@]}"
+    render_default "$out_fallback" --set global.deploymentMode=$mode "${args[@]}" \
+      --set global.autoGenerateSecrets=false
+    if ! diff <(pg_secret_data "$out_auto") <(pg_secret_data "$out_fallback") >/dev/null; then
+      red "FAIL: postgresql-secrets emitters disagree ($label, $mode)"
+      diff <(pg_secret_data "$out_auto") <(pg_secret_data "$out_fallback") | sed 's/PASSWORD=.*/PASSWORD=<redacted>/' | head -10
+      exit 1
+    fi
+    green "ok  - postgresql-secrets emitters agree ($label Postgres + authMode=iam, $mode)"
+  done
+done
+out_pg_incluster="$TMP/pg-emitter-in-cluster-hybrid-auto.yaml"
+assert_contains "$out_pg_incluster" 'POSTGRES_LOGIN: "ZGVmYXVsdA=="' \
+  "authMode=iam is ignored for the chart's own Postgres: POSTGRES_LOGIN stays default"
+assert_contains "$out_pg_incluster" 'POSTGRES_AUTH_MODE: "cGFzc3dvcmQ="' \
+  "authMode=iam is ignored for the chart's own Postgres: POSTGRES_AUTH_MODE stays password"
+assert_secret_key "$out_pg_incluster" postgresql-secrets present POSTGRES_PASSWORD \
+  "authMode=iam is ignored for the chart's own Postgres: it keeps its password"
+notes_iam="$TMP/notes-hybrid-iam-in-cluster.txt"
+render_notes "$notes_iam" --set global.postgresql.authMode=iam
+assert_contains "$notes_iam" 'authMode is iam, but the chart is deploying its own PostgreSQL' \
+  "authMode=iam with the chart's own Postgres is warned about"
+
+# global.irsa reaches every workload ServiceAccount. The ClickHouse backup,
+# DataBridge and ingest-gateway ones used to emit only their own annotations, so
+# the backup CronJob got no role and could not reach its bucket.
+sa_role() {  # file, serviceaccount -> its eks.amazonaws.com/role-arn, or empty
+  ruby -ryaml -e '
+    YAML.load_stream(File.read(ARGV.fetch(0))) do |d|
+      next unless d.is_a?(Hash) && d["kind"] == "ServiceAccount" && d.dig("metadata", "name") == ARGV.fetch(1)
+      puts (d.dig("metadata", "annotations") || {})["eks.amazonaws.com/role-arn"].to_s
+    end
+  ' "$1" "$2"
+}
+irsa_args=(
+  --set global.irsa.roleArn=arn:aws:iam::111111111111:role/nt-global
+  --set global.irsa.applyGlobally=true
+)
+out_sa_backup="$TMP/scenario-external-clickhouse-backup-irsa.yaml"
+render_default "$out_sa_backup" --set global.deploymentMode=external \
+  --set infrastructure.clickhouse.deploy=true \
+  --set clickhouse.backup.enabled=true --set clickhouse.backup.serviceAccount.create=true \
+  "${irsa_args[@]}"
+out_sa_saas="$TMP/scenario-saas-irsa.yaml"
+render_default "$out_sa_saas" --set global.deploymentMode=saas "${irsa_args[@]}" \
+  --set databridge.serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn=arn:aws:iam::111111111111:role/nt-databridge
+for pair in "$out_sa_backup:clickhouse-backup:nt-global" \
+            "$out_sa_saas:clickstack-ingest-gateway:nt-global" \
+            "$out_sa_saas:databridge:nt-databridge"; do
+  IFS=: read -r file sa want <<< "$pair"
+  got="$(sa_role "$file" "$sa")"
+  if [[ "$got" != "arn:aws:iam::111111111111:role/$want" ]]; then
+    red "FAIL: IRSA: ServiceAccount $sa should carry role $want, got '${got}'"
+    exit 1
+  fi
+  green "ok  - IRSA: ServiceAccount $sa carries role $want"
+done
+
 # Regression fence: an install that never configures an Azure identity must be
 # untouched by any of the above.
 out2c_none="$TMP/scenario-hybrid-no-cloud-identity.yaml"

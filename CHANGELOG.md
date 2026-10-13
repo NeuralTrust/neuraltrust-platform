@@ -4,6 +4,41 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Added
+
+- **Install warnings in the post-install notes.** Some values mistakes cannot
+  be made a render error without breaking a values file that installs today.
+  The chart now reports them after `helm install` / `helm upgrade`, under a
+  `Warnings` heading. Each warning says what will break and which key fixes it.
+  The release is still installed. The first warning covers external and saas
+  installs where TrustGate or TrustGuard uses PostgreSQL IAM token auth with an
+  `sslMode` weaker than `require`. Both refuse to start that way, and
+  `values.yaml` ships `sslMode: prefer`. Hybrid installs already fail the render
+  for this. A gateway on password auth is not warned about. A second warning
+  covers `global.postgresql.authMode: iam` with the chart's own PostgreSQL
+  (`deploy: true`), where IAM is ignored.
+
+### Fixed
+
+- **`global.irsa` and `global.azureIdentity` now reach the ClickHouse backup,
+  DataBridge and ClickStack ingest-gateway ServiceAccounts.** These three wrote
+  only their own `serviceAccount.annotations`. With `applyGlobally: true`, the
+  backup CronJob therefore got no cloud role and could not write to S3 unless
+  you annotated its ServiceAccount by hand. Annotations you set per service
+  still win. Installs with no global identity render unchanged.
+- **`authMode: iam` is ignored for the chart's own PostgreSQL in every Secret
+  path.** `values.yaml` documents that `global.postgresql.authMode: iam` applies
+  only with `deploy: false`. With `global.autoGenerateSecrets: true` (the
+  default) the chart still wrote an IAM login into `postgresql-secrets` for the
+  in-cluster database, with an empty password the server cannot start with. It now
+  writes the password login there, as `autoGenerateSecrets: false` already did.
+  Only installs that set `authMode: iam` with `deploy: true` see a change:
+  `POSTGRES_LOGIN` becomes `default`, `POSTGRES_AUTH_MODE` becomes `password`,
+  `POSTGRES_CONNECTION_TYPE` becomes `postgres`, and `POSTGRES_PASSWORD` is
+  generated. That combination could not start before, so no working install is
+  affected, and it now also prints a warning, since it is almost always a
+  missing `deploy: false`.
+
 ## [v3.0.3] — 2026-10-13
 
 ### Fixed

@@ -1020,8 +1020,32 @@ omitted Secret keys and the validation.
 */}}
 {{- define "neuraltrust-platform.postgresql.passwordIsExternal" -}}
 {{- $ref := (include "neuraltrust-platform.postgresql.passwordSecretRef" . | fromYaml) -}}
-{{- $pg := default dict (default dict .Values.global).postgresql -}}
-{{- if and $ref.name (ne ($pg.authMode | default "password") "iam") -}}true{{- end -}}
+{{- if and $ref.name (ne (include "neuraltrust-platform.postgresql.iam" .) "true") -}}true{{- end -}}
+{{- end }}
+
+{{/*
+Whether the shared `postgresql-secrets` describes an IAM (token) login.
+
+`global.postgresql.authMode`, falling back to the external control-plane overlay
+`control-plane-api.controlPlane.components.postgresql.authMode`, and only against
+a managed Postgres: the chart's own Postgres (`deploy`, default true) has no
+token path, so `authMode: iam` is ignored there, as values.yaml documents.
+
+Both emitters of `postgresql-secrets` (templates/platform-secrets.yaml, and
+templates/postgresql/secrets.yaml when autoGenerateSecrets is false) read this,
+so the same values cannot produce a different POSTGRES_LOGIN, auth mode or
+password depending on which one runs.
+*/}}
+{{- define "neuraltrust-platform.postgresql.iam" -}}
+{{- $globalPg := default dict (default dict .Values.global).postgresql -}}
+{{- $cpApiPg := default dict (default dict (default dict (default dict (index .Values "control-plane-api")).controlPlane).components).postgresql -}}
+{{- $deploy := true -}}
+{{- if hasKey $globalPg "deploy" -}}{{- $deploy = $globalPg.deploy -}}{{- end -}}
+{{- $authMode := "password" -}}
+{{- if and $globalPg.authMode (ne ($globalPg.authMode | toString) "") -}}{{- $authMode = $globalPg.authMode | toString | lower -}}
+{{- else if and $cpApiPg.authMode (ne ($cpApiPg.authMode | toString) "") -}}{{- $authMode = $cpApiPg.authMode | toString | lower -}}
+{{- end -}}
+{{- if and (eq $authMode "iam") (not $deploy) -}}true{{- end -}}
 {{- end }}
 
 {{/*
@@ -1247,10 +1271,8 @@ POSTGRES_LOGIN for the shared postgresql-secrets Secret:
   "aws"     — RDS/Aurora IAM token (AWS SDK default chain, IRSA)
   "azure"   — Entra ID token (azidentity DefaultAzureCredential)
 
-The caller passes its own IAM boolean rather than having this helper recompute
-one, because the two Secret emitters derive `$pgIam` differently and aligning
-them here would flip POSTGRES_LOGIN, POSTGRES_CONNECTION_TYPE and regenerate
-POSTGRES_PASSWORD on an existing install. That divergence is a separate fix.
+The caller passes its IAM boolean, which both Secret emitters take from
+`neuraltrust-platform.postgresql.iam`.
 
 Usage: {{ include "neuraltrust-platform.postgres.login" (dict "ctx" . "iam" $pgIam) }}
 */}}
@@ -1796,9 +1818,7 @@ Credential readiness for a merged instance cfg (dict "ctx" $ "cfg" $merged).
 {{- $preserve := dig "preserveExistingSecrets" false ($root.Values.global | default dict) -}}
 {{- $autoGenerate := eq (include "neuraltrust-platform.autoGenerateSecrets" $root) "true" -}}
 {{- $chartGeneratesDatabase := and $autoGenerate (not $preserve) -}}
-{{- $pgDeploy := true -}}
-{{- if hasKey $globalPg "deploy" -}}{{- $pgDeploy = $globalPg.deploy -}}{{- end -}}
-{{- $pgIam := and (eq ($globalPg.authMode | default "password" | toString | lower) "iam") (not $pgDeploy) -}}
+{{- $pgIam := eq (include "neuraltrust-platform.postgresql.iam" $root) "true" -}}
 {{- $fallbackSharedPgReady := and (not $autoGenerate) (not $preserve) (not ($globalPgExisting.name | default "")) (or ($globalPg.password | default "") $pgIam) -}}
 {{- $tokenReady := or $existingName $hasManagedToken (and $token $chartGeneratesDatabase) -}}
 {{- $storeBackend := (default dict $cfg.store).backend | default "" | toString | lower -}}
@@ -3141,8 +3161,11 @@ Custom corporate CA certificate trust helpers.
 Cloud identity helpers.
 
 `serviceAccount.annotationsBlock` is the one place the platform stamps a cloud
-identity onto a ServiceAccount, and it is called by twelve of the fifteen
-ServiceAccount templates — including every one that renders in hybrid.
+identity onto a ServiceAccount, and every workload ServiceAccount template calls
+it — one that emits its own annotations verbatim leaves that workload without
+the global role (the ClickHouse backup CronJob then cannot reach its bucket).
+The key-generation hook ServiceAccounts in _keygen.tpl only talk to the
+Kubernetes API and carry no cloud identity.
 Explicit per-service annotations are merged last so they always win over the
 global identity, which is what lets an operator run least-privilege per-service
 roles with applyGlobally=false.
