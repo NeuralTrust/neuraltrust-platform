@@ -519,6 +519,32 @@ assert_not_contains "$out1_pg_preserve" 'key: "POSTGRES_SSLMODE"' \
   "hybrid with preserveExistingSecrets: chart does not rename keys it does not own"
 assert_contains "$out1_pg_preserve" '- secretRef:'$'\n''            name: "postgresql-secrets"' \
   "hybrid with preserveExistingSecrets: Postgres envFrom passthrough is kept"
+
+# An operator-named Secret is required: a missing or misspelt one must stop the
+# pod with an error naming it, not start it without datastore settings. The
+# chart always renders its own redis-secrets, and preserveExistingSecrets keeps
+# whatever an earlier release wrote, so those refs stay optional.
+envfrom_opt() {  # file, workload, secret -> the envFrom ref's optional field
+  yq -N "select(.kind == \"Deployment\" and .metadata.name == \"$2\")
+    | .spec.template.spec.containers[].envFrom[] | select(.secretRef.name == \"$3\")
+    | .secretRef.optional" "$1" 2>/dev/null | head -1
+}
+check_envfrom_opt() {  # file, workload, secret, want, message
+  got="$(envfrom_opt "$1" "$2" "$3")"
+  if [ "$got" != "$4" ]; then
+    red "FAIL: $2: $5 (envFrom $3 optional=${got:-<no ref>}, want $4)"
+    exit 1
+  fi
+}
+out1_redis_existing="$TMP/scenario-hybrid-redis-existing.yaml"
+render_default "$out1_redis_existing" --set global.redis.existingSecret.name=my-redis
+for w in agentgateway-proxy agentgateway-mcp trustguard-data-plane; do
+  check_envfrom_opt "$out1_pg_existing" "$w" my-pg null "an operator Postgres Secret must be required"
+  check_envfrom_opt "$out1_redis_existing" "$w" my-redis null "an operator Redis Secret must be required"
+  check_envfrom_opt "$out1" "$w" redis-secrets true "the chart's own redis-secrets stays optional"
+  check_envfrom_opt "$out1_pg_preserve" "$w" postgresql-secrets true "preserveExistingSecrets keeps the Postgres ref optional"
+done
+green "ok  - hybrid: operator-named Redis and Postgres Secrets are required refs; chart-managed ones stay optional"
 assert_contains "$out1" 'name: POSTGRES_SCHEMA'$'\n''          value: "public"' \
   "data-plane PostgreSQL: default schema reaches the runtime"
 assert_pg_migration_runner "$out1" \

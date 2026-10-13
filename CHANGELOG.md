@@ -4,6 +4,19 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Fixed
+
+- **A missing Redis or PostgreSQL Secret of your own now stops the pod instead
+  of starting it without datastore settings.** In hybrid mode, the TrustGate
+  proxy, TrustGate MCP and TrustGuard data plane read `global.redis.existingSecret`
+  and `global.postgresql.existingSecret` as optional. A misspelt or forgotten
+  Secret let the pods start and then fail on their first Redis or database call,
+  with nothing pointing at the cause. These references are now required, so the
+  pod waits in `CreateContainerConfigError` and names the missing Secret, as
+  `global.postgresql.passwordSecret` already did. Installs whose Secrets exist
+  see no change. The chart's own `redis-secrets`, and the PostgreSQL Secret kept
+  by `global.preserveExistingSecrets`, stay optional.
+
 ## [v3.0.1] — 2026-10-09
 
 ### Added

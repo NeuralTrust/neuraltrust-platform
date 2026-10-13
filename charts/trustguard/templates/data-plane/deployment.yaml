@@ -69,13 +69,20 @@ spec:
                see the explicit DB_* env below. */}}
         - secretRef:
             name: {{ include "neuraltrust-platform.v2.hybridRedis.secretName" . | quote }}
+            {{- /* The chart always creates its own redis-secrets. An operator's
+                   global.redis.existingSecret is required: a missing one must
+                   stop the pod, not start it without Redis settings. */}}
+            {{- if eq (include "neuraltrust-platform.v2.hybridRedis.chartManagedSecret" .) "true" }}
             optional: true
+            {{- end }}
         {{- if ne (include "neuraltrust-platform.v2.hybridPg.chartManagedSecret" .) "true" }}
         {{- /* An operator-supplied Secret keeps the passthrough: its key names are
                theirs, so the chart cannot rename them. */}}
         - secretRef:
             name: {{ include "neuraltrust-platform.v2.hybridPg.secretName" . | quote }}
+            {{- if ne (include "neuraltrust-platform.v2.hybridPg.operatorSecret" .) "true" }}
             optional: true
+            {{- end }}
         {{- end }}
         {{- end }}
         env:
