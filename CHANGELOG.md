@@ -4,6 +4,27 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Changed
+
+- **Product Ingresses get TLS when you supply the certificate.** The
+  AgentGateway, TrustGuard, DataCore and TrustLens Ingresses defaulted to plain
+  HTTP, even when the operator had configured a real certificate for the console
+  and `data-plane-api`. Covering every host meant also setting
+  `<chart>.ingress.tls.enabled: true` on each chart. When `ingress.tls.enabled` is
+  unset, those four now add the TLS block if you supplied the certificate: a
+  `secretName` on that chart, or the shared secret with
+  `global.ingress.tls.autoGenerate: false`. The rule is the same in hybrid,
+  external and saas. Installs that use the chart-generated self-signed
+  certificate render unchanged. The chart does not move a host that serves plain
+  HTTP today onto a certificate its callers cannot verify. An explicit `true` or
+  `false` still wins, and cloud-managed certificates (`certificateArn`,
+  `managedCertificates`, `sslCertificate`) still leave the block out. On upgrade,
+  an install with `autoGenerate: false` starts serving these hosts over HTTPS
+  with its own certificate, so make sure that certificate covers them, or a
+  wildcard does. Controllers that redirect when TLS is present (ingress-nginx
+  does by default) then send plain-HTTP callers to HTTPS. To keep plain HTTP, set
+  `ingress.tls.enabled: false` on the affected chart.
+
 ## [v3.1.0] — 2026-10-14
 
 ### Added

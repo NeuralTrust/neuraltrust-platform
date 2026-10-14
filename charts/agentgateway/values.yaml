@@ -277,7 +277,7 @@ ingress:
   className: "" # Empty = use global.ingress.className
   annotations: {}
   tls:
-    enabled: false
+    enabled: # Unset = on when you supply the cert: secretName below, or global.ingress.tls.autoGenerate=false
     secretName: "" # Empty = shared global.ingress.tls secret
   controlPlane:
     host: "" # Empty = auto-derive <hostPrefix>.<global.domain>

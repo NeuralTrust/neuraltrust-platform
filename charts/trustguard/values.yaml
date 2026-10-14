@@ -228,8 +228,8 @@ ingress:
   className: ""
   annotations: {}
   tls:
-    enabled: false
-    secretName: ""
+    enabled: # Unset = on when you supply the cert: secretName below, or global.ingress.tls.autoGenerate=false
+    secretName: "" # Empty = shared global.ingress.tls secret
   controlPlane:
     host: ""
     hostPrefix: "trustguard-admin"

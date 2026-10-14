@@ -2365,6 +2365,23 @@ insecureEdgeTerminationPolicy: {{ $tls.insecureEdgeTerminationPolicy | default "
 {{- if and .tlsEnabled (not $cloudTLS) }}true{{- end }}
 {{- end }}
 
+{{/*
+TLS block for a product subchart Ingress (agentgateway, trustguard, datacore,
+trustlens). An explicit ingress.tls.enabled wins. Unset adds the block only when
+the operator supplied the certificate: a local ingress.tls.secretName, or the
+shared global.ingress.tls secret with autoGenerate off. A host that serves plain
+HTTP today is therefore never moved onto the chart's self-signed placeholder,
+which would redirect its callers to a certificate they cannot verify. Same rule
+in every mode. Cloud-managed certificates still drop the block.
+Call with the subchart context.
+*/}}
+{{- define "neuraltrust-platform.ingress.productTLS" -}}
+{{- $tls := default dict .Values.ingress.tls }}
+{{- $enabled := or $tls.secretName (not (include "neuraltrust-platform.ingress.autoGenerateTLSSecret" (dict "global" .Values.global))) }}
+{{- if not (kindIs "invalid" $tls.enabled) }}{{ $enabled = $tls.enabled }}{{- end }}
+{{- include "neuraltrust-platform.ingress.renderTLS" (dict "global" .Values.global "tlsEnabled" $enabled) }}
+{{- end }}
+
 {{- define "neuraltrust-platform.service.negAnnotations" -}}
 {{- $global := default dict .global }}
 {{- $globalIngress := default dict $global.ingress }}
