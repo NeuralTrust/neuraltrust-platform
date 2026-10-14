@@ -187,6 +187,15 @@ Remote data-plane endpoints (L4 names must bypass any TLS-terminating proxy):
   Note: It may take a few minutes for the load balancer to provision external endpoints.
 {{- end }}
 
+{{- $warnings := include "neuraltrust-platform.warnings" . | fromYamlArray }}
+{{- if $warnings }}
+
+Warnings — the release was installed, but these values will not work as intended:
+{{- range $warnings }}
+  - {{ . }}
+{{- end }}
+{{- end }}
+
 To get the status of your deployment, run:
   kubectl get pods -n {{ .Release.Namespace }}
 
