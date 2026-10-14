@@ -1,7 +1,7 @@
 {{- if and .Values.enabled (eq (include "neuraltrust-platform.isExternal" .) "true") .Values.ingress.enabled }}
 {{- $className := include "neuraltrust-platform.ingress.className" (dict "global" .Values.global "local" .Values.ingress.className) }}
 {{- $annotations := include "neuraltrust-platform.ingress.annotations" (dict "global" .Values.global "local" .Values.ingress.annotations) }}
-{{- $renderTLS := and .Values.ingress.tls .Values.ingress.tls.enabled (include "neuraltrust-platform.ingress.renderTLS" (dict "global" .Values.global "tlsEnabled" .Values.ingress.tls.enabled)) }}
+{{- $renderTLS := include "neuraltrust-platform.ingress.productTLS" . }}
 {{- $tlsSecret := include "neuraltrust-platform.ingress.effectiveTLSSecretName" (dict "global" .Values.global "localSecretName" .Values.ingress.tls.secretName) }}
 {{- $cpHost := include "neuraltrust-platform.ingress.host" (dict "host" .Values.ingress.controlPlane.host "prefix" .Values.ingress.controlPlane.hostPrefix "global" .Values.global) }}
 # Control-plane (api) ingress — full only. The worker has no HTTP service.
