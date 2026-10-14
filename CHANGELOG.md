@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v3.2.0] — 2026-10-14
+
 ### Changed
 
 - **Product Ingresses get TLS when you supply the certificate.** The
