@@ -654,6 +654,8 @@ install, missing Secrets/keys are created; later upgrades reuse them with `looku
   database, which no image created there. It logs in with the admin login in the
   Secret named by `managedBootstrap.adminSecret.name` (keys `username` and
   `password`, renamable), which needs `CREATEROLE` and `CREATEDB`, not superuser.
+  A role that already exists keeps everything but its password, which the Job
+  sets to the one in its service's Secret on every run.
   The control-plane password comes from `global.postgresql.passwordSecret` or
   `postgresql-secrets`. It also creates `managedBootstrap.extensions`
   (default `pgcrypto`, which TrustGuard's migrations need) in every database, as
