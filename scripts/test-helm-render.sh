@@ -2329,16 +2329,37 @@ assert_contains "$out10d" 'nvidia.com/gpu' \
 assert_contains "$out10d" 'hostIPC: true' \
   "gpu: Firewall workers share host IPC for CUDA MPS"
 
-# A per-worker `resources` replaces workerDefaults.resources, so a worker with
-# its own block in the chart defaults silently stays off the GPU unless the
-# example restates it. Check the shipped example, worker by worker.
+# Every Firewall worker must inherit a GPU set in workerDefaults, including the
+# two with their own `resources` in the chart defaults: a worker's block merges
+# over the defaults instead of replacing them. Checked on the --set shape above
+# and on the shipped example, worker by worker.
+gpu_less_workers() {  # rendered file -> worker Deployments without a GPU request
+  ruby -ryaml -e '
+    puts YAML.load_stream(File.read(ARGV.fetch(0))).compact
+      .select { |d| d["kind"] == "Deployment" && d.dig("metadata", "name").to_s.end_with?("-worker") }
+      .reject { |d| d.dig("spec", "template", "spec", "containers", 0, "resources", "requests", "nvidia.com/gpu") }
+      .map { |d| d.dig("metadata", "name") }' "$1"
+}
+gpu_less="$(gpu_less_workers "$out10d")"
+if [[ -n "$gpu_less" ]]; then
+  red "FAIL: gpu: a GPU in workerDefaults reaches every Firewall worker"
+  red "  without a GPU request: $(echo $gpu_less)"
+  exit 1
+fi
+green "ok  - gpu: a GPU in workerDefaults reaches every Firewall worker, own resources or not"
+# A worker's own key still wins: topic-guard keeps its 5Gi memory ceiling.
+tg_mem="$(ruby -ryaml -e '
+  d = YAML.load_stream(File.read(ARGV.fetch(0))).compact
+    .find { |x| x["kind"] == "Deployment" && x.dig("metadata", "name") == "topic-guard-worker" }
+  puts d.dig("spec", "template", "spec", "containers", 0, "resources", "limits", "memory")' "$out10d")"
+if [[ "$tg_mem" != "5Gi" ]]; then
+  red "FAIL: gpu: topic-guard keeps its own memory limit over workerDefaults (got $tg_mem, want 5Gi)"
+  exit 1
+fi
+green "ok  - gpu: a worker's own resources key still wins over workerDefaults"
 out10d_ex="$TMP/scenario-firewall-gpu-example.yaml"
 render_default "$out10d_ex" -f "$CHART_DIR/values-dataplane-gpu.yaml.example"
-gpu_less="$(ruby -ryaml -e '
-  puts YAML.load_stream(File.read(ARGV.fetch(0))).compact
-    .select { |d| d["kind"] == "Deployment" && d.dig("metadata", "name").to_s.end_with?("-worker") }
-    .reject { |d| d.dig("spec", "template", "spec", "containers", 0, "resources", "requests", "nvidia.com/gpu") }
-    .map { |d| d.dig("metadata", "name") }' "$out10d_ex")"
+gpu_less="$(gpu_less_workers "$out10d_ex")"
 if [[ -n "$gpu_less" ]]; then
   red "FAIL: gpu example: every Firewall worker requests a GPU"
   red "  without a GPU request: $(echo $gpu_less)"
@@ -4003,7 +4024,7 @@ bootstrap_services() {
   ruby -ryaml -e '
     docs = []
     YAML.load_stream(File.read(ARGV.fetch(0), encoding: "UTF-8")) { |d| docs << d if d.is_a?(Hash) }
-    job = docs.find { |d| d["kind"] == "Job" && d.dig("metadata", "name") == "control-plane-postgresql-bootstrap" }
+    job = docs.find { |d| d["kind"] == "Job" && d.dig("metadata", "name") == ARGV.fetch(1) }
     exit 0 if job.nil?
     container = job.dig("spec", "template", "spec", "containers").fetch(0)
     script = container["command"].fetch(2)
@@ -4013,12 +4034,12 @@ bootstrap_services() {
       abort "#{key}: #{env_name} is not wired into the pod" unless envs.include?(env_name)
       puts "#{key}:#{role}:#{db}:#{secret}/#{secret_key}"
     end
-  ' "$1"
+  ' "$1" "${2:-control-plane-postgresql-bootstrap}"
 }
 
 assert_bootstrap() {
-  local file="$1" expected="$2" msg="$3" got
-  got="$(bootstrap_services "$file" | tr '\n' ' ' | sed 's/ $//')"
+  local file="$1" expected="$2" msg="$3" job="${4:-control-plane-postgresql-bootstrap}" got
+  got="$(bootstrap_services "$file" "$job" | tr '\n' ' ' | sed 's/ $//')"
   if [[ "$got" != "$expected" ]]; then
     red "FAIL: $msg"
     red "  expected: ${expected:-<no Job>}"
@@ -4084,6 +4105,54 @@ render_default "$out19hook" --set global.deploymentMode=external \
 assert_bootstrap "$out19hook" \
   "agentgateway:agentgateway:agentgateway:postgres-roles/AGENTGATEWAY trustguard:trustguard:trustguard:trustguard-secrets/DB_PASSWORD alertengine:alertengine:alertengine:alertengine-secrets/DB_PASSWORD datacore:dc:dcdb:datacore-secrets/POSTGRES_PASSWORD" \
   "the Job follows the credential hooks and custom role/database names"
+
+blue "==> Scenario 19b: opt-in bootstrap of a PostgreSQL the chart does not run"
+# Off by default: a managed instance's roles stay the DBA's unless the operator
+# asks, and then only through managedBootstrap with an admin login they provide.
+MANAGED_PG=(--set global.postgresql.deploy=false --set global.postgresql.host=pg.example.com)
+MB_ON=(--set global.postgresql.managedBootstrap.enabled=true --set global.postgresql.managedBootstrap.adminSecret.name=pg-admin)
+out19bOff="$TMP/scenario-managed-bootstrap-off.yaml"
+render_default "$out19bOff" --set global.deploymentMode=external "${MANAGED_PG[@]}"
+assert_not_contains "$out19bOff" 'postgresql-managed-bootstrap' \
+  "managed PostgreSQL: no bootstrap Job unless managedBootstrap is enabled"
+
+# Hybrid on a managed instance: nothing created the control-plane pair, so the
+# Job creates it with the password the services read.
+out19bHy="$TMP/scenario-managed-bootstrap-hybrid.yaml"
+render_default "$out19bHy" "${MANAGED_PG[@]}" "${MB_ON[@]}"
+assert_bootstrap "$out19bHy" \
+  "control-plane:neuraltrust:neuraltrust:postgresql-secrets/POSTGRES_PASSWORD" \
+  "managed hybrid: the Job creates the shared control-plane role and database" \
+  postgresql-managed-bootstrap
+assert_contains "$out19bHy" 'value: "pg.example.com"' \
+  "managed: the Job dials global.postgresql.host"
+assert_contains "$out19bHy" 'name: "pg-admin"' \
+  "managed: the admin login comes from managedBootstrap.adminSecret"
+assert_contains "$out19bHy" 'EXTENSIONS="pgcrypto"' \
+  "managed: pgcrypto, which TrustGuard migrations need, is created by default"
+assert_not_contains "$out19bHy" 'control-plane-postgresql-bootstrap' \
+  "managed: the in-cluster Job does not render alongside"
+
+# External on a managed instance: one role and database per service, plus the
+# control plane, with each password from the Secret that service reads.
+out19bExt="$TMP/scenario-managed-bootstrap-external.yaml"
+render_default "$out19bExt" --set global.deploymentMode=external "${MANAGED_PG[@]}" "${MB_ON[@]}" \
+  --set global.postgresql.passwordSecret.name=managed-postgres-roles --set global.postgresql.passwordSecret.key=CONTROL_PLANE
+assert_bootstrap "$out19bExt" \
+  "control-plane:neuraltrust:neuraltrust:managed-postgres-roles/CONTROL_PLANE agentgateway:agentgateway:agentgateway:agentgateway-secrets/DB_PASSWORD trustguard:trustguard:trustguard:trustguard-secrets/DB_PASSWORD alertengine:alertengine:alertengine:alertengine-secrets/DB_PASSWORD datacore:datacore:datacore:datacore-secrets/POSTGRES_PASSWORD" \
+  "managed external: every service role, the control plane's from passwordSecret" \
+  postgresql-managed-bootstrap
+
+# Asked for, it must be able to run.
+assert_render_fails_with "adminSecret.name is required" \
+  "managed bootstrap without an admin Secret fails the render" \
+  "${MANAGED_PG[@]}" --set global.postgresql.managedBootstrap.enabled=true
+assert_render_fails_with "needs password auth" \
+  "managed bootstrap with IAM auth fails the render" \
+  "${MANAGED_PG[@]}" "${MB_ON[@]}" --set global.postgresql.authMode=iam
+assert_render_fails_with "is for a PostgreSQL the chart does not run" \
+  "managed bootstrap against the in-cluster instance fails the render" \
+  "${MB_ON[@]}"
 
 blue "==> Scenario 20: the control-plane Postgres password lives in an operator Secret"
 # The point of the hook is that a managed-external values file can hold no

@@ -4,6 +4,38 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Added
+
+- **The chart can create the roles and databases on your own PostgreSQL.**
+  Off by default. With `global.postgresql.deploy: false` and `host` set, turn on
+  `global.postgresql.managedBootstrap` and name a Secret with an admin login that
+  can create roles and databases. A post-install and post-upgrade Job then
+  creates, idempotently, the control-plane role and database and each service's
+  own, with the passwords the services read, plus `pgcrypto` in each database.
+  Password auth only. Installs that do not turn it on render as before.
+
+### Changed
+
+- **The examples name datastore Secrets `external-postgresql` and
+  `external-redis`,** the names `ntctl` creates, so one set of instructions fits
+  both install paths. `values-hybrid.yaml.example` now keeps only the password in
+  `external-postgresql` through `global.postgresql.passwordSecret`, with the
+  endpoint in values, instead of a whole hand-written Secret plus a
+  data-plane-api key mapping. SECRETS.md lists the convention. Templates are
+  unchanged; existing installs keep whatever names their values give.
+
+### Fixed
+
+- **A Firewall worker's own `resources` now merges over
+  `firewall.workerDefaults.resources` instead of replacing it.** Before, a worker
+  with its own block ignored the defaults entirely. Setting a GPU in
+  `workerDefaults` therefore skipped `prompt-moderation` and `topic-guard`, which
+  carry their own memory sizes, and they ran without a GPU. Now keys a worker
+  sets win and the rest come from the defaults. Installs that set no per-worker
+  `resources`, or that set every key in it, render as before.
+  `values-dataplane-gpu.yaml.example` no longer restates the GPU for those two
+  workers.
+
 ## [v3.3.0] — 2026-10-15
 
 ### Added

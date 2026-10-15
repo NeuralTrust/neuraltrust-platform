@@ -587,6 +587,27 @@ Requires all of:
 {{- end -}}
 
 {{/*
+Gate for the opt-in bootstrap of a PostgreSQL the chart does not run
+(templates/postgresql/bootstrap-job.yaml, managed mode).
+
+Requires all of:
+  - `managedBootstrap.enabled`, which defaults off
+  - the topology needs PostgreSQL at all
+  - the chart is not running it: `deploy` is off, or `host` names another
+    instance (the in-cluster Job covers the chart's own)
+  - password auth; IAM and Entra principals are created by cloud tooling
+validate-values.yaml fails the render for an enabled bootstrap that cannot run.
+*/}}
+{{- define "neuraltrust-platform.postgresql.managedBootstrap.enabled" -}}
+{{- $pg := default dict (default dict .Values.global).postgresql -}}
+{{- $mb := default dict $pg.managedBootstrap -}}
+{{- $host := "" -}}
+{{- if $pg.host -}}{{- $host = $pg.host | toString -}}{{- end -}}
+{{- $inCluster := and (include "neuraltrust-platform.postgresql.deploy" .) (eq $host "") -}}
+{{- if and $mb.enabled (eq (include "neuraltrust-platform.postgresRequired" .) "true") (not $inCluster) (ne ($pg.authMode | default "password" | toString) "iam") -}}true{{- end -}}
+{{- end -}}
+
+{{/*
 PostgreSQL connection scalars. In hybrid every service connects to the shared
 `control-plane-postgresql` Service; in external, callers overlay their own
 host/port under their subchart values. These helpers always return sensible

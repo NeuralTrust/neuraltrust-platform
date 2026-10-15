@@ -54,7 +54,7 @@ global:
 #             database: "neuraltrust"
 #             sslMode: "require"
 #             existingSecret:
-#               name: "my-external-postgres"   # must contain the password key below
+#               name: "external-postgresql"    # must contain the password key below
 #               keys:
 #                 password: "POSTGRES_PASSWORD"
 #       # To read from an external ClickHouse instead, set a dotted host here:

@@ -169,7 +169,10 @@ spec:
             failureThreshold: 3
             successThreshold: 1
             timeoutSeconds: 3
-          {{- $resources := $workerCfg.resources | default $defaults.resources }}
+          {{- /* A worker's own resources merge over workerDefaults.resources: its
+                 keys win, and keys it leaves out (a GPU request, say) come from
+                 the defaults. */}}
+          {{- $resources := mustMergeOverwrite (deepCopy ($defaults.resources | default dict)) (deepCopy ($workerCfg.resources | default dict)) }}
           {{- if $resources }}
           resources:
             {{- toYaml $resources | nindent 12 }}
