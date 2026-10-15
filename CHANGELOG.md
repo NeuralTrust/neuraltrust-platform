@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v3.3.0] — 2026-10-15
+
 ### Added
 
 - **Gateway API as an ingress provider.** `global.ingress.provider: gateway-api`
