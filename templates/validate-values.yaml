@@ -7,6 +7,23 @@ no Kubernetes resource when validation succeeds.
 {{- if not (has $mode (list "hybrid" "external" "saas")) -}}
   {{- fail (printf "global.deploymentMode must be one of: hybrid, external, saas (got %q)" $mode) -}}
 {{- end -}}
+{{- /* The managed PostgreSQL bootstrap is opt-in; once asked for, it must be
+       able to run, or the release would install with no roles and say nothing. */ -}}
+{{- $mbPg := default dict $global.postgresql -}}
+{{- $mb := default dict $mbPg.managedBootstrap -}}
+{{- if $mb.enabled -}}
+  {{- $mbHost := "" -}}
+  {{- if $mbPg.host -}}{{- $mbHost = $mbPg.host | toString -}}{{- end -}}
+  {{- if eq ($mbPg.authMode | default "password" | toString) "iam" -}}
+    {{- fail "global.postgresql.managedBootstrap needs password auth: with authMode=iam the roles are IAM or Entra principals, which your cloud tooling creates. Turn managedBootstrap off." -}}
+  {{- end -}}
+  {{- if and (include "neuraltrust-platform.postgresql.deploy" .) (eq $mbHost "") -}}
+    {{- fail "global.postgresql.managedBootstrap is for a PostgreSQL the chart does not run: set global.postgresql.deploy=false and global.postgresql.host. The chart's own instance is bootstrapped by global.postgresql.bootstrapJob." -}}
+  {{- end -}}
+  {{- if not (default dict $mb.adminSecret).name -}}
+    {{- fail "global.postgresql.managedBootstrap.adminSecret.name is required: create a Secret holding an admin login that can create roles and databases (keys username and password by default), and name it there." -}}
+  {{- end -}}
+{{- end -}}
 {{- /* saas is external plus the remote-data-plane pieces, so every rule below
        that guards the in-cluster control plane has to cover both. */ -}}
 {{- $controlPlaneInCluster := has $mode (list "external" "saas") -}}

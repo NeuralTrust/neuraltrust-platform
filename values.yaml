@@ -371,6 +371,21 @@ global:
     bootstrapJob:
       enabled: true
       resources: {} # Empty → 100m/64Mi requests, 500m/128Mi limits
+    # Opt-in bootstrap for a PostgreSQL the chart does not run (deploy: false, or
+    # host set). A post-install/post-upgrade Job logs in with an admin login you
+    # provide and creates, idempotently, each service's role and database with
+    # the password that service reads, plus the extensions the services need.
+    # Off by default: on a managed instance roles are usually the DBA's. Password
+    # auth only; IAM and Entra principals come from your cloud tooling.
+    managedBootstrap:
+      enabled: false
+      adminSecret:
+        name: "" # Required when enabled: a Secret holding the admin login
+        usernameKey: username
+        passwordKey: password
+      adminDatabase: postgres # Database the admin connects to
+      extensions:
+        - pgcrypto # TrustGuard's migrations need it; on Azure, allow-list it first
     # In-cluster PostgreSQL Deployment image/resources/persistence knobs.
     image:
       repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/postgres

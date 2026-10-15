@@ -312,7 +312,7 @@ of Helm release history:
 agentgateway:
   database:
     existingSecret:
-      name: "managed-postgres-roles"
+      name: "external-postgresql"
       key: "AGENTGATEWAY" # key is configurable, so one Secret serves every role
 ```
 
@@ -328,7 +328,7 @@ global:
     deploy: false
     host: "postgres.example.com"
     passwordSecret:
-      name: "managed-postgres-roles"
+      name: "external-postgresql"
       key: "CONTROL_PLANE"
 ```
 
