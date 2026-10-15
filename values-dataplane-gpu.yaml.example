@@ -30,7 +30,11 @@ firewall:
     # These two carry their own `resources` in the chart defaults, and a
     # per-worker `resources` replaces workerDefaults.resources rather than
     # merging with it, so the GPU request is restated for them.
+    # prompt-jailbreak defaults to RollingUpdate. One GPU cannot surge
+    # (maxUnavailable: 0 waits for a second device), so keep Recreate.
     workers:
+      prompt-jailbreak:
+        deploymentStrategy: Recreate
       prompt-moderation:
         resources:
           requests:

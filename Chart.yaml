@@ -103,7 +103,7 @@ dependencies:
   # Firewall is part of TrustGuard. Templates follow the TrustGuard product
   # gate in both modes (opt-in in hybrid, opt-out in external).
   - name: firewall
-    version: 2.1.23
+    version: 2.1.24
     repository: file://./charts/firewall
     tags:
       - neuraltrust

@@ -1363,6 +1363,9 @@ firewall:
       prompt-jailbreak:
         enabled: true
         module: src.workers.prompt_jailbreak.app:app
+        readinessProbe:
+          path: /ready
+        deploymentStrategy: RollingUpdate
         extraEnv: []
         extraEnvFrom: []
       prompt-moderation:

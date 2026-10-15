@@ -17,7 +17,7 @@ spec:
   selector:
     matchLabels:
       {{- include "firewall.worker.selectorLabels" (dict "name" $workerName) | nindent 6 }}
-  {{- $strategy := $defaults.deploymentStrategy | default "Recreate" }}
+  {{- $strategy := $workerCfg.deploymentStrategy | default $defaults.deploymentStrategy | default "Recreate" }}
   strategy:
     type: {{ $strategy }}
     {{- if eq $strategy "RollingUpdate" }}
@@ -160,9 +160,10 @@ spec:
             failureThreshold: 3
             successThreshold: 1
             timeoutSeconds: 5
+          {{- $readinessPath := ($workerCfg.readinessProbe).path | default ($defaults.readinessProbe).path | default "/health" }}
           readinessProbe:
             httpGet:
-              path: /health
+              path: {{ $readinessPath }}
               port: http
               scheme: HTTP
             periodSeconds: 5
