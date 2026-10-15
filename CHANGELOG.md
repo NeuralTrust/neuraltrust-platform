@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v3.4.0] — 2026-10-15
+
 ### Added
 
 - **The chart can create the roles and databases on your own PostgreSQL.**
