@@ -35,6 +35,8 @@ firewall:
     # Recreate terminates the old pod before starting the new one. Prefer this over
     # RollingUpdate for ML workers (heavy CPU/RAM): maxSurge: 1 doubles capacity
     # during rollouts and leaves the new pod Pending on small clusters.
+    # A worker may set deploymentStrategy itself. prompt-jailbreak does, because
+    # it has no PVC and no GPU request.
     deploymentStrategy: Recreate # Recreate | RollingUpdate
     image:
       repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
@@ -55,6 +57,8 @@ firewall:
     nodeSelector: {}
     tolerations: []
     hostIPC: false
+    # Template periodSeconds is 5, so 36 failures is 180s for model load and
+    # warm-up before liveness starts. Startup and liveness stay on /health.
     startupProbe:
       failureThreshold: 36
     autoscaling:
@@ -92,6 +96,12 @@ firewall:
     prompt-jailbreak:
       enabled: true
       module: src.workers.prompt_jailbreak.app:app
+      # GET /ready stays 503 until warm-up inference finishes. Other workers
+      # keep /health until the image exposes /ready for them too.
+      readinessProbe:
+        path: /ready
+      # Surge one pod so a warm replica keeps serving. maxSurge 1 / maxUnavailable 0.
+      deploymentStrategy: RollingUpdate
       extraEnv: []
       extraEnvFrom: []
     prompt-moderation:

@@ -4,6 +4,16 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Changed
+
+- **Firewall prompt-jailbreak stays warm across rollouts.** Its readiness probe
+  calls `GET /ready` (503 until warm-up inference finishes, then 200). Startup
+  and liveness stay on `/health`, with the same 36×5s startup budget. The
+  Deployment strategy is `RollingUpdate` (`maxUnavailable: 0`, `maxSurge: 1`)
+  so a warm pod keeps serving. Other workers stay on `Recreate` and `/health`.
+  The GPU overlay keeps prompt-jailbreak on `Recreate`, because one GPU cannot
+  surge. Firewall subchart `2.1.23 → 2.1.24`.
+
 ## [v3.3.0] — 2026-10-15
 
 ### Added
