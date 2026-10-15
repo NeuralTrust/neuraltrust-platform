@@ -1,0 +1,6 @@
+{{- /* Gateway API counterpart of ingress.yaml, rendered when
+       global.ingress.provider=gateway-api. */ -}}
+{{- if and (eq (include "neuraltrust-platform.isExternal" .) "true") .Values.ingress.enabled (include "neuraltrust-platform.ingress.gatewayApi" (dict "global" .Values.global)) }}
+{{- $host := include "neuraltrust-platform.ingress.host" (dict "host" .Values.ingress.host "prefix" .Values.ingress.hostPrefix "global" .Values.global) }}
+{{- include "neuraltrust-platform.httpRoute" (dict "ctx" . "name" (include "datacore.fullname" .) "labels" (printf "%s\napp.kubernetes.io/component: data-plane" (include "datacore.labels" .)) "hosts" (list $host) "service" (include "datacore.fullname" .) "port" 80 "healthPath" "/readyz") }}
+{{- end }}

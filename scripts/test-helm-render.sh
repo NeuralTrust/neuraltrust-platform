@@ -2329,6 +2329,23 @@ assert_contains "$out10d" 'nvidia.com/gpu' \
 assert_contains "$out10d" 'hostIPC: true' \
   "gpu: Firewall workers share host IPC for CUDA MPS"
 
+# A per-worker `resources` replaces workerDefaults.resources, so a worker with
+# its own block in the chart defaults silently stays off the GPU unless the
+# example restates it. Check the shipped example, worker by worker.
+out10d_ex="$TMP/scenario-firewall-gpu-example.yaml"
+render_default "$out10d_ex" -f "$CHART_DIR/values-dataplane-gpu.yaml.example"
+gpu_less="$(ruby -ryaml -e '
+  puts YAML.load_stream(File.read(ARGV.fetch(0))).compact
+    .select { |d| d["kind"] == "Deployment" && d.dig("metadata", "name").to_s.end_with?("-worker") }
+    .reject { |d| d.dig("spec", "template", "spec", "containers", 0, "resources", "requests", "nvidia.com/gpu") }
+    .map { |d| d.dig("metadata", "name") }' "$out10d_ex")"
+if [[ -n "$gpu_less" ]]; then
+  red "FAIL: gpu example: every Firewall worker requests a GPU"
+  red "  without a GPU request: $(echo $gpu_less)"
+  exit 1
+fi
+green "ok  - gpu example: every Firewall worker requests a GPU"
+
 blue "==> Scenario 10f: Firewall OTLP endpoint resolution"
 # The chart used to default this to a NeuralTrust-internal collector namespace,
 # which no customer cluster has. Enabling OTel without an endpoint must leave
@@ -6084,6 +6101,71 @@ doc40e="$TMP/ha-nospread-proxy.yaml"
 document_named_kind "$out40e" Deployment agentgateway-proxy "$doc40e"
 assert_not_contains "$doc40e" 'topologySpreadConstraints' \
   "ha: topologySpread.enabled=false removes the constraints"
+
+# ---------------------------------------------------------------------------
+# 42. Gateway API — HTTPRoutes replace every Ingress, host for host
+# ---------------------------------------------------------------------------
+blue "==> Scenario 42: global.ingress.provider=gateway-api"
+GATEWAY_API_ARGS=(
+  --set global.domain=platform.example.com
+  --set global.ingress.provider=gateway-api
+  --set 'global.ingress.gatewayApi.parentRefs[0].name=shared'
+  --set 'global.ingress.gatewayApi.parentRefs[0].namespace=gateway-system'
+  --set 'global.ingress.gatewayApi.parentRefs[0].sectionName=https'
+)
+# Ingress rules and HTTPRoute hostnames as sorted "host backend" lines, so the
+# two providers can be compared for the same values.
+route_table() {
+  ruby -ryaml -e '
+    rows = YAML.load_stream(File.read(ARGV.fetch(0))).compact.flat_map do |d|
+      case d["kind"]
+      when "Ingress"
+        d["spec"]["rules"].map { |r| [r["host"] || "*", r["http"]["paths"][0]["backend"]["service"]["name"]] }
+      when "HTTPRoute"
+        svc = d["spec"]["rules"][0]["backendRefs"][0]["name"]
+        (d["spec"]["hostnames"] || ["*"]).map { |h| [h, svc] }
+      else []
+      end
+    end
+    puts rows.map { |r| r.join(" ") }.sort' "$1"
+}
+for mode in hybrid external saas; do
+  out42i="$TMP/gwapi-$mode-ingress.yaml"
+  out42r="$TMP/gwapi-$mode-routes.yaml"
+  render_default "$out42i" --set global.deploymentMode="$mode" --set global.domain=platform.example.com
+  render_default "$out42r" --set global.deploymentMode="$mode" "${GATEWAY_API_ARGS[@]}"
+  assert_occurrences "$out42r" '^kind: Ingress$' 0 \
+    "gateway-api ($mode): no Ingress objects"
+  if [[ "$(route_table "$out42i")" != "$(route_table "$out42r")" ]]; then
+    red "FAIL: gateway-api ($mode): HTTPRoutes cover the same hosts and backends as the Ingresses"
+    diff <(route_table "$out42i") <(route_table "$out42r") | head -20
+    exit 1
+  fi
+  green "ok  - gateway-api ($mode): HTTPRoutes cover the same hosts and backends as the Ingresses"
+done
+assert_contains "$out42r" '^    - "\*\.llm\.platform\.example\.com"$' \
+  "gateway-api: the per-gateway wildcard host is a route hostname"
+assert_contains "$out42r" '^      sectionName: https$' \
+  "gateway-api: parentRefs pass through, sectionName included"
+assert_not_contains "$out42r" '^kind: HealthCheckPolicy$' \
+  "gateway-api: no GKE HealthCheckPolicy where the CRD is not served"
+assert_not_contains "$out42r" '^      timeouts:$' \
+  "gateway-api: no rule timeouts unless set"
+
+out42g="$TMP/gwapi-gke.yaml"
+render_default "$out42g" "${GATEWAY_API_ARGS[@]}" \
+  --set global.ingress.gatewayApi.timeouts.request=300s \
+  --api-versions networking.gke.io/v1/HealthCheckPolicy
+doc42g="$TMP/gwapi-gke-proxy-hc.yaml"
+document_named_kind "$out42g" HealthCheckPolicy agentgateway-proxy-healthcheck "$doc42g"
+assert_contains "$doc42g" 'requestPath: /readyz' \
+  "gateway-api on GKE: the proxy is health-checked on its readiness path"
+assert_contains "$out42g" '^        request: 300s$' \
+  "gateway-api: rule timeouts render when set"
+
+assert_render_fails_with 'needs global.ingress.gatewayApi.parentRefs' \
+  "gateway-api: fails closed without a parent Gateway" \
+  --set global.ingress.provider=gateway-api
 
 green ""
 green "All v2 render scenarios passed."

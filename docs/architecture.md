@@ -254,10 +254,9 @@ it. External and saas ignore the flags and deploy the full product stack.
 
 ## Cluster sizing
 
-Chart defaults are a comfortable starting point. Hybrid (all products) typically
-fits **3–4** workers at **8 vCPU / 16–32 GiB**; External typically wants
-**4–5** of the same class. Right-size and fine-tune for your traffic — see
-[sizing.md](./sizing.md).
+Minimum node pools, with the Firewall on CPU and cluster autoscaling enabled:
+Hybrid (all products) 3 × 8 vCPU / 32 GiB, External or SaaS 4 × 8 vCPU / 32 GiB.
+GPU Firewall options and the other scenarios are in [sizing.md](./sizing.md).
 
 ## Datastores
 
@@ -440,8 +439,44 @@ settings remain operator prerequisites:
 | Azure (AGIC) | Ingress | AGIC **1.5.1+** / Application Gateway **v2** with a wildcard-capable certificate and DNS |
 | GCP (GCE Ingress) | Ingress | Wildcard Ingress rules are supported; **Google-managed certificates do not support wildcard names** — provide a self-managed wildcard TLS Secret |
 | OpenShift | native `Route` (`resourceType: auto\|route`) | IngressController `routeAdmission.wildcardPolicy: WildcardsAllowed`; router/Route certificate covering the wildcard domains. Set `ingress.resourceType: ingress` to keep Kubernetes Ingress instead |
+| Gateway API (`global.ingress.provider: gateway-api`) | `gateway.networking.k8s.io/v1` HTTPRoute | An existing Gateway whose listener admits the release namespace and terminates TLS for the exact and wildcard hosts; wildcard DNS to its address. Overrides `resourceType` |
 
 Admin stays exact-host only (no wildcards).
+
+## Gateway API: one Gateway, many releases
+
+With `global.ingress.provider: gateway-api`, every surface that would get an
+Ingress gets an HTTPRoute instead — same hostnames, `/` prefix, same backend
+Service — and no Ingress renders. The routes attach to the Gateway(s) in
+`global.ingress.gatewayApi.parentRefs`; the chart never creates a Gateway, a
+GatewayClass or a certificate.
+
+| Mode | HTTPRoutes |
+|---|---|
+| hybrid | `agentgateway-gateway` (`gateway.` + `*.llm.`), `agentgateway-mcp` (`mcp.` + `*.mcp.`), `trustguard`, `data-plane-api` |
+| external | hybrid's, plus `agentgateway-admin`, `trustguard-admin`, `control-plane-api`, `control-plane-app`, and `datacore` / `trustlens` when their ingress is on |
+| saas | external's, plus the `clickstack-ingest-gateway` (`telemetry.`) |
+
+Hostnames derive from `global.domain` exactly as for Ingress, so several
+releases can share one Gateway as long as each has its own domain — typically a
+per-release subdomain under one wildcard DNS zone, such as
+`<release>.platform.example.com`. Two routes that claim the same hostname
+conflict, and Gateway API gives the hostname to the older route. The Gateway's
+certificate must then cover each release's `*.llm.` and `*.mcp.` names, which a
+single `*.platform.example.com` wildcard does not: wildcards match one label.
+
+`gatewayApi.timeouts` sets HTTPRoute rule timeouts on every route. Leave it
+empty to keep the implementation's default; Envoy-based Gateways default to
+15s, which cuts long LLM streams, so set `request` there.
+
+On GKE, the Gateway health-checks `/` unless a `HealthCheckPolicy` says
+otherwise. When the cluster serves that CRD, the chart renders one per backend
+Service, pointing at the workload's readiness path.
+
+What HTTPRoutes do not cover: the saas L4 endpoints (DataBridge southbound and
+config-sync) are `LoadBalancer` Services that need TLS passthrough. They keep
+their own `annotations` (`databridge.service.southbound`,
+`<product>.configSync.expose`) for the cloud's internal or public load balancer.
 
 ---
 

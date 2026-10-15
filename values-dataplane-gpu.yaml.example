@@ -27,6 +27,25 @@ firewall:
           operator: "Exists"
           effect: "NoSchedule"
       hostIPC: true
+    # These two carry their own `resources` in the chart defaults, and a
+    # per-worker `resources` replaces workerDefaults.resources rather than
+    # merging with it, so the GPU request is restated for them.
+    workers:
+      prompt-moderation:
+        resources:
+          requests:
+            nvidia.com/gpu: "1"
+          limits:
+            memory: 8Gi
+            nvidia.com/gpu: "1"
+      topic-guard:
+        resources:
+          requests:
+            memory: 4Gi
+            nvidia.com/gpu: "1"
+          limits:
+            memory: 8Gi
+            nvidia.com/gpu: "1"
     config:
       cudaMpsActiveThreadPercentage: "25"
       cudaMpsPinnedDeviceMemLimit: "6000M"

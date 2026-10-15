@@ -45,7 +45,11 @@ spec:
       name: http
   selector:
     app: control-plane-api
-{{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.api .Values.controlPlane.components.api.ingress .Values.controlPlane.components.api.ingress.enabled }}
+{{- $apiIngressOn := and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.api .Values.controlPlane.components.api.ingress .Values.controlPlane.components.api.ingress.enabled }}
+{{- if and $apiIngressOn (include "neuraltrust-platform.ingress.gatewayApi" (dict "global" .Values.global)) }}
+---
+{{ include "neuraltrust-platform.httpRoute" (dict "ctx" . "name" "control-plane-api" "labels" "app: control-plane-api" "hosts" (list (include "neuraltrust-platform.ingress.host" (dict "host" .Values.controlPlane.components.api.host "prefix" .Values.controlPlane.components.api.hostPrefix "global" .Values.global))) "service" "control-plane-api-service" "port" 80 "healthPath" "/health") }}
+{{- else if $apiIngressOn }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress

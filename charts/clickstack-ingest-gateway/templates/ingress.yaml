@@ -1,4 +1,4 @@
-{{- if and (eq (include "clickstack-ingest-gateway.deploy" .) "true") .Values.ingress.enabled }}
+{{- if and (eq (include "clickstack-ingest-gateway.deploy" .) "true") .Values.ingress.enabled (not (include "neuraltrust-platform.ingress.gatewayApi" (dict "global" .Values.global))) }}
 {{- $host := include "clickstack-ingest-gateway.host" . }}
 {{- /* Same L7 Ingress shape as control-plane-app / datacore: inherit
        global.ingress (className, ALB group, ACM certificateArn, …). OTLP/HTTP

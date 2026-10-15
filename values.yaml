@@ -507,9 +507,16 @@ global:
   psc:
     negNames: {}
   ingress:
-    provider: ""
+    provider: "" # "" (from global.platform) | aws | gcp | azure | openshift | none | gateway-api
     className: ""
     annotations: {}
+    # provider: gateway-api renders an HTTPRoute (gateway.networking.k8s.io/v1)
+    # for every host an Ingress would get, attached to an existing Gateway, and
+    # no Ingress. The Gateway, its listeners and TLS are the cluster's: its
+    # allowedRoutes must admit this namespace.
+    gatewayApi:
+      parentRefs: [] # e.g. [{name: internal, namespace: gateway-system, sectionName: https}]
+      timeouts: {} # HTTPRoute rule timeouts, e.g. {request: 300s}; empty = implementation default
     tls:
       autoGenerate: true
       secretName: "neuraltrust-ingress-tls"
@@ -1211,7 +1218,7 @@ data-plane-api:
               resources: {}
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.55.1
+          tag: v1.56.0
           pullPolicy: IfNotPresent
         accessMode: ReadWriteOnce
         huggingfaceToken: ""

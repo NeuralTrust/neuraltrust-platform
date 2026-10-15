@@ -85,8 +85,13 @@ Enabled v2 components:
   - TrustLens
 {{- end }}
 
+{{- if include "neuraltrust-platform.ingress.gatewayApi" (dict "global" .Values.global) }}
+HTTPRoute endpoints (attached to {{ range $i, $p := .Values.global.ingress.gatewayApi.parentRefs }}{{ if $i }}, {{ end }}{{ $p.namespace | default $.Release.Namespace }}/{{ $p.name }}{{ end }}):
+  kubectl get httproute -n {{ .Release.Namespace }}
+{{- else }}
 Ingress endpoints:
   kubectl get ingress -n {{ .Release.Namespace }}
+{{- end }}
 {{- if $trustgateEnabled }}
 {{- $agGwHost := include "neuraltrust-platform.ingress.host" (dict "host" (dig "ingress" "dataPlane" "host" "" $ag) "prefix" "gateway" "global" .Values.global) }}
 {{- if $agGwHost }}

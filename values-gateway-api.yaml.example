@@ -1,0 +1,32 @@
+# Gateway API ingress overlay — layer on top of any mode's values file.
+#
+#   helm upgrade --install neuraltrust-platform . -n <namespace> \
+#     -f values-required.yaml -f values-gateway-api.yaml.example
+#
+# Instead of networking.k8s.io/v1 Ingress, the chart renders one
+# gateway.networking.k8s.io/v1 HTTPRoute per public surface — the same hosts,
+# wildcards included, and the same backends — attached to a Gateway the cluster
+# already runs (kgateway, Envoy Gateway, Istio, GKE Gateway, …). The chart never
+# creates a Gateway or GatewayClass.
+#
+# Cluster prerequisites (not Helm):
+#   - Gateway API CRDs (v1) and a programmed Gateway.
+#   - Its listeners' allowedRoutes admit this release's namespace
+#     (namespaces.from: All, or a Selector matching it).
+#   - The Gateway terminates TLS with a certificate covering <domain>,
+#     *.<domain>, *.llm.<domain> and *.mcp.<domain>; DNS for the same names
+#     resolves to the Gateway address.
+#   - One global.domain per release when several releases share a Gateway:
+#     two routes claiming the same hostname conflict, and the older one wins.
+global:
+  domain: "<release>.platform.example.com"
+  ingress:
+    provider: gateway-api
+    gatewayApi:
+      parentRefs:
+        - name: "<gateway-name>"
+          namespace: "<gateway-namespace>"
+          # sectionName: https   # attach to one listener only
+      # LLM streaming outlives most proxies' default route timeout (Envoy: 15s).
+      timeouts:
+        request: 300s
