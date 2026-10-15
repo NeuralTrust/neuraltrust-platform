@@ -88,16 +88,25 @@ alert evaluation, SIEM, and integration forwarding path.
 
 ## 2. Size the cluster (defaults)
 
-Use a **comfortable starting shape**, then right-size and fine-tune as you learn
-your traffic patterns. Chart defaults are not a hard ceiling.
+Kubernetes schedules pods by their resource requests, so the chart's defaults
+set the smallest cluster a new installation can be scheduled on. Use these counts
+as each node pool's minimum, and enable cluster autoscaling with a maximum at
+least two nodes higher to add capacity as load grows.
 
-| Mode | Approx. chart requests | Comfortable starting shape |
+| Scenario | Firewall on CPU | Firewall on GPU |
 |---|---|---|
-| Hybrid (all products + CPU Firewall) | ~10 vCPU / ~28 GiB | **3–4** workers at **8 vCPU / 16–32 GiB** |
-| External (self-hosted) | ~15 vCPU / ~38 GiB | **4–5** workers at **8 vCPU / 16–32 GiB** |
+| Hybrid, all products | **3** × 8 vCPU / 32 GiB | **2** × 8 vCPU / 16 GiB + **2** × L4 GPU nodes |
+| Hybrid, TrustGuard only | **3** × 8 vCPU / 16 GiB | **2** × 8 vCPU / 16 GiB + **2** × L4 GPU nodes |
+| Hybrid, TrustGate only | **2** × 8 vCPU / 16 GiB | — |
+| External or SaaS | **4** × 8 vCPU / 32 GiB | **3** × 8 vCPU / 16 GiB + **2** × L4 GPU nodes |
 
-Leave headroom for the node OS, kube-system, and ingress. Firewall CPU workers
-dominate Hybrid memory when TrustGuard is on; fewer products need less.
+8 vCPU / 32 GiB: AWS `m6i.2xlarge`, Azure `Standard_D8s_v5`, GCP
+`e2-standard-8`. 8 vCPU / 16 GiB: AWS `c6i.2xlarge`, Azure `Standard_F8s_v2`,
+GCP `c4-highcpu-8`. L4 GPU node (8 vCPU / 32 GiB, one L4, shared by four CUDA
+MPS clients): AWS `g6.2xlarge`, GCP `g2-standard-8`.
+
+Firewall CPU workers are 60 % of Hybrid's memory requests when TrustGuard is on;
+fewer products need less.
 Details and tuning tips: [`docs/sizing.md`](./docs/sizing.md).
 
 ## 3. Open hybrid network paths

@@ -26,9 +26,11 @@ your environment. For the default hosted-control-plane path, see the
 ## Prerequisites
 
 - A Kubernetes cluster with an ingress controller, and Helm 3.8+ for OCI installs
-- **4–5 worker nodes at 8 vCPU / 16–32 GiB** — external adds the control plane,
-ClickHouse, ClickStack collector, DataCore, and AlertEngine on top of the data
-path. See `[docs/sizing.md](./docs/sizing.md)`
+- **4 nodes of 8 vCPU / 32 GiB** (`m6i.2xlarge`, `Standard_D8s_v5`,
+`e2-standard-8`), or with the Firewall on GPU 3 × 8 vCPU / 16 GiB plus 2 L4 GPU
+nodes, with cluster autoscaling on. External adds the control plane, ClickHouse, ClickStack
+collector, DataCore, and AlertEngine on top of the data path. See
+[docs/sizing.md](./docs/sizing.md)
 - A base domain you can point at the cluster ingress, plus TLS certificates for
 it
 - The NeuralTrust registry pull secret in the release namespace, or all images

@@ -1,0 +1,5 @@
+{{- /* Gateway API counterpart of ingress.yaml (OTLP/HTTP only), rendered when
+       global.ingress.provider=gateway-api. Health is served on its own port. */ -}}
+{{- if and (eq (include "clickstack-ingest-gateway.deploy" .) "true") .Values.ingress.enabled (include "neuraltrust-platform.ingress.gatewayApi" (dict "global" .Values.global)) }}
+{{- include "neuraltrust-platform.httpRoute" (dict "ctx" . "name" (include "clickstack-ingest-gateway.fullname" .) "labels" (printf "%s\napp.kubernetes.io/component: ingest-gateway" (include "clickstack-ingest-gateway.labels" .)) "hosts" (list (include "clickstack-ingest-gateway.host" .)) "service" (include "clickstack-ingest-gateway.fullname" .) "port" .Values.ports.otlpHttp "healthPath" "/health" "healthPort" .Values.ports.health) }}
+{{- end }}

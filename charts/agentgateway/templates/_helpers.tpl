@@ -200,10 +200,12 @@ resourceType: auto|ingress|route
   auto    → Ingress unless OpenShift (then Routes)
   ingress → always Ingress
   route   → never Ingress (OpenShift Routes instead)
+global.ingress.provider=gateway-api overrides all three: HTTPRoutes only.
 */}}
 {{- define "agentgateway.ingress.useIngress" -}}
 {{- $rt := (.Values.ingress.resourceType | default "auto") -}}
-{{- if eq $rt "ingress" -}}
+{{- if include "neuraltrust-platform.ingress.gatewayApi" (dict "global" .Values.global) -}}
+{{- else if eq $rt "ingress" -}}
 true
 {{- else if eq $rt "route" -}}
 {{- else if include "neuraltrust-platform.isOpenshift" . -}}
@@ -216,7 +218,7 @@ true
 Whether AgentGateway should render OpenShift Route resources.
 */}}
 {{- define "agentgateway.ingress.useRoutes" -}}
-{{- if and .Values.ingress.enabled (include "neuraltrust-platform.isOpenshift" .) -}}
+{{- if and .Values.ingress.enabled (include "neuraltrust-platform.isOpenshift" .) (not (include "neuraltrust-platform.ingress.gatewayApi" (dict "global" .Values.global))) -}}
   {{- $rt := (.Values.ingress.resourceType | default "auto") -}}
   {{- if or (eq $rt "route") (eq $rt "auto") -}}
 true

@@ -1,4 +1,4 @@
-{{- if and (eq (include "trustguard.enabled" .) "true") .Values.ingress.enabled }}
+{{- if and (eq (include "trustguard.enabled" .) "true") .Values.ingress.enabled (not (include "neuraltrust-platform.ingress.gatewayApi" (dict "global" .Values.global))) }}
 {{- $className := include "neuraltrust-platform.ingress.className" (dict "global" .Values.global "local" .Values.ingress.className) }}
 {{- $annotations := include "neuraltrust-platform.ingress.annotations" (dict "global" .Values.global "local" .Values.ingress.annotations) }}
 {{- $renderTLS := include "neuraltrust-platform.ingress.productTLS" . }}

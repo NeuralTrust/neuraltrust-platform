@@ -1,0 +1,20 @@
+{{- if eq (include "agentgateway.enabled" .) "true" }}
+{{- /* Gateway API counterpart of ingress.yaml: the same hosts (wildcards included)
+       and backends, rendered when global.ingress.provider=gateway-api. */ -}}
+{{- if and .Values.ingress.enabled (include "neuraltrust-platform.ingress.gatewayApi" (dict "global" .Values.global)) }}
+{{- $dpHost := include "neuraltrust-platform.ingress.host" (dict "host" .Values.ingress.dataPlane.host "prefix" .Values.ingress.dataPlane.hostPrefix "global" .Values.global) }}
+{{- $dpExtra := include "agentgateway.ingress.effectiveAdditionalHosts" (dict "ctx" . "plane" "dataPlane") | fromYamlArray }}
+{{- include "neuraltrust-platform.httpRoute" (dict "ctx" . "name" "agentgateway-gateway" "labels" (printf "%s\napp.kubernetes.io/component: data-plane" (include "agentgateway.labels" .)) "hosts" (prepend $dpExtra $dpHost) "service" .Values.dataPlane.name "port" 80 "healthPath" "/readyz") }}
+{{- if .Values.mcp.enabled }}
+{{- $mcpHost := include "neuraltrust-platform.ingress.host" (dict "host" .Values.ingress.mcp.host "prefix" .Values.ingress.mcp.hostPrefix "global" .Values.global) }}
+{{- $mcpExtra := include "agentgateway.ingress.effectiveAdditionalHosts" (dict "ctx" . "plane" "mcp") | fromYamlArray }}
+---
+{{ include "neuraltrust-platform.httpRoute" (dict "ctx" . "name" "agentgateway-mcp" "labels" (printf "%s\napp.kubernetes.io/component: mcp" (include "agentgateway.labels" .)) "hosts" (prepend $mcpExtra $mcpHost) "service" .Values.mcp.name "port" 80 "healthPath" "/readyz") }}
+{{- end }}
+{{- if eq (include "neuraltrust-platform.isExternal" .) "true" }}
+{{- $cpHost := include "neuraltrust-platform.ingress.host" (dict "host" .Values.ingress.controlPlane.host "prefix" .Values.ingress.controlPlane.hostPrefix "global" .Values.global) }}
+---
+{{ include "neuraltrust-platform.httpRoute" (dict "ctx" . "name" "agentgateway-admin" "labels" (printf "%s\napp.kubernetes.io/component: control-plane" (include "agentgateway.labels" .)) "hosts" (list $cpHost) "service" .Values.controlPlane.name "port" 80 "healthPath" "/readyz") }}
+{{- end }}
+{{- end }}
+{{- end }}

@@ -2382,6 +2382,104 @@ Call with the subchart context.
 {{- include "neuraltrust-platform.ingress.renderTLS" (dict "global" .Values.global "tlsEnabled" $enabled) }}
 {{- end }}
 
+{{/*
+True when global.ingress.provider is gateway-api: every component that would
+render an Ingress renders an HTTPRoute instead, attached to the Gateway(s) in
+global.ingress.gatewayApi.parentRefs. The chart never creates the Gateway, and
+TLS is the Gateway listener's concern.
+Args: dict "global" .Values.global
+*/}}
+{{- define "neuraltrust-platform.ingress.gatewayApi" -}}
+{{- $globalIngress := default dict (default dict .global).ingress }}
+{{- if eq ($globalIngress.provider | default "") "gateway-api" }}true{{- end }}
+{{- end }}
+
+{{/*
+HTTPRoute mirroring one Ingress: same hosts, `/` prefix, same backend Service.
+An empty host list leaves hostnames unset, which matches every hostname the
+parent listener accepts — the same catch-all an Ingress rule without a host is.
+
+On GKE the Gateway health-checks `/` on the serving port unless a
+HealthCheckPolicy says otherwise, and most backends answer `/` with a 404, so
+when that CRD is served a policy pointing at the readiness path is rendered too.
+
+Args: dict
+  "ctx"        chart context (.Values.global, .Capabilities)
+  "name"       metadata.name
+  "labels"     rendered label block, optional
+  "hosts"      list of hostnames (wildcards allowed)
+  "service"    backend Service name
+  "port"       backend Service port number
+  "healthPath" readiness path for the GKE HealthCheckPolicy
+  "healthPort" pod port, only when health is served off the traffic port
+*/}}
+{{- define "neuraltrust-platform.httpRoute" -}}
+{{- $gw := default dict (default dict (default dict .ctx.Values.global).ingress).gatewayApi }}
+{{- $parentRefs := default list $gw.parentRefs }}
+{{- if not $parentRefs }}
+{{- fail "global.ingress.provider=gateway-api needs global.ingress.gatewayApi.parentRefs: the existing Gateway the routes attach to, e.g. [{name: internal, namespace: gateway-system}]" }}
+{{- end }}
+{{- $hosts := list }}
+{{- range (default list .hosts) }}
+  {{- $h := . | toString | trim }}
+  {{- if and $h (not (has $h $hosts)) }}{{ $hosts = append $hosts $h }}{{- end }}
+{{- end }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ .name }}
+  {{- with .labels }}
+  labels:
+    {{- . | nindent 4 }}
+  {{- end }}
+spec:
+  parentRefs:
+    {{- toYaml $parentRefs | nindent 4 }}
+  {{- with $hosts }}
+  hostnames:
+    {{- range . }}
+    - {{ . | quote }}
+    {{- end }}
+  {{- end }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: {{ .service }}
+          port: {{ .port }}
+      {{- with $gw.timeouts }}
+      timeouts:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- if and .healthPath (.ctx.Capabilities.APIVersions.Has "networking.gke.io/v1/HealthCheckPolicy") }}
+---
+apiVersion: networking.gke.io/v1
+kind: HealthCheckPolicy
+metadata:
+  name: {{ printf "%s-healthcheck" .service | trunc 63 | trimSuffix "-" }}
+  {{- with .labels }}
+  labels:
+    {{- . | nindent 4 }}
+  {{- end }}
+spec:
+  default:
+    config:
+      type: HTTP
+      httpHealthCheck:
+        requestPath: {{ .healthPath }}
+        {{- with .healthPort }}
+        portSpecification: USE_FIXED_PORT
+        port: {{ . }}
+        {{- end }}
+  targetRef:
+    group: ""
+    kind: Service
+    name: {{ .service }}
+{{- end }}
+{{- end }}
+
 {{- define "neuraltrust-platform.service.negAnnotations" -}}
 {{- $global := default dict .global }}
 {{- $globalIngress := default dict $global.ingress }}

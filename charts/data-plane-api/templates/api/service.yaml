@@ -31,7 +31,11 @@ spec:
       name: http
   selector:
     app: api
-{{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.ingress .Values.dataPlane.components.api.ingress.enabled }}
+{{- $dpIngressOn := and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.ingress .Values.dataPlane.components.api.ingress.enabled }}
+{{- if and $dpIngressOn (include "neuraltrust-platform.ingress.gatewayApi" (dict "global" .Values.global)) }}
+---
+{{ include "neuraltrust-platform.httpRoute" (dict "ctx" . "name" "data-plane-api" "labels" "app: api" "hosts" (list (include "neuraltrust-platform.ingress.host" (dict "host" .Values.dataPlane.components.api.host "prefix" .Values.dataPlane.components.api.hostPrefix "global" .Values.global))) "service" "data-plane-api-service" "port" 80 "healthPath" "/health/ready") }}
+{{- else if $dpIngressOn }}
   {{- $apiIngress := .Values.dataPlane.components.api.ingress }}
 ---
 apiVersion: networking.k8s.io/v1

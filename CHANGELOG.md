@@ -4,6 +4,19 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Added
+
+- **Gateway API as an ingress provider.** `global.ingress.provider: gateway-api`
+  renders a `gateway.networking.k8s.io/v1` HTTPRoute for every host the Ingress
+  path renders in hybrid, external and saas — wildcard `*.llm.` / `*.mcp.` hosts
+  included, same backends — and no Ingress. Routes attach to an existing Gateway
+  named in `global.ingress.gatewayApi.parentRefs` (`sectionName` optional); the
+  chart creates no Gateway and leaves TLS to its listeners. Optional
+  `gatewayApi.timeouts` sets rule timeouts. On GKE the chart also renders a
+  `HealthCheckPolicy` per backend pointing at its readiness path. Rendering fails
+  if the provider is set without `parentRefs`. Off by default: existing installs
+  render unchanged. See `values-gateway-api.yaml.example`.
+
 ## [v3.2.0] — 2026-10-14
 
 ### Changed
