@@ -3025,6 +3025,17 @@ Call with (dict "ctx" $ "port" 4317). Default listenHost "::" → "[::]:port"
 {{- end -}}
 {{- end }}
 
+{{/*
+"true" when the operator opted in to operational telemetry
+(global.observability.operationalTelemetry), else empty. Consent gate for the
+services' own traces and metrics: in hybrid they leave the cluster for
+NeuralTrust, so nothing renders them on by default.
+*/}}
+{{- define "neuraltrust-platform.operationalTelemetry.enabled" -}}
+{{- $obs := default dict (default dict .Values.global).observability -}}
+{{- if eq (toString (default false $obs.operationalTelemetry)) "true" -}}true{{- end -}}
+{{- end -}}
+
 {{- define "neuraltrust-platform.clickstackEgress.endpointHost" -}}
 {{- printf "%s.%s.svc.cluster.local" (include "neuraltrust-platform.clickstackEgress.fullname" .) .Release.Namespace -}}
 {{- end }}

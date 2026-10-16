@@ -4,6 +4,30 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Added
+
+- **Opt-in operational telemetry: `global.observability.operationalTelemetry`
+  (default `false`).** When set to `true`, AgentGateway and TrustGuard export
+  their own traces and metrics: server spans, request rate, errors and
+  latency. Probe routes are sampled at 1%. No prompt or response payloads are
+  included. In **hybrid** installs this is sent to NeuralTrust through
+  the existing `clickstack-egress-collector`, with the same enrolment
+  credentials as product telemetry; no new Secrets or network destinations.
+  It is off until you opt in, and we recommend turning it on so support can
+  see the health of your gateway. In **external** installs it goes to your
+  in-release `clickstack-collector` and stays in your environment.
+  - AgentGateway gains `OPS_TRACES_ENABLED`, `OPS_METRICS_ENABLED`, sampling
+    ratios and `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` /
+    `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` in `agentgateway-env-vars`.
+  - Hybrid TrustGuard gains `OPENTELEMETRY_*` in `trustguard-env-vars`.
+    External TrustGuard already exported these and is unchanged.
+  - Toggle at any time, for example while a support case is open:
+    `helm upgrade <release> <chart> --reuse-values --set
+    global.observability.operationalTelemetry=true` (or `false`). The affected
+    pods roll; nothing else changes. With `ntctl`: `ntctl upgrade
+    --operational-telemetry=true|false --version <installed version>`.
+  - Existing installs render unchanged until the key is set.
+
 ## [v3.4.0] — 2026-10-15
 
 ### Added

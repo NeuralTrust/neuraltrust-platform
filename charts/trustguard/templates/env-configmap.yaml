@@ -131,6 +131,16 @@ data:
   {{- else if eq (include "neuraltrust-platform.clickstackHybridEnabled" .) "true" }}
   # Hybrid: plain OTLP to local clickstack-egress-collector (enrolment auth).
   {{- include "neuraltrust-platform.clickstack.otlpEnv" . | nindent 2 }}
+  {{- if eq (include "neuraltrust-platform.operationalTelemetry.enabled" .) "true" }}
+  {{- /* Opt-in: these leave the cluster for NeuralTrust. Same local egress as
+         host:port (the app appends /v1/traces|metrics); plaintext in-cluster,
+         the egress sidecar owns auth. */}}
+  {{- $egressHost := printf "%s:4318" (include "neuraltrust-platform.clickstackEgress.endpointHost" .) }}
+  OPENTELEMETRY_ENABLED: "true"
+  OPENTELEMETRY_INSECURE: "true"
+  OPENTELEMETRY_TRACES_ENDPOINT: {{ $egressHost | quote }}
+  OPENTELEMETRY_METRICS_ENDPOINT: {{ $egressHost | quote }}
+  {{- end }}
   {{- else }}
   {{- $obs := default dict .Values.global.observability }}
   {{- $collector := default dict $obs.collector }}
