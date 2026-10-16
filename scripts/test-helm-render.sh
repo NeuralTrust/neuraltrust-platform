@@ -608,6 +608,30 @@ assert_not_contains "$out1" 'client_secret: ${env:ENROLMENT_TOKEN}' \
   "hybrid: egress sidecar must not read ENROLMENT_TOKEN"
 assert_contains "$out1" 'http://clickstack-egress-collector.default.svc.cluster.local:4318/v1/logs' \
   "hybrid: apps OTLP endpoint points at local egress"
+# Operational telemetry is consent-gated: in hybrid it leaves the cluster for
+# NeuralTrust, so the default render must carry none of it.
+assert_not_contains "$out1" 'OPENTELEMETRY_ENABLED' \
+  "hybrid: TrustGuard operational telemetry is off by default (opt-in)"
+assert_not_contains "$out1" 'OPS_TRACES_ENABLED' \
+  "hybrid: AgentGateway operational traces are off by default (opt-in)"
+assert_not_contains "$out1" 'OPS_METRICS_ENABLED' \
+  "hybrid: AgentGateway operational metrics are off by default (opt-in)"
+out1_ot="$TMP/scenario-hybrid-operational-telemetry.yaml"
+render_default "$out1_ot" --set global.observability.operationalTelemetry=true
+assert_contains "$out1_ot" 'OPENTELEMETRY_ENABLED: "true"' \
+  "hybrid opt-in: TrustGuard traces/metrics are on"
+assert_contains "$out1_ot" 'OPENTELEMETRY_TRACES_ENDPOINT: "clickstack-egress-collector.default.svc.cluster.local:4318"' \
+  "hybrid opt-in: TrustGuard traces use local egress host:port (WithEndpoint appends /v1/traces)"
+assert_contains "$out1_ot" 'OPENTELEMETRY_METRICS_ENDPOINT: "clickstack-egress-collector.default.svc.cluster.local:4318"' \
+  "hybrid opt-in: TrustGuard metrics use local egress host:port (WithEndpoint appends /v1/metrics)"
+assert_contains "$out1_ot" 'OPS_TRACES_ENABLED: "true"' \
+  "hybrid opt-in: AgentGateway operational traces are on"
+assert_contains "$out1_ot" 'OPS_METRICS_ENABLED: "true"' \
+  "hybrid opt-in: AgentGateway operational metrics are on"
+assert_contains "$out1_ot" 'OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://clickstack-egress-collector.default.svc.cluster.local:4318/v1/traces"' \
+  "hybrid opt-in: AgentGateway traces go to local egress (enabled without an endpoint fails startup)"
+assert_contains "$out1_ot" 'OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: "http://clickstack-egress-collector.default.svc.cluster.local:4318/v1/metrics"' \
+  "hybrid opt-in: AgentGateway metrics go to local egress (enabled without an endpoint fails startup)"
 # Brackets escaped — assert_contains uses grep -E ([::] is a char class).
 assert_contains "$out1" 'endpoint: "\[::\]:4317"' \
   "hybrid: egress OTLP gRPC binds dual-stack ([::]) for IPv6-only clusters"
@@ -1363,6 +1387,20 @@ assert_contains "$out3" 'OTEL_EXPORTER_OTLP_ENDPOINT: "http://clickstack-collect
   "external: product OTLP logs endpoint includes /v1/logs (WithEndpointURL)"
 assert_contains "$out3" 'OPENTELEMETRY_TRACES_ENDPOINT: "clickstack-collector.default.svc.cluster.local:4318"' \
   "external: runtime traces stay host:port (WithEndpoint appends /v1/traces)"
+assert_not_contains "$out3" 'OPS_TRACES_ENABLED' \
+  "external: AgentGateway operational traces are off by default (opt-in)"
+assert_not_contains "$out3" 'OPS_METRICS_ENABLED' \
+  "external: AgentGateway operational metrics are off by default (opt-in)"
+out3_ot="$TMP/scenario-external-operational-telemetry.yaml"
+render_default "$out3_ot" --set global.deploymentMode=external --set global.observability.operationalTelemetry=true
+assert_contains "$out3_ot" 'OPS_TRACES_ENABLED: "true"' \
+  "external opt-in: AgentGateway operational traces are on"
+assert_contains "$out3_ot" 'OPS_METRICS_ENABLED: "true"' \
+  "external opt-in: AgentGateway operational metrics are on"
+assert_contains "$out3_ot" 'OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://clickstack-collector.default.svc.cluster.local:4318/v1/traces"' \
+  "external opt-in: AgentGateway traces go to the in-cluster collector (enabled without an endpoint fails startup)"
+assert_contains "$out3_ot" 'OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: "http://clickstack-collector.default.svc.cluster.local:4318/v1/metrics"' \
+  "external opt-in: AgentGateway metrics go to the in-cluster collector (enabled without an endpoint fails startup)"
 assert_not_contains "$out3" 'name: clickstack-egress-collector' \
   "external: hybrid egress collector must not render (in-cluster path)"
 assert_not_contains "$out3" 'clickstack-egress-collector.default.svc' \
