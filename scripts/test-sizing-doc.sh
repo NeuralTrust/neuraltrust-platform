@@ -88,7 +88,7 @@ sizing_cells() {
       end
     end
     cell = ->(p) { "#{p[0].ceil} vCPU / #{(p[1] / 2**30).ceil} GiB" }
-    gpu = pools.key?(:gpu) ? "#{cell.(pools[:gpu])}, #{pools[:gpu][2]} GPU shares" : "—"
+    gpu = pools.key?(:gpu) ? "#{cell.(pools[:gpu])}, #{pools[:gpu][2]} GPU shares" : [0x2014].pack("U")
     puts [cell.(pools[:cpu]), gpu].join("\t")' "$1"
 }
 
