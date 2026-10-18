@@ -894,7 +894,7 @@ control-plane-app:
         replicas: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v2.3.0"
+          tag: "v2.5.1"
           pullPolicy: IfNotPresent
         config:
           nodeEnv: production
@@ -972,7 +972,7 @@ control-plane-app:
 # stays agentgateway for now; K8s names stay agentgateway-*.
 agentgateway:
   image:
-    tag: "v0.65.0"
+    tag: "v0.66.0"
   # Empty host/port/sslMode/username/tls inherit from global.postgresql /
   # global.redis, then fall back to the in-cluster Services. Set them here only
   # to point this one service somewhere else.
@@ -1120,7 +1120,7 @@ clickstack-ingest-gateway:
 # ClickStack OTel collector (v2 external only): OTLP-to-ClickHouse pipeline.
 clickstack-otel-collector:
   image:
-    tag: "2.39.1"
+    tag: "2.41.0"
     repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickstack-otel-collector
   # Empty endpoint is composed from global.clickhouse (scheme follows
   # global.clickhouse.tls), then http://clickhouse:8123 (AUT-636). Set it
@@ -1242,7 +1242,7 @@ data-plane-api:
               resources: {}
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.56.0
+          tag: v1.56.3
           pullPolicy: IfNotPresent
         accessMode: ReadWriteOnce
         huggingfaceToken: ""
@@ -1322,7 +1322,7 @@ firewall:
       replicas: 2
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-        tag: "v2.33.1"
+        tag: "v2.33.2"
         pullPolicy: IfNotPresent
       resources:
         requests:
@@ -1348,7 +1348,7 @@ firewall:
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
         # Keep in lockstep with gateway.image.tag.
-        tag: "v2.33.1"
+        tag: "v2.33.2"
         pullPolicy: IfNotPresent
       replicas: 1
       resources:

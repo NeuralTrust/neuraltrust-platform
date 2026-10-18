@@ -9,7 +9,7 @@ fullnameOverride: "clickstack-collector"
 securityHardening: true
 image:
   repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickstack-otel-collector
-  tag: "2.39.1"
+  tag: "2.41.0"
   pullPolicy: IfNotPresent
 # imagePullSecrets: unset → global.imagePullSecrets → gcr-secret; "" → global
 # only; "none" suppresses. Accepts a name or a list of names / {name:} maps.
