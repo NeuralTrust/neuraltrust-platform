@@ -105,8 +105,9 @@ global:
   #   hybrid           — opt-in: a product deploys only when set to true.
   #   external / saas  — opt-out: everything deploys unless set to false, e.g.
   #                      trustgate: false for a TrustGuard-only install.
-  # Firewall follows TrustGuard. In external the console also reads audit logs
-  # and activity from data-plane-api, so keep dataPlane on there.
+  # Firewall follows TrustGuard. In external the console also reads runtime
+  # activity from data-plane-api, so keep dataPlane on there. The audit trail
+  # does not use it: see docs/observability.md.
   products: {}
   # trustgate: true
   # trustguard: true
