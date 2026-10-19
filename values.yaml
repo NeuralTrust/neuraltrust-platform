@@ -724,7 +724,7 @@ clickhouse:
   replicas: 1
   image:
     repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickhouse-server
-    tag: "26.8"
+    tag: "26.9"
     pullPolicy: IfNotPresent
   global:
     imagePullSecrets: []
@@ -834,7 +834,7 @@ control-plane-api:
         replicas: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api"
-          tag: "v1.28.3"
+          tag: "v1.29.0"
           pullPolicy: IfNotPresent
         config:
           controlPlaneApiUrl: ""
@@ -894,7 +894,7 @@ control-plane-app:
         replicas: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v2.5.1"
+          tag: "v2.6.0"
           pullPolicy: IfNotPresent
         config:
           nodeEnv: production
@@ -972,7 +972,7 @@ control-plane-app:
 # stays agentgateway for now; K8s names stay agentgateway-*.
 agentgateway:
   image:
-    tag: "v0.66.0"
+    tag: "v0.67.0"
   # Empty host/port/sslMode/username/tls inherit from global.postgresql /
   # global.redis, then fall back to the in-cluster Services. Set them here only
   # to point this one service somewhere else.
@@ -1000,7 +1000,7 @@ agentgateway:
 # TrustGuard: control-plane + data-plane (/v1/evaluate).
 trustguard:
   image:
-    tag: "v0.50.0"
+    tag: "v0.51.1"
   # Empty host/port/sslMode/username/tls inherit — see the agentgateway note.
   database:
     sslMode: ""
@@ -1044,7 +1044,7 @@ dataagent:
 # `global.postgresql` block.
 datacore:
   image:
-    tag: "v0.28.1"
+    tag: "v0.29.0"
   database:
     # Empty inherits global.postgresql, then control-plane-postgresql:5432.
     # name/user stay per-service: external gives each service its own role+DB.
@@ -1132,7 +1132,7 @@ clickstack-otel-collector:
 alertengine:
   enabled: true
   image:
-    tag: "v0.12.0"
+    tag: "v0.13.0"
   database:
     # Empty inherits global.postgresql, then control-plane-postgresql:5432.
     # name/user stay per-service: external gives each service its own role+DB.
@@ -1242,7 +1242,7 @@ data-plane-api:
               resources: {}
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.56.3
+          tag: v1.57.0
           pullPolicy: IfNotPresent
         accessMode: ReadWriteOnce
         huggingfaceToken: ""
