@@ -295,6 +295,19 @@ set_fallback templates/postgresql/deployment.yaml tag "$POSTGRES" || true
 set_fallback charts/control-plane-api/templates/api/deployment.yaml pgWaitImageTag "$POSTGRES" && touch_dir control-plane-api
 set_fallback charts/data-plane-api/templates/api/deployment.yaml    chMigrationTag "$CLICKHOUSE" && touch_dir data-plane-api
 
+# otel-collector-contrib is one upstream image behind four values paths: the
+# umbrella collector, the hybrid egress sidecar, the saas ingest gateway pin and
+# that subchart's own default. They move together, as in the workflow.
+set_tag '.global.observability.collector.image.tag' "$OTEL_CONTRIB" "otel-collector-contrib (umbrella)" || true
+if [[ -n "$(yq eval '.global.clickstack.egress.image.repository // ""' values.yaml)" ]]; then
+  set_tag '.global.clickstack.egress.image.tag' "$OTEL_CONTRIB" "otel-collector-contrib (clickstack egress)" || true
+fi
+if [[ -n "$(yq eval '.["clickstack-ingest-gateway"].image.tag // ""' values.yaml)" ]]; then
+  set_tag '.["clickstack-ingest-gateway"].image.tag' "$OTEL_CONTRIB" "otel-collector-contrib (clickstack ingest gateway)" || true
+fi
+set_tag '.image.tag' "$OTEL_CONTRIB" "otel-collector-contrib (ingest gateway subchart)" \
+  charts/clickstack-ingest-gateway/values.yaml || true
+
 # otel-collector-contrib fallback is an inline `default "X.Y.Z"`, not a $var.
 if [[ -n "$OTEL_CONTRIB" ]] && grep -q 'opentelemetry-collector-contrib' templates/otel-collector/deployment.yaml 2>/dev/null; then
   tmp=$(mktemp)
