@@ -31,6 +31,10 @@ firewall:
     # worker inherits the GPU request. These two carry larger memory in the chart
     # defaults; raise it further for the GPU image.
     workers:
+      # prompt-jailbreak defaults to RollingUpdate. One GPU cannot surge
+      # (maxUnavailable: 0 waits for a second device), so keep Recreate.
+      prompt-jailbreak:
+        deploymentStrategy: Recreate
       prompt-moderation:
         resources:
           limits:

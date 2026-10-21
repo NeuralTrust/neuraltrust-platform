@@ -215,7 +215,9 @@ firewall:
 ```
 
 Use [`values-dataplane-gpu.yaml.example`](./values-dataplane-gpu.yaml.example)
-as the complete overlay.
+as the complete overlay. That overlay keeps `prompt-jailbreak` on `Recreate`:
+the chart default is `RollingUpdate` with `maxUnavailable: 0`, which needs a
+spare GPU during the surge.
 
 ## 8. Validate before rollout
 

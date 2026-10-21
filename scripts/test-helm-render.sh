@@ -2057,6 +2057,69 @@ assert_contains "$out10b2" 'src.workers.complexity.app:app' \
 assert_contains "$out10b2" 'COMPLEXITY_WORKER_URL: "http://complexity-worker:80"' \
   "firewall workers: complexity worker URL in ConfigMap"
 
+# prompt-jailbreak is the worker whose image exposes GET /ready (503 until
+# warm-up). It must not take traffic cold, and a surge of one keeps the old
+# pod serving. Other workers stay on /health and Recreate.
+ruby -ryaml -e '
+  docs = YAML.load_stream(File.read(ARGV.fetch(0))).compact
+  deploys = docs.select { |d| d["kind"] == "Deployment" && d.dig("metadata", "name").to_s.end_with?("-worker") }
+  abort "no firewall workers rendered" if deploys.empty?
+  deploys.each do |d|
+    name = d.dig("metadata", "name")
+    c = (d.dig("spec", "template", "spec", "containers") || []).find { |x| x["name"] == "worker" }
+    abort "#{name}: missing worker container" if c.nil?
+    vols = d.dig("spec", "template", "spec", "volumes") || []
+    vols.each do |v|
+      abort "#{name}: unexpected persistentVolumeClaim" if v.key?("persistentVolumeClaim")
+    end
+    resources = c["resources"] || {}
+    %w[requests limits].each do |side|
+      gpu = (resources[side] || {})["nvidia.com/gpu"]
+      abort "#{name}: default render sets nvidia.com/gpu" unless gpu.nil?
+    end
+    ready = c.dig("readinessProbe", "httpGet", "path")
+    live = c.dig("livenessProbe", "httpGet", "path")
+    start = c.dig("startupProbe", "httpGet", "path")
+    start_fail = c.dig("startupProbe", "failureThreshold")
+    start_period = c.dig("startupProbe", "periodSeconds")
+    abort "#{name}: liveness #{live.inspect}" unless live == "/health"
+    abort "#{name}: startup #{start.inspect}" unless start == "/health"
+    abort "#{name}: startup failureThreshold #{start_fail.inspect}" unless start_fail == 36
+    abort "#{name}: startup periodSeconds #{start_period.inspect}" unless start_period == 5
+    strategy = d.dig("spec", "strategy") || {}
+    if name == "prompt-jailbreak-worker"
+      abort "#{name}: readiness #{ready.inspect}" unless ready == "/ready"
+      abort "#{name}: strategy #{strategy.inspect}" unless strategy["type"] == "RollingUpdate"
+      ru = strategy["rollingUpdate"] || {}
+      abort "#{name}: maxSurge #{ru["maxSurge"].inspect}" unless ru["maxSurge"].to_i == 1
+      abort "#{name}: maxUnavailable #{ru["maxUnavailable"].inspect}" unless ru["maxUnavailable"].to_i == 0
+    else
+      abort "#{name}: readiness #{ready.inspect}" unless ready == "/health"
+      abort "#{name}: strategy #{strategy["type"].inspect}" unless strategy["type"] == "Recreate"
+    end
+  end
+' "$out10b2"
+green "ok  - prompt-jailbreak: /ready + RollingUpdate; other workers: /health + Recreate"
+
+# The GPU overlay asks for one nvidia.com/gpu on every worker. Surging
+# prompt-jailbreak would wait forever for a second device, so the overlay
+# pins that worker back to Recreate.
+out10b2gpu="$TMP/scenario-firewall-gpu-strategy.yaml"
+render_default "$out10b2gpu" -f "$CHART_DIR/values-dataplane-gpu.yaml.example"
+ruby -ryaml -e '
+  docs = YAML.load_stream(File.read(ARGV.fetch(0))).compact
+  d = docs.find { |x| x["kind"] == "Deployment" && x.dig("metadata", "name") == "prompt-jailbreak-worker" }
+  abort "missing prompt-jailbreak-worker in GPU overlay" if d.nil?
+  strategy = d.dig("spec", "strategy") || {}
+  abort "GPU prompt-jailbreak strategy #{strategy.inspect}" unless strategy["type"] == "Recreate"
+  c = (d.dig("spec", "template", "spec", "containers") || []).find { |x| x["name"] == "worker" }
+  gpu = c.dig("resources", "limits", "nvidia.com/gpu")
+  abort "GPU overlay did not set nvidia.com/gpu (got #{gpu.inspect})" unless gpu.to_s == "1"
+  ready = c.dig("readinessProbe", "httpGet", "path")
+  abort "GPU prompt-jailbreak readiness #{ready.inspect}" unless ready == "/ready"
+' "$out10b2gpu"
+green "ok  - GPU overlay: prompt-jailbreak stays Recreate and still probes /ready"
+
 blue "==> Scenario 10b3: TrustGate complexity scoring wiring"
 out10b3="$TMP/scenario-firewall-complexity-wiring.yaml"
 render_default "$out10b3"
