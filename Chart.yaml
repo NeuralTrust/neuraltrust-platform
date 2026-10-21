@@ -30,7 +30,7 @@ dependencies:
       - v2
   # Control-plane App/UI — external only.
   - name: control-plane-app
-    version: 0.1.60
+    version: 0.1.61
     repository: file://./charts/control-plane-app
     tags:
       - neuraltrust

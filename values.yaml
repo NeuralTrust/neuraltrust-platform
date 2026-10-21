@@ -896,7 +896,7 @@ control-plane-app:
         replicas: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v2.8.0"
+          tag: "v2.8.1"
           pullPolicy: IfNotPresent
         config:
           nodeEnv: production
