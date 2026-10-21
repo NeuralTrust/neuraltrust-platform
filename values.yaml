@@ -836,7 +836,7 @@ control-plane-api:
         replicas: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api"
-          tag: "v1.29.1"
+          tag: "v1.29.2"
           pullPolicy: IfNotPresent
         config:
           controlPlaneApiUrl: ""
@@ -896,7 +896,7 @@ control-plane-app:
         replicas: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v2.8.0"
+          tag: "v2.8.2"
           pullPolicy: IfNotPresent
         config:
           nodeEnv: production
@@ -1002,7 +1002,7 @@ agentgateway:
 # TrustGuard: control-plane + data-plane (/v1/evaluate).
 trustguard:
   image:
-    tag: "v0.51.2"
+    tag: "v0.51.3"
   # Empty host/port/sslMode/username/tls inherit — see the agentgateway note.
   database:
     sslMode: ""
@@ -1244,7 +1244,7 @@ data-plane-api:
               resources: {}
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.57.1
+          tag: v1.57.2
           pullPolicy: IfNotPresent
         accessMode: ReadWriteOnce
         huggingfaceToken: ""
@@ -1324,7 +1324,7 @@ firewall:
       replicas: 2
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-        tag: "v2.36.0"
+        tag: "v2.36.2"
         pullPolicy: IfNotPresent
       resources:
         requests:
@@ -1350,7 +1350,7 @@ firewall:
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
         # Keep in lockstep with gateway.image.tag.
-        tag: "v2.36.0"
+        tag: "v2.36.2"
         pullPolicy: IfNotPresent
       replicas: 1
       resources:
