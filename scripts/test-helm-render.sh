@@ -3756,6 +3756,29 @@ render_default "$out15off"
 assert_not_contains "$out15off" 'name: REDIS_TLS_ENABLED' \
   "hybrid: no TLS flag is invented when global.redis.tls is unset"
 
+# The root filesystem is read-only, so with persistence on Redis crash-loops on
+# "Can't open or create append-only dir" unless its --dir is the mounted PVC.
+blue "==> Scenario 15b: persistent in-cluster Redis writes to its PVC"
+out15p="$TMP/scenario-redis-persistence.yaml"
+render_default "$out15p" --set infrastructure.redis.persistence.enabled=true
+ruby -ryaml -e '
+  docs = []
+  YAML.load_stream(File.read(ARGV.fetch(0), encoding: "UTF-8")) { |d| docs << d if d.is_a?(Hash) }
+  dep = docs.find { |d| d["kind"] == "Deployment" && d.dig("metadata", "name") == "redis" }
+  abort "redis Deployment not rendered" if dep.nil?
+  spec = dep.dig("spec", "template", "spec")
+  c = spec.fetch("containers").find { |x| x["name"] == "redis" }
+  args = c.fetch("args")
+  i = args.index("--dir")
+  abort "redis has no --dir, so it writes to the read-only root filesystem" if i.nil?
+  vol = spec.fetch("volumes").find { |v| v.dig("persistentVolumeClaim", "claimName") == "redis-data" }
+  abort "redis-data PVC is not mounted" if vol.nil?
+  mount = c.fetch("volumeMounts").find { |m| m["name"] == vol["name"] }
+  abort "--dir #{args[i + 1]} is not the PVC mount #{mount && mount["mountPath"]}" unless
+    mount && mount["mountPath"] == args[i + 1]
+' "$out15p" || { red "FAIL: persistent Redis does not write to its PVC"; exit 1; }
+green "ok  - persistent Redis writes RDB/AOF to the PVC, not the read-only root"
+
 # IRSA supplies a role and a token file, not a region, and the SDK fails the
 # token request without one.
 blue "==> Scenario 16: AWS region for RDS IAM on the Go gateways"
@@ -5300,6 +5323,66 @@ if [[ "$sb_pub" != "internet-facing" ]]; then
   exit 1
 fi
 green "ok  - saas aws: one global knob flips L4 scheme to internet-facing"
+
+# The scheme keeps a central control plane private on every cloud, not only
+# AWS: on AKS and GKE a LoadBalancer without the cloud's internal annotation
+# gets a public address.
+lb_anno() { # file service annotation
+  yq -N "select(.kind == \"Service\" and .metadata.name == \"$2\") | .metadata.annotations[\"$3\"] // \"\"" "$1" | sed '/^$/d' | head -1
+}
+for cloud in azure gcp; do
+  case "$cloud" in
+    azure) key="service.beta.kubernetes.io/azure-load-balancer-internal"; want_int="true"; want_pub="false" ;;
+    gcp)   key="networking.gke.io/load-balancer-type";                    want_int="Internal"; want_pub="" ;;
+  esac
+  out_int="$TMP/scenario-saas-$cloud-l4.yaml"
+  render_default "$out_int" \
+    --set global.deploymentMode=saas \
+    --set global.domain=cp.example.com \
+    --set global.platform=$cloud
+  for svc in databridge-southbound agentgateway-admin-configsync trustguard-control-plane-configsync; do
+    got=$(lb_anno "$out_int" "$svc" "$key")
+    if [[ "$got" != "$want_int" ]]; then
+      red "FAIL: saas $cloud: $svc want $key=$want_int by default got: ${got:-<none>}"
+      exit 1
+    fi
+  done
+  green "ok  - saas $cloud: every published L4 Service is internal by default"
+  out_pub="$TMP/scenario-saas-$cloud-l4-public.yaml"
+  render_default "$out_pub" \
+    --set global.deploymentMode=saas \
+    --set global.domain=cp.example.com \
+    --set global.platform=$cloud \
+    --set global.controlPlane.loadBalancerScheme=internet-facing
+  got=$(lb_anno "$out_pub" databridge-southbound "$key")
+  if [[ "$got" != "$want_pub" ]]; then
+    red "FAIL: saas $cloud: internet-facing want ${want_pub:-<none>} got: ${got:-<none>}"
+    exit 1
+  fi
+  green "ok  - saas $cloud: one global knob flips L4 scheme to internet-facing"
+done
+out_az_override="$TMP/scenario-saas-azure-l4-override.yaml"
+render_default "$out_az_override" \
+  --set global.deploymentMode=saas \
+  --set global.domain=cp.example.com \
+  --set global.platform=azure \
+  --set 'databridge.service.southbound.annotations.service\.beta\.kubernetes\.io/azure-load-balancer-internal=false'
+got=$(lb_anno "$out_az_override" databridge-southbound service.beta.kubernetes.io/azure-load-balancer-internal)
+if [[ "$got" != "false" ]]; then
+  red "FAIL: saas azure: an explicit local annotation must win over the global knob (got: ${got:-<none>})"
+  exit 1
+fi
+green "ok  - saas azure: an explicit local annotation still overrides the global knob"
+out_k8s="$TMP/scenario-saas-kubernetes-l4.yaml"
+render_default "$out_k8s" \
+  --set global.deploymentMode=saas \
+  --set global.domain=cp.example.com \
+  --set global.platform=kubernetes
+if [[ -n "$(yq -N 'select(.kind == "Service" and .metadata.name == "databridge-southbound") | .metadata.annotations // ""' "$out_k8s" | sed '/^$/d')" ]]; then
+  red "FAIL: saas kubernetes: a plain cluster has no portable scheme annotation; none should render"
+  exit 1
+fi
+green "ok  - saas kubernetes: no cloud annotation on a plain cluster"
 
 # --- local annotations must MERGE over the scheme, not replace it ------------
 # Regression: l4Annotations used to return local annotations verbatim, so a

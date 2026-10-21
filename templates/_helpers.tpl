@@ -2750,7 +2750,15 @@ global.controlPlane.loadBalancerScheme: "internal" (default) | "internet-facing"
 
 {{/*
 Annotations for saas L4 Services: cloud defaults first, local keys layered on
-top. AWS only (NLB); GKE/AKS get a plain LoadBalancer without extra keys.
+top. global.controlPlane.loadBalancerScheme decides on every cloud whether the
+address is private, so a central control plane is never published by accident:
+
+  aws    internal NLB (aws-load-balancer-scheme), or internet-facing
+  azure  azure-load-balancer-internal "true", or "false" for internet-facing
+  gcp    networking.gke.io/load-balancer-type Internal; internet-facing adds
+         nothing, an external load balancer being GKE's default
+  other  a plain LoadBalancer: the scheme has no portable annotation, so set
+         the platform's own through the Service's local annotations
 
 Local annotations MERGE rather than replace. Replacing meant a local block that
 set any key at all silently dropped the scheme derived from
@@ -2758,7 +2766,7 @@ global.controlPlane.loadBalancerScheme — the Service came up internal, a remot
 data plane in another VPC dialled an RFC1918 address, and the resulting
 `i/o timeout` looked like an application fault rather than a values one. Same
 shape as neuraltrust-platform.ingress.annotations. An explicit local
-aws-load-balancer-scheme still wins.
+annotation (an aws-load-balancer-scheme, say) still wins.
 
 Usage: {{ include "neuraltrust-platform.controlPlane.l4Annotations" (dict "ctx" . "local" $annotations) }}
 */}}
@@ -2767,11 +2775,15 @@ Usage: {{ include "neuraltrust-platform.controlPlane.l4Annotations" (dict "ctx" 
 {{- $local := default dict .local -}}
 {{- $merged := dict -}}
 {{- $platform := (default dict $ctx.Values.global).platform | default "kubernetes" | toString | trim | lower -}}
-{{- if eq $platform "aws" -}}
 {{- $scheme := include "neuraltrust-platform.controlPlane.loadBalancerScheme" $ctx -}}
+{{- if eq $platform "aws" -}}
 {{- $_ := set $merged "service.beta.kubernetes.io/aws-load-balancer-type" "nlb" -}}
 {{- $_ := set $merged "service.beta.kubernetes.io/aws-load-balancer-scheme" $scheme -}}
 {{- $_ := set $merged "service.beta.kubernetes.io/aws-load-balancer-nlb-target-type" "ip" -}}
+{{- else if eq $platform "azure" -}}
+{{- $_ := set $merged "service.beta.kubernetes.io/azure-load-balancer-internal" (ternary "true" "false" (eq $scheme "internal")) -}}
+{{- else if and (eq $platform "gcp") (eq $scheme "internal") -}}
+{{- $_ := set $merged "networking.gke.io/load-balancer-type" "Internal" -}}
 {{- end -}}
 {{- range $k, $v := $local -}}
 {{- $_ := set $merged $k ($v | toString) -}}
