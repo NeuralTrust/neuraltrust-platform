@@ -127,7 +127,7 @@ steps the chart cannot do for you.
 | Dial names from `global.domain` | `databridge.`, `*-configsync.`, `telemetry.` |
 | DataBridge HA | `replicas: 2` + peer headless Service |
 | Self-signed TLS | DataBridge + published config-sync (export CA → step 4) |
-| AWS L4 NLBs | `internal` when `platform=aws`; local annotations merge over it |
+| Private L4 load balancers | `internal` on AWS, Azure and GCP; local annotations merge over it |
 | Telemetry Ingress | ON, inherits `global.ingress` (ACM/ALB) |
 
 ### Common escape hatches
@@ -291,7 +291,7 @@ To reach a config-sync listener over peering without publishing a Service, set
 `<product>.configSync.expose.enabled: false` and route to the ClusterIP yourself.
 
 For the endpoints that do get a LoadBalancer, prefer an internal scheme when the
-callers are on a private network — see [AWS / EKS](#aws--eks).
+callers are on a private network — see [Load balancer scheme](#load-balancer-scheme).
 
 ## Authentication
 
@@ -330,21 +330,31 @@ value — otherwise every agent connection returns 401 with nothing visibly wron
 on either side. `./create-secrets.sh` with `DEPLOYMENT_MODE=saas` writes them
 correctly, including the alias. Full table: [SECRETS.md](../SECRETS.md).
 
-## AWS / EKS
+## Load balancer scheme
 
-With `global.platform: aws`, the L4 Services get NLB defaults from one knob:
+One knob decides whether the L4 Services get a private or a public address:
 
 ```yaml
 global:
-  platform: aws
+  platform: aws                    # or azure, gcp
   controlPlane:
     loadBalancerScheme: internal   # default; or internet-facing
 ```
 
+It is applied as each cloud's own annotation:
+
+| `global.platform` | `internal` | `internet-facing` |
+|---|---|---|
+| `aws` | NLB, `aws-load-balancer-scheme: internal` | NLB, `aws-load-balancer-scheme: internet-facing` |
+| `azure` | `azure-load-balancer-internal: "true"` | `azure-load-balancer-internal: "false"` |
+| `gcp` | `networking.gke.io/load-balancer-type: Internal` | GKE's default external load balancer |
+| other | no annotation: set your platform's in the local `annotations` | |
+
 That covers DataBridge southbound and both config-sync expose Services. Local
 `annotations` are **merged over** these defaults, so adding one custom key keeps
-the scheme; set `service.beta.kubernetes.io/aws-load-balancer-scheme` locally to
-override a single Service. Restrict source ranges whenever the scheme is
+the scheme; set the scheme annotation locally (for example
+`service.beta.kubernetes.io/aws-load-balancer-scheme`) to override a single
+Service. Restrict source ranges whenever the scheme is
 `internet-facing`:
 
 ```yaml

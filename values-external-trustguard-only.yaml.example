@@ -10,8 +10,8 @@
 # and Admin API machine-credential keys, whose only client is TrustGate.
 #
 # TrustGuard, the Firewall, the console, data-plane-api, DataCore, AlertEngine
-# and ClickHouse still deploy. Keep data-plane-api: the console reads audit logs
-# and activity from it.
+# and ClickHouse still deploy. Keep data-plane-api: the console reads runtime
+# activity from it.
 
 global:
   products:

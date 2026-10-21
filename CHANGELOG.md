@@ -12,7 +12,67 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
   Deployment strategy is `RollingUpdate` (`maxUnavailable: 0`, `maxSurge: 1`)
   so a warm pod keeps serving. Other workers stay on `Recreate` and `/health`.
   The GPU overlay keeps prompt-jailbreak on `Recreate`, because one GPU cannot
-  surge. Firewall subchart `2.1.23 → 2.1.24`.
+  surge.
+
+## [v3.5.0] — 2026-10-16
+
+### Added
+
+- **Opt-in operational telemetry: `global.observability.operationalTelemetry`
+  (default `false`).** When set to `true`, AgentGateway and TrustGuard export
+  their own traces and metrics: server spans, request rate, errors and
+  latency. Probe routes are sampled at 1%. No prompt or response payloads are
+  included. In **hybrid** installs this is sent to NeuralTrust through
+  the existing `clickstack-egress-collector`, with the same enrolment
+  credentials as product telemetry; no new Secrets or network destinations.
+  It is off until you opt in, and we recommend turning it on so support can
+  see the health of your gateway. In **external** installs it goes to your
+  in-release `clickstack-collector` and stays in your environment.
+  - AgentGateway gains `OPS_TRACES_ENABLED`, `OPS_METRICS_ENABLED`, sampling
+    ratios and `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` /
+    `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` in `agentgateway-env-vars`.
+  - Hybrid TrustGuard gains `OPENTELEMETRY_*` in `trustguard-env-vars`.
+    External TrustGuard already exported these and is unchanged.
+  - Toggle at any time, for example while a support case is open:
+    `helm upgrade <release> <chart> --reuse-values --set
+    global.observability.operationalTelemetry=true` (or `false`). The affected
+    pods roll; nothing else changes. With `ntctl`: `ntctl upgrade
+    --operational-telemetry=true|false --version <installed version>`.
+  - Existing installs render unchanged until the key is set.
+
+## [v3.4.0] — 2026-10-15
+
+### Added
+
+- **The chart can create the roles and databases on your own PostgreSQL.**
+  Off by default. With `global.postgresql.deploy: false` and `host` set, turn on
+  `global.postgresql.managedBootstrap` and name a Secret with an admin login that
+  can create roles and databases. A post-install and post-upgrade Job then
+  creates, idempotently, the control-plane role and database and each service's
+  own, with the passwords the services read, plus `pgcrypto` in each database.
+  Password auth only. Installs that do not turn it on render as before.
+
+### Changed
+
+- **The examples name datastore Secrets `external-postgresql` and
+  `external-redis`,** the names `ntctl` creates, so one set of instructions fits
+  both install paths. `values-hybrid.yaml.example` now keeps only the password in
+  `external-postgresql` through `global.postgresql.passwordSecret`, with the
+  endpoint in values, instead of a whole hand-written Secret plus a
+  data-plane-api key mapping. SECRETS.md lists the convention. Templates are
+  unchanged; existing installs keep whatever names their values give.
+
+### Fixed
+
+- **A Firewall worker's own `resources` now merges over
+  `firewall.workerDefaults.resources` instead of replacing it.** Before, a worker
+  with its own block ignored the defaults entirely. Setting a GPU in
+  `workerDefaults` therefore skipped `prompt-moderation` and `topic-guard`, which
+  carry their own memory sizes, and they ran without a GPU. Now keys a worker
+  sets win and the rest come from the defaults. Installs that set no per-worker
+  `resources`, or that set every key in it, render as before.
+  `values-dataplane-gpu.yaml.example` no longer restates the GPU for those two
+  workers.
 
 ## [v3.3.0] — 2026-10-15
 

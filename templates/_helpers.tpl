@@ -587,6 +587,27 @@ Requires all of:
 {{- end -}}
 
 {{/*
+Gate for the opt-in bootstrap of a PostgreSQL the chart does not run
+(templates/postgresql/bootstrap-job.yaml, managed mode).
+
+Requires all of:
+  - `managedBootstrap.enabled`, which defaults off
+  - the topology needs PostgreSQL at all
+  - the chart is not running it: `deploy` is off, or `host` names another
+    instance (the in-cluster Job covers the chart's own)
+  - password auth; IAM and Entra principals are created by cloud tooling
+validate-values.yaml fails the render for an enabled bootstrap that cannot run.
+*/}}
+{{- define "neuraltrust-platform.postgresql.managedBootstrap.enabled" -}}
+{{- $pg := default dict (default dict .Values.global).postgresql -}}
+{{- $mb := default dict $pg.managedBootstrap -}}
+{{- $host := "" -}}
+{{- if $pg.host -}}{{- $host = $pg.host | toString -}}{{- end -}}
+{{- $inCluster := and (include "neuraltrust-platform.postgresql.deploy" .) (eq $host "") -}}
+{{- if and $mb.enabled (eq (include "neuraltrust-platform.postgresRequired" .) "true") (not $inCluster) (ne ($pg.authMode | default "password" | toString) "iam") -}}true{{- end -}}
+{{- end -}}
+
+{{/*
 PostgreSQL connection scalars. In hybrid every service connects to the shared
 `control-plane-postgresql` Service; in external, callers overlay their own
 host/port under their subchart values. These helpers always return sensible
@@ -2729,7 +2750,15 @@ global.controlPlane.loadBalancerScheme: "internal" (default) | "internet-facing"
 
 {{/*
 Annotations for saas L4 Services: cloud defaults first, local keys layered on
-top. AWS only (NLB); GKE/AKS get a plain LoadBalancer without extra keys.
+top. global.controlPlane.loadBalancerScheme decides on every cloud whether the
+address is private, so a central control plane is never published by accident:
+
+  aws    internal NLB (aws-load-balancer-scheme), or internet-facing
+  azure  azure-load-balancer-internal "true", or "false" for internet-facing
+  gcp    networking.gke.io/load-balancer-type Internal; internet-facing adds
+         nothing, an external load balancer being GKE's default
+  other  a plain LoadBalancer: the scheme has no portable annotation, so set
+         the platform's own through the Service's local annotations
 
 Local annotations MERGE rather than replace. Replacing meant a local block that
 set any key at all silently dropped the scheme derived from
@@ -2737,7 +2766,7 @@ global.controlPlane.loadBalancerScheme — the Service came up internal, a remot
 data plane in another VPC dialled an RFC1918 address, and the resulting
 `i/o timeout` looked like an application fault rather than a values one. Same
 shape as neuraltrust-platform.ingress.annotations. An explicit local
-aws-load-balancer-scheme still wins.
+annotation (an aws-load-balancer-scheme, say) still wins.
 
 Usage: {{ include "neuraltrust-platform.controlPlane.l4Annotations" (dict "ctx" . "local" $annotations) }}
 */}}
@@ -2746,11 +2775,15 @@ Usage: {{ include "neuraltrust-platform.controlPlane.l4Annotations" (dict "ctx" 
 {{- $local := default dict .local -}}
 {{- $merged := dict -}}
 {{- $platform := (default dict $ctx.Values.global).platform | default "kubernetes" | toString | trim | lower -}}
-{{- if eq $platform "aws" -}}
 {{- $scheme := include "neuraltrust-platform.controlPlane.loadBalancerScheme" $ctx -}}
+{{- if eq $platform "aws" -}}
 {{- $_ := set $merged "service.beta.kubernetes.io/aws-load-balancer-type" "nlb" -}}
 {{- $_ := set $merged "service.beta.kubernetes.io/aws-load-balancer-scheme" $scheme -}}
 {{- $_ := set $merged "service.beta.kubernetes.io/aws-load-balancer-nlb-target-type" "ip" -}}
+{{- else if eq $platform "azure" -}}
+{{- $_ := set $merged "service.beta.kubernetes.io/azure-load-balancer-internal" (ternary "true" "false" (eq $scheme "internal")) -}}
+{{- else if and (eq $platform "gcp") (eq $scheme "internal") -}}
+{{- $_ := set $merged "networking.gke.io/load-balancer-type" "Internal" -}}
 {{- end -}}
 {{- range $k, $v := $local -}}
 {{- $_ := set $merged $k ($v | toString) -}}
@@ -3004,6 +3037,17 @@ Call with (dict "ctx" $ "port" 4317). Default listenHost "::" → "[::]:port"
 {{- end -}}
 {{- end }}
 
+{{/*
+"true" when the operator opted in to operational telemetry
+(global.observability.operationalTelemetry), else empty. Consent gate for the
+services' own traces and metrics: in hybrid they leave the cluster for
+NeuralTrust, so nothing renders them on by default.
+*/}}
+{{- define "neuraltrust-platform.operationalTelemetry.enabled" -}}
+{{- $obs := default dict (default dict .Values.global).observability -}}
+{{- if eq (toString (default false $obs.operationalTelemetry)) "true" -}}true{{- end -}}
+{{- end -}}
+
 {{- define "neuraltrust-platform.clickstackEgress.endpointHost" -}}
 {{- printf "%s.%s.svc.cluster.local" (include "neuraltrust-platform.clickstackEgress.fullname" .) .Release.Namespace -}}
 {{- end }}
@@ -3120,7 +3164,7 @@ default registry keep doing so. A repository the operator changed always wins.
 {{- define "neuraltrust-platform.collectorImage" -}}
 {{- $default := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/opentelemetry-collector-contrib" -}}
 {{- $repo := .repository | default $default -}}
-{{- $tag := .tag | default "0.161.0" -}}
+{{- $tag := .tag | default "0.163.1" -}}
 {{- $global := default dict .global -}}
 {{- if and (eq $repo $default) (eq (toString $global.imageRegistryScope) "all") -}}
 {{- include "neuraltrust-platform.image" (dict "repository" $repo "tag" $tag "global" $global) -}}

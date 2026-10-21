@@ -48,6 +48,11 @@ spec:
                    can connect. */}}
             - "--protected-mode"
             - "no"
+            {{- /* The image sets no WORKDIR, so Redis would write RDB/AOF to "/",
+                   which readOnlyRootFilesystem makes unwritable. Point it at the
+                   data volume (PVC with persistence, emptyDir without). */}}
+            - "--dir"
+            - "/data"
             {{- if $persist.enabled }}
             - "--save"
             - "60 1"

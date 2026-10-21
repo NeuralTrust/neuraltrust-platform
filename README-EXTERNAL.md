@@ -127,7 +127,10 @@ one is set to `false`. For a TrustGuard-only install, layer
 [`values-external-trustguard-only.yaml.example`](./values-external-trustguard-only.yaml.example)
 on top: it sets `global.products.trustgate: false`, which removes TrustGate, the
 firewall complexity worker and the MCP OAuth / Admin API machine-credential keys.
-Keep `dataPlane` on — the console reads audit logs and activity from data-plane-api.
+Keep `dataPlane` on — the console reads runtime activity from data-plane-api.
+The audit trail does not depend on it: audit events leave the console as OTLP
+log records and are read back through DataCore in Telemetry → Logs (see
+[docs/observability.md](./docs/observability.md)).
 `hostedExport.enabled: false` removes the umbrella collector's hosted telemetry
 exporter; keep it `false` for no-egress deployments.
 
@@ -312,7 +315,7 @@ of Helm release history:
 agentgateway:
   database:
     existingSecret:
-      name: "managed-postgres-roles"
+      name: "external-postgresql"
       key: "AGENTGATEWAY" # key is configurable, so one Secret serves every role
 ```
 
@@ -328,7 +331,7 @@ global:
     deploy: false
     host: "postgres.example.com"
     passwordSecret:
-      name: "managed-postgres-roles"
+      name: "external-postgresql"
       key: "CONTROL_PLANE"
 ```
 

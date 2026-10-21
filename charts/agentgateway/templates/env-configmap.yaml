@@ -100,9 +100,15 @@ data:
   OTEL_EXPORTER_OTLP_ENDPOINT: {{ printf "http://clickstack-collector.%s.svc.cluster.local:4318/v1/logs" .Release.Namespace | quote }}
   OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
   OTEL_EXPORTER_OTLP_INSECURE: "true"
+  {{- if eq (include "neuraltrust-platform.operationalTelemetry.enabled" .) "true" }}
+  {{- include "agentgateway.opsTelemetryEnv" (include "neuraltrust-platform.clickstack.externalOtlpHTTPBaseEndpoint" .) | nindent 2 }}
+  {{- end }}
   {{- else if eq (include "neuraltrust-platform.clickstackHybridEnabled" .) "true" }}
   # Hybrid: plain OTLP to local clickstack-egress-collector (enrolment auth).
   {{- include "neuraltrust-platform.clickstack.otlpEnv" . | nindent 2 }}
+  {{- if eq (include "neuraltrust-platform.operationalTelemetry.enabled" .) "true" }}
+  {{- include "agentgateway.opsTelemetryEnv" (include "neuraltrust-platform.clickstackEgress.otlpHTTPBaseEndpoint" .) | nindent 2 }}
+  {{- end }}
   {{- end }}
   {{- /* TrustGuard URL when Guard is on (hybrid positive select / external full). */ -}}
   {{- $tg := default dict .Values.trustguard -}}

@@ -334,3 +334,19 @@ static password to point at. Emits nothing unless an `existingSecret.name` is se
 {{- end -}}
 {{- join "\n" $entries -}}
 {{- end }}
+
+{{/*
+Operational traces and metrics (the gateway's own server spans and RED
+metrics), sent to the same collector as product logs. The binary defaults both
+switches off, and an enabled signal with no endpoint fails startup, so the
+switches and endpoints always render together. Takes the collector base URL.
+Rendered only when global.observability.operationalTelemetry is true.
+*/}}
+{{- define "agentgateway.opsTelemetryEnv" -}}
+OPS_TRACES_ENABLED: "true"
+OPS_TRACES_SAMPLING_RATIO: "1.0"
+OPS_TRACES_PROBE_SAMPLING_RATIO: "0.01"
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: {{ printf "%s/v1/traces" . | quote }}
+OPS_METRICS_ENABLED: "true"
+OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: {{ printf "%s/v1/metrics" . | quote }}
+{{ end }}
