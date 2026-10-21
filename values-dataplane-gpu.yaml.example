@@ -27,29 +27,24 @@ firewall:
           operator: "Exists"
           effect: "NoSchedule"
       hostIPC: true
-    # These two carry their own `resources` in the chart defaults, and a
-    # per-worker `resources` replaces workerDefaults.resources rather than
-    # merging with it, so the GPU request is restated for them.
-    # prompt-jailbreak defaults to RollingUpdate. One GPU cannot surge
-    # (maxUnavailable: 0 waits for a second device), so keep Recreate.
+    # A worker's own `resources` merges over workerDefaults.resources, so every
+    # worker inherits the GPU request. These two carry larger memory in the chart
+    # defaults; raise it further for the GPU image.
     workers:
+      # prompt-jailbreak defaults to RollingUpdate. One GPU cannot surge
+      # (maxUnavailable: 0 waits for a second device), so keep Recreate.
       prompt-jailbreak:
         deploymentStrategy: Recreate
       prompt-moderation:
         resources:
-          requests:
-            nvidia.com/gpu: "1"
           limits:
             memory: 8Gi
-            nvidia.com/gpu: "1"
       topic-guard:
         resources:
           requests:
             memory: 4Gi
-            nvidia.com/gpu: "1"
           limits:
             memory: 8Gi
-            nvidia.com/gpu: "1"
     config:
       cudaMpsActiveThreadPercentage: "25"
       cudaMpsPinnedDeviceMemLimit: "6000M"

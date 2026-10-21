@@ -396,10 +396,26 @@ point at, so the hooks are ignored when `iamAuth: true`, and
 `global.postgresql.passwordSecret` is likewise ignored under
 `global.postgresql.authMode: iam` rather than rejected.
 
-Hybrid needs none of this: every workload connects as the one shared role, taking
-`postgresql-secrets` and `redis-secrets` wholesale through `envFrom`, so a
-pre-created Secret is already supported there via `global.postgresql.existingSecret`
-/ `global.redis.existingSecret`. The per-service hooks are inert in hybrid.
+In hybrid every workload connects as the one shared role, so the per-service
+hooks are inert there and `global.postgresql.passwordSecret` is the whole story:
+the chart writes every other connection key and each workload, DataAgent
+included, reads the password from your Secret. `values-hybrid.yaml.example`
+shows it. `global.postgresql.existingSecret` still works when you would rather
+hand over a whole Secret, at the cost of writing its keys yourself and mapping
+them for data-plane-api.
+
+#### Naming the Secrets you create
+
+The examples, and `ntctl`, use one name per datastore, so the same Secret
+works whichever install path created it:
+
+| Secret | Holds | Referenced from |
+|---|---|---|
+| `external-postgresql` | The PostgreSQL password: `POSTGRES_PASSWORD` in hybrid; one key per role in external (`CONTROL_PLANE`, `AGENTGATEWAY`, `TRUSTGUARD`, `ALERTENGINE`, `DATACORE`) | `global.postgresql.passwordSecret`; also `<service>.database.existingSecret` in external |
+| `external-redis` | `REDIS_HOST`, `REDIS_PORT`, `REDIS_USERNAME`, `REDIS_PASSWORD`, `REDIS_TLS`; plus `REDIS_URL` in external, for data-plane-api | `global.redis.existingSecret` in hybrid; `<service>.redis.existingSecret` in external |
+
+The names are a convention, not a requirement: the chart reads whatever name
+the values give.
 
 #### One canonical name per fact
 
@@ -630,7 +646,23 @@ install, missing Secrets/keys are created; later upgrades reuse them with `looku
   `deploy: false`, IAM auth, or
   `global.postgresql.bootstrapJob.enabled: false` all stop it rendering, and its
   target is templated rather than read from `postgresql-secrets`. Managed instances
-  stay the DBA's to provision.
+  stay the DBA's to provision, unless you opt in below.
+- **Roles and databases on your own PostgreSQL (opt-in)**: with
+  `global.postgresql.deploy: false` and `host` set, `global.postgresql.managedBootstrap.enabled: true`
+  renders a `postgresql-managed-bootstrap` Job (post-install and post-upgrade)
+  that does the same against your instance, plus the control-plane role and
+  database, which no image created there. It logs in with the admin login in the
+  Secret named by `managedBootstrap.adminSecret.name` (keys `username` and
+  `password`, renamable), which needs `CREATEROLE` and `CREATEDB`, not superuser.
+  A role that already exists keeps everything but its password, which the Job
+  sets to the one in its service's Secret on every run.
+  The control-plane password comes from `global.postgresql.passwordSecret` or
+  `postgresql-secrets`. It also creates `managedBootstrap.extensions`
+  (default `pgcrypto`, which TrustGuard's migrations need) in every database, as
+  each database's owner. On Azure Flexible Server, allow-list them first in the
+  `azure.extensions` server parameter; a failure is logged, not fatal. Password
+  auth only: with `authMode: iam` the roles are IAM or Entra principals your
+  cloud tooling creates, and the render fails if you enable it.
 - **In-cluster Redis** (`redis`) is passwordless by default. Set
   `global.redis.password` / `global.redis.existingSecret.name` for a hosted /
   authenticated Redis; the chart stores it in the shared `redis-secrets` Secret

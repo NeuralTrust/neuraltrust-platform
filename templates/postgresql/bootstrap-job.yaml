@@ -19,8 +19,17 @@ Idempotent, because it runs on every upgrade and on re-installs into a namespace
 whose Secrets were kept: an existing role has its password re-aligned with the
 Secret the pods read, an existing database keeps its data and only gains the
 owner and grants.
+
+Managed mode is the one exception to "never touches a managed instance", and
+only when the operator opts in with `global.postgresql.managedBootstrap`. The
+same Job, named postgresql-managed-bootstrap, logs in to `global.postgresql.host`
+with the admin login in `managedBootstrap.adminSecret`, creates the control-plane
+role and database too (there is no image to create them), takes each role it
+must own a database as only for that statement, and creates the extensions the
+services need.
 */ -}}
-{{- if eq (include "neuraltrust-platform.postgresql.bootstrapJob.enabled" .) "true" }}
+{{- $managed := eq (include "neuraltrust-platform.postgresql.managedBootstrap.enabled" .) "true" }}
+{{- if or (eq (include "neuraltrust-platform.postgresql.bootstrapJob.enabled" .) "true") $managed }}
 {{- $pg := default dict (default dict .Values.global).postgresql }}
 {{- $img := default dict $pg.image }}
 {{- $job := default dict $pg.bootstrapJob }}
@@ -28,6 +37,19 @@ owner and grants.
 {{- $adminDb := include "neuraltrust-platform.v2.hybridPg.database" . }}
 {{- $adminRole := include "neuraltrust-platform.v2.hybridPg.user" . }}
 {{- $isExternal := eq (include "neuraltrust-platform.isExternal" .) "true" }}
+{{- $mb := default dict $pg.managedBootstrap }}
+{{- $mbAdmin := default dict $mb.adminSecret }}
+{{- $jobName := "control-plane-postgresql-bootstrap" }}
+{{- if $managed }}{{- $jobName = "postgresql-managed-bootstrap" }}{{- end }}
+{{- /* The control-plane password: the operator's passwordSecret when set,
+       otherwise the shared postgresql-secrets (or its existingSecret). */}}
+{{- $cpRef := include "neuraltrust-platform.postgresql.passwordSecretRef" . | fromYaml }}
+{{- $cpSecret := include "neuraltrust-platform.v2.hybridPg.secretName" . }}
+{{- $cpKey := "POSTGRES_PASSWORD" }}
+{{- if eq (include "neuraltrust-platform.postgresql.passwordIsExternal" .) "true" }}
+  {{- $cpSecret = $cpRef.name }}
+  {{- $cpKey = $cpRef.key | default "POSTGRES_PASSWORD" }}
+{{- end }}
 {{- /* `default` cannot read these: it treats an explicit false as absent. */}}
 {{- $aeEnabled := true }}
 {{- if hasKey (default dict .Values.alertengine) "enabled" }}{{- $aeEnabled = (default dict .Values.alertengine).enabled }}{{- end }}
@@ -78,9 +100,9 @@ owner and grants.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: control-plane-postgresql-bootstrap
+  name: {{ $jobName }}
   labels:
-    app: control-plane-postgresql-bootstrap
+    app: {{ $jobName }}
   annotations:
     {{- /* post-install, not pre-install: the PostgreSQL Deployment is created in
            the main phase, so there is nothing to connect to before it. Services
@@ -99,7 +121,7 @@ spec:
   template:
     metadata:
       labels:
-        app: control-plane-postgresql-bootstrap
+        app: {{ $jobName }}
     spec:
       restartPolicy: Never
       {{- if not (include "neuraltrust-platform.isOpenshift" .) }}
@@ -135,9 +157,14 @@ spec:
               log() { printf '%s\n' "$*"; }
 
               if [ -z "${PGPASSWORD:-}" ] || [ -z "${PGUSER:-}" ]; then
+              {{- if $managed }}
+                log "ERROR: Secret {{ $mbAdmin.name }} is missing the admin login (keys {{ $mbAdmin.usernameKey | default "username" }} and {{ $mbAdmin.passwordKey | default "password" }})."
+                log "       Create it in this namespace with a login that can create roles and databases."
+              {{- else }}
                 log "ERROR: postgresql-secrets is missing POSTGRES_USER or POSTGRES_PASSWORD."
                 log "       With autoGenerateSecrets=false or preserveExistingSecrets=true the"
                 log "       chart writes no Secret, so pre-create postgresql-secrets before installing."
+              {{- end }}
                 exit 1
               fi
 
@@ -147,10 +174,15 @@ spec:
                 ATTEMPT=$((ATTEMPT + 1))
                 if [ "${ATTEMPT}" -ge 100 ]; then
                   log "ERROR: no authenticated connection after $((ATTEMPT * 3))s."
+                {{- if $managed }}
+                  log "       Check the host, port and sslMode in global.postgresql, that this"
+                  log "       namespace can reach the instance, and the admin login in {{ $mbAdmin.name }}."
+                {{- else }}
                   log "       If the data directory outlived the Secret, the stored password is"
                   log "       no longer POSTGRES_PASSWORD — the image applies that only when it"
                   log "       initialises an empty directory. Reset the role from inside the"
                   log "       PostgreSQL pod, or restore the Secret it was initialised with."
+                {{- end }}
                   exit 1
                 fi
                 [ $((ATTEMPT % 10)) -eq 0 ] && log "  still waiting (attempt ${ATTEMPT})..."
@@ -186,6 +218,17 @@ spec:
               # the public schema no longer grants CREATE to everyone.
               ensure_database() {
                 DB="$1"; ROLE="$2"
+              {{- if $managed }}
+                # A managed instance's admin is not a superuser: it can make a
+                # role own a database only while it holds that role itself.
+                HELD=""
+                if [ "${ROLE}" != "${PGUSER}" ]; then
+                  q -v r="${ROLE}" <<'SQL'
+              GRANT :"r" TO CURRENT_USER;
+              SQL
+                  HELD=1
+                fi
+              {{- end }}
                 if db_exists "${DB}"; then
                   q -v d="${DB}" -v r="${ROLE}" <<'SQL'
               ALTER DATABASE :"d" OWNER TO :"r";
@@ -203,12 +246,42 @@ spec:
                 q -d "${DB}" -v r="${ROLE}" <<'SQL'
               GRANT ALL ON SCHEMA public TO :"r";
               SQL
+              {{- if $managed }}
+                # pgcrypto and the like are trusted extensions: the database owner
+                # may create them, the admin may not. Hence SET ROLE to the owner,
+                # while the admin still holds it.
+                for EXT in ${EXTENSIONS}; do
+                  if q -d "${DB}" -v r="${ROLE}" -v e="${EXT}" >/dev/null 2>&1 <<'SQL'
+              SET ROLE :"r";
+              CREATE EXTENSION IF NOT EXISTS :"e";
+              SQL
+                  then
+                    log "  extension ${EXT} present in \"${DB}\""
+                  else
+                    log "  WARNING: could not create extension ${EXT} in \"${DB}\". On Azure, allow-list it"
+                    log "           in the server parameter azure.extensions; elsewhere, check it is installed."
+                    NOEXT="${NOEXT} ${DB}/${EXT}"
+                  fi
+                done
+                if [ -n "${HELD}" ]; then
+                  q -v r="${ROLE}" <<'SQL'
+              REVOKE :"r" FROM CURRENT_USER;
+              SQL
+                fi
+              {{- end }}
               }
 
               # The password arrives as the NAME of an env var, so it is never a
               # process argument and never reaches a log line.
               bootstrap_service() {
                 LABEL="$1"; ROLE="$2"; DB="$3"; PW="$(printenv "$4" || true)"
+              {{- if $managed }}
+                if [ "${ROLE}" = "${PGUSER}" ]; then
+                  log "${LABEL}: role \"${ROLE}\" is the admin login itself; left as it is."
+                  ensure_database "${DB}" "${ROLE}"
+                  return 0
+                fi
+              {{- end }}
                 if [ -z "${PW}" ]; then
                   log "${LABEL}: no password in ${5} (key ${6}); skipping. The service cannot connect until its role exists."
                   SKIPPED="${SKIPPED} ${LABEL}"
@@ -229,6 +302,17 @@ spec:
               }
 
               SKIPPED=""
+              {{- if $managed }}
+              NOEXT=""
+              # Extensions the services' migrations expect, created in every
+              # database. A failure is reported, not fatal: the service that needs
+              # one says so when it migrates.
+              EXTENSIONS="{{ join " " ($mb.extensions | default list) }}"
+
+              # Nothing created the control-plane pair on a managed instance, so it
+              # is a service like the others, with the password the API reads.
+              bootstrap_service "control-plane" {{ $adminRole | quote }} {{ $adminDb | quote }} "CONTROL_PLANE_DB_PASSWORD" {{ $cpSecret | quote }} {{ $cpKey | quote }}
+              {{- else }}
 
               # The bootstrap pair the image created. Ensured here too so a data
               # directory that predates a change to global.postgresql.database, or
@@ -236,8 +320,13 @@ spec:
               CONTROL_PLANE_DB="${CONTROL_PLANE_DB:-{{ $adminDb }}}"
               log "control plane: role \"${PGUSER}\", database \"${CONTROL_PLANE_DB}\""
               ensure_database "${CONTROL_PLANE_DB}" "${PGUSER}"
+              {{- end }}
               {{ range $s := $services }}
               bootstrap_service {{ $s.key | quote }} {{ $s.role | quote }} {{ $s.db | quote }} {{ $s.env | quote }} {{ $s.secret | quote }} {{ $s.secretKey | quote }}
+              {{- end }}
+
+              {{- if $managed }}
+              [ -n "${NOEXT}" ] && SKIPPED="${SKIPPED} extensions:${NOEXT}"
               {{- end }}
 
               if [ -n "${SKIPPED}" ]; then
@@ -246,6 +335,38 @@ spec:
                 log "Done."
               fi
           env:
+            {{- if $managed }}
+            - name: PGHOST
+              value: {{ include "neuraltrust-platform.v2.hybridPg.host" . | quote }}
+            - name: PGPORT
+              value: {{ include "neuraltrust-platform.v2.hybridPg.port" . | quote }}
+            - name: PGSSLMODE
+              value: {{ include "neuraltrust-platform.v2.hybridPg.sslMode" . | quote }}
+            - name: PGDATABASE
+              value: {{ $mb.adminDatabase | default "postgres" | quote }}
+            - name: PGCONNECT_TIMEOUT
+              value: "5"
+            - name: HOME
+              value: "/tmp"
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $mbAdmin.name | quote }}
+                  key: {{ $mbAdmin.usernameKey | default "username" | quote }}
+                  optional: true
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $mbAdmin.name | quote }}
+                  key: {{ $mbAdmin.passwordKey | default "password" | quote }}
+                  optional: true
+            - name: CONTROL_PLANE_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $cpSecret | quote }}
+                  key: {{ $cpKey | quote }}
+                  optional: true
+            {{- else }}
             - name: PGHOST
               value: "control-plane-postgresql"
             - name: PGPORT
@@ -278,6 +399,7 @@ spec:
                   name: postgresql-secrets
                   key: POSTGRES_DB
                   optional: true
+            {{- end }}
             {{- range $s := $services }}
             - name: {{ $s.env }}
               valueFrom:

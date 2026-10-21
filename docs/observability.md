@@ -52,6 +52,49 @@ hybrid with a DataAgent egress Service, watchdog points at
 no default watchdog OTLP endpoint — set `watchdog.telemetry.otlp.endpoint`
 explicitly if needed.
 
+## Operational telemetry (opt-in)
+
+`global.observability.operationalTelemetry` (default `false`) controls
+AgentGateway's and TrustGuard's **own** traces and metrics: server spans,
+request rate, errors and latency. This is separate from product telemetry
+above, which is always on in hybrid. Neither signal carries prompt or response
+payloads.
+
+| Mode | Where it goes when enabled |
+|---|---|
+| hybrid | NeuralTrust, through `clickstack-egress-collector` with the enrolment credentials |
+| external | the in-release `clickstack-collector`; it stays in your environment |
+
+It is off by default because in hybrid it leaves your cluster. We recommend
+turning it on: it lets NeuralTrust support see your gateway's error rate and
+latency directly, which usually shortens a support case.
+
+Switching it on or off is a single upgrade, so it can be enabled just for the
+length of a support case:
+
+```bash
+helm upgrade <release> <chart> --reuse-values \
+  --set global.observability.operationalTelemetry=true   # or false
+# or
+ntctl upgrade --operational-telemetry=true --version <installed version>   # or false
+```
+
+Only the AgentGateway and TrustGuard pods roll.
+
+What renders when it is on:
+
+- **AgentGateway** sets `OPS_TRACES_ENABLED`, `OPS_METRICS_ENABLED`,
+  `OPS_TRACES_SAMPLING_RATIO` (`1.0`), `OPS_TRACES_PROBE_SAMPLING_RATIO`
+  (`0.01`, for health and readiness routes) and full-URL
+  `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` / `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`
+  (`…:4318/v1/traces`, `/v1/metrics`). AgentGateway refuses to start with a
+  signal enabled and no endpoint, so the chart always renders them together.
+- **TrustGuard** (hybrid) sets `OPENTELEMETRY_ENABLED` and the scheme-less
+  `OPENTELEMETRY_TRACES_ENDPOINT` / `OPENTELEMETRY_METRICS_ENDPOINT`
+  (`clickstack-egress-collector.<ns>.svc.cluster.local:4318`; the SDK appends
+  the signal path). External TrustGuard already exports these to the in-release
+  collector, independently of this key.
+
 ## ClickStack OTel Collector
 
 The ClickStack collector is an external-mode component, not a replacement

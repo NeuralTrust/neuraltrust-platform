@@ -166,9 +166,10 @@ Then provide the host/user/password (or `existingSecret`) for each. Reference
 existing Kubernetes Secrets for passwords. The full pattern is in
 [`values-managed-datastores.yaml.example`](./values-managed-datastores.yaml.example).
 
-There is no chart-managed database init Job. When external PostgreSQL is
-selected, pre-create the role and database before installing; application
-migrations own their own tables.
+When external PostgreSQL is selected, either pre-create the roles and databases
+before installing, or let the chart do it with
+`global.postgresql.managedBootstrap` and an admin login you provide (see
+[SECRETS.md](./SECRETS.md)). Application migrations own their own tables.
 
 ## 6. Configure observability
 

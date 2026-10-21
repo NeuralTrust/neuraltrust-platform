@@ -5,7 +5,7 @@ firewall:
     replicas: 2
     image:
       repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-      tag: v2.32.2
+      tag: v2.36.2
       pullPolicy: IfNotPresent
     resources:
       limits:
@@ -41,7 +41,7 @@ firewall:
     image:
       repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
       # Keep in lockstep with gateway.image.tag.
-      tag: v2.32.2
+      tag: v2.36.2
       pullPolicy: IfNotPresent
     replicas: 1
     # CPU-worker default: one HF transformer (~86M-class) per pod via ONNX.
@@ -145,8 +145,8 @@ firewall:
       module: src.workers.topic_guard.app:app
       # ONNX weights are ~1.15Gi and ONNX Runtime plus the tokenizer peak past the
       # 4Gi workerDefaults limit under load, so this worker gets the same 5Gi
-      # ceiling the prod overlay gives it. `resources` replaces the whole
-      # workerDefaults block rather than merging into it, so the rest is restated.
+      # ceiling the prod overlay gives it. A worker's `resources` merges over
+      # workerDefaults.resources: keys set here win, the rest are inherited.
       resources:
         requests:
           cpu: "1"

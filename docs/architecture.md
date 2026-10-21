@@ -332,7 +332,9 @@ it is: when the chart runs PostgreSQL itself, the
 `control-plane-postgresql-bootstrap` Job creates whatever the image did not
 (hybrid shares the one bootstrap pair, external needs a role and database per
 service). For an external / managed PostgreSQL, the DBA (or Terraform) pre-creates
-them before install and the Job does not render; point the chart at the instance
+them before install and that Job does not render, unless the operator opts in to
+`global.postgresql.managedBootstrap`, which runs the same Job against their
+instance with an admin login they provide; point the chart at the instance
 via `global.postgresql.deploy: false` + host/user/password (or set
 `global.postgresql.existingSecret.name`). The `data-plane-api` read shim runs on
 PostgreSQL by default in hybrid, sharing the same `postgresql-secrets` — a
