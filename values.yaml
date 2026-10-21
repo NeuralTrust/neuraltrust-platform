@@ -33,8 +33,10 @@ global:
     # Leave empty on hybrid to use NeuralTrust SaaS per saasRegion.
     # Leave empty on saas to use global.domain.
     domain: ""
-    # L4 LoadBalancer scheme for DataBridge southbound + config-sync expose
-    # (AWS NLB annotations when local annotations are empty). saas only.
+    # L4 LoadBalancer scheme for DataBridge southbound + config-sync expose,
+    # saas only. Applied as each cloud's annotation (AWS NLB scheme, AKS
+    # azure-load-balancer-internal, GKE load-balancer-type); local Service
+    # annotations layer on top.
     #   internal          — private hybrid reachability (default)
     #   internet-facing   — data planes over the public internet
     loadBalancerScheme: "internal"
@@ -1031,7 +1033,7 @@ trustlens:
 # agentgateway.dataagent / trustguard.dataagent.
 dataagent:
   image:
-    tag: "v0.8.1"
+    tag: "v0.8.2"
   databridge:
     # Empty derives from global.saasRegion (databridge.<saas domain>:443).
     addr: ""
@@ -1044,7 +1046,7 @@ dataagent:
 # `global.postgresql` block.
 datacore:
   image:
-    tag: "v0.29.1"
+    tag: "v0.29.2"
   database:
     # Empty inherits global.postgresql, then control-plane-postgresql:5432.
     # name/user stay per-service: external gives each service its own role+DB.
@@ -1068,7 +1070,7 @@ datacore:
 # Ignored in hybrid and external.
 databridge:
   image:
-    tag: "v0.4.5"
+    tag: "v0.4.6"
   replicas: 2
   peers:
     discovery: "headless"
@@ -1132,7 +1134,7 @@ clickstack-otel-collector:
 alertengine:
   enabled: true
   image:
-    tag: "v0.13.1"
+    tag: "v0.13.2"
   database:
     # Empty inherits global.postgresql, then control-plane-postgresql:5432.
     # name/user stay per-service: external gives each service its own role+DB.
@@ -1322,7 +1324,7 @@ firewall:
       replicas: 2
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-        tag: "v2.35.0"
+        tag: "v2.36.0"
         pullPolicy: IfNotPresent
       resources:
         requests:
@@ -1348,7 +1350,7 @@ firewall:
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
         # Keep in lockstep with gateway.image.tag.
-        tag: "v2.35.0"
+        tag: "v2.36.0"
         pullPolicy: IfNotPresent
       replicas: 1
       resources:
