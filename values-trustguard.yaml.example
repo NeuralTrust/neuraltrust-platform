@@ -13,6 +13,8 @@ global:
     trustguard: true
   # firewall:
   #   deploy: false
+  #   # In-cluster, or https://firewall.neuraltrust.ai (https://firewall.us.neuraltrust.ai
+  #   # for saasRegion: us) for the NeuralTrust-hosted firewall.
   #   baseURL: "http://firewall.<namespace>.svc.cluster.local"
   #   existingSecret:
   #     name: "<secret holding the external firewall JWT_SECRET>"

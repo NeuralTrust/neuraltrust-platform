@@ -117,9 +117,12 @@ global:
   # deploy=false skips the firewall subchart and points TrustGuard (and TrustGate
   # complexity scoring) at a firewall you already run. Both then need baseURL and
   # the firewall's JWT_SECRET, from existingSecret or global.platformSecret.
+  # For the NeuralTrust-hosted firewall, use the key NeuralTrust issues and the
+  # regional URL below; it is the same over the internet or Private Service
+  # Connect (VALUES_SCENARIOS.md).
   firewall:
     deploy: true
-    baseURL: "" # e.g. http://firewall.<namespace>.svc.cluster.local
+    baseURL: "" # e.g. http://firewall.<namespace>.svc.cluster.local, https://firewall.neuraltrust.ai, https://firewall.us.neuraltrust.ai
     existingSecret:
       name: "" # Secret in this namespace holding the external firewall's JWT_SECRET
       key: "JWT_SECRET"

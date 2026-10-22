@@ -331,7 +331,8 @@ per cloud in the public docs:
 **Firewall follows TrustGuard.** It deploys with TrustGuard in both modes —
 `firewall.enabled`, `firewall.firewall.enabled`, and `trustguard.firewall.enabled`
 are no-ops. The one way to leave it out is `global.firewall.deploy: false`, which
-points TrustGuard at a firewall you already run (`global.firewall.baseURL` plus its
+points TrustGuard at a firewall you already run, or at the NeuralTrust-hosted one
+over the internet or Private Service Connect (`global.firewall.baseURL` plus its
 `JWT_SECRET`; see [VALUES_SCENARIOS.md](./VALUES_SCENARIOS.md)). Its CPU workers are the largest memory
 consumer in the data path, so size for them whenever TrustGuard is on. Choose
 CPU or GPU workers via
