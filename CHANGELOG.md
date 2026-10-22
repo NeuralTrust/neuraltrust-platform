@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v3.5.9] — 2026-10-22
+
 ### Changed
 
 - **NeuralTrust-hosted Firewall.** `global.firewall.deploy: false` can now point
