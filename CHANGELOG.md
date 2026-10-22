@@ -4,6 +4,19 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Changed
+
+- **NeuralTrust-hosted Firewall.** `global.firewall.deploy: false` can now point
+  TrustGuard and TrustGate complexity scoring at the firewall NeuralTrust hosts:
+  `https://firewall.neuraltrust.ai`, or `https://firewall.us.neuraltrust.ai` for
+  the US region. Reach it over the internet or Google Cloud Private Service
+  Connect; the URL is the same either way. This works in `hybrid`, `external`
+  and `saas` modes and needs no new values. Set `baseURL` and put the key
+  NeuralTrust issues in `global.firewall.existingSecret`. `baseURL` is never
+  derived, so prompts reach a hosted firewall only when you ask for it. See
+  VALUES_SCENARIOS.md and docs/hybrid-network.md. The validation message for a
+  missing `baseURL` now names these URLs. No rendered output changes.
+
 ## [v3.5.0] — 2026-10-16
 
 ### Added

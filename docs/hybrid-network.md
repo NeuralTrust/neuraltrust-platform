@@ -52,6 +52,20 @@ Allow **TCP 443** from your cluster egress to:
 US rows list DNS only; use hostname rules and ask NeuralTrust support for
 static IPs if your firewall cannot resolve names.
 
+### NeuralTrust-hosted Firewall (optional)
+
+Only when `global.firewall.deploy: false` points TrustGuard at the hosted
+firewall
+([VALUES_SCENARIOS.md](../VALUES_SCENARIOS.md#scenario-neuraltrust-hosted-firewall)):
+
+| Region | Hostname | Purpose |
+|---|---|---|
+| `eu` | `firewall.neuraltrust.ai` | Firewall detector API (HTTPS) |
+| `us` | `firewall.us.neuraltrust.ai` | Firewall detector API (HTTPS) |
+
+With Private Service Connect, traffic goes to your PSC endpoint inside the VPC
+instead, and no internet egress rule is needed.
+
 Also allow outbound HTTPS to your container registry (or mirror), LLM
 upstreams, and managed PostgreSQL / Redis. Product OTLP exits via the local
 `clickstack-egress-collector`, which is the only workload that dials the

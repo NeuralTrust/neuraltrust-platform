@@ -503,7 +503,8 @@ generates a key. TrustGuard (`NEURAL_TRUST_FIREWALL_SECRET_KEY`) and TrustGate
 (`FIREWALL_SECRET_KEY`) sign with the external firewall's `JWT_SECRET`, read from
 `global.firewall.existingSecret.{name,key}` — a Secret you create in the release
 namespace — or, when that is unset, from `global.platformSecret.existingSecret`.
-The render fails if neither is set.
+The render fails if neither is set. For the NeuralTrust-hosted firewall, that key
+is the one NeuralTrust issues you, not a value you generate.
 
 ### Docker registry
 

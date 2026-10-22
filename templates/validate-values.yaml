@@ -499,7 +499,7 @@ Secret produces a pod that cannot start. Fail at render instead.
 {{- $fwExternal := eq (include "neuraltrust-platform.firewall.external" .) "true" -}}
 {{- if $fwExternal -}}
   {{- if not (regexMatch "^https?://[^/]" ($gFw.baseURL | default "" | toString)) -}}
-    {{- fail (printf "global.firewall.deploy=false requires global.firewall.baseURL to be the external firewall's http(s) URL (for example http://firewall.<namespace>.svc.cluster.local), got %q." ($gFw.baseURL | default "" | toString)) -}}
+    {{- fail (printf "global.firewall.deploy=false requires global.firewall.baseURL to be the external firewall's http(s) URL (for example http://firewall.<namespace>.svc.cluster.local, or https://firewall.neuraltrust.ai / https://firewall.us.neuraltrust.ai for the NeuralTrust-hosted firewall), got %q." ($gFw.baseURL | default "" | toString)) -}}
   {{- end -}}
   {{- if not (or $gFwSecretName $sharedSecretName) -}}
     {{- fail "global.firewall.deploy=false requires the external firewall's JWT_SECRET: set global.firewall.existingSecret.name (a Secret in this namespace, key global.firewall.existingSecret.key) or global.platformSecret.existingSecret.name carrying JWT_SECRET. A chart-generated key would not match the external firewall and every firewall call would fail authentication." -}}

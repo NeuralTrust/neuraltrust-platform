@@ -199,6 +199,40 @@ key. No firewall gateway, workers, `firewall-config` or `firewall-secrets` rende
 The Secret lives in the release namespace and must carry the same `JWT_SECRET`
 the external firewall verifies with; see [SECRETS.md](./SECRETS.md#firewall).
 
+## Scenario: NeuralTrust-hosted Firewall
+
+To skip running the firewall models yourself, point TrustGuard at the firewall
+NeuralTrust hosts. It works in every deployment mode (`hybrid`, `external`,
+`saas`). Store the firewall key that NeuralTrust issues you in a Secret in the
+release namespace, then:
+
+```yaml
+global:
+  firewall:
+    deploy: false
+    baseURL: "https://firewall.neuraltrust.ai"   # https://firewall.us.neuraltrust.ai for the US region
+    existingSecret:
+      name: "neuraltrust-firewall"
+      key: "JWT_SECRET"
+```
+
+The chart does not fill in `baseURL` for you, even in hybrid. Leaving it unset
+fails the render, so prompts are never sent to a hosted firewall unless you
+asked for it in writing.
+
+Allow outbound TCP 443 to that hostname
+([docs/hybrid-network.md](./docs/hybrid-network.md)), or reach it privately:
+
+- **Over the internet**, the hostname is served through NeuralTrust's edge,
+  protected by Cloudflare. Nothing else to configure.
+- **Over Google Cloud Private Service Connect**, create a PSC endpoint to the
+  service attachment NeuralTrust shares with you. Then add a private DNS zone in
+  your VPC for that one hostname (for example `firewall.neuraltrust.ai.`), with
+  an `A` record pointing at the endpoint IP. Keep `baseURL` exactly as above:
+  TLS and routing depend on the hostname, so the URL never changes between
+  internet and PSC. Create a zone for the hostname only, never for the parent
+  domain, or other NeuralTrust names stop resolving inside your VPC.
+
 ## Scenario: no hosted telemetry egress
 
 Layer `values-observability-self-hosted.yaml.example`. This disables hosted

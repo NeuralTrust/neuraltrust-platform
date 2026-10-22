@@ -2131,6 +2131,30 @@ render_default "$out10b4b" "${FW_EXTERNAL_ARGS[@]}" \
   --set trustguard.firewall.existingSecret.name=firewall-jwt
 assert_contains "$out10b4b" 'NEURAL_TRUST_FIREWALL_BASE_URL: "http://firewall\.firewall\.svc\.cluster\.local"$' \
   "external firewall: trustguard.firewall.existingSecret aligned with global renders"
+# NeuralTrust-hosted firewall: the same https URL serves internet and Private
+# Service Connect callers, and must reach both signers untouched in every mode.
+# Leaving baseURL empty must still fail (covered above): prompts are never sent
+# to a hosted firewall by default.
+for fw_mode in hybrid external saas; do
+  out10b4b="$TMP/scenario-firewall-hosted-$fw_mode.yaml"
+  render_default "$out10b4b" --set global.deploymentMode="$fw_mode" --set global.domain=cp.example.com \
+    --set global.firewall.deploy=false \
+    --set global.firewall.baseURL=https://firewall.us.neuraltrust.ai \
+    --set global.firewall.existingSecret.name=neuraltrust-firewall
+  assert_not_contains "$out10b4b" 'name: firewall$' \
+    "hosted firewall ($fw_mode): no in-release Firewall gateway"
+  assert_contains "$out10b4b" 'NEURAL_TRUST_FIREWALL_BASE_URL: "https://firewall\.us\.neuraltrust\.ai"$' \
+    "hosted firewall ($fw_mode): TrustGuard calls the hosted URL"
+  assert_contains "$out10b4b" '^  FIREWALL_BASE_URL: "https://firewall\.us\.neuraltrust\.ai"$' \
+    "hosted firewall ($fw_mode): TrustGate complexity scoring calls the hosted URL"
+  fw_refs="$TMP/scenario-firewall-hosted-$fw_mode-refs.txt"
+  grep -A4 -E 'name: (NEURAL_TRUST_FIREWALL_SECRET_KEY|FIREWALL_SECRET_KEY)$' "$out10b4b" \
+    | grep -E '^ +name: "' > "$fw_refs" || true
+  assert_contains "$fw_refs" 'name: "neuraltrust-firewall"' \
+    "hosted firewall ($fw_mode): signing keys come from the issued key's Secret"
+  assert_not_contains "$fw_refs" 'name: "(platform-secrets|firewall-secrets)"' \
+    "hosted firewall ($fw_mode): no signer left on a chart-generated key"
+done
 
 blue "==> Scenario 10b5: data-plane-api PrometheusRule"
 # The v1-era rule was gated on a helper that always returned true, so it never
