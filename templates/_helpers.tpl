@@ -587,6 +587,20 @@ Requires all of:
 {{- end -}}
 
 {{/*
+The current value of one key of a Secret in the release namespace, as stored
+(base64), or "" when the Secret or key is absent or there is no cluster to ask
+(`helm template`). The bootstrap Job hashes it into its name, so a password the
+operator rotates in their own Secret runs the Job again on the next apply.
+Usage: {{ include "neuraltrust-platform.postgresql.bootstrapJob.secretValue" (dict "ctx" . "name" "my-secret" "key" "password") }}
+*/}}
+{{- define "neuraltrust-platform.postgresql.bootstrapJob.secretValue" -}}
+{{- if .name -}}
+{{- $s := lookup "v1" "Secret" .ctx.Release.Namespace .name -}}
+{{- if $s -}}{{- index (default dict $s.data) .key | default "" -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Gate for the opt-in bootstrap of a PostgreSQL the chart does not run
 (templates/postgresql/bootstrap-job.yaml, managed mode).
 

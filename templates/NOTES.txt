@@ -55,7 +55,11 @@ Enabled v2 components:
 {{- end }}
 {{- if $trustguardEnabled }}
   - TrustGuard runtime (data plane)
+{{- if eq (include "neuraltrust-platform.firewall.deploy" .) "true" }}
   - Firewall
+{{- else }}
+  - Firewall: not deployed here; TrustGuard calls {{ include "neuraltrust-platform.firewall.baseURL" . }}
+{{- end }}
 {{- end }}
 {{- if $dataPlaneEnabled }}
   - data-plane-api (analytics shim)

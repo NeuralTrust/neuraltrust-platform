@@ -4109,7 +4109,8 @@ bootstrap_services() {
   ruby -ryaml -e '
     docs = []
     YAML.load_stream(File.read(ARGV.fetch(0), encoding: "UTF-8")) { |d| docs << d if d.is_a?(Hash) }
-    job = docs.find { |d| d["kind"] == "Job" && d.dig("metadata", "name") == ARGV.fetch(1) }
+    # By its app label: the name ends in a hash of what the Job sets up.
+    job = docs.find { |d| d["kind"] == "Job" && d.dig("metadata", "labels", "app") == ARGV.fetch(1) }
     exit 0 if job.nil?
     container = job.dig("spec", "template", "spec", "containers").fetch(0)
     script = container["command"].fetch(2)
@@ -4139,8 +4140,40 @@ render_default "$out19ext" --set global.deploymentMode=external
 assert_bootstrap "$out19ext" \
   "agentgateway:agentgateway:agentgateway:agentgateway-secrets/DB_PASSWORD trustguard:trustguard:trustguard:trustguard-secrets/DB_PASSWORD alertengine:alertengine:alertengine:alertengine-secrets/DB_PASSWORD datacore:datacore:datacore:datacore-secrets/POSTGRES_PASSWORD" \
   "external + in-cluster Postgres bootstraps all four per-service roles"
-assert_contains "$out19ext" '"helm.sh/hook": post-install,post-upgrade' \
-  "the Job runs after the PostgreSQL Deployment exists, not before it"
+# Not a hook: Helm runs post-install hooks only once the release is ready, and
+# the services that need these roles cannot be ready without them, so a hook
+# deadlocked every install that waits (helm --wait, ntctl, Flux).
+assert_not_contains "$out19ext" 'helm.sh/hook": post-install' \
+  "the bootstrap Job is part of the release, not a post-install hook"
+bootstrap_job_name() {
+  ruby -ryaml -e '
+    YAML.load_stream(File.read(ARGV.fetch(0), encoding: "UTF-8")) do |d|
+      next unless d.is_a?(Hash) && d["kind"] == "Job" && d.dig("metadata", "labels", "app") == ARGV.fetch(1)
+      puts d.dig("metadata", "name")
+    end
+  ' "$1" "${2:-control-plane-postgresql-bootstrap}"
+}
+name19="$(bootstrap_job_name "$out19ext")"
+if [[ ! "$name19" =~ ^control-plane-postgresql-bootstrap-[0-9a-f]{10}$ ]]; then
+  red "FAIL: the bootstrap Job name should end in a 10-character hash, got '$name19'"; exit 1
+fi
+green "ok  - the bootstrap Job name ends in a hash of its inputs"
+# The pod template of a Job cannot change in place: the name must change with
+# anything that shapes it, and must not change otherwise.
+out19same="$TMP/scenario-bootstrap-same.yaml"
+render_default "$out19same" --set global.deploymentMode=external
+[[ "$(bootstrap_job_name "$out19same")" == "$name19" ]] || { red "FAIL: the same inputs gave another Job name"; exit 1; }
+green "ok  - the same inputs keep the same Job name, so an upgrade leaves it alone"
+for change in \
+  "--set agentgateway.database.password=rotated" \
+  "--set global.nodeSelector.pool=db" \
+  "--set global.postgresql.bootstrapJob.resources.requests.cpu=200m"; do
+  out19chg="$TMP/scenario-bootstrap-changed.yaml"
+  # shellcheck disable=SC2086 # deliberate word splitting of the flag pair above
+  render_default "$out19chg" --set global.deploymentMode=external $change
+  [[ "$(bootstrap_job_name "$out19chg")" != "$name19" ]] || { red "FAIL: $change kept the Job name, so the Job would not run again (or the upgrade would fail on its immutable pod template)"; exit 1; }
+  green "ok  - $change gives the Job a new name"
+done
 # Templated target, so no values path can aim this Job at someone's managed instance.
 assert_contains "$out19ext" 'value: "control-plane-postgresql"' \
   "the Job dials the in-cluster Service, not the endpoint in postgresql-secrets"

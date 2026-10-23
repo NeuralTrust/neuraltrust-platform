@@ -15,10 +15,18 @@ This never touches a managed instance. Host and port below are templated from
 `bootstrapJob.enabled` already refuses to render once `global.postgresql.host`
 names something else or auth is IAM.
 
-Idempotent, because it runs on every upgrade and on re-installs into a namespace
-whose Secrets were kept: an existing role has its password re-aligned with the
-Secret the pods read, an existing database keeps its data and only gains the
-owner and grants.
+Idempotent, because it runs again whenever what it sets up changes and on
+re-installs into a namespace whose Secrets were kept: an existing role has its
+password re-aligned with the Secret the pods read, an existing database keeps
+its data and only gains the owner and grants.
+
+An ordinary Job in the release, not a hook. Helm runs post-install and
+post-upgrade hooks only after the release becomes ready, and the services that
+need these roles cannot become ready without them, so a hook deadlocked every
+install that waits (`helm --wait`, ntctl, Flux). As part of the release it runs
+alongside the services, which restart until their role exists. Its name ends in
+a hash of what it sets up, so it runs again exactly when that changes; see
+$inputs below.
 
 Managed mode is the one exception to "never touches a managed instance", and
 only when the operator opts in with `global.postgresql.managedBootstrap`. The
@@ -41,6 +49,8 @@ services need.
 {{- $mbAdmin := default dict $mb.adminSecret }}
 {{- $jobName := "control-plane-postgresql-bootstrap" }}
 {{- if $managed }}{{- $jobName = "postgresql-managed-bootstrap" }}{{- end }}
+{{- /* The pod label keeps the base name, so it can be found whatever the hash. */}}
+{{- $appLabel := $jobName }}
 {{- /* The control-plane password: the operator's passwordSecret when set,
        otherwise the shared postgresql-secrets (or its existingSecret). */}}
 {{- $cpRef := include "neuraltrust-platform.postgresql.passwordSecretRef" . | fromYaml }}
@@ -69,6 +79,7 @@ services need.
   (dict "key" "trustlens" "gate" $tlEnabled "secret" "trustlens-secrets" "defaultKey" "DATABASE_PASSWORD")
 }}
 {{- $services := list }}
+{{- $passwords := list }}
 {{- range $c := $candidates }}
   {{- $vals := default dict (index $.Values $c.key) }}
   {{- $db := default dict $vals.database }}
@@ -95,33 +106,62 @@ services need.
       "secret" ($ref.name | default $c.secret)
       "secretKey" ($ref.key | default $c.defaultKey)
     ) }}
+    {{- /* A password can change only when it is set in values or kept in a Secret
+           the operator owns; one the chart generated is reused for good
+           (resolveSecret). Only those two can, so only they are hashed. */}}
+    {{- $current := "" }}
+    {{- if $ref.name }}
+      {{- $current = include "neuraltrust-platform.postgresql.bootstrapJob.secretValue" (dict "ctx" $ "name" $ref.name "key" ($ref.key | default $c.defaultKey)) }}
+    {{- end }}
+    {{- $passwords = append $passwords (printf "%s=%s%s" $c.key ($db.password | default "" | toString) $current | sha256sum) }}
   {{- end }}
 {{- end }}
+{{- /* What its name hashes: everything the Job sets up, and everything that
+       shapes its pod. Change any of it and the next apply runs a new Job;
+       change none and the completed one is left alone. The pod template of a
+       Job cannot change in place, so a pod-shaping input left out would fail
+       the upgrade instead. The chart version stands for the script and the
+       template itself: a new chart runs it once more, which is harmless. */}}
+{{- $operatorSecrets := list }}
+{{- if $managed }}
+  {{- $operatorSecrets = append $operatorSecrets (include "neuraltrust-platform.postgresql.bootstrapJob.secretValue" (dict "ctx" . "name" $mbAdmin.name "key" ($mbAdmin.passwordKey | default "password"))) }}
+{{- end }}
+{{- if eq (include "neuraltrust-platform.postgresql.passwordIsExternal" .) "true" }}
+  {{- $operatorSecrets = append $operatorSecrets (include "neuraltrust-platform.postgresql.bootstrapJob.secretValue" (dict "ctx" . "name" $cpSecret "key" $cpKey)) }}
+{{- end }}
+{{- $inputs := dict
+  "services" $services "passwords" $passwords "operatorSecrets" (toJson $operatorSecrets | sha256sum)
+  "managed" $managed "admin" $mbAdmin "adminDatabase" ($mb.adminDatabase | default "")
+  "controlPlane" (list $cpSecret $cpKey) "image" (list $img.repository $img.tag)
+  "host" (include "neuraltrust-platform.v2.hybridPg.host" .) "port" ($service.port | default 5432)
+  "chart" .Chart.Version "postgresql" (toJson $pg | sha256sum)
+  "pod" (list
+    (include "neuraltrust-platform.postgresql.imagePullSecrets" .)
+    (include "neuraltrust-platform.nodeSelector" (dict "ctx" .))
+    (include "neuraltrust-platform.tolerations" (dict "ctx" .))
+    (include "neuraltrust-platform.image" (dict "repository" $img.repository "tag" $img.tag "global" .Values.global))
+    (include "neuraltrust-platform.isOpenshift" .))
+}}
+{{- $jobName = printf "%s-%s" $jobName (toJson $inputs | sha256sum | trunc 10) }}
 apiVersion: batch/v1
 kind: Job
 metadata:
   name: {{ $jobName }}
   labels:
-    app: {{ $jobName }}
-  annotations:
-    {{- /* post-install, not pre-install: the PostgreSQL Deployment is created in
-           the main phase, so there is nothing to connect to before it. Services
-           that need a role may restart a few times while this runs, then
-           recover. */}}
-    "helm.sh/hook": post-install,post-upgrade
-    "helm.sh/hook-weight": "-5"
-    {{- /* Kept after it finishes, succeeded or not: "which roles did it create"
-           is the first question asked after an install, and deleting on success
-           leaves nothing to answer it with. Replaced on the next install or
-           upgrade, and the TTL below clears it either way. */}}
-    "helm.sh/hook-delete-policy": before-hook-creation
+    app: {{ $appLabel }}
+{{- /* No ttlSecondsAfterFinished: the Job belongs to the release, so a TTL would
+       delete it and the next upgrade would create it again and re-run it.
+       Kept after it finishes, succeeded or not, because "which roles did it
+       create" is the first question asked after an install; the next change
+       to its inputs replaces it.
+       backoffLimit covers the PostgreSQL pod, which starts in the same apply
+       and may wait for a node: each attempt waits five minutes for it. */}}
 spec:
-  backoffLimit: 2
-  ttlSecondsAfterFinished: 86400
+  backoffLimit: 6
   template:
     metadata:
       labels:
-        app: {{ $jobName }}
+        app: {{ $appLabel }}
     spec:
       restartPolicy: Never
       {{- if not (include "neuraltrust-platform.isOpenshift" .) }}
