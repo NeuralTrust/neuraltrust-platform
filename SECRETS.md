@@ -321,9 +321,9 @@ when convenient — it is validated at render time, `extraEnv` is not.
 | `postgresql-secrets` | `POSTGRES_PASSWORD` | Auto-generated (password mode) | Database password. Empty when `controlPlane.components.postgresql.authMode: iam`. |
 | `postgresql-secrets` | `POSTGRES_DB` | Yes (if pre-generating) | Database name |
 | `postgresql-secrets` | `POSTGRES_SSLMODE` | No | `sslmode` for the connection. Referenced optionally everywhere, so omitting it falls back to each service's own libpq default rather than blocking a pod. |
-| `postgresql-secrets` | `POSTGRES_LOGIN` | No | `default`, `aws` (RDS IAM) or `azure` (Entra ID). The token-auth switch TrustGate, TrustGuard and DataAgent read; with `aws` or `azure` they reject a `POSTGRES_SSLMODE` weaker than `require` at boot. |
-| `postgresql-secrets` | `POSTGRES_AUTH_MODE` | No | `password` (default) or `iam`. `iam` only with `global.postgresql.deploy: false`: the chart's own PostgreSQL has no token login, so `authMode: iam` is ignored there and all three switches stay on password. Read by the Next.js app (`lib/db/postgresConfig.ts`). |
-| `postgresql-secrets` | `POSTGRES_CONNECTION_TYPE` | No | `postgres` (password) or `aurora` (IAM). Read by the Python API (`src/database.py`). |
+| `postgresql-secrets` | `POSTGRES_LOGIN` | No | `default`, `aws` (RDS IAM), `azure` (Entra ID) or `gcp` (Cloud SQL / AlloyDB IAM). The token-auth switch TrustGate, TrustGuard and DataAgent read; with a token login they reject a `POSTGRES_SSLMODE` weaker than `require` at boot. Under `gcp` the control-plane API and app are handed `POSTGRES_LOGIN=gcp` directly, which outranks the two keys below. |
+| `postgresql-secrets` | `POSTGRES_AUTH_MODE` | No | `password` (default), `iam`, or `gcp` under GCP IAM. `iam` only with `global.postgresql.deploy: false`: the chart's own PostgreSQL has no token login, so `authMode: iam` is ignored there and all three switches stay on password. Read by the Next.js app (`lib/db/postgresConfig.ts`). |
+| `postgresql-secrets` | `POSTGRES_CONNECTION_TYPE` | No | `postgres` (password), `aurora` (IAM), or `gcp` under GCP IAM. Read by the Python API (`src/database.py`). `gcp` is not a value either legacy switch accepts, so an image that predates GCP support stops at boot instead of trying a password against a passwordless role. |
 
 > **Pre-generating `postgresql-secrets` with a DataAgent on the Postgres store.**
 > `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER` and `POSTGRES_DB` are referenced
@@ -638,7 +638,7 @@ install, missing Secrets/keys are created; later upgrades reuse them with `looku
   Per deployed service it creates the role with the password already in that
   service's Secret — `agentgateway-secrets` / `trustguard-secrets` /
   `alertengine-secrets` (`DB_PASSWORD`), `datacore-secrets`
-  (`POSTGRES_PASSWORD`), `trustlens-secrets` (`DATABASE_PASSWORD`), or the Secret
+  (`POSTGRES_PASSWORD`), or the Secret
   named under `<service>.database.existingSecret` — then creates the database owned
   by it. So generated passwords never need transcribing, and rotating one is
   applied to the role on the next upgrade. Skipped per service when it is not
@@ -745,6 +745,56 @@ install, missing Secrets/keys are created; later upgrades reuse them with `looku
   `global.postgresql.awsRegion` — AgentGateway and TrustGuard fall back to it,
   and `<chart>.database.awsRegion` overrides per chart.
   Use `values-managed-datastores.yaml.example` as the tracked starting point.
+- **Optional IAM DB auth (GCP)**: Cloud SQL and AlloyDB IAM database auth, in
+  every deployment mode. Set `global.postgresql.authMode: iam` and
+  `global.gcpIdentity.method: workload-identity`. Every PostgreSQL client then
+  gets `POSTGRES_LOGIN=gcp` and mints a token from Application Default
+  Credentials (GKE Workload Identity) for every new connection, instead of
+  using a static password. The clients are TrustGate, TrustGuard, DataAgent,
+  DataCore, AlertEngine, data-plane-api, and the control-plane API
+  and app. One token serves Cloud SQL and AlloyDB alike.
+  - **Users.** Each database user is a Google service account's email without
+    `.gserviceaccount.com` (`trustguard-db@my-project.iam`): the control plane's
+    is `global.postgresql.user` (also every hybrid client's), the others
+    `<service>.database.user`. The full email is refused at render.
+  - **Identities.** Map each Google service account to its Kubernetes
+    ServiceAccount with `<service>.serviceAccount.annotations`
+    (`iam.gke.io/gcp-service-account`), and
+    `control-plane-api.controlPlane.serviceAccount.annotations` for the shared
+    `control-plane` one, or annotate them all with one account through
+    `global.gcpIdentity.serviceAccount` + `applyGlobally: true`.
+  - **TLS.** `global.postgresql.sslMode` must be `require`, `verify-ca` or
+    `verify-full`.
+  - **Instance setup, once per service account.** Enable the
+    `alloydb.iam_authentication` (AlloyDB) or `cloudsql.iam_authentication`
+    (Cloud SQL) flag. Create the user with
+    `gcloud alloydb users create <user> --type=IAM_BASED` or
+    `gcloud sql users create <user> --type=cloud_iam_service_account`. Grant
+    `roles/alloydb.databaseUser` + `roles/serviceusage.serviceUsageConsumer`
+    (AlloyDB) or `roles/cloudsql.instanceUser` + `roles/cloudsql.client` (Cloud
+    SQL), and `roles/iam.workloadIdentityUser` for
+    `<project>.svc.id.goog[<namespace>/<serviceaccount>]`. Then, as an admin,
+    create each database owned by its user:
+    `CREATE DATABASE trustguard; ALTER DATABASE trustguard OWNER TO "trustguard-db@my-project.iam";`,
+    and in the TrustGuard database `CREATE EXTENSION IF NOT EXISTS pgcrypto;`.
+    The bootstrap Jobs never run under IAM auth.
+- **Optional Redis IAM auth and Redis Cluster (GCP)**: for Memorystore for Redis
+  Cluster (or Valkey) with IAM auth, set on `global.redis`:
+  - `deploy: false`, `host` = the discovery endpoint and `tls: "true"`;
+  - `authMode: iam` with `global.gcpIdentity` set. TrustGate, TrustGuard and
+    data-plane-api then get `REDIS_LOGIN=gcp` and send a Google access token as
+    the AUTH password; no Redis password is needed;
+  - `cluster: true` (`REDIS_CLUSTER=true`) for a cluster client. A Redis Cluster
+    has database 0 only, so a non-zero `agentgateway.redis.db` or data-plane-api
+    `redis.db` is refused;
+  - `caSecret.name` for a Secret holding the server CA bundle (key `ca.pem` by
+    default), mounted at `/etc/neuraltrust/redis-ca/ca.pem`
+    (`REDIS_TLS_CA_FILE`) and handed to data-plane-api's evaluation Jobs. For
+    Memorystore: `gcloud redis clusters get-cluster-certificate-authority
+    <cluster>`, every certificate it prints, in one file.
+
+  Each service account needs `roles/redis.dbConnectionUser`. Leave any
+  `<service>.redis.existingSecret` password unset: it is not used.
 - **Firewall Redis URL (AUT-386)**: the firewall Python client reads only
   `REDIS_URL` (defaulting to `redis://localhost:6379/0` when unset). The chart
   composes that URL from the shared Redis helpers into `firewall-config` (no

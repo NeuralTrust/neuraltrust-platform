@@ -54,6 +54,7 @@ spec:
           secretName: {{ include "agentgateway.configSyncTls.secretName" . }}
       {{- end }}
       {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 6 }}
+      {{- include "neuraltrust-platform.redis.caVolume" . | nindent 6 }}
       containers:
       - name: proxy
         image: {{ $img | quote }}
@@ -118,6 +119,7 @@ spec:
         {{- include "neuraltrust-platform.trustguardClientEnv" (dict "ctx" . "idVar" "TRUSTGUARD_CLIENT_ID" "secretVar" "TRUSTGUARD_CLIENT_SECRET") | nindent 8 }}
         {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
         {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "go" "ctx" .) | nindent 8 }}
+        {{- include "neuraltrust-platform.redis.cloudEnv" (dict "ctx" . "skip" .Values.dataPlane.extraEnv) | nindent 8 }}
         {{- if eq (include "agentgateway.configSyncTls.active" .) "true" }}
         {{- include "neuraltrust-platform.configSyncEnv" (dict "ctx" . "product" "agentgateway" "tlsCaPath" (printf "%s/ca.crt" (include "agentgateway.configSyncTls.mountPath" .))) | nindent 8 }}
         {{- else }}
@@ -151,6 +153,7 @@ spec:
           readOnly: true
         {{- end }}
         {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 8 }}
+        {{- include "neuraltrust-platform.redis.caVolumeMount" . | nindent 8 }}
         resources:
           {{- toYaml .Values.dataPlane.resources | nindent 10 }}
         startupProbe:

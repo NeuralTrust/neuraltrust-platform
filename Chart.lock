@@ -17,9 +17,6 @@ dependencies:
 - name: trustguard
   repository: file://./charts/trustguard
   version: 0.1.62
-- name: trustlens
-  repository: file://./charts/trustlens
-  version: 0.1.2
 - name: dataagent
   repository: file://./charts/dataagent
   version: 0.1.21

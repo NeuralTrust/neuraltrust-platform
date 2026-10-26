@@ -200,7 +200,6 @@ FIREWALL=$(resolve firewall firewall-cpu)          # firewall-gpu shares the tag
 WATCHDOG=$(resolve watchdog watchdog)
 AGENTGATEWAY=$(resolve agentgateway agentgateway)
 TRUSTGUARD=$(resolve trustguard trustguard)
-TRUSTLENS=$(pinned trustlens || true)              # no registry repo yet: pin only
 DATAAGENT=$(resolve dataagent dataagent)
 DATACORE=$(resolve datacore datacore)
 DATABRIDGE=$(resolve databridge databridge)
@@ -215,7 +214,7 @@ printf '\n%-34s %s\n' "IMAGE" "RESOLVED"
 for row in \
   "control-plane-api:$CONTROL_PLANE_API" "app:$APP" "data-plane-api:$DATA_PLANE_API" \
   "firewall:$FIREWALL" "watchdog:$WATCHDOG" "agentgateway:$AGENTGATEWAY" \
-  "trustguard:$TRUSTGUARD" "trustlens:$TRUSTLENS" "dataagent:$DATAAGENT" \
+  "trustguard:$TRUSTGUARD" "dataagent:$DATAAGENT" \
   "datacore:$DATACORE" "databridge:$DATABRIDGE" "alertengine:$ALERTENGINE" \
   "clickstack-otel-collector:$CLICKSTACK_COLLECTOR" "otel-collector-contrib:$OTEL_CONTRIB" \
   "clickhouse:$CLICKHOUSE" "redis:$REDIS" "postgres:$POSTGRES"; do
@@ -279,7 +278,6 @@ bump_simple() {
 bump_simple watchdog                  -                                        watchdog                  "$WATCHDOG"
 bump_simple agentgateway              '.agentgateway.image.tag'                agentgateway              "$AGENTGATEWAY"
 bump_simple trustguard                '.trustguard.image.tag'                  trustguard                "$TRUSTGUARD"
-bump_simple trustlens                 '.trustlens.image.tag'                   trustlens                 "$TRUSTLENS"
 bump_simple dataagent                 '.dataagent.image.tag'                   dataagent                 "$DATAAGENT"
 bump_simple datacore                  '.datacore.image.tag'                    datacore                  "$DATACORE"
 bump_simple databridge                '.databridge.image.tag'                  databridge                "$DATABRIDGE"

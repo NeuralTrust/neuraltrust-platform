@@ -353,7 +353,9 @@ Who creates the PostgreSQL roles and databases depends on whose instance it is:
 - **A managed instance**: pre-create every role and database yourself. The Job is
   not rendered when `global.postgresql.host` names another instance, when `deploy`
   is false, or under IAM auth, so the chart never issues DDL against an instance
-  it does not own.
+  it does not own. For Cloud SQL or AlloyDB with IAM database auth instead of
+  passwords, see
+  [Optional IAM DB auth (GCP)](./SECRETS.md#full-secret-catalog).
 
 DataCore, AlertEngine, the ClickStack collector, and `data-plane-api` all read one
 shared ClickHouse credential; point their `clickhouse.existingSecret` at your
