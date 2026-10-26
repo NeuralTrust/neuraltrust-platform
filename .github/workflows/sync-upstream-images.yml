@@ -1,0 +1,199 @@
+# Mirror upstream infrastructure images into Artifact Registry under
+# immutable version tags.
+#
+# Why: a floating upstream tag (e.g. postgres:17-alpine) copied once under the
+# same name never changes in our registry, so "Bump Image Versions" can never
+# see a newer build. This job copies the newest immutable upstream tag
+# (e.g. 17.11-alpine3.22) by digest, scans it, and leaves the chart change to
+# "Bump Image Versions", which then shows the refresh as a reviewable diff.
+#
+# Rules:
+#   - Tags in Artifact Registry are immutable: an existing tag is never
+#     overwritten. A differing digest under an existing tag is reported, not
+#     replaced.
+#   - Only the configured major version is followed. A major upgrade is a
+#     deliberate chart change, never a scheduled one.
+#   - The scan is a report in the job summary. It does not block the copy: the
+#     image it replaces is older and carries at least the same fixed CVEs.
+
+name: Sync Upstream Images
+
+on:
+  schedule:
+    # Mondays 05:17 UTC, before the working day in Europe.
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Resolve and scan only; do not copy into Artifact Registry."
+        type: boolean
+        required: false
+        default: false
+
+concurrency:
+  group: sync-upstream-images
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  AR_REGISTRY: europe-west1-docker.pkg.dev
+  AR_PROJECT: neuraltrust-app-prod
+  AR_REPO: nt-docker
+  CRANE_VERSION: v0.20.6
+  TRIVY_VERSION: v0.71.0
+
+jobs:
+  sync:
+    name: Sync ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # In-cluster PostgreSQL, the bootstrap Job and control-plane-api's
+          # wait-for-postgresql initContainer. Follows major 17 only.
+          - name: postgres
+            upstream: docker.io/library/postgres
+            target: postgres
+            tag_pattern: '^17\.[0-9]+-alpine3\.[0-9]+$'
+    steps:
+      - name: Install crane
+        run: |
+          set -euo pipefail
+          url="https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz"
+          curl -fsSL "$url" | sudo tar -xz -C /usr/local/bin crane
+          crane version
+
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@3fb12ec12f41e471780db15c232d5dd185dcb514 # v0.2.6
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          cache: true
+
+      - name: Authenticate to Google Cloud
+        id: gcp_auth
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.PLATFORM_WIF_PROVIDER }}
+          service_account: ${{ secrets.PLATFORM_WIF_SERVICE_ACCOUNT }}
+          token_format: access_token
+          create_credentials_file: false
+
+      - name: Log in to Artifact Registry
+        env:
+          ACCESS_TOKEN: ${{ steps.gcp_auth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+          echo "$ACCESS_TOKEN" | crane auth login "$AR_REGISTRY" -u oauth2accesstoken --password-stdin
+
+      - name: Resolve newest upstream tag
+        id: resolve
+        env:
+          UPSTREAM: ${{ matrix.upstream }}
+          TARGET: ${{ matrix.target }}
+          TAG_PATTERN: ${{ matrix.tag_pattern }}
+        run: |
+          set -euo pipefail
+          tag="$(crane ls "$UPSTREAM" | grep -E "$TAG_PATTERN" | sort -V | tail -1 || true)"
+          if [[ -z "$tag" ]]; then
+            echo "::error::No upstream tag of ${UPSTREAM} matches ${TAG_PATTERN}"
+            exit 1
+          fi
+          digest="$(crane digest "${UPSTREAM}:${tag}")"
+          dest="${AR_REGISTRY}/${AR_PROJECT}/${AR_REPO}/${TARGET}:${tag}"
+
+          state="missing"
+          if existing="$(crane digest "$dest" 2>/dev/null)"; then
+            if [[ "$existing" == "$digest" ]]; then
+              state="present"
+            else
+              state="diverged"
+            fi
+          fi
+
+          echo "Upstream ${UPSTREAM}:${tag} = ${digest}"
+          echo "Target   ${dest} → ${state}"
+          {
+            echo "tag=${tag}"
+            echo "digest=${digest}"
+            echo "dest=${dest}"
+            echo "state=${state}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Scan upstream image
+        id: scan
+        if: steps.resolve.outputs.state == 'missing'
+        env:
+          SOURCE: ${{ matrix.upstream }}@${{ steps.resolve.outputs.digest }}
+        run: |
+          set -uo pipefail
+          out="${RUNNER_TEMP}/scan.json"
+          if trivy image --quiet --timeout 20m \
+               --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed \
+               --format json --output "$out" "$SOURCE"; then
+            critical="$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length' "$out")"
+            high="$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH")] | length' "$out")"
+          else
+            echo "::warning::Scan failed for ${SOURCE}"
+            critical="-"
+            high="-"
+          fi
+          echo "critical=${critical}" >> "$GITHUB_OUTPUT"
+          echo "high=${high}" >> "$GITHUB_OUTPUT"
+          # A scan is a report, not a gate (see the header).
+          exit 0
+
+      - name: Copy into Artifact Registry
+        if: steps.resolve.outputs.state == 'missing' && inputs.dry_run != true
+        env:
+          SOURCE: ${{ matrix.upstream }}@${{ steps.resolve.outputs.digest }}
+          DEST: ${{ steps.resolve.outputs.dest }}
+          DIGEST: ${{ steps.resolve.outputs.digest }}
+        run: |
+          set -euo pipefail
+          # Copies the whole manifest list (every platform) by digest.
+          crane copy "$SOURCE" "$DEST"
+          copied="$(crane digest "$DEST")"
+          if [[ "$copied" != "$DIGEST" ]]; then
+            echo "::error::Digest mismatch after copy: ${copied}"
+            exit 1
+          fi
+
+      - name: Summary
+        if: always()
+        env:
+          NAME: ${{ matrix.name }}
+          TAG: ${{ steps.resolve.outputs.tag }}
+          DIGEST: ${{ steps.resolve.outputs.digest }}
+          STATE: ${{ steps.resolve.outputs.state }}
+          CRITICAL: ${{ steps.scan.outputs.critical }}
+          HIGH: ${{ steps.scan.outputs.high }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          case "$STATE" in
+            present)  result="already mirrored" ;;
+            diverged) result="tag exists with a different digest; not overwritten" ;;
+            missing)
+              if [[ "$DRY_RUN" == "true" ]]; then result="dry run; not copied"; else result="copied"; fi ;;
+            *)        result="not resolved" ;;
+          esac
+          {
+            echo "### ${NAME}"
+            echo ""
+            echo "| Upstream tag | Digest | Result | Critical (fixed) | High (fixed) |"
+            echo "|--|--|--|--|--|"
+            echo "| \`${TAG:-?}\` | \`${DIGEST:-?}\` | ${result} | ${CRITICAL:-n/a} | ${HIGH:-n/a} |"
+            if [[ "$result" == "copied" ]]; then
+              echo ""
+              echo "Next: run **Bump Image Versions** to move the chart default to \`${TAG}\`."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$STATE" == "diverged" ]]; then
+            echo "::warning::${NAME}:${TAG} exists in Artifact Registry with a different digest"
+          fi
