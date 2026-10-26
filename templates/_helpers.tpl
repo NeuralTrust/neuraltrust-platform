@@ -985,6 +985,100 @@ callers emit the env var only when the resolved value is non-empty.
 {{- end }}
 
 {{/*
+Cloud-managed Redis settings for the Redis clients (TrustGate, TrustGuard,
+data-plane-api). All opt-in, and only for a Redis the chart does not run
+(global.redis.deploy=false):
+
+  redis.gcpIam   global.redis.authMode=iam with global.gcpIdentity: the services
+                 send a Google access token as the AUTH password (REDIS_LOGIN=gcp),
+                 as Memorystore for Redis Cluster / Valkey with IAM auth expects.
+  redis.cluster  global.redis.cluster: a cluster client seeded from host:port
+                 (REDIS_CLUSTER=true). Database 0 only.
+  redis.caFile   global.redis.caSecret.name: the server CA bundle, mounted by
+                 redis.caVolume / redis.caVolumeMount (REDIS_TLS_CA_FILE).
+*/}}
+{{- define "neuraltrust-platform.redis.external" -}}
+{{- $r := default dict (default dict .Values.global).redis -}}
+{{- $deploy := true -}}
+{{- if hasKey $r "deploy" -}}{{- $deploy = $r.deploy -}}{{- end -}}
+{{- if not $deploy -}}true{{- end -}}
+{{- end }}
+
+{{- define "neuraltrust-platform.redis.gcpIam" -}}
+{{- $r := default dict (default dict .Values.global).redis -}}
+{{- if and (eq (include "neuraltrust-platform.redis.external" .) "true") (eq ($r.authMode | default "password" | toString | lower) "iam") (eq (include "neuraltrust-platform.postgres.tokenProvider" .) "gcp") -}}true{{- end -}}
+{{- end }}
+
+{{- define "neuraltrust-platform.redis.cluster" -}}
+{{- $r := default dict (default dict .Values.global).redis -}}
+{{- if and (eq (include "neuraltrust-platform.redis.external" .) "true") $r.cluster -}}true{{- end -}}
+{{- end }}
+
+{{- define "neuraltrust-platform.redis.caSecret" -}}
+{{- $r := default dict (default dict .Values.global).redis -}}
+{{- if eq (include "neuraltrust-platform.redis.external" .) "true" -}}
+{{- (default dict $r.caSecret).name | default "" -}}
+{{- end -}}
+{{- end }}
+
+{{- define "neuraltrust-platform.redis.caFile" -}}
+{{- if include "neuraltrust-platform.redis.caSecret" . -}}/etc/neuraltrust/redis-ca/ca.pem{{- end -}}
+{{- end }}
+
+{{/*
+Env for a Redis client container. `skip` takes the component's extraEnv so an
+operator override wins without a duplicate name. `jobs` (data-plane-api) also
+names the CA Secret for the evaluation Jobs it creates, which mount it themselves.
+Usage: {{ include "neuraltrust-platform.redis.cloudEnv" (dict "ctx" . "skip" .Values.extraEnv) }}
+*/}}
+{{- define "neuraltrust-platform.redis.cloudEnv" -}}
+{{- $ctx := .ctx -}}
+{{- $skip := list -}}
+{{- range $e := (default list .skip) -}}{{- $skip = append $skip $e.name -}}{{- end -}}
+{{- if and (eq (include "neuraltrust-platform.redis.gcpIam" $ctx) "true") (not (has "REDIS_LOGIN" $skip)) }}
+- name: REDIS_LOGIN
+  value: "gcp"
+{{- end }}
+{{- if and (eq (include "neuraltrust-platform.redis.cluster" $ctx) "true") (not (has "REDIS_CLUSTER" $skip)) }}
+- name: REDIS_CLUSTER
+  value: "true"
+{{- end }}
+{{- with include "neuraltrust-platform.redis.caFile" $ctx }}
+{{- if not (has "REDIS_TLS_CA_FILE" $skip) }}
+- name: REDIS_TLS_CA_FILE
+  value: {{ . | quote }}
+{{- end }}
+{{- if $.jobs }}
+{{- $r := default dict (default dict $ctx.Values.global).redis }}
+- name: K8S_JOB_REDIS_CA_SECRET_NAME
+  value: {{ include "neuraltrust-platform.redis.caSecret" $ctx | quote }}
+- name: K8S_JOB_REDIS_CA_SECRET_KEY
+  value: {{ (default dict $r.caSecret).key | default "ca.pem" | quote }}
+{{- end }}
+{{- end }}
+{{- end -}}
+
+{{- define "neuraltrust-platform.redis.caVolume" -}}
+{{- with include "neuraltrust-platform.redis.caSecret" . }}
+{{- $r := default dict (default dict $.Values.global).redis }}
+- name: redis-ca
+  secret:
+    secretName: {{ . | quote }}
+    items:
+    - key: {{ (default dict $r.caSecret).key | default "ca.pem" | quote }}
+      path: ca.pem
+{{- end }}
+{{- end }}
+
+{{- define "neuraltrust-platform.redis.caVolumeMount" -}}
+{{- if include "neuraltrust-platform.redis.caSecret" . }}
+- name: redis-ca
+  mountPath: /etc/neuraltrust/redis-ca
+  readOnly: true
+{{- end }}
+{{- end }}
+
+{{/*
 Operator-supplied datastore credentials (AUT-411).
 
 A service's password normally lands in the Secret the chart renders for it, which
@@ -1279,9 +1373,10 @@ true
 {{- end }}
 
 {{/*
-Which cloud mints the short-lived Postgres token: "azure" | "aws".
+Which cloud mints the short-lived Postgres token: "gcp" | "azure" | "aws".
 
-Derived from `global.azureIdentity.method` alone, deliberately. `authMode: iam`
+Derived from `global.gcpIdentity.method` / `global.azureIdentity.method` alone,
+deliberately (validate-values refuses both at once). `authMode: iam`
 already answers WHETHER a token is used; this answers WHOSE, and the operator
 has to configure the identity block for Entra to work at all — so the two facts
 cannot disagree. Reading `global.platform` instead would silently flip an
@@ -1296,8 +1391,11 @@ RDS overrides POSTGRES_LOGIN through the service's own `extraEnv`, which the
 Usage: {{ include "neuraltrust-platform.postgres.tokenProvider" . }}
 */}}
 {{- define "neuraltrust-platform.postgres.tokenProvider" -}}
+{{- $gcp := default dict (default dict .Values.global).gcpIdentity -}}
 {{- $azure := default dict (default dict .Values.global).azureIdentity -}}
-{{- if $azure.method | default "" | toString | trim -}}azure{{- else -}}aws{{- end -}}
+{{- if $gcp.method | default "" | toString | trim -}}gcp
+{{- else if $azure.method | default "" | toString | trim -}}azure
+{{- else -}}aws{{- end -}}
 {{- end }}
 
 {{/*
@@ -1305,6 +1403,7 @@ POSTGRES_LOGIN for the shared postgresql-secrets Secret:
   "default" — static POSTGRES_PASSWORD
   "aws"     — RDS/Aurora IAM token (AWS SDK default chain, IRSA)
   "azure"   — Entra ID token (azidentity DefaultAzureCredential)
+  "gcp"     — Cloud SQL / AlloyDB IAM token (Application Default Credentials)
 
 The caller passes its IAM boolean, which both Secret emitters take from
 `neuraltrust-platform.postgresql.iam`.
@@ -1395,7 +1494,7 @@ Usage: {{ include "neuraltrust-platform.postgres.cloudAuthEnv" (dict "ctx" . "sk
   value: {{ . | quote }}
 {{- end }}
 {{- end }}
-{{- else -}}
+{{- else if eq (include "neuraltrust-platform.postgres.tokenProvider" $ctx) "aws" -}}
 {{- with $globalPg.awsRegion | default "" | toString | trim }}
 {{- if not (has "AWS_REGION" $skip) }}
 - name: AWS_REGION
@@ -1503,7 +1602,7 @@ it, instead of starting the pod without database settings.
 Explicit Postgres env for one consumer, renamed to the names that consumer reads.
 
 `postgresql-secrets` stores a single canonical POSTGRES_* family. The Go services
-read DB_*, TrustLens reads DATABASE_*, so that translation happens here instead of
+read DB_*, so that translation happens here instead of
 storing every alias in the Secret and injecting the whole set with envFrom — which
 handed each pod eighteen datastore variables to read six, with no manifest showing
 which ones it used.
@@ -1511,10 +1610,6 @@ which ones it used.
 Only valid for the chart-managed Secret. When an operator supplies
 global.postgresql.existingSecret the key names in it are theirs, so callers keep
 the envFrom passthrough for that case.
-
-TrustLens reads DATABASE_* but is deliberately not handled here: it owns a separate
-database identity (its own user, database and password), so pointing it at the
-shared credential would change which database it connects to.
 
 Usage: (dict "ctx" $ "skip" .Values.dataPlane.extraEnv)
   skip    env entries that already define these names, so an operator override in
@@ -1997,7 +2092,9 @@ needs this tunable. Prefer `global.postgresql.connectionLimit`, else 15.
 {{- $port := $cfg.port | default $globalRedis.port | default 6379 }}
 {{- $db := $cfg.db | default "0" }}
 {{- $tls := $cfg.tls | default $globalRedis.tls | default "" }}
-{{- $iamAuth := $cfg.iamAuth | default false }}
+{{- /* Either token login (ElastiCache via api.redis.iamAuth, GCP via
+       global.redis.authMode) carries no credential in the URL and needs TLS. */}}
+{{- $iamAuth := or ($cfg.iamAuth | default false) (eq (include "neuraltrust-platform.redis.gcpIam" .) "true") }}
 {{- $scheme := "redis" }}
 {{- if or $iamAuth (eq ($tls | toString) "true") }}{{- $scheme = "rediss" }}{{- end }}
 {{- $authority := "" }}
@@ -2110,6 +2207,13 @@ needs this tunable. Prefer `global.postgresql.connectionLimit`, else 15.
 {{- if eq (include "neuraltrust-platform.postgres.iamAuth" (dict "ctx" . "database" dict)) "true" }}
 - name: POSTGRES_AUTH_MODE
   value: "azure_ad"
+{{- end }}
+{{- else if eq (include "neuraltrust-platform.postgres.tokenProvider" .) "gcp" }}
+{{- /* GCP IAM: POSTGRES_LOGIN outranks POSTGRES_AUTH_MODE, and the client
+       defaults POSTGRES_SSL to "require" under it, as it does for azure_ad. */}}
+{{- if eq (include "neuraltrust-platform.postgres.iamAuth" (dict "ctx" . "database" dict)) "true" }}
+- name: POSTGRES_LOGIN
+  value: "gcp"
 {{- end }}
 {{- end }}
 {{- end -}}
@@ -2401,8 +2505,8 @@ insecureEdgeTerminationPolicy: {{ $tls.insecureEdgeTerminationPolicy | default "
 {{- end }}
 
 {{/*
-TLS block for a product subchart Ingress (agentgateway, trustguard, datacore,
-trustlens). An explicit ingress.tls.enabled wins. Unset adds the block only when
+TLS block for a product subchart Ingress (agentgateway, trustguard, datacore).
+An explicit ingress.tls.enabled wins. Unset adds the block only when
 the operator supplied the certificate: a local ingress.tls.secretName, or the
 shared global.ingress.tls secret with autoGenerate off. A host that serves plain
 HTTP today is therefore never moved onto the chart's self-signed placeholder,
@@ -3369,6 +3473,12 @@ eks.amazonaws.com/role-arn: {{ $irsa.roleArn | quote }}
 {{- $_ := set $merged "azure.workload.identity/tenant-id" . -}}
 {{- end -}}
 {{- end -}}
+{{- /* GKE Workload Identity needs only this annotation: the GKE metadata server
+       answers ADC for any pod running as the ServiceAccount, with no pod label. */ -}}
+{{- $gcp := (default dict (default dict $ctx.Values.global).gcpIdentity) -}}
+{{- if and (eq ($gcp.method | default "" | toString | trim) "workload-identity") $gcp.applyGlobally ($gcp.serviceAccount | default "" | toString | trim) -}}
+{{- $_ := set $merged "iam.gke.io/gcp-service-account" ($gcp.serviceAccount | toString | trim) -}}
+{{- end -}}
 {{- range $k, $v := (default dict .annotations) -}}
 {{- $_ := set $merged $k $v -}}
 {{- end -}}
@@ -3677,8 +3787,6 @@ legacy Secret it adopts from on upgrade, and to a `generate` policy:
 when any of them is in play:
   external   → the full stack
   trustgate / trustguard / dataPlane → the product claims it in hybrid
-  trustlens  → the opt-in subchart is enabled, in either mode. External deploys
-               the full stack, so shape alone would not gate an opt-in chart.
   alertengine → the AlertEngine subchart is enabled in external mode. External
                alone must not mint its credentials when the subchart is off
                (`alertengine.enabled=false`); hybrid never deploys AlertEngine.
@@ -3759,8 +3867,6 @@ REDIS_EVENTS_SECRET: {legacyName: trustguard-secrets, legacyKey: REDIS_EVENTS_SE
 AUTH_JWT_HS256_SECRET: {legacyName: datacore-secrets, legacyKey: AUTH_JWT_HS256_SECRET, generate: random, length: 64, requires: external}
 AUTH_JWT_SECRET: {legacyName: alertengine-secrets, legacyKey: AUTH_JWT_SECRET, generate: random, length: 64, requires: alertengine}
 APP_ENCRYPTION_KEY: {legacyName: alertengine-secrets, legacyKey: APP_ENCRYPTION_KEY, generate: random, length: 32, requires: alertengine}
-TRUSTLENS_JWT_SECRET: {legacyName: trustlens-secrets, legacyKey: JWT_SECRET, generate: random, length: 64, requires: trustlens}
-ENCRYPTION_KEYSET: {legacyName: trustlens-secrets, legacyKey: ENCRYPTION_KEYSET, generate: random, length: 64, requires: trustlens}
 JWT_SECRET: {legacyName: firewall-secrets, legacyKey: JWT_SECRET, generate: random, length: 64, requires: trustguard}
 DATA_PLANE_JWT_SECRET: {legacyName: data-plane-jwt-secret, legacyKey: DATA_PLANE_JWT_SECRET, generate: random, length: 64, requires: external dataPlane watchdog}
 CONTROL_PLANE_JWT_SECRET: {legacyName: control-plane-secrets, legacyKey: CONTROL_PLANE_JWT_SECRET, generate: random, length: 64, requires: external watchdog}
@@ -4354,7 +4460,7 @@ Emits nothing when the shared Secret is not in play, leaving those installs on
 the legacy contract unchanged.
 
 Usage:
-  {{- include "neuraltrust-platform.platformSecretEnv" (dict "ctx" . "keys" (dict "JWT_SECRET" "TRUSTLENS_JWT_SECRET") "skip" .Values.extraEnv) | nindent 8 }}
+  {{- include "neuraltrust-platform.platformSecretEnv" (dict "ctx" . "keys" (dict "AUTH_JWT_SECRET" "AUTH_JWT_SECRET") "skip" .Values.extraEnv) | nindent 8 }}
 
   keys: envVarName → logical shared key
   skip: optional list of `{name: ...}` env entries (e.g. an operator's extraEnv)

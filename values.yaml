@@ -422,6 +422,22 @@ global:
     password: ""
     username: ""
     tls: ""
+    # The three keys below apply to a Redis you run (deploy: false).
+    # authMode: password | iam. iam with global.gcpIdentity has TrustGate,
+    # TrustGuard and data-plane-api send a Google access token as the AUTH
+    # password (REDIS_LOGIN=gcp): Memorystore for Redis Cluster or Valkey with
+    # IAM auth. Needs tls "true"; the service accounts need
+    # roles/redis.dbConnectionUser.
+    authMode: "password"
+    # true for a Redis Cluster (Memorystore for Redis Cluster): a cluster client
+    # seeded from host:port, the discovery endpoint. Database 0 only.
+    cluster: false
+    # Secret holding the server's CA bundle (PEM) when no public CA signs its
+    # certificate, e.g. Memorystore's per-instance CA:
+    #   gcloud redis clusters get-cluster-certificate-authority <cluster>
+    caSecret:
+      name: ""
+      key: "ca.pem"
     existingSecret:
       name: ""
       keys:
@@ -525,6 +541,29 @@ global:
     clientSecret: # service-principal only; never inline the secret
       name: ""
       key: "AZURE_CLIENT_SECRET"
+  # GCP IAM identity for token-authenticated Postgres (Cloud SQL, AlloyDB), in
+  # every deployment mode. Like azureIdentity, setting `method` is what selects
+  # GCP as the token provider under global.postgresql.authMode: iam; empty
+  # changes nothing.
+  #
+  #   workload-identity  GKE Workload Identity. Each ServiceAccount carries
+  #                      iam.gke.io/gcp-service-account: set it per service
+  #                      (<service>.serviceAccount.annotations) for one Google
+  #                      service account per database, or set serviceAccount +
+  #                      applyGlobally to annotate every chart ServiceAccount.
+  #
+  # Each database user is its Google service account's email without
+  # ".gserviceaccount.com" (e.g. trustguard-db@my-project.iam), and
+  # global.postgresql.sslMode must be require/verify-ca/verify-full.
+  #
+  # Image floor: every Postgres client's release that accepts POSTGRES_LOGIN=gcp
+  # (agentgateway, trustguard, dataagent, datacore, alertengine,
+  # control-plane-api, control-plane-app, data-plane-api).
+  # An older pinned tag fails closed at boot.
+  gcpIdentity:
+    method: "" # "" | workload-identity
+    serviceAccount: "" # Google service account email, for applyGlobally
+    applyGlobally: false # true ⇒ annotate every chart ServiceAccount
   psc:
     negNames: {}
   ingress:
@@ -899,7 +938,7 @@ control-plane-app:
         replicas: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v2.15.2"
+          tag: "v2.16.1"
           pullPolicy: IfNotPresent
         config:
           nodeEnv: production
@@ -924,7 +963,6 @@ control-plane-app:
           datacoreUrl: ""
           datacoreMetricsEnabled: "true"
           alertEngineApiUrl: ""
-          trustlensApiUrl: ""
           modelScannerApiUrl: ""
           openaiModel: "gpt-4o-mini"
         resources:
@@ -977,7 +1015,7 @@ control-plane-app:
 # stays agentgateway for now; K8s names stay agentgateway-*.
 agentgateway:
   image:
-    tag: "v0.71.1"
+    tag: "v0.71.2"
   # Empty host/port/sslMode/username/tls inherit from global.postgresql /
   # global.redis, then fall back to the in-cluster Services. Set them here only
   # to point this one service somewhere else.
@@ -1022,16 +1060,6 @@ trustguard:
         key: "ENROLMENT_TOKEN"
     existingSecret:
       name: ""
-# TrustLens (opt-in).
-trustlens:
-  enabled: false
-  image:
-    tag: ""
-  database:
-    # Empty inherits global.postgresql, then control-plane-postgresql:5432.
-    host: ""
-    port: ""
-    sslMode: ""
 # Shared DataAgent defaults. Per-product enrolment lives only under
 # agentgateway.dataagent / trustguard.dataagent.
 dataagent:
@@ -1049,7 +1077,7 @@ dataagent:
 # `global.postgresql` block.
 datacore:
   image:
-    tag: "v0.31.0"
+    tag: "v0.32.0"
   database:
     # Empty inherits global.postgresql, then control-plane-postgresql:5432.
     # name/user stay per-service: external gives each service its own role+DB.
@@ -1137,7 +1165,7 @@ clickstack-otel-collector:
 alertengine:
   enabled: true
   image:
-    tag: "v0.13.3"
+    tag: "v0.14.0"
   database:
     # Empty inherits global.postgresql, then control-plane-postgresql:5432.
     # name/user stay per-service: external gives each service its own role+DB.

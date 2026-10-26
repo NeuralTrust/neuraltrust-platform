@@ -4,6 +4,50 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Added
+
+- **Cloud SQL and AlloyDB IAM database auth on GKE.** In every deployment mode,
+  `global.postgresql.authMode: iam` with
+  `global.gcpIdentity.method: workload-identity` logs every PostgreSQL client in
+  with a token from Application Default Credentials (`POSTGRES_LOGIN=gcp`)
+  instead of a password.
+  - Each service's database user is its Google service account's email without
+    `.gserviceaccount.com`.
+  - Map each account through the service's `serviceAccount.annotations`, or
+    annotate every ServiceAccount with one account via
+    `global.gcpIdentity.applyGlobally`.
+  - `sslMode` must be `require` or stricter.
+  - Needs the service images that accept `POSTGRES_LOGIN=gcp`; older ones stop
+    at boot rather than try a password.
+
+  Installs that do not set `global.gcpIdentity` render unchanged. See
+  SECRETS.md, "Optional IAM DB auth (GCP)".
+- **Memorystore for Redis Cluster with IAM auth.** `global.redis` gains three
+  opt-in keys for a Redis you run:
+  - `authMode: iam` (with `global.gcpIdentity`) has TrustGate, TrustGuard and
+    data-plane-api log in with a Google access token (`REDIS_LOGIN=gcp`);
+  - `cluster: true` gives them a cluster client (`REDIS_CLUSTER=true`,
+    database 0 only);
+  - `caSecret` mounts the server CA bundle (`REDIS_TLS_CA_FILE`), including in
+    data-plane-api's evaluation Jobs.
+
+  data-plane-api's composed `REDIS_URL` then carries no credential. Needs the
+  service images that accept these settings. Installs that set none of the keys
+  render unchanged.
+
+### Removed
+
+- **TrustLens.** The opt-in `trustlens` subchart is gone, with its `trustlens:`
+  values block, its role in the PostgreSQL bootstrap Job, its keys in
+  `platform-secrets` (`TRUSTLENS_JWT_SECRET`, `ENCRYPTION_KEYSET`) and
+  `create-secrets.sh`, and its NOTES lines. The control-plane app no longer
+  receives `TRUSTLENS_API_URL` or `TRUSTLENS_JWT_SECRET`, and
+  `control-plane-app.controlPlane.components.app.config.trustlensApiUrl` is no
+  longer read. A values file that still sets any `trustlens` key keeps
+  installing, since Helm ignores unknown keys. Nothing TrustLens owned is
+  rendered any more, so an install that had enabled it loses those resources
+  on upgrade; its database is left in place.
+
 ## [v3.5.9] — 2026-10-22
 
 ### Changed

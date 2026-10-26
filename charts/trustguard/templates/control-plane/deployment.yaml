@@ -51,6 +51,7 @@ spec:
           secretName: {{ include "trustguard.configSyncTls.secretName" . }}
       {{- end }}
       {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 6 }}
+      {{- include "neuraltrust-platform.redis.caVolume" . | nindent 6 }}
       containers:
       - name: control-plane
         image: {{ $img | quote }}
@@ -96,6 +97,7 @@ spec:
         {{- include "neuraltrust-platform.trustguardClientEnv" (dict "ctx" . "idVar" "TRUSTGUARD_PLATFORM_CLIENT_ID" "secretVar" "TRUSTGUARD_PLATFORM_CLIENT_SECRET") | nindent 8 }}
         {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
         {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "go" "ctx" .) | nindent 8 }}
+        {{- include "neuraltrust-platform.redis.cloudEnv" (dict "ctx" . "skip" .Values.controlPlane.extraEnv) | nindent 8 }}
         {{- include "neuraltrust-platform.configSyncTokenEnv" . | nindent 8 }}
         {{- include "neuraltrust-platform.appVersionEnv" (dict "tag" .Values.image.tag) | nindent 8 }}
         {{- if eq (include "neuraltrust-platform.isExternal" .) "true" }}
@@ -141,6 +143,7 @@ spec:
           readOnly: true
         {{- end }}
         {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 8 }}
+        {{- include "neuraltrust-platform.redis.caVolumeMount" . | nindent 8 }}
         resources:
           {{- toYaml .Values.controlPlane.resources | nindent 10 }}
         startupProbe:

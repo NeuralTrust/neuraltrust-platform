@@ -80,6 +80,12 @@ no Kubernetes resource when validation succeeds.
   {{- end -}}
 {{- end -}}
 
+{{- /* One cloud mints the Postgres token. Checked ahead of either cloud's own
+       rules so the conflict is what gets reported. */ -}}
+{{- if and ((default dict $global.gcpIdentity).method | default "" | toString | trim) ((default dict $global.azureIdentity).method | default "" | toString | trim) -}}
+  {{- fail "global.gcpIdentity.method and global.azureIdentity.method are both set: the Postgres token comes from one cloud. Clear the one your database does not use." -}}
+{{- end -}}
+
 {{- /* Azure Entra ID identity for Postgres token auth. Every rule below is
        conjoined with authMode=iam: global.azureIdentity may legitimately be set
        for something other than the database, and on its own it must never stop
@@ -125,6 +131,72 @@ no Kubernetes resource when validation succeeds.
     {{- if not ($azureIdentity.clientId | default "" | toString | trim) -}}
       {{- fail "global.azureIdentity.clientId is required when method=workload-identity and applyGlobally=true: it is the azure.workload.identity/client-id annotation the AKS webhook resolves. Set applyGlobally=false to annotate each ServiceAccount yourself." -}}
     {{- end -}}
+  {{- end -}}
+{{- end -}}
+
+{{- /* GCP IAM identity for Postgres token auth. As with Azure, every
+       database rule is conjoined with authMode=iam, so the block may be set for
+       other reasons without stopping a password install. */ -}}
+{{- $gcpIdentity := default dict $global.gcpIdentity -}}
+{{- $gcpMethod := $gcpIdentity.method | default "" | toString | trim -}}
+{{- if $gcpMethod -}}
+  {{- if ne $gcpMethod "workload-identity" -}}
+    {{- fail (printf "global.gcpIdentity.method must be workload-identity (got %q). Leave it empty for AWS IAM, Entra ID or password auth." $gcpMethod) -}}
+  {{- end -}}
+  {{- if and $gcpIdentity.applyGlobally (not ($gcpIdentity.serviceAccount | default "" | toString | trim)) -}}
+    {{- fail "global.gcpIdentity.serviceAccount is required when applyGlobally=true: it is the iam.gke.io/gcp-service-account annotation every ServiceAccount gets. Set applyGlobally=false to annotate each ServiceAccount yourself." -}}
+  {{- end -}}
+  {{- $gcpPg := default dict $global.postgresql -}}
+  {{- if eq ($gcpPg.authMode | default "password" | toString | lower) "iam" -}}
+    {{- $gcpSecureSsl := list "require" "verify-ca" "verify-full" -}}
+    {{- $gcpSslMode := $gcpPg.sslMode | default "" | toString | trim | lower -}}
+    {{- if not (has $gcpSslMode $gcpSecureSsl) -}}
+      {{- fail (printf "global.postgresql.sslMode must be require, verify-ca or verify-full for GCP IAM token auth (got %q). The token is a bearer credential, so the services reject anything weaker at boot." $gcpSslMode) -}}
+    {{- end -}}
+    {{- /* The commonest mistake, and one each service would only report at boot. */ -}}
+    {{- $gcpUsers := dict "global.postgresql.user" $gcpPg.user -}}
+    {{- range $svc := list "agentgateway" "trustguard" "datacore" "alertengine" -}}
+      {{- $_ := set $gcpUsers (printf "%s.database.user" $svc) (default dict (default dict (index $.Values $svc)).database).user -}}
+    {{- end -}}
+    {{- range $key, $user := $gcpUsers -}}
+      {{- if hasSuffix ".gserviceaccount.com" ($user | default "" | toString | trim) -}}
+        {{- fail (printf "%s is %q: a GCP IAM database user is the service account email without \".gserviceaccount.com\" (%s)." $key ($user | toString) (trimSuffix ".gserviceaccount.com" ($user | toString | trim))) -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+
+{{- /* Cloud-managed Redis (authMode / cluster / caSecret). All three only make
+       sense against a Redis the chart does not run. */ -}}
+{{- $cloudRedis := default dict $global.redis -}}
+{{- $cloudRedisIam := eq ($cloudRedis.authMode | default "password" | toString | lower) "iam" -}}
+{{- $cloudRedisCa := (default dict $cloudRedis.caSecret).name | default "" -}}
+{{- if or $cloudRedisIam $cloudRedis.cluster $cloudRedisCa -}}
+  {{- if ne (include "neuraltrust-platform.redis.external" .) "true" -}}
+    {{- fail "global.redis.authMode=iam, cluster and caSecret describe a Redis you run: set global.redis.deploy=false and global.redis.host." -}}
+  {{- end -}}
+{{- end -}}
+{{- if $cloudRedisIam -}}
+  {{- if ne (include "neuraltrust-platform.postgres.tokenProvider" .) "gcp" -}}
+    {{- fail "global.redis.authMode=iam is supported for GCP only (Memorystore for Redis Cluster / Valkey): set global.gcpIdentity.method. For ElastiCache IAM use <service>.redis.iamAuth." -}}
+  {{- end -}}
+  {{- if ne ($cloudRedis.tls | default "" | toString | lower) "true" -}}
+    {{- fail "global.redis.authMode=iam needs global.redis.tls: \"true\": the access token is a bearer credential." -}}
+  {{- end -}}
+  {{- range $svc := list "agentgateway" "trustguard" -}}
+    {{- if (default dict (default dict (index $.Values $svc)).redis).iamAuth -}}
+      {{- fail (printf "%s.redis.iamAuth (ElastiCache IAM) conflicts with global.redis.authMode=iam (GCP): pick one." $svc) -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- if $cloudRedis.cluster -}}
+  {{- $agwDb := (default dict (default dict (index .Values "agentgateway")).redis).db | default "0" | toString -}}
+  {{- if ne $agwDb "0" -}}
+    {{- fail (printf "agentgateway.redis.db is %q, but global.redis.cluster=true: a Redis Cluster has database 0 only." $agwDb) -}}
+  {{- end -}}
+  {{- $dpRedisDb := (include "neuraltrust-platform.dataPlaneApi.redisConfig" . | fromYaml).db | default "0" | toString -}}
+  {{- if ne $dpRedisDb "0" -}}
+    {{- fail (printf "data-plane-api's redis.db is %q, but global.redis.cluster=true: a Redis Cluster has database 0 only." $dpRedisDb) -}}
   {{- end -}}
 {{- end -}}
 
@@ -193,12 +265,6 @@ no Kubernetes resource when validation succeeds.
   {{- if and $customHostM2m (not (default dict $global.agentgatewayM2m).issuer) -}}
     {{- fail "AgentGateway machine credentials derive the token issuer from global.domain as https://app.<domain>, but this install serves the control-plane app from a different host, so TrustGate would reject every service token. Set global.agentgatewayM2m.issuer to the app's real public URL, or set global.agentgatewayM2m.enabled=false." -}}
   {{- end -}}
-{{- end -}}
-
-{{- $trustlens := default dict .Values.trustlens -}}
-{{- $trustlensImage := default dict $trustlens.image -}}
-{{- if and ($trustlens.enabled | default false) (not ($trustlensImage.tag | default "")) -}}
-  {{- fail "trustlens.image.tag is required when trustlens.enabled=true; no default TrustLens release image is published yet." -}}
 {{- end -}}
 
 {{- /* Outbound email. A provider selected without its required settings would
