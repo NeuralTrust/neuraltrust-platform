@@ -395,7 +395,7 @@ global:
     # In-cluster PostgreSQL Deployment image/resources/persistence knobs.
     image:
       repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/postgres
-      tag: "17-alpine"
+      tag: "17.11-alpine"
       pullPolicy: IfNotPresent
       # Empty → global.imagePullSecrets → chart default gcr-secret. ["none"] suppresses.
       imagePullSecrets: []
