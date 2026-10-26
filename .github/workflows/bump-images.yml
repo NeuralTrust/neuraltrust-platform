@@ -79,7 +79,7 @@ on:
         required: false
         default: ""
       postgres_tag:
-        description: "postgres tag (e.g. 17-alpine). Empty = latest matching N-alpine from AR (in-cluster postgres + control-plane-api wait initContainer)."
+        description: "postgres tag (e.g. 17.11-alpine). Empty = latest 17.N-alpine minor-version tag from AR (in-cluster postgres + control-plane-api wait initContainer)."
         required: false
         default: ""
       fetch_latest:
@@ -202,7 +202,10 @@ jobs:
           OTEL_COLLECTOR_CONTRIB=$(resolve_tag "opentelemetry-collector-contrib" "${{ inputs.opentelemetry_collector_contrib_tag }}" '^[0-9]+\.[0-9]+\.[0-9]+$')
           CLICKHOUSE=$(resolve_tag "clickhouse-server" "${{ inputs.clickhouse_tag }}" '^[0-9]+\.[0-9]+(\.[0-9]+){0,2}$')
           REDIS=$(resolve_tag "redis-stack-server" "${{ inputs.redis_tag }}" '^[0-9]+\.[0-9]+\.[0-9]+-v[0-9]+$')
-          POSTGRES=$(resolve_tag "postgres" "${{ inputs.postgres_tag }}" '^[0-9]+-alpine$')
+          # Minor-version tags only (17.N-alpine), mirrored into AR by hand. The floating
+          # "17-alpine" copy never changes under its name, so matching it made every bump a no-op.
+          # Pinned to major 17: a PostgreSQL major upgrade needs a data migration, never an auto-bump.
+          POSTGRES=$(resolve_tag "postgres" "${{ inputs.postgres_tag }}" '^17\.[0-9]+-alpine$')
 
           echo "control_plane_api=${CONTROL_PLANE_API}" >> "$GITHUB_OUTPUT"
           echo "app=${APP}" >> "$GITHUB_OUTPUT"
