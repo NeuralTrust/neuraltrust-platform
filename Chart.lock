@@ -4,42 +4,42 @@ dependencies:
   version: 1.0.7
 - name: data-plane-api
   repository: file://./charts/data-plane-api
-  version: 1.7.14
+  version: 1.7.15
 - name: control-plane-api
   repository: file://./charts/control-plane-api
-  version: 0.1.14
+  version: 0.1.16
 - name: control-plane-app
   repository: file://./charts/control-plane-app
-  version: 0.1.60
+  version: 0.1.67
 - name: agentgateway
   repository: file://./charts/agentgateway
-  version: 0.1.79
+  version: 0.1.83
 - name: trustguard
   repository: file://./charts/trustguard
-  version: 0.1.62
+  version: 0.1.67
 - name: dataagent
   repository: file://./charts/dataagent
-  version: 0.1.21
+  version: 0.1.22
 - name: datacore
   repository: file://./charts/datacore
-  version: 0.1.31
+  version: 0.1.34
 - name: databridge
   repository: file://./charts/databridge
-  version: 0.1.3
+  version: 0.1.4
 - name: clickstack-ingest-gateway
   repository: file://./charts/clickstack-ingest-gateway
   version: 0.1.0
 - name: clickstack-otel-collector
   repository: file://./charts/clickstack-otel-collector
-  version: 0.1.9
+  version: 0.1.10
 - name: alertengine
   repository: file://./charts/alertengine
-  version: 0.1.18
+  version: 0.1.20
 - name: firewall
   repository: file://./charts/firewall
-  version: 2.1.28
+  version: 2.1.33
 - name: watchdog
   repository: file://./charts/watchdog
-  version: 0.3.23
-digest: sha256:b08bf2496cf8cf0ed520e4273e1b85ef69e94ef7d292f239b63d3f38b1542ea8
-generated: "2026-10-21T10:12:20.034596+02:00"
+  version: 0.3.26
+digest: sha256:54bcbabfc860a7ff49b475e9f57729a26a83f42200904968c15697b70a70d5b0
+generated: "2026-10-26T18:03:34.123742+01:00"

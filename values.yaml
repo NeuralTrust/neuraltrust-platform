@@ -395,7 +395,7 @@ global:
     # In-cluster PostgreSQL Deployment image/resources/persistence knobs.
     image:
       repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/postgres
-      tag: "17.11-alpine"
+      tag: "17-alpine"
       pullPolicy: IfNotPresent
       # Empty → global.imagePullSecrets → chart default gcr-secret. ["none"] suppresses.
       imagePullSecrets: []
@@ -938,7 +938,7 @@ control-plane-app:
         replicas: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v2.16.1"
+          tag: "v2.17.0"
           pullPolicy: IfNotPresent
         config:
           nodeEnv: production
@@ -1153,7 +1153,7 @@ clickstack-ingest-gateway:
 # ClickStack OTel collector (v2 external only): OTLP-to-ClickHouse pipeline.
 clickstack-otel-collector:
   image:
-    tag: "2.41.0"
+    tag: "2.42.0"
     repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickstack-otel-collector
   # Empty endpoint is composed from global.clickhouse (scheme follows
   # global.clickhouse.tls), then http://clickhouse:8123 (AUT-636). Set it
@@ -1355,7 +1355,7 @@ firewall:
       replicas: 2
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-        tag: "v2.40.0"
+        tag: "v2.41.0"
         pullPolicy: IfNotPresent
       resources:
         requests:
@@ -1381,7 +1381,7 @@ firewall:
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
         # Keep in lockstep with gateway.image.tag.
-        tag: "v2.40.0"
+        tag: "v2.41.0"
         pullPolicy: IfNotPresent
       replicas: 1
       resources:

@@ -70,7 +70,7 @@ spec:
       initContainers:
       - name: wait-for-postgresql
         {{- $pgWaitImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/postgres" }}
-        {{- $pgWaitImageTag := "17.11-alpine" }}
+        {{- $pgWaitImageTag := "17-alpine" }}
         {{- $pgWaitPullPolicy := "IfNotPresent" }}
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.postgresql .Values.controlPlane.components.postgresql.image }}
           {{- if .Values.controlPlane.components.postgresql.image.repository }}{{- $pgWaitImageRepo = .Values.controlPlane.components.postgresql.image.repository }}{{- end }}

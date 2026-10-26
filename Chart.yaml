@@ -23,14 +23,14 @@ dependencies:
       - v2
   # Control-plane API — external only (templates gated by isExternal).
   - name: control-plane-api
-    version: 0.1.15
+    version: 0.1.16
     repository: file://./charts/control-plane-api
     tags:
       - neuraltrust
       - v2
   # Control-plane App/UI — external only.
   - name: control-plane-app
-    version: 0.1.66
+    version: 0.1.67
     repository: file://./charts/control-plane-app
     tags:
       - neuraltrust
@@ -81,7 +81,7 @@ dependencies:
       - v2
   # ClickStack OTel collector — v2 external only.
   - name: clickstack-otel-collector
-    version: 0.1.9
+    version: 0.1.10
     repository: file://./charts/clickstack-otel-collector
     tags:
       - neuraltrust
@@ -96,7 +96,7 @@ dependencies:
   # Firewall is part of TrustGuard. Templates follow the TrustGuard product
   # gate in both modes (opt-in in hybrid, opt-out in external).
   - name: firewall
-    version: 2.1.32
+    version: 2.1.33
     repository: file://./charts/firewall
     tags:
       - neuraltrust
