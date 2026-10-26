@@ -230,7 +230,15 @@ spec:
               name: {{ $pgSecretName }}
               key: POSTGRES_CONNECTION_TYPE
               optional: true
-        {{- if eq (include "control-plane.postgresql.iam" .) "true" }}
+        {{- /* GCP follows the shared Secret's IAM decision (global.postgresql
+               first), so this pod and POSTGRES_CONNECTION_TYPE cannot disagree.
+               POSTGRES_LOGIN outranks POSTGRES_CONNECTION_TYPE, whose enum has
+               no GCP member; the token comes from Application Default
+               Credentials. */}}
+        {{- if and (eq (include "neuraltrust-platform.postgresql.iam" .) "true") (eq (include "neuraltrust-platform.postgres.tokenProvider" .) "gcp") }}
+        - name: POSTGRES_LOGIN
+          value: "gcp"
+        {{- else if eq (include "control-plane.postgresql.iam" .) "true" }}
         {{- $awsRegion := include "control-plane.postgresql.awsRegion" . }}
         {{- if $awsRegion }}
         - name: AWS_REGION

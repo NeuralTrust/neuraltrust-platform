@@ -112,7 +112,26 @@ global:
     #   enabled: true
     #   adminSecret:
     #     name: "managed-postgres-admin" # keys: username, password
+    #
+    # Cloud SQL or AlloyDB with IAM database auth on GKE instead of passwords:
+    # drop passwordSecret above and the DB keys of external-postgresql, then
+    # uncomment these and global.gcpIdentity below. Each user is a Google
+    # service account's email without ".gserviceaccount.com"; map each one to
+    # its service's ServiceAccount through `serviceAccount.annotations`
+    # (control-plane-api.controlPlane.serviceAccount for the control plane).
+    # See SECRETS.md, "Optional IAM DB auth (GCP)".
+    # authMode: "iam"
+    # user: "neuraltrust-db@my-project.iam"
+  # gcpIdentity:
+  #   method: "workload-identity"
   # One Redis endpoint for the whole platform, same inheritance.
+  # Memorystore for Redis Cluster with IAM auth: point host at the discovery
+  # endpoint, keep tls "true", drop the external-redis Secret and uncomment
+  # these (with global.gcpIdentity above). See SECRETS.md.
+  #   authMode: "iam"
+  #   cluster: true
+  #   caSecret:
+  #     name: "redis-ca" # key ca.pem: the cluster's CA bundle
   redis:
     deploy: false
     host: "redis.example.com"

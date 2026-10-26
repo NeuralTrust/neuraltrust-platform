@@ -20,11 +20,17 @@ data:
   # IAM (RDS) DB auth: AlertEngine mints a SigV4 token per connection (DB_AUTH_MODE=iam).
   # No static DB_PASSWORD is shipped. Defaults from global.postgresql.authMode when
   # database.iamAuth is unset (AUT-392). AWS_REGION is required by the binary.
+  {{- if eq (include "neuraltrust-platform.postgres.tokenProvider" .) "gcp" }}
+  # GCP IAM: POSTGRES_LOGIN outranks the AWS-only DB_AUTH_MODE, and the token
+  # comes from Application Default Credentials, so no region is needed.
+  POSTGRES_LOGIN: "gcp"
+  {{- else }}
   DB_IAM_AUTH: "true"
   DB_AUTH_MODE: "iam"
   {{- $aeRegion := .Values.database.awsRegion | default (default dict (default dict .Values.global).postgresql).awsRegion | default "" }}
   {{- if and $aeRegion (ne ($aeRegion | toString) "") }}
   AWS_REGION: {{ $aeRegion | quote }}
+  {{- end }}
   {{- end }}
   {{- end }}
   # ---- ClickHouse (event source, native protocol) ----

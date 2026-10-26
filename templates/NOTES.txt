@@ -85,9 +85,6 @@ Enabled v2 components:
   - ClickStack ingest gateway (public OTLP)
 {{- end }}
 {{- end }}
-{{- if .Values.trustlens.enabled }}
-  - TrustLens
-{{- end }}
 
 {{- if include "neuraltrust-platform.ingress.gatewayApi" (dict "global" .Values.global) }}
 HTTPRoute endpoints (attached to {{ range $i, $p := .Values.global.ingress.gatewayApi.parentRefs }}{{ if $i }}, {{ end }}{{ $p.namespace | default $.Release.Namespace }}/{{ $p.name }}{{ end }}):
@@ -150,14 +147,6 @@ Ingress endpoints:
   - Control Plane App:    https://{{ $cpAppHost }}
 {{- else }}
   - Control Plane App:    kubectl get ingress control-plane-app-ingress -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].{{ $ipField }}}'
-{{- end }}
-{{- if .Values.trustlens.enabled }}
-{{- $tlHost := include "neuraltrust-platform.ingress.host" (dict "host" (dig "ingress" "controlPlane" "host" "" (.Values.trustlens | default dict)) "prefix" "trustlens" "global" .Values.global) }}
-{{- if $tlHost }}
-  - TrustLens:            https://{{ $tlHost }}
-{{- else }}
-  - TrustLens:            kubectl get ingress trustlens -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].{{ $ipField }}}'
-{{- end }}
 {{- end }}
 {{- end }}
 {{- if $dataPlaneEnabled }}

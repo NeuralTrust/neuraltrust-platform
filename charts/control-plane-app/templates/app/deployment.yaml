@@ -54,6 +54,9 @@ spec:
       {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.postgresql .Values.controlPlane.components.postgresql.secrets .Values.controlPlane.components.postgresql.secrets.name }}
         {{- $pgSecretName = .Values.controlPlane.components.postgresql.secrets.name }}
       {{- end }}
+      {{- /* Follows the shared Secret's IAM decision (global.postgresql first), so
+             these pods and POSTGRES_AUTH_MODE cannot disagree. */}}
+      {{- $pgGcp := and (eq (include "neuraltrust-platform.postgresql.iam" .) "true") (eq (include "neuraltrust-platform.postgres.tokenProvider" .) "gcp") }}
       {{- if or (include "neuraltrust-platform.customCaCert.enabled" .) (and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.extraVolumes) }}
       volumes:
       {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 6 }}
@@ -64,7 +67,7 @@ spec:
       initContainers:
       - name: init-db
         {{- $initImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
-        {{- $initImageTag := "v2.15.2" }}
+        {{- $initImageTag := "v2.16.1" }}
         {{- $initPullPolicy := "IfNotPresent" }}
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.image }}
           {{- if .Values.controlPlane.components.app.image.repository }}{{- $initImageRepo = .Values.controlPlane.components.app.image.repository }}{{- end }}
@@ -111,8 +114,13 @@ spec:
           # Assign before exporting: `export VAR=$(cmd)` reports export's exit
           # status, not the command's, so under `set -e` a failing script would
           # leave an empty URL and a confusing Prisma error instead of stopping.
+          {{- if $pgGcp }}
+          if [ "${POSTGRES_LOGIN:-}" = "gcp" ]; then
+            echo "Minting GCP IAM auth token for Prisma migrations..."
+          {{- else }}
           if [ "${POSTGRES_AUTH_MODE:-password}" = "iam" ]; then
             echo "Minting RDS IAM auth token for Prisma migrations..."
+          {{- end }}
             POSTGRES_PRISMA_URL="$(node scripts/postgres-iam-url.mjs)"
             export POSTGRES_PRISMA_URL
             export DATABASE_URL="$POSTGRES_PRISMA_URL"
@@ -178,7 +186,10 @@ spec:
               key: POSTGRES_AUTH_MODE
               name: {{ $pgSecretName }}
               optional: true
-        {{- if eq (include "control-plane.postgresql.iam" .) "true" }}
+        {{- if $pgGcp }}
+        - name: POSTGRES_LOGIN
+          value: "gcp"
+        {{- else if eq (include "control-plane.postgresql.iam" .) "true" }}
         {{- $awsRegion := include "control-plane.postgresql.awsRegion" . }}
         {{- if $awsRegion }}
         - name: AWS_REGION
@@ -239,7 +250,7 @@ spec:
       containers:
       - name: app
         {{- $appImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
-        {{- $appImageTag := "v2.15.2" }}
+        {{- $appImageTag := "v2.16.1" }}
         {{- $appPullPolicy := "IfNotPresent" }}
         {{- $appPort := 3000 }}
         {{- $nodeEnv := "production" }}
@@ -270,7 +281,6 @@ spec:
                config.authEmailForceEnv: "false". */}}
         {{- $authEmailForceEnv := "true" }}
         {{- $alertEngineApiUrl := "http://alertengine-api" }}
-        {{- $trustlensApiUrl := "http://trustlens-api" }}
         {{- $openshiftDomain := include "neuraltrust-platform.domain" . }}
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.config }}
           {{- if .Values.controlPlane.components.app.config.port }}{{- $appPort = .Values.controlPlane.components.app.config.port }}{{- end }}
@@ -289,7 +299,6 @@ spec:
           {{- if hasKey .Values.controlPlane.components.app.config "datacoreMetricsEnabled" }}{{- $datacoreMetricsEnabled = .Values.controlPlane.components.app.config.datacoreMetricsEnabled | toString }}{{- end }}
           {{- if hasKey .Values.controlPlane.components.app.config "authEmailForceEnv" }}{{- $authEmailForceEnv = .Values.controlPlane.components.app.config.authEmailForceEnv | toString }}{{- end }}
           {{- if .Values.controlPlane.components.app.config.alertEngineApiUrl }}{{- $alertEngineApiUrl = .Values.controlPlane.components.app.config.alertEngineApiUrl }}{{- end }}
-          {{- if .Values.controlPlane.components.app.config.trustlensApiUrl }}{{- $trustlensApiUrl = .Values.controlPlane.components.app.config.trustlensApiUrl }}{{- end }}
         {{- end }}
         {{- /* Use internal Kubernetes service URLs for inter-service communication */}}
         {{- if not $controlPlaneApiUrl }}
@@ -363,7 +372,15 @@ spec:
               name: {{ $pgSecretName }}
               key: POSTGRES_AUTH_MODE
               optional: true
-        {{- if eq (include "control-plane.postgresql.iam" .) "true" }}
+        {{- if $pgGcp }}
+        {{- /* POSTGRES_LOGIN outranks POSTGRES_AUTH_MODE, whose enum has no GCP
+               member; the token comes from Application Default Credentials. The
+               CA note below applies to Cloud SQL and AlloyDB alike. */}}
+        - name: POSTGRES_LOGIN
+          value: "gcp"
+        - name: POSTGRES_IAM_SSL_REJECT_UNAUTHORIZED
+          value: "false"
+        {{- else if eq (include "control-plane.postgresql.iam" .) "true" }}
         {{- $awsRegion := include "control-plane.postgresql.awsRegion" . }}
         {{- if $awsRegion }}
         - name: AWS_REGION
@@ -703,7 +720,7 @@ spec:
               {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "MODEL_SCANNER_SECRET" "optional" true) | nindent 14 }}
         {{- /* v2 backend services the console (BFF) calls. Core backend
                credentials are required so the app fails closed on an incomplete
-               external install. AlertEngine and TrustLens remain optional. */}}
+               external install. AlertEngine remains optional. */}}
         {{- /* A product left out with global.products.<name>=false gets no URL and no
                secretKeyRef: its Secret is never written, so a required ref would
                stop the pod. The app reads these lazily, so it starts without them and
@@ -736,8 +753,6 @@ spec:
           value: "{{ $datacoreMetricsEnabled }}"
         - name: ALERT_ENGINE_API_URL
           value: "{{ $alertEngineApiUrl }}"
-        - name: TRUSTLENS_API_URL
-          value: "{{ $trustlensApiUrl }}"
         - name: DATACORE_JWT_SECRET
           valueFrom:
             secretKeyRef:
@@ -746,10 +761,6 @@ spec:
           valueFrom:
             secretKeyRef:
               {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "AUTH_JWT_SECRET" "optional" true) | nindent 14 }}
-        - name: TRUSTLENS_JWT_SECRET
-          valueFrom:
-            secretKeyRef:
-              {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "TRUSTLENS_JWT_SECRET" "optional" true) | nindent 14 }}
         {{- /* saas console: publish this plane's public endpoints so the private
                gateway wizard can emit global.controlPlane.domain (and dial hosts)
                into hybrid Helm / Docker install snippets. Without these the app

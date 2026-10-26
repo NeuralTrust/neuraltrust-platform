@@ -73,10 +73,16 @@ data:
   # IAM (RDS) DB auth: DataCore mints a SigV4 token per connection (POSTGRES_LOGIN=aws).
   # No static POSTGRES_PASSWORD is shipped. Defaults from global.postgresql.authMode
   # when database.iamAuth is unset (AUT-392). AWS_REGION is required by the binary.
+  {{- if eq (include "neuraltrust-platform.postgres.tokenProvider" .) "gcp" }}
+  # GCP IAM: the token comes from Application Default Credentials (GKE Workload
+  # Identity through this ServiceAccount), so no region is needed.
+  POSTGRES_LOGIN: "gcp"
+  {{- else }}
   POSTGRES_LOGIN: "aws"
   {{- $dcRegion := .Values.database.awsRegion | default (default dict (default dict .Values.global).postgresql).awsRegion | default "" }}
   {{- if and $dcRegion (ne ($dcRegion | toString) "") }}
   AWS_REGION: {{ $dcRegion | quote }}
+  {{- end }}
   {{- end }}
   {{- end }}
   {{- /* AUT-636: host/port/tls resolve through global.clickhouse so a managed
