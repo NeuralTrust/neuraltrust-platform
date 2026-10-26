@@ -456,7 +456,7 @@ GatewayClass or a certificate.
 | Mode | HTTPRoutes |
 |---|---|
 | hybrid | `agentgateway-gateway` (`gateway.` + `*.llm.`), `agentgateway-mcp` (`mcp.` + `*.mcp.`), `trustguard`, `data-plane-api` |
-| external | hybrid's, plus `agentgateway-admin`, `trustguard-admin`, `control-plane-api`, `control-plane-app`, and `datacore` / `trustlens` when their ingress is on |
+| external | hybrid's, plus `agentgateway-admin`, `trustguard-admin`, `control-plane-api`, `control-plane-app`, and `datacore` when its ingress is on |
 | saas | external's, plus the `clickstack-ingest-gateway` (`telemetry.`) |
 
 Hostnames derive from `global.domain` exactly as for Ingress, so several

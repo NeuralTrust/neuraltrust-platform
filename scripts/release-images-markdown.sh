@@ -37,7 +37,6 @@ V=values.yaml
 WD=charts/watchdog/values.yaml
 AGW=charts/agentgateway/values.yaml
 TGUARD=charts/trustguard/values.yaml
-TLENS=charts/trustlens/values.yaml
 DAGENT=charts/dataagent/values.yaml
 DCORE=charts/datacore/values.yaml
 CSCOL=charts/clickstack-otel-collector/values.yaml
@@ -63,7 +62,6 @@ emit_row "control-plane-app (external)" "$(yq_get "$V" '.["control-plane-app"].c
 emit_row "datacore (external)" "$(yq_get "$DCORE" '.image.repository')" "$(yq_get "$V" '.datacore.image.tag')"
 emit_row "clickstack-otel-collector (external)" "$(yq_get "$CSCOL" '.image.repository')" "$(yq_get "$V" '.["clickstack-otel-collector"].image.tag')"
 emit_row "alertengine (external)" "$(yq_get "$AENG" '.image.repository')" "$(yq_get "$V" '.alertengine.image.tag')"
-emit_row "trustlens (optional)" "$(yq_get "$TLENS" '.image.repository')" "$(yq_get "$V" '.trustlens.image.tag')"
 
 # Central control plane (saas) only: serve remote data planes in other clusters.
 emit_row "databridge (saas)" "$(yq_get "$DBRIDGE" '.image.repository')" "$(yq_get "$V" '.databridge.image.tag')"

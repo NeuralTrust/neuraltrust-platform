@@ -1721,6 +1721,165 @@ assert_contains "$out3b" 'AUTH_JWT_HS256_SECRET:'$'\n''  CLICKHOUSE_USER:' \
   "datacore IAM: omits POSTGRES_PASSWORD between JWT and CLICKHOUSE_USER"
 
 # ---------------------------------------------------------------------------
+# 3c. GCP IAM (Cloud SQL / AlloyDB) with GKE Workload Identity, external mode.
+# Global authMode alone must reach every Postgres client, including the control
+# plane, whose own overlays still default to "password".
+# ---------------------------------------------------------------------------
+blue "==> Scenario 3c: GCP IAM Postgres env contract (external, Workload Identity)"
+gcp_args=(
+  --set global.deploymentMode=external
+  --set global.postgresql.deploy=false
+  --set global.postgresql.host=10.0.0.5
+  --set global.postgresql.authMode=iam
+  --set global.postgresql.sslMode=require
+  --set global.postgresql.user=cp-db@example-project.iam
+  --set global.gcpIdentity.method=workload-identity
+  --set trustguard.database.user=trustguard-db@example-project.iam
+  --set datacore.database.user=datacore-db@example-project.iam
+  --set alertengine.database.user=alertengine-db@example-project.iam
+)
+out3c="$TMP/scenario-external-gcp-iam.yaml"
+render_default "$out3c" "${gcp_args[@]}" \
+  --set trustguard.serviceAccount.annotations.iam\\.gke\\.io/gcp-service-account=trustguard-db@example-project.iam.gserviceaccount.com \
+  --set control-plane-api.controlPlane.serviceAccount.annotations.iam\\.gke\\.io/gcp-service-account=cp-db@example-project.iam.gserviceaccount.com
+for w in "control-plane-api:control-plane-api" "control-plane-app:app" "control-plane-app:init-db"; do
+  IFS=: read -r workload container <<< "$w"
+  assert_env_value "$out3c" "$workload" "$container" POSTGRES_LOGIN gcp \
+    "gcp IAM: $workload/$container gets POSTGRES_LOGIN=gcp"
+  assert_env_value "$out3c" "$workload" "$container" AWS_REGION ABSENT \
+    "gcp IAM: $workload/$container gets no AWS_REGION"
+done
+assert_contains "$out3c" 'if \[ "\$\{POSTGRES_LOGIN:-\}" = "gcp" \]; then' \
+  "gcp IAM: app init-db mints the Prisma URL for the gcp login"
+# agentgateway, trustguard, datacore and alertengine env ConfigMaps.
+assert_occurrences "$out3c" '^  POSTGRES_LOGIN: "gcp"$' 4 \
+  "gcp IAM: TrustGate, TrustGuard, DataCore and AlertEngine ConfigMaps carry POSTGRES_LOGIN=gcp"
+assert_not_contains "$out3c" '^  AWS_REGION:' \
+  "gcp IAM: no ConfigMap carries AWS_REGION"
+assert_not_contains "$out3c" '^  (DB_AUTH_MODE|DB_IAM_AUTH):' \
+  "gcp IAM: AlertEngine gets no AWS-only DB_AUTH_MODE"
+# postgresql-secrets: POSTGRES_LOGIN, POSTGRES_AUTH_MODE and
+# POSTGRES_CONNECTION_TYPE all "gcp" (Z2Nw), so an image without GCP support
+# fails closed instead of attempting a password login.
+assert_occurrences "$out3c" '^  POSTGRES_(LOGIN|AUTH_MODE|CONNECTION_TYPE): "Z2Nw"$' 3 \
+  "gcp IAM: postgresql-secrets stores gcp under all three switch names"
+assert_datastore_env "$out3c" trustguard-control-plane control-plane \
+  "DB_HOST DB_NAME DB_PORT DB_SSL_MODE DB_USER POSTGRES_LOGIN" \
+  "gcp IAM: TrustGuard receives no DB_PASSWORD"
+assert_contains "$out3c" 'DB_USER: "trustguard-db@example-project.iam"' \
+  "gcp IAM: TrustGuard logs in as its IAM user"
+assert_contains "$out3c" 'iam.gke.io/gcp-service-account: trustguard-db@example-project.iam.gserviceaccount.com' \
+  "gcp IAM: a per-service Google service account reaches its ServiceAccount"
+assert_occurrences "$out3c" 'iam\.gke\.io/gcp-service-account' 2 \
+  "gcp IAM: without applyGlobally only the annotated ServiceAccounts change"
+
+out3c_global="$TMP/scenario-external-gcp-iam-global.yaml"
+render_default "$out3c_global" "${gcp_args[@]}" \
+  --set global.gcpIdentity.applyGlobally=true \
+  --set global.gcpIdentity.serviceAccount=nt-db@example-project.iam.gserviceaccount.com
+# Workload ServiceAccounts only: the key-generation hook ones talk to the
+# Kubernetes API alone and deliberately carry no cloud identity.
+sa_count="$(ruby -ryaml -e '
+  n = 0
+  YAML.load_stream(File.read(ARGV.fetch(0))) do |d|
+    next unless d.is_a?(Hash) && d["kind"] == "ServiceAccount"
+    n += 1 unless (d.dig("metadata", "annotations") || {}).key?("helm.sh/hook")
+  end
+  puts n
+' "$out3c_global")"
+assert_occurrences "$out3c_global" 'iam\.gke\.io/gcp-service-account: nt-db@example-project\.iam\.gserviceaccount\.com' "$sa_count" \
+  "gcp IAM: applyGlobally annotates every ServiceAccount"
+
+# Hybrid: the gateways, TrustGuard, both DataAgents and data-plane-api all take
+# the login from the shared Secret or a literal.
+out3c_hybrid="$TMP/scenario-hybrid-gcp-iam.yaml"
+render_default "$out3c_hybrid" \
+  --set global.postgresql.deploy=false --set global.postgresql.host=10.0.0.5 \
+  --set global.postgresql.authMode=iam --set global.postgresql.sslMode=require \
+  --set global.postgresql.user=nt-db@example-project.iam \
+  --set global.gcpIdentity.method=workload-identity
+assert_contains "$out3c_hybrid" '^  POSTGRES_LOGIN: "Z2Nw"$' \
+  "gcp IAM hybrid: postgresql-secrets carries POSTGRES_LOGIN=gcp"
+assert_env_value "$out3c_hybrid" data-plane-api api POSTGRES_LOGIN gcp \
+  "gcp IAM hybrid: data-plane-api gets POSTGRES_LOGIN=gcp"
+assert_env_value "$out3c_hybrid" dataagent dataagent POSTGRES_LOGIN "secretKeyRef:postgresql-secrets/POSTGRES_LOGIN" \
+  "gcp IAM hybrid: DataAgent reads the login from postgresql-secrets"
+assert_not_contains "$out3c_hybrid" 'name: AWS_REGION' \
+  "gcp IAM hybrid: no AWS_REGION reaches any pod"
+assert_render_fails_with 'sslMode must be require, verify-ca or verify-full for GCP IAM' \
+  "gcp IAM guard: the shipped sslMode=prefer is refused" \
+  "${gcp_args[@]}" --set global.postgresql.sslMode=prefer
+assert_render_fails_with 'are both set' \
+  "gcp IAM guard: a GCP and an Azure identity at once are refused" \
+  "${gcp_args[@]}" --set global.azureIdentity.method=workload-identity
+assert_render_fails_with 'global.gcpIdentity.method must be workload-identity' \
+  "gcp IAM guard: an unknown method is refused" \
+  "${gcp_args[@]}" --set global.gcpIdentity.method=federation
+assert_render_fails_with 'global.gcpIdentity.serviceAccount is required' \
+  "gcp IAM guard: applyGlobally needs the Google service account" \
+  "${gcp_args[@]}" --set global.gcpIdentity.applyGlobally=true
+assert_render_fails_with 'without ".gserviceaccount.com" (datacore-db@example-project.iam)' \
+  "gcp IAM guard: a database user with the .gserviceaccount.com suffix is refused" \
+  "${gcp_args[@]}" --set datacore.database.user=datacore-db@example-project.iam.gserviceaccount.com
+# ---------------------------------------------------------------------------
+# 3d. Memorystore for Redis Cluster with IAM auth and its per-instance CA.
+# ---------------------------------------------------------------------------
+blue "==> Scenario 3d: Redis Cluster, GCP IAM and a custom CA"
+redis_args=(
+  --set global.redis.deploy=false
+  --set global.redis.host=10.0.0.6
+  --set global.redis.tls=true
+  --set global.redis.authMode=iam
+  --set global.redis.cluster=true
+  --set global.redis.caSecret.name=redis-ca
+)
+out3d="$TMP/scenario-external-redis-cluster-iam.yaml"
+render_default "$out3d" "${gcp_args[@]}" "${redis_args[@]}"
+for w in "trustguard-control-plane:control-plane" "trustguard-data-plane:data-plane" \
+         "agentgateway-admin:admin" "agentgateway-proxy:proxy" "agentgateway-mcp:mcp" "data-plane-api:api"; do
+  IFS=: read -r workload container <<< "$w"
+  assert_env_value "$out3d" "$workload" "$container" REDIS_LOGIN gcp \
+    "redis gcp: $workload/$container gets REDIS_LOGIN=gcp"
+  assert_env_value "$out3d" "$workload" "$container" REDIS_CLUSTER true \
+    "redis cluster: $workload/$container gets REDIS_CLUSTER=true"
+  assert_env_value "$out3d" "$workload" "$container" REDIS_TLS_CA_FILE /etc/neuraltrust/redis-ca/ca.pem \
+    "redis CA: $workload/$container reads the mounted CA bundle"
+done
+assert_env_value "$out3d" data-plane-api api K8S_JOB_REDIS_CA_SECRET_NAME redis-ca \
+  "redis CA: data-plane-api hands the CA Secret to its evaluation Jobs"
+assert_contains "$out3d" "REDIS_URL: $(printf 'rediss://10.0.0.6:6379/0' | base64)" \
+  "redis gcp: data-plane-api's REDIS_URL carries no credential and uses TLS"
+out3d_hybrid="$TMP/scenario-hybrid-redis-cluster-iam.yaml"
+render_default "$out3d_hybrid" "${redis_args[@]}" --set global.gcpIdentity.method=workload-identity
+assert_env_value "$out3d_hybrid" agentgateway-proxy proxy REDIS_LOGIN gcp \
+  "redis gcp hybrid: the gateway data plane gets REDIS_LOGIN=gcp"
+assert_env_value "$out3d_hybrid" trustguard-data-plane data-plane REDIS_CLUSTER true \
+  "redis cluster hybrid: TrustGuard's data plane gets REDIS_CLUSTER=true"
+assert_render_fails_with 'set global.gcpIdentity.method' \
+  "redis gcp guard: authMode=iam without a GCP identity is refused" \
+  --set global.redis.deploy=false --set global.redis.host=10.0.0.6 --set global.redis.tls=true \
+  --set global.redis.authMode=iam
+assert_render_fails_with 'needs global.redis.tls' \
+  "redis gcp guard: a token login without TLS is refused" \
+  "${gcp_args[@]}" --set global.redis.deploy=false --set global.redis.host=10.0.0.6 \
+  --set global.redis.authMode=iam
+assert_render_fails_with 'database 0 only' \
+  "redis cluster guard: a non-zero database is refused" \
+  "${gcp_args[@]}" "${redis_args[@]}" --set agentgateway.redis.db=3
+assert_render_fails_with 'describe a Redis you run' \
+  "redis guard: cluster against the chart's own Redis is refused" \
+  --set global.redis.cluster=true
+out3d_none="$TMP/scenario-external-no-redis-cloud.yaml"
+render_default "$out3d_none" --set global.deploymentMode=external
+assert_not_contains "$out3d_none" 'REDIS_CLUSTER|REDIS_TLS_CA_FILE|name: redis-ca' \
+  "no cloud Redis: nothing renders by default"
+
+out3c_none="$TMP/scenario-external-no-gcp.yaml"
+render_default "$out3c_none" --set global.deploymentMode=external
+assert_not_contains "$out3c_none" 'iam\.gke\.io|"gcp"' \
+  "no GCP identity: nothing GCP renders by default"
+
+# ---------------------------------------------------------------------------
 # 4. New unprefixed value roots are honoured
 # ---------------------------------------------------------------------------
 blue "==> Scenario 4: unprefixed value roots (control-plane-api / control-plane-app / data-plane-api / firewall / watchdog)"
@@ -2784,8 +2943,6 @@ assert_shared_secret_wiring() {
       "AUTH_JWT_HS256_SECRET" => ["datacore-secrets", "AUTH_JWT_HS256_SECRET"],
       "AUTH_JWT_SECRET" => ["alertengine-secrets", "AUTH_JWT_SECRET"],
       "APP_ENCRYPTION_KEY" => ["alertengine-secrets", "APP_ENCRYPTION_KEY"],
-      "TRUSTLENS_JWT_SECRET" => ["trustlens-secrets", "JWT_SECRET"],
-      "ENCRYPTION_KEYSET" => ["trustlens-secrets", "ENCRYPTION_KEYSET"],
       "JWT_SECRET" => ["firewall-secrets", "JWT_SECRET"],
       "DATA_PLANE_JWT_SECRET" => ["data-plane-jwt-secret", "DATA_PLANE_JWT_SECRET"],
       "CONTROL_PLANE_JWT_SECRET" => ["control-plane-secrets", "CONTROL_PLANE_JWT_SECRET"],
@@ -2887,25 +3044,13 @@ assert_platform_keys "$out12aeoff" absent \
   "alertengine disabled: platform-secrets omits" \
   AUTH_JWT_SECRET APP_ENCRYPTION_KEY
 
-# An opt-in subchart and a retired code path must not mint credentials nobody
-# reads, in either mode. External deploys the full stack, so the install shape
-# alone cannot gate these.
+# A retired code path must not mint credentials nobody reads, in either mode.
 assert_platform_keys "$out12ext" absent \
   "external: platform-secrets omits unused" \
-  TRUSTLENS_JWT_SECRET ENCRYPTION_KEYSET TRUSTGATE_JWT_SECRET
+  TRUSTGATE_JWT_SECRET
 assert_platform_keys "$out12hyb" absent \
   "hybrid: platform-secrets omits unused" \
-  TRUSTLENS_JWT_SECRET ENCRYPTION_KEYSET TRUSTGATE_JWT_SECRET
-
-# Enabling TrustLens is what brings its credentials in, not the deployment mode.
-out12tl="$TMP/scenario-shared-secret-trustlens-on.yaml"
-render_default "$out12tl" --set global.deploymentMode=hybrid \
-  --set trustlens.enabled=true --set trustlens.image.tag=v0.1.1
-assert_platform_keys "$out12tl" present \
-  "trustlens enabled: platform-secrets carries" \
-  TRUSTLENS_JWT_SECRET ENCRYPTION_KEYSET
-assert_shared_secret_wiring "$out12tl" \
-  "trustlens enabled: every migrated key has a single source in platform-secrets"
+  TRUSTGATE_JWT_SECRET
 
 # MODEL_SCANNER_SECRET is adopt-only: an empty legacy value must stay empty
 # rather than becoming a generated credential for a peer that is not deployed.
@@ -3574,7 +3719,7 @@ for f in "$out12hyb" "$out12hybkey"; do
 done
 
 blue "==> Scenario 12b: control-plane-app no longer couples to backend Secrets"
-for legacy in agentgateway-secrets trustguard-secrets datacore-secrets alertengine-secrets trustlens-secrets; do
+for legacy in agentgateway-secrets trustguard-secrets datacore-secrets alertengine-secrets; do
   ruby -ryaml -e '
     docs = YAML.load_stream(File.read(ARGV.fetch(0))).compact
     app = docs.find { |d| d["kind"] == "Deployment" && d.dig("metadata", "name") == "control-plane-app" }
@@ -3856,7 +4001,6 @@ MANAGED_DATASTORES=(
 
 out17="$TMP/scenario-datastore-inherit.yaml"
 render_default "$out17" --set global.deploymentMode=external \
-  --set trustlens.enabled=true --set trustlens.image.tag=v0.1.0 \
   "${MANAGED_DATASTORES[@]}"
 ruby -ryaml -e '
   docs = []
@@ -3870,8 +4014,7 @@ ruby -ryaml -e '
   { "agentgateway-env-vars" => %w[DB_HOST DB_PORT DB_SSL_MODE],
     "trustguard-env-vars"   => %w[DB_HOST DB_PORT DB_SSL_MODE],
     "alertengine-env-vars"  => %w[DB_HOST DB_PORT DB_SSL_MODE],
-    "datacore-env-vars"     => %w[POSTGRES_HOST POSTGRES_PORT POSTGRES_SSLMODE],
-    "trustlens-env-vars"    => %w[DATABASE_HOST DATABASE_PORT DATABASE_SSLMODE] }.each do |name, (hk, pk, sk)|
+    "datacore-env-vars"     => %w[POSTGRES_HOST POSTGRES_PORT POSTGRES_SSLMODE] }.each do |name, (hk, pk, sk)|
     data = cm.call(name)
     abort "#{name} #{hk}=#{data[hk].inspect}" unless data[hk] == "aurora.example.com"
     abort "#{name} #{pk}=#{data[pk].inspect}" unless data[pk].to_s == "5433"
@@ -4453,7 +4596,7 @@ assert_not_contains "$out20keep" 'key: POSTGRES_PRISMA_URL' \
 # ---------------------------------------------------------------------------
 # port + probe parity against service k8s overlays / health routes.
 # A wrong readiness path marks Ready while broken; a missing startupProbe
-# CrashLoops migration-bound boots (TrustGate admin, TrustLens API).
+# CrashLoops migration-bound boots (TrustGate admin).
 # ---------------------------------------------------------------------------
 blue "==> port and probe parity"
 assert_workload_parity() {
@@ -4483,14 +4626,12 @@ assert_workload_parity() {
 
 out322ext="$TMP/scenario-aut322-external.yaml"
 render_default "$out322ext" \
-  --set global.deploymentMode=external \
-  --set trustlens.enabled=true --set trustlens.image.tag=v0.1.0
+  --set global.deploymentMode=external
 assert_workload_parity "$out322ext" agentgateway-admin admin 8080 /readyz /healthz /healthz
 assert_workload_parity "$out322ext" agentgateway-proxy proxy 8081 /readyz /healthz /healthz
 assert_workload_parity "$out322ext" agentgateway-mcp mcp 8082 /readyz /healthz /healthz
 assert_workload_parity "$out322ext" trustguard-control-plane control-plane 8080 /readyz /healthz /healthz
 assert_workload_parity "$out322ext" trustguard-data-plane data-plane 8081 /readyz /healthz /healthz
-assert_workload_parity "$out322ext" trustlens-api api 8080 /ready /health /health
 assert_workload_parity "$out322ext" data-plane-api api 8000 /health/ready /health /health
 
 out322hyb="$TMP/scenario-aut322-hybrid.yaml"
@@ -4500,10 +4641,6 @@ render_default "$out322hyb"
 for da in dataagent dataagent-trustguard; do
   assert_workload_parity "$out322hyb" "$da" dataagent 8080 /readyz /healthz /healthz
 done
-assert_render_fails_with \
-  "trustlens.image.tag is required when trustlens.enabled=true" \
-  "TrustLens refuses to render without an image tag" \
-  --set trustlens.enabled=true
 
 # ---------------------------------------------------------------------------
 # create-secrets.sh must track platformSecret.registry and the

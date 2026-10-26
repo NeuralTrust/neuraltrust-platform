@@ -63,8 +63,6 @@ services need.
 {{- /* `default` cannot read these: it treats an explicit false as absent. */}}
 {{- $aeEnabled := true }}
 {{- if hasKey (default dict .Values.alertengine) "enabled" }}{{- $aeEnabled = (default dict .Values.alertengine).enabled }}{{- end }}
-{{- $tlEnabled := false }}
-{{- if hasKey (default dict .Values.trustlens) "enabled" }}{{- $tlEnabled = (default dict .Values.trustlens).enabled }}{{- end }}
 
 {{- /* Every service that owns a role: the two telemetry writers resolve theirs
        through the same mode-aware helpers as their env ConfigMaps, so the Job
@@ -76,7 +74,6 @@ services need.
   (dict "key" "trustguard" "gate" (eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustguard")) "true") "writer" true "secret" "trustguard-secrets" "defaultKey" "DB_PASSWORD")
   (dict "key" "alertengine" "gate" (and $isExternal $aeEnabled) "secret" "alertengine-secrets" "defaultKey" "DB_PASSWORD")
   (dict "key" "datacore" "gate" $isExternal "secret" "datacore-secrets" "defaultKey" "POSTGRES_PASSWORD")
-  (dict "key" "trustlens" "gate" $tlEnabled "secret" "trustlens-secrets" "defaultKey" "DATABASE_PASSWORD")
 }}
 {{- $services := list }}
 {{- $passwords := list }}

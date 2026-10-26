@@ -345,8 +345,6 @@ PLATFORM_SECRET_REGISTRY_KEYS=(
     AUTH_JWT_HS256_SECRET
     AUTH_JWT_SECRET
     APP_ENCRYPTION_KEY
-    TRUSTLENS_JWT_SECRET
-    ENCRYPTION_KEYSET
     JWT_SECRET
     DATA_PLANE_JWT_SECRET
     CONTROL_PLANE_JWT_SECRET
@@ -555,7 +553,7 @@ while [[ $# -gt 0 ]]; do
             echo "  All secret values can be provided via environment variables:"
             echo "  - DEPLOYMENT_MODE       hybrid|external|saas (default: external)"
             echo "  - ENABLE_TRUSTGATE / ENABLE_TRUSTGUARD / ENABLE_DATAPLANE"
-            echo "  - ENABLE_TRUSTLENS / ENABLE_MCP_OAUTH / ENABLE_WATCHDOG"
+            echo "  - ENABLE_MCP_OAUTH / ENABLE_WATCHDOG"
             echo "  - ENABLE_AGENTGATEWAY_M2M (external; prints the public half to pin in values)"
             echo "  - ENABLE_CONFIG_SYNC (default: on for hybrid, off for external)"
             echo "  - CONFIG_SYNC_LKG_KEY (base64, exactly 32 bytes; generated when unset)"
@@ -580,7 +578,6 @@ while [[ $# -gt 0 ]]; do
             echo "  - TRUSTGUARD_ADMIN_JWT_SECRET / TRUSTGUARD_TOKEN_SIGNING_SECRET"
             echo "  - TRUSTGUARD_REDIS_EVENTS_SECRET"
             echo "  - DATACORE_JWT_SECRET / DATACORE_DB_PASSWORD / ALERTENGINE_JWT_SECRET"
-            echo "  - TRUSTLENS_JWT_SECRET / TRUSTLENS_ENCRYPTION_KEYSET"
             echo "  - DATAAGENT_DB_PASSWORD (ENROLMENT_TOKEN is never generated)"
             echo "  - And more..."
             echo ""
@@ -661,9 +658,6 @@ else
     if prompt_yes_default "ENABLE_DATAPLANE" "Enable data-plane product secrets?" "true"; then
         PLATFORM_SHAPES+=(dataPlane)
     fi
-fi
-if prompt_yes_default "ENABLE_TRUSTLENS" "Enable TrustLens secrets?" "false"; then
-    PLATFORM_SHAPES+=(trustlens)
 fi
 if shape_enabled external && prompt_yes_default "ENABLE_MCP_OAUTH" "Enable MCP OAuth client secret?" "true"; then
     PLATFORM_SHAPES+=(mcpOAuth)
@@ -928,14 +922,6 @@ if [ -n "$MODEL_SCANNER_SECRET" ]; then
     add_secret_key "$SECRET_NAME" "MODEL_SCANNER_SECRET" "$MODEL_SCANNER_SECRET"
 fi
 echo ""
-
-# TrustLens secrets (only when the TrustLens shape is active)
-if shape_enabled "trustlens"; then
-    echo "--- TrustLens Secrets ---"
-    ensure_generated_secret_key "trustlens-secrets" "JWT_SECRET" "TRUSTLENS_JWT_SECRET"
-    ensure_generated_secret_key "trustlens-secrets" "ENCRYPTION_KEYSET" "TRUSTLENS_ENCRYPTION_KEYSET"
-    echo ""
-fi
 
 # ============================================================================
 # INFRASTRUCTURE SECRETS
@@ -1245,8 +1231,6 @@ ensure_platform_secret_key "REDIS_EVENTS_SECRET" "trustguard-secrets" "REDIS_EVE
 ensure_platform_secret_key "AUTH_JWT_HS256_SECRET" "datacore-secrets" "AUTH_JWT_HS256_SECRET" "random" "DATACORE_JWT_SECRET" "external"
 ensure_platform_secret_key "AUTH_JWT_SECRET" "alertengine-secrets" "AUTH_JWT_SECRET" "random" "ALERTENGINE_JWT_SECRET" "external"
 ensure_platform_secret_key "APP_ENCRYPTION_KEY" "alertengine-secrets" "APP_ENCRYPTION_KEY" "random" "ALERTENGINE_APP_ENCRYPTION_KEY" "external"
-ensure_platform_secret_key "TRUSTLENS_JWT_SECRET" "trustlens-secrets" "JWT_SECRET" "random" "TRUSTLENS_JWT_SECRET" "trustlens"
-ensure_platform_secret_key "ENCRYPTION_KEYSET" "trustlens-secrets" "ENCRYPTION_KEYSET" "random" "TRUSTLENS_ENCRYPTION_KEYSET" "trustlens"
 ensure_platform_secret_key "JWT_SECRET" "firewall-secrets" "JWT_SECRET" "random" "FIREWALL_JWT_SECRET" "external trustguard"
 ensure_platform_secret_key "DATA_PLANE_JWT_SECRET" "data-plane-jwt-secret" "DATA_PLANE_JWT_SECRET" "random" "DATA_PLANE_JWT_SECRET" "external dataPlane watchdog"
 ensure_platform_secret_key "CONTROL_PLANE_JWT_SECRET" "control-plane-secrets" "CONTROL_PLANE_JWT_SECRET" "random" "CONTROL_PLANE_JWT_SECRET" "external watchdog"

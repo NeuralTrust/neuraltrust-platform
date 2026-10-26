@@ -193,7 +193,7 @@ What each service is wired for, by deployment mode:
 | firewall | yes — derived endpoint, `OTEL_ENABLED` follows it | no — nothing resolves, so the SDK stays off |
 | control-plane-api / app | yes — derived endpoint | n/a, neither renders in hybrid |
 | data-plane-api | yes — derived endpoint | only if an endpoint is set |
-| datacore, databridge, alertengine, trustlens, dataagent | not wired | not wired |
+| datacore, databridge, alertengine, dataagent | not wired | not wired |
 
 Every wired service resolves the same way: an explicit
 `global.observability.collector.endpoint` wins, and otherwise external and saas

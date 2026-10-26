@@ -60,6 +60,11 @@ data:
          token. POSTGRES_LOGIN is the only switch TrustGuard reads for this
          (internal/config/config.go). Defaults from global.postgresql.authMode when
          database.iamAuth is unset (AUT-392). */}}
+  {{- if eq (include "neuraltrust-platform.postgres.tokenProvider" .) "gcp" }}
+  {{- /* Application Default Credentials: GKE Workload Identity through this
+         ServiceAccount's annotation, so no region or credential env. */}}
+  POSTGRES_LOGIN: "gcp"
+  {{- else }}
   POSTGRES_LOGIN: "aws"
   {{- /* The binary does not read AWS_REGION itself, but the AWS SDK it hands the
          token request to fails with "aws region is required" when the default
@@ -67,6 +72,7 @@ data:
          region. Emitted when known so IAM does not depend on node-level config. */}}
   {{- with (include "trustguard.awsRegion" .) }}
   AWS_REGION: {{ . | quote }}
+  {{- end }}
   {{- end }}
   {{- end }}
   {{- /* Host/port/username/tls fall back to `global.redis` so a managed cache is
