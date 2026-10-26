@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v3.6.0] — 2026-10-26
+
 ### Added
 
 - **Cloud SQL and AlloyDB IAM database auth on GKE.** In every deployment mode,
