@@ -16,7 +16,7 @@ dependencies:
   version: 0.1.83
 - name: trustguard
   repository: file://./charts/trustguard
-  version: 0.1.67
+  version: 0.1.68
 - name: dataagent
   repository: file://./charts/dataagent
   version: 0.1.22
@@ -41,5 +41,5 @@ dependencies:
 - name: watchdog
   repository: file://./charts/watchdog
   version: 0.3.26
-digest: sha256:54bcbabfc860a7ff49b475e9f57729a26a83f42200904968c15697b70a70d5b0
-generated: "2026-10-26T18:03:34.123742+01:00"
+digest: sha256:6abc685b174d0fb8dee07b33ecf97253aea3a94f2afa071a18ca7c56d3a97eb2
+generated: "2026-10-27T13:46:16.601221+01:00"
