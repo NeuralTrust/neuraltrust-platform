@@ -16,21 +16,21 @@ dependencies:
       - infrastructure
   # Analytics / evaluation API. Gated by global.products.dataPlane in hybrid.
   - name: data-plane-api
-    version: 1.7.15
+    version: 1.7.16
     repository: file://./charts/data-plane-api
     tags:
       - neuraltrust
       - v2
   # Control-plane API — external only (templates gated by isExternal).
   - name: control-plane-api
-    version: 0.1.16
+    version: 0.1.17
     repository: file://./charts/control-plane-api
     tags:
       - neuraltrust
       - v2
   # Control-plane App/UI — external only.
   - name: control-plane-app
-    version: 0.1.67
+    version: 0.1.68
     repository: file://./charts/control-plane-app
     tags:
       - neuraltrust
@@ -38,21 +38,21 @@ dependencies:
   # TrustGate (values: agentgateway; K8s: agentgateway-*). Hybrid gated by
   # global.products.trustgate.
   - name: agentgateway
-    version: 0.1.83
+    version: 0.1.84
     repository: file://./charts/agentgateway
     tags:
       - neuraltrust
       - v2
   # TrustGuard. Hybrid gated by global.products.trustguard.
   - name: trustguard
-    version: 0.1.68
+    version: 0.1.69
     repository: file://./charts/trustguard
     tags:
       - neuraltrust
       - v2
   # DataAgent (hybrid; agentgateway.dataagent / trustguard.dataagent).
   - name: dataagent
-    version: 0.1.22
+    version: 0.1.23
     repository: file://./charts/dataagent
     tags:
       - neuraltrust
@@ -88,7 +88,7 @@ dependencies:
       - v2
   # AlertEngine — v2 external only.
   - name: alertengine
-    version: 0.1.20
+    version: 0.1.21
     repository: file://./charts/alertengine
     tags:
       - neuraltrust
@@ -102,7 +102,7 @@ dependencies:
       - neuraltrust
   # Watchdog — optional self-monitoring/self-healing.
   - name: watchdog
-    version: 0.3.26
+    version: 0.3.27
     repository: file://./charts/watchdog
     condition: watchdog.enabled
     tags:

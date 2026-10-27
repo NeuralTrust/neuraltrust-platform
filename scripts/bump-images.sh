@@ -11,6 +11,8 @@
 #   * Works with BSD sed (macOS), which the workflow's GNU sed idioms do not.
 #   * Root Chart.yaml version is left alone, exactly as in CI — auto-release.yml
 #     owns it on merge to main.
+#   * Chart.lock is regenerated at the end, as in CI — it pins the subchart
+#     versions this script bumps. --no-deps skips it.
 #
 # v2 only. v1 (TrustGate/Kafka) lives on the v1.14.x line and is not bumped here.
 #
@@ -21,11 +23,10 @@
 #   scripts/bump-images.sh --set app=v1.148.4        # pin instead of detecting
 #   scripts/bump-images.sh --no-fetch --set app=v1.148.4
 #   scripts/bump-images.sh --verify                  # apply, then render-test
-#   scripts/bump-images.sh --deps                    # apply, then refresh Chart.lock
-#                                                    #   and the committed charts/*.tgz
+#   scripts/bump-images.sh --no-deps                 # apply, leave Chart.lock alone
 #
-# Requires: gcloud (authenticated, read access to the registry), yq v4.
-# --verify additionally requires helm.
+# Requires: gcloud (authenticated, read access to the registry), yq v4, and helm
+# (for the Chart.lock refresh and --verify).
 
 set -euo pipefail
 
@@ -40,7 +41,7 @@ BARE='^[0-9]+\.[0-9]+\.[0-9]+$'
 DRY_RUN=false
 FETCH=true
 VERIFY=false
-DEPS=false
+DEPS=true
 ONLY=""
 declare -a PINS=()
 
@@ -51,14 +52,15 @@ warn() { printf '%s%s%s\n' "$YELLOW" "$*" "$OFF"; }
 die()  { printf '%s%s%s\n' "$RED" "$*" "$OFF" >&2; exit 1; }
 step() { printf '\n%s==> %s%s\n' "$BLUE" "$*" "$OFF"; }
 
-usage() { sed -n '3,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
+usage() { sed -n '3,29p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run)  DRY_RUN=true; shift ;;
     --no-fetch) FETCH=false; shift ;;
     --verify)   VERIFY=true; shift ;;
-    --deps)     DEPS=true; shift ;;
+    --deps)     DEPS=true; shift ;;  # the default; kept so older invocations still parse
+    --no-deps)  DEPS=false; shift ;;
     --only)     ONLY="${2:?--only needs a comma-separated list}"; shift 2 ;;
     --set)      PINS+=("${2:?--set needs key=tag}"); shift 2 ;;
     -h|--help)  usage ;;
@@ -71,6 +73,9 @@ cd "$(dirname "$0")/.."
 command -v yq >/dev/null || die "yq v4 is required (brew install yq)"
 if [[ "$FETCH" == true ]]; then
   command -v gcloud >/dev/null || die "gcloud is required for tag detection (or pass --no-fetch --set ...)"
+fi
+if [[ "$DEPS" == true && "$DRY_RUN" == false ]]; then
+  command -v helm >/dev/null || die "helm is required to refresh Chart.lock (or pass --no-deps)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -348,16 +353,14 @@ fi
 printf '\n'
 ok "Applied ${#CHANGES[@]} change(s). Nothing was committed — review with: git diff"
 
-# Chart.lock pins the subchart versions this file just bumped, and the committed
-# charts/*.tgz are what `helm install .` from a checkout actually uses. CI does
-# neither — publish-chart.yml regenerates them at publish time with
-# --dependency-update — so this stays opt-in to keep the default diff matched to
-# the workflow's.
+# Chart.lock pins the subchart versions this script just bumped. The workflow
+# regenerates it in its "Regenerate Chart.lock" step, so doing it here keeps the
+# local diff matched to the workflow's. The charts/*.tgz it also rebuilds are
+# gitignored local artifacts.
 if [[ "$DEPS" == true ]]; then
-  step "Refreshing dependencies (Chart.lock + charts/*.tgz)"
-  command -v helm >/dev/null || die "helm is required for --deps"
+  step "Refreshing Chart.lock (helm dependency update)"
   helm dependency update . >/dev/null
-  ok "  Chart.lock and packaged subcharts refreshed"
+  ok "  Chart.lock refreshed"
 fi
 
 if [[ "$VERIFY" == true ]]; then

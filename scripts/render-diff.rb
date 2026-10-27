@@ -23,18 +23,20 @@ require 'set'
 
 CHART_DIR = File.expand_path('..', __dir__)
 
+REQUIRED = 'values-required.yaml'
+EXTERNAL = 'values-external.yaml.example'
 SHAPES = {
-  'hybrid'                   => %w[values-required.yaml],
+  'hybrid'                   => [REQUIRED],
   'hybrid-managed'           => %w[values-hybrid.yaml.example],
   'hybrid-trustgate'         => %w[values-trustgate.yaml.example],
   'hybrid-trustguard'        => %w[values-trustguard.yaml.example],
   'hybrid-red-teaming'       => %w[values-red-teaming.yaml.example],
-  'hybrid-gpu'               => %w[values-required.yaml values-dataplane-gpu.yaml.example],
-  'hybrid-openshift'         => %w[values-required.yaml values-openshift.yaml],
-  'external'                 => %w[values-external.yaml.example],
+  'hybrid-gpu'               => [REQUIRED, 'values-dataplane-gpu.yaml.example'],
+  'hybrid-openshift'         => [REQUIRED, 'values-openshift.yaml'],
+  'external'                 => [EXTERNAL],
   'external-managed'         => %w[values-managed-datastores.yaml.example],
-  'external-trustguard-only' => %w[values-external.yaml.example values-external-trustguard-only.yaml.example],
-  'external-observability'   => %w[values-external.yaml.example values-observability-self-hosted.yaml.example],
+  'external-trustguard-only' => [EXTERNAL, 'values-external-trustguard-only.yaml.example'],
+  'external-observability'   => [EXTERNAL, 'values-observability-self-hosted.yaml.example'],
 }.freeze
 API_VERSIONS = %w[route.openshift.io/v1 monitoring.coreos.com/v1].freeze
 
@@ -76,6 +78,7 @@ def image_tags(node, acc = Set.new)
       end
     end
   when Array then node.each { |v| image_tags(v, acc) }
+  else nil # scalars carry no image reference
   end
   acc
 end
