@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v3.6.3] — 2026-10-27
+
 ### Fixed
 
 - **The install notes print the hosts the Ingresses and HTTPRoutes actually
