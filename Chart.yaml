@@ -45,7 +45,7 @@ dependencies:
       - v2
   # TrustGuard. Hybrid gated by global.products.trustguard.
   - name: trustguard
-    version: 0.1.67
+    version: 0.1.68
     repository: file://./charts/trustguard
     tags:
       - neuraltrust

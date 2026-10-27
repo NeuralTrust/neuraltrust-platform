@@ -6551,5 +6551,41 @@ assert_render_fails_with 'needs global.ingress.gatewayApi.parentRefs' \
   "gateway-api: fails closed without a parent Gateway" \
   --set global.ingress.provider=gateway-api
 
+# NOTES must print the hosts the routes actually claim, so with every
+# hostPrefix overridden the two sets are equal (wildcards are route-only).
+HOST_PREFIX_ARGS=(
+  --set global.deploymentMode=external
+  --set agentgateway.ingress.dataPlane.hostPrefix=t-gateway
+  --set agentgateway.ingress.mcp.hostPrefix=t-mcp
+  --set agentgateway.ingress.controlPlane.hostPrefix=t-admin
+  --set trustguard.ingress.dataPlane.hostPrefix=t-trustguard
+  --set trustguard.ingress.controlPlane.hostPrefix=t-trustguard-admin
+  --set control-plane-api.controlPlane.components.api.hostPrefix=t-api
+  --set control-plane-app.controlPlane.components.app.hostPrefix=t-app
+  --set data-plane-api.dataPlane.components.api.hostPrefix=t-data-plane-api
+  # A moved app host must name the issuers it no longer derives from app.<domain>.
+  --set global.mcpOAuth.issuer=https://t-app.platform.example.com/api/mcp/oauth
+  --set global.agentgatewayM2m.issuer=https://t-app.platform.example.com
+)
+for provider in ingress gateway-api; do
+  if [[ "$provider" == gateway-api ]]; then
+    provider_args=("${GATEWAY_API_ARGS[@]}")
+  else
+    provider_args=(--set global.domain=platform.example.com)
+  fi
+  out42h="$TMP/hostprefix-$provider.yaml"
+  notes42h="$TMP/hostprefix-$provider-notes.txt"
+  render_default "$out42h" "${HOST_PREFIX_ARGS[@]}" "${provider_args[@]}"
+  render_notes "$notes42h" "${HOST_PREFIX_ARGS[@]}" "${provider_args[@]}"
+  route_hosts="$(route_table "$out42h" | awk '$1 !~ /^\*/ {print $1}' | sort -u)"
+  notes_hosts="$(grep -E '^  - [^:]+: +https://' "$notes42h" | grep -oE 'https://[^ ]+' | sed 's#^https://##' | sort -u)"
+  if [[ -z "$notes_hosts" || "$route_hosts" != "$notes_hosts" ]]; then
+    red "FAIL: NOTES ($provider): endpoints follow each component's hostPrefix"
+    diff <(echo "$route_hosts") <(echo "$notes_hosts") | head -20
+    exit 1
+  fi
+  green "ok  - NOTES ($provider): endpoints follow each component's hostPrefix"
+done
+
 green ""
 green "All v2 render scenarios passed."

@@ -94,14 +94,14 @@ Ingress endpoints:
   kubectl get ingress -n {{ .Release.Namespace }}
 {{- end }}
 {{- if $trustgateEnabled }}
-{{- $agGwHost := include "neuraltrust-platform.ingress.host" (dict "host" (dig "ingress" "dataPlane" "host" "" $ag) "prefix" "gateway" "global" .Values.global) }}
+{{- $agGwHost := include "neuraltrust-platform.ingress.host" (dict "host" (dig "ingress" "dataPlane" "host" "" $ag) "prefix" (dig "ingress" "dataPlane" "hostPrefix" "gateway" $ag) "global" .Values.global) }}
 {{- if $agGwHost }}
   - AgentGateway Gateway: https://{{ $agGwHost }}
 {{- else }}
   - AgentGateway Gateway: kubectl get ingress agentgateway-gateway -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].{{ $ipField }}}'
 {{- end }}
 {{- if $mcpEnabled }}
-{{- $agMcpHost := include "neuraltrust-platform.ingress.host" (dict "host" (dig "ingress" "mcp" "host" "" $ag) "prefix" "mcp" "global" .Values.global) }}
+{{- $agMcpHost := include "neuraltrust-platform.ingress.host" (dict "host" (dig "ingress" "mcp" "host" "" $ag) "prefix" (dig "ingress" "mcp" "hostPrefix" "mcp" $ag) "global" .Values.global) }}
 {{- if $agMcpHost }}
   - AgentGateway MCP:     https://{{ $agMcpHost }}
 {{- else }}
@@ -111,7 +111,7 @@ Ingress endpoints:
 {{- end }}
 {{- if $trustguardEnabled }}
 {{- $tg := .Values.trustguard | default dict }}
-{{- $tgHost := include "neuraltrust-platform.ingress.host" (dict "host" (dig "ingress" "dataPlane" "host" "" $tg) "prefix" "trustguard" "global" .Values.global) }}
+{{- $tgHost := include "neuraltrust-platform.ingress.host" (dict "host" (dig "ingress" "dataPlane" "host" "" $tg) "prefix" (dig "ingress" "dataPlane" "hostPrefix" "trustguard" $tg) "global" .Values.global) }}
 {{- if $tgHost }}
   - TrustGuard:           https://{{ $tgHost }}
 {{- else }}
@@ -120,7 +120,7 @@ Ingress endpoints:
 {{- end }}
 {{- if $isExternal }}
 {{- if $trustgateEnabled }}
-{{- $agAdminHost := include "neuraltrust-platform.ingress.host" (dict "host" (dig "ingress" "controlPlane" "host" "" $ag) "prefix" "admin" "global" .Values.global) }}
+{{- $agAdminHost := include "neuraltrust-platform.ingress.host" (dict "host" (dig "ingress" "controlPlane" "host" "" $ag) "prefix" (dig "ingress" "controlPlane" "hostPrefix" "admin" $ag) "global" .Values.global) }}
 {{- if $agAdminHost }}
   - AgentGateway Admin:   https://{{ $agAdminHost }}
 {{- else }}
@@ -129,20 +129,20 @@ Ingress endpoints:
 {{- end }}
 {{- if $trustguardEnabled }}
 {{- $tg := .Values.trustguard | default dict }}
-{{- $tgAdminHost := include "neuraltrust-platform.ingress.host" (dict "host" (dig "ingress" "controlPlane" "host" "" $tg) "prefix" "trustguard-admin" "global" .Values.global) }}
+{{- $tgAdminHost := include "neuraltrust-platform.ingress.host" (dict "host" (dig "ingress" "controlPlane" "host" "" $tg) "prefix" (dig "ingress" "controlPlane" "hostPrefix" "trustguard-admin" $tg) "global" .Values.global) }}
 {{- if $tgAdminHost }}
   - TrustGuard Admin:     https://{{ $tgAdminHost }}
 {{- else }}
   - TrustGuard Admin:     kubectl get ingress trustguard-admin -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].{{ $ipField }}}'
 {{- end }}
 {{- end }}
-{{- $cpApiHost := include "neuraltrust-platform.ingress.host" (dict "host" (dig "controlPlane" "components" "api" "host" "" $cpApi) "prefix" "api" "global" .Values.global) }}
+{{- $cpApiHost := include "neuraltrust-platform.ingress.host" (dict "host" (dig "controlPlane" "components" "api" "host" "" $cpApi) "prefix" (dig "controlPlane" "components" "api" "hostPrefix" "api" $cpApi) "global" .Values.global) }}
 {{- if $cpApiHost }}
   - Control Plane API:    https://{{ $cpApiHost }}
 {{- else }}
   - Control Plane API:    kubectl get ingress control-plane-api-ingress -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].{{ $ipField }}}'
 {{- end }}
-{{- $cpAppHost := include "neuraltrust-platform.ingress.host" (dict "host" (dig "controlPlane" "components" "app" "host" "" $cpApp) "prefix" "app" "global" .Values.global) }}
+{{- $cpAppHost := include "neuraltrust-platform.ingress.host" (dict "host" (dig "controlPlane" "components" "app" "host" "" $cpApp) "prefix" (dig "controlPlane" "components" "app" "hostPrefix" "app" $cpApp) "global" .Values.global) }}
 {{- if $cpAppHost }}
   - Control Plane App:    https://{{ $cpAppHost }}
 {{- else }}
@@ -150,7 +150,7 @@ Ingress endpoints:
 {{- end }}
 {{- end }}
 {{- if $dataPlaneEnabled }}
-{{- $dpApiHost := include "neuraltrust-platform.ingress.host" (dict "host" (dig "dataPlane" "components" "api" "host" "" $dpValues) "prefix" "data-plane-api" "global" .Values.global) }}
+{{- $dpApiHost := include "neuraltrust-platform.ingress.host" (dict "host" (dig "dataPlane" "components" "api" "host" "" $dpValues) "prefix" (dig "dataPlane" "components" "api" "hostPrefix" "data-plane-api" $dpValues) "global" .Values.global) }}
 {{- if $dpApiHost }}
   - Data Plane API:       https://{{ $dpApiHost }}
 {{- else }}

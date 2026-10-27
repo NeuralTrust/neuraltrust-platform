@@ -4,6 +4,16 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Fixed
+
+- **The install notes print the hosts the Ingresses and HTTPRoutes actually
+  serve.** NOTES.txt built every endpoint from the default prefix (`app`, `api`,
+  `trustguard`, …) and ignored each component's `hostPrefix`. An install that
+  moved a component to another host was therefore pointed at the default one,
+  which can be a different service on the same domain. NOTES now reads the same
+  `hostPrefix` the route and Ingress templates do. Installs that do not set
+  `hostPrefix` print the same notes as before.
+
 ## [v3.6.0] — 2026-10-26
 
 ### Added
