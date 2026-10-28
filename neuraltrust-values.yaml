@@ -1,0 +1,22 @@
+# Values for neuraltrust-platform, written by ntctl. No credentials are stored here.
+# Use with: helm upgrade --install neuraltrust-platform <chart> -f neuraltrust-values.yaml
+global:
+  deploymentMode: saas
+  domain: stg.neuraltrust.ai
+  ingress:
+    gatewayApi:
+      parentRefs:
+      - name: internal
+        namespace: kgateway-system
+    provider: gateway-api
+  observability:
+    operationalTelemetry: false
+  platform: azure
+  products:
+    dataPlane: true
+    trustgate: true
+    trustguard: true
+  saasRegion: eu
+  superadmin:
+    existingSecret:
+      name: onprem-superadmin

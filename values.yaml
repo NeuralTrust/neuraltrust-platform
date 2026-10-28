@@ -395,7 +395,7 @@ global:
     # In-cluster PostgreSQL Deployment image/resources/persistence knobs.
     image:
       repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/postgres
-      tag: "17-alpine"
+      tag: "17.11-alpine"
       pullPolicy: IfNotPresent
       # Empty → global.imagePullSecrets → chart default gcr-secret. ["none"] suppresses.
       imagePullSecrets: []
@@ -938,7 +938,7 @@ control-plane-app:
         replicas: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v2.18.0"
+          tag: "v2.18.1"
           pullPolicy: IfNotPresent
         config:
           nodeEnv: production
@@ -1015,7 +1015,7 @@ control-plane-app:
 # stays agentgateway for now; K8s names stay agentgateway-*.
 agentgateway:
   image:
-    tag: "v0.72.0"
+    tag: "v0.73.0"
   # Empty host/port/sslMode/username/tls inherit from global.postgresql /
   # global.redis, then fall back to the in-cluster Services. Set them here only
   # to point this one service somewhere else.
@@ -1355,7 +1355,7 @@ firewall:
       replicas: 2
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-        tag: "v2.41.0"
+        tag: "v2.44.0"
         pullPolicy: IfNotPresent
       resources:
         requests:
@@ -1381,7 +1381,7 @@ firewall:
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
         # Keep in lockstep with gateway.image.tag.
-        tag: "v2.41.0"
+        tag: "v2.44.0"
         pullPolicy: IfNotPresent
       replicas: 1
       resources:

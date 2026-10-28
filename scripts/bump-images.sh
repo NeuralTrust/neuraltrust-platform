@@ -213,7 +213,7 @@ CLICKSTACK_COLLECTOR=$(resolve clickstack-otel-collector clickstack-otel-collect
 OTEL_CONTRIB=$(resolve opentelemetry-collector-contrib opentelemetry-collector-contrib "$BARE")
 CLICKHOUSE=$(resolve clickhouse clickhouse-server '^[0-9]+\.[0-9]+(\.[0-9]+){0,2}$')
 REDIS=$(resolve redis redis-stack-server '^[0-9]+\.[0-9]+\.[0-9]+-v[0-9]+$')
-POSTGRES=$(resolve postgres postgres '^[0-9]+-alpine$')
+POSTGRES=$(resolve postgres postgres '^17\.[0-9]+-alpine$')   # minor tags only; major 17 pinned
 
 printf '\n%-34s %s\n' "IMAGE" "RESOLVED"
 for row in \
