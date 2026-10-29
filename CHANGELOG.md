@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v3.7.1] — 2026-10-29
+
 ### Fixed
 
 - **The in-cluster PostgreSQL re-aligns its passwords on volumes that apply
