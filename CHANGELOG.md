@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v3.6.7] — 2026-10-29
+
 ### Changed
 
 - **`create-secrets.sh` produces every Secret a pre-provisioned install reads,
