@@ -97,6 +97,9 @@ spec:
             echo "empty data directory: the image initialises it from POSTGRES_PASSWORD"
             exit 0
           fi
+          # fsGroup leaves the volume group-writable on each mount, which
+          # pg_ctl refuses; the image's entrypoint restores 0700 the same way.
+          chmod 00700 "$PGDATA" || :
           if ! pg_ctl -D "$PGDATA" -o "-c listen_addresses='' -c unix_socket_directories=/var/run/postgresql" -w -t 120 start; then
             echo "warning: could not start PostgreSQL to realign passwords; starting it as is" >&2
             exit 0

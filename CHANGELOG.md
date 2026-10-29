@@ -4,6 +4,35 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Fixed
+
+- **The in-cluster PostgreSQL re-aligns its passwords on volumes that apply
+  `fsGroup`.** The `realign-passwords` init container started PostgreSQL before
+  the image's entrypoint had set the data directory back to `0700`. On GKE
+  persistent disks and other CSI volumes, `fsGroup` leaves that directory
+  group-writable on every mount, and PostgreSQL refuses to start from it. The
+  init container then let PostgreSQL start unchanged, so an install whose
+  passwords had drifted stayed broken. The init container now restores `0700`
+  first, as the entrypoint does.
+
+- **`managedBootstrap` no longer fails, or takes over, on a database a DBA
+  provisioned.** It ran `ALTER ROLE … PASSWORD` and `ALTER DATABASE … OWNER`
+  on every run. So when a DBA had created the roles, the Job failed with
+  "permission denied to alter role". When it could run, it reset passwords set
+  outside the chart and reassigned database owners.
+
+  Managed mode now only creates what is missing:
+  - an existing role keeps its password;
+  - an existing database keeps its owner;
+  - a role the admin is refused (PostgreSQL 16+ needs `ADMIN OPTION` on a role
+    someone else created) is logged, along with grants it may not give. The
+    Job only fails when it cannot create a database that is missing.
+  - extensions fall back to being created as the admin when it cannot act as
+    the owner.
+
+  The in-cluster PostgreSQL, which the chart owns, is unchanged: its roles are
+  still re-aligned with the Secrets.
+
 ## [v3.7.0] — 2026-10-29
 
 ### Fixed
