@@ -327,8 +327,8 @@ If you pre-provision secrets yourself (`global.preserveExistingSecrets`,
 `global.autoGenerateSecrets: false`, or `global.platformSecret.existingSecret`),
 all of the above must be present, and the two token keys must hold one identical
 value — otherwise every agent connection returns 401 with nothing visibly wrong
-on either side. `./create-secrets.sh` with `DEPLOYMENT_MODE=saas` writes them
-correctly, including the alias. Full table: [SECRETS.md](../SECRETS.md).
+on either side. `create-secrets.sh` does not cover saas mode, which refuses
+`preserveExistingSecrets`. Full table: [SECRETS.md](../SECRETS.md).
 
 ## Load balancer scheme
 
