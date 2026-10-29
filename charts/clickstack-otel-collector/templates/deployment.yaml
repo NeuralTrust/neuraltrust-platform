@@ -41,7 +41,7 @@ spec:
       {{- $chEp := include "clickstack-otel-collector.clickhouseEndpoint" . }}
       {{- $chHostPort := $chEp | trimPrefix "https://" | trimPrefix "http://" | trimSuffix "/" }}
       {{- $chHost := $chHostPort }}
-      {{- $chPort := (include "neuraltrust-platform.clickhouse.resolve" (dict "local" .Values.clickhouse "global" .Values.global) | fromYaml).httpPort }}
+      {{- $chPort := (include "neuraltrust-platform.clickhouse.resolve" (dict "ctx" $ "local" .Values.clickhouse "global" .Values.global) | fromYaml).httpPort }}
       {{- if contains ":" $chHostPort }}
       {{- $chHost = (splitList ":" $chHostPort) | first }}
       {{- $chPort = (splitList ":" $chHostPort) | last }}
@@ -59,12 +59,20 @@ spec:
             name: {{ include "clickstack-otel-collector.fullname" . }}-secrets
             optional: true
         env:
+        {{- if eq (include "neuraltrust-platform.secretsGenerator.active" .) "true" }}
+        # Receiver token from the in-cluster secrets generator, which no render can rotate.
+        - name: OTLP_AUTH_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "neuraltrust-platform.secretsGenerator.name" . | quote }}
+              key: OTLP_AUTH_TOKEN
+        {{- end }}
         # Shared ClickHouse password (same secret DataCore/AlertEngine read). Explicit
         # env wins over the clickstack-collector-secrets envFrom above.
         - name: CLICKHOUSE_PASSWORD
           valueFrom:
             secretKeyRef:
-              {{- $ch := include "neuraltrust-platform.clickhouse.resolve" (dict "local" .Values.clickhouse "global" .Values.global) | fromYaml }}
+              {{- $ch := include "neuraltrust-platform.clickhouse.resolve" (dict "ctx" $ "local" .Values.clickhouse "global" .Values.global) | fromYaml }}
               name: {{ $ch.secretName | quote }}
               key: {{ $ch.secretKey | quote }}
         - name: HYPERDX_OTEL_EXPORTER_CLICKHOUSE_DATABASE

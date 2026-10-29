@@ -60,58 +60,23 @@ services need.
   {{- $cpSecret = $cpRef.name }}
   {{- $cpKey = $cpRef.key | default "POSTGRES_PASSWORD" }}
 {{- end }}
-{{- /* `default` cannot read these: it treats an explicit false as absent. */}}
-{{- $aeEnabled := true }}
-{{- if hasKey (default dict .Values.alertengine) "enabled" }}{{- $aeEnabled = (default dict .Values.alertengine).enabled }}{{- end }}
-
-{{- /* Every service that owns a role: the two telemetry writers resolve theirs
-       through the same mode-aware helpers as their env ConfigMaps, so the Job
-       cannot disagree with what the pod dials. `defaultKey` is the key read from
-       the chart's own Secret; an `existingSecret` hook (AUT-411) redirects both
-       name and key to the operator's Secret. */}}
-{{- $candidates := list
-  (dict "key" "agentgateway" "gate" (eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustgate")) "true") "writer" true "secret" "agentgateway-secrets" "defaultKey" "DB_PASSWORD")
-  (dict "key" "trustguard" "gate" (eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustguard")) "true") "writer" true "secret" "trustguard-secrets" "defaultKey" "DB_PASSWORD")
-  (dict "key" "alertengine" "gate" (and $isExternal $aeEnabled) "secret" "alertengine-secrets" "defaultKey" "DB_PASSWORD")
-  (dict "key" "datacore" "gate" $isExternal "secret" "datacore-secrets" "defaultKey" "POSTGRES_PASSWORD")
-}}
-{{- $services := list }}
+{{- /* Every service that owns a role, shared with the in-cluster PostgreSQL's
+       password realign (templates/postgresql/deployment.yaml) so both act on the
+       same roles and passwords. */}}
+{{- $services := (include "neuraltrust-platform.postgresql.serviceRoles" . | fromYaml).services | default list }}
 {{- $passwords := list }}
-{{- range $c := $candidates }}
-  {{- $vals := default dict (index $.Values $c.key) }}
-  {{- $db := default dict $vals.database }}
-  {{- $role := "" }}
-  {{- $name := "" }}
-  {{- if $c.writer }}
-    {{- $role = include "neuraltrust-platform.v2.writerUser" (dict "ctx" $ "explicit" $db.user "default" $c.key) }}
-    {{- $name = include "neuraltrust-platform.v2.dbName" (dict "ctx" $ "explicit" $db.name "external" $c.key) }}
-  {{- else }}
-    {{- $role = $db.user | default $c.key }}
-    {{- $name = $db.name | default $c.key }}
-  {{- end }}
-  {{- $ref := default dict $db.existingSecret }}
-  {{- /* Skipped when: the service is not deployed; it authenticates with IAM and
-         so has no password to set; or it shares the bootstrap role, which the
-         image itself created (every hybrid service resolves to exactly that). */}}
-  {{- $iam := eq (include "neuraltrust-platform.postgres.iamAuth" (dict "ctx" $ "database" $db)) "true" }}
-  {{- if and $c.gate (not $iam) (ne $role $adminRole) }}
-    {{- $services = append $services (dict
-      "key" $c.key
-      "role" $role
-      "db" $name
-      "env" (printf "%s_DB_PASSWORD" (upper $c.key))
-      "secret" ($ref.name | default $c.secret)
-      "secretKey" ($ref.key | default $c.defaultKey)
-    ) }}
+{{- $hashed := list }}
+{{- range $s := $services }}
     {{- /* A password can change only when it is set in values or kept in a Secret
-           the operator owns; one the chart generated is reused for good
-           (resolveSecret). Only those two can, so only they are hashed. */}}
+           outside this render; one the chart generated is reused for good. Only
+           those two can, so only they are hashed. */}}
     {{- $current := "" }}
-    {{- if $ref.name }}
-      {{- $current = include "neuraltrust-platform.postgresql.bootstrapJob.secretValue" (dict "ctx" $ "name" $ref.name "key" ($ref.key | default $c.defaultKey)) }}
+    {{- if $s.refName }}
+      {{- $current = include "neuraltrust-platform.postgresql.bootstrapJob.secretValue" (dict "ctx" $ "name" $s.refName "key" $s.secretKey) }}
     {{- end }}
-    {{- $passwords = append $passwords (printf "%s=%s%s" $c.key ($db.password | default "" | toString) $current | sha256sum) }}
-  {{- end }}
+    {{- $passwords = append $passwords (printf "%s=%s%s" $s.key $s.pinned $current | sha256sum) }}
+    {{- /* The name hashes the fields the Job acts on, as it always has. */}}
+    {{- $hashed = append $hashed (pick $s "key" "role" "db" "env" "secret" "secretKey") }}
 {{- end }}
 {{- /* What its name hashes: everything the Job sets up, and everything that
        shapes its pod. Change any of it and the next apply runs a new Job;
@@ -127,7 +92,7 @@ services need.
   {{- $operatorSecrets = append $operatorSecrets (include "neuraltrust-platform.postgresql.bootstrapJob.secretValue" (dict "ctx" . "name" $cpSecret "key" $cpKey)) }}
 {{- end }}
 {{- $inputs := dict
-  "services" $services "passwords" $passwords "operatorSecrets" (toJson $operatorSecrets | sha256sum)
+  "services" $hashed "passwords" $passwords "operatorSecrets" (toJson $operatorSecrets | sha256sum)
   "managed" $managed "admin" $mbAdmin "adminDatabase" ($mb.adminDatabase | default "")
   "controlPlane" (list $cpSecret $cpKey) "image" (list $img.repository $img.tag)
   "host" (include "neuraltrust-platform.v2.hybridPg.host" .) "port" ($service.port | default 5432)
@@ -424,11 +389,13 @@ spec:
                   name: postgresql-secrets
                   key: POSTGRES_USER
                   optional: true
+            {{- /* The admin password the instance runs with: postgresql-secrets, or the
+                   generated or operator Secret when one owns it. */}}
             - name: PGPASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: postgresql-secrets
-                  key: POSTGRES_PASSWORD
+                  name: {{ $cpSecret }}
+                  key: {{ $cpKey }}
                   optional: true
             - name: CONTROL_PLANE_DB
               valueFrom:

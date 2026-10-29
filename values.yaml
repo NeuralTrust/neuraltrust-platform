@@ -185,6 +185,14 @@ global:
   imagePullSecrets: []
   autoGenerateSecrets: true
   preserveExistingSecrets: false
+  # External installs: a hook Job creates every generated credential in the
+  # cluster once, into `neuraltrust-generated`, so `helm template` (ArgoCD, Flux)
+  # can never rotate one. auto: on, except a `helm upgrade` of a release that
+  # predates it, which keeps working as before; true opts that one in (adopting
+  # the live values); false turns it off. See SECRETS.md.
+  secrets:
+    generator:
+      enabled: auto
   # Shared platform Secret (`platform-secrets`) — one home for every
   # cross-service application credential (service-to-service JWT secrets, the
   # app auth secret, encryption keys). Replaces the hand-duplicated per-service

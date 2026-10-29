@@ -73,7 +73,7 @@ spec:
       hosts:
         - {{ $resolvedHost | quote }}
       {{- end }}
-      secretName: {{ include "neuraltrust-platform.ingress.effectiveTLSSecretName" (dict "global" $.Values.global "localSecretName" .ingress.tls.secretName) }}
+      secretName: {{ include "neuraltrust-platform.ingress.effectiveTLSSecretName" (dict "ctx" $ "global" $.Values.global "localSecretName" .ingress.tls.secretName) }}
   {{- end }}
   rules:
     - {{- if $resolvedHost }}

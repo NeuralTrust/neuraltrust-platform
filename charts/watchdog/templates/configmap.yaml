@@ -24,7 +24,7 @@ data:
              their own values. Resolves through global.clickhouse now, and still
              yields clickhouse:9000 for a default in-cluster install. */ -}}
       {{- if and (eq $csAddr "") (eq (include "neuraltrust-platform.isExternal" .) "true") -}}
-      {{- $wch := include "neuraltrust-platform.clickhouse.resolve" (dict "local" dict "global" .Values.global) | fromYaml -}}
+      {{- $wch := include "neuraltrust-platform.clickhouse.resolve" (dict "ctx" $ "local" dict "global" .Values.global) | fromYaml -}}
       {{- $csAddr = printf "%s:%s" $wch.host $wch.nativePort -}}
       {{- end -}}
       {{- if $csAddr }}

@@ -4,6 +4,26 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Generated credentials no longer rotate under ArgoCD or Flux.** Both render
+  with `helm template`, where `lookup` finds nothing, so every value the chart
+  generated while rendering was new on each render, and each sync applied it.
+  PostgreSQL kept the passwords it was initialised with, so the services stopped
+  authenticating, and the keys that encrypt data at rest (`AUTH_SECRET_KEY`,
+  `APP_ENCRYPTION_KEY`, `ADMIN_JWT_SECRET`, `SERVER_SECRET_KEY`) made what they had
+  encrypted unreadable. External installs now get every generated credential
+  from a hook Job that creates them in the cluster once, in
+  `neuraltrust-generated`, so the rendered manifests are identical on every render.
+  Upgrades adopt the values already in use, so nothing rotates. The in-cluster
+  PostgreSQL also brings each role's password in line with those Secrets when it
+  starts, which heals an install whose passwords already drifted.
+  `global.secrets.generator.enabled` defaults to `auto`: on for new installs and
+  for every ArgoCD or Flux render, and off for a `helm upgrade` of a release
+  deployed before this, which keeps working exactly as before. `true` moves such
+  a release over, adopting its live values; `false` opts out. Hybrid and saas
+  are unchanged for now. See SECRETS.md, "Auto-generated secrets".
+
 ## [v3.6.7] — 2026-10-29
 
 ### Changed

@@ -67,8 +67,7 @@ spec:
                 - name: CLICKHOUSE_PASSWORD
                   valueFrom:
                     secretKeyRef:
-                      name: {{ if .Values.auth.existingSecret }}{{ .Values.auth.existingSecret }}{{ else }}{{ include "clickhouse.fullname" . }}{{ end }}
-                      key: {{ .Values.auth.existingSecretKey | default "admin-password" | quote }}
+                      {{- include "clickhouse.passwordRef" (dict "ctx" . "quoteKey" true) | nindent 22 }}
                 - name: BACKUP_STORAGE_TYPE
                   value: {{ $type | quote }}
                 {{- if eq $type "s3" }}

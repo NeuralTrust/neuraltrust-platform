@@ -16,7 +16,7 @@
 {{- $localSecret := include "clickstack-ingest-gateway.tlsSecretName" . }}
 {{- $tlsSecret := $localSecret }}
 {{- if and $renderTLS (not $tlsSecret) }}
-  {{- $tlsSecret = include "neuraltrust-platform.ingress.effectiveTLSSecretName" (dict "global" .Values.global "localSecretName" "") }}
+  {{- $tlsSecret = include "neuraltrust-platform.ingress.effectiveTLSSecretName" (dict "ctx" $ "global" .Values.global "localSecretName" "") }}
 {{- end }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress

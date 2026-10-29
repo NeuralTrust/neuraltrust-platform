@@ -121,7 +121,28 @@ verifies the listener against the generated CA using this DNS server name.
 */}}
 {{- define "trustguard.configSyncTls.secretName" -}}
 {{- $tls := (default dict .Values.configSync).grpcTls | default dict -}}
+{{- if eq (include "trustguard.configSyncTls.generated" .) "true" -}}
+{{- include "neuraltrust-platform.secretsGenerator.tlsName" (dict "id" "trustguard-configsync") -}}
+{{- else -}}
 {{- $tls.existingSecret | default "trustguard-configsync-tls" -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Whether the in-cluster secrets generator issues the config-sync keypair instead
+of this chart rendering it: the chart would generate it here (active,
+autoGenerate, no existingSecret), and the listener is not published. A
+published listener's CA is handed to other clusters out of band, so it stays on
+the rendered path until that hand-off can follow a generated CA.
+*/}}
+{{- define "trustguard.configSyncTls.generated" -}}
+{{- $tls := (default dict .Values.configSync).grpcTls | default dict -}}
+{{- if and
+  (eq (include "neuraltrust-platform.secretsGenerator.active" .) "true")
+  (eq (include "trustguard.configSyncTls.active" .) "true")
+  (eq (include "trustguard.configSyncTls.autoGenerate" .) "true")
+  (not ($tls.existingSecret | default ""))
+  (ne (include "neuraltrust-platform.configSync.expose" (dict "ctx" .)) "true") -}}true{{- end -}}
 {{- end }}
 
 {{- define "trustguard.configSyncTls.mountPath" -}}/etc/trustguard/configsync-tls{{- end }}
@@ -169,7 +190,7 @@ static password to point at. Emits nothing unless an `existingSecret.name` is se
 {{- $entries := list -}}
 {{- if ne (include "neuraltrust-platform.isHybrid" .) "true" -}}
 {{- if ne (include "neuraltrust-platform.postgres.iamAuth" (dict "ctx" . "database" .Values.database)) "true" -}}
-{{- $db := include "neuraltrust-platform.datastore.credentialEnv" (dict "ref" .Values.database.existingSecret "envName" "DB_PASSWORD") -}}
+{{- $db := include "neuraltrust-platform.datastore.credentialEnv" (dict "ref" (include "neuraltrust-platform.dbPasswordRef" (dict "ctx" . "db" .Values.database "key" "TRUSTGUARD_DB_PASSWORD") | fromYaml) "envName" "DB_PASSWORD") -}}
 {{- if $db }}{{- $entries = append $entries $db }}{{- end -}}
 {{- end -}}
 {{- if not .Values.redis.iamAuth -}}

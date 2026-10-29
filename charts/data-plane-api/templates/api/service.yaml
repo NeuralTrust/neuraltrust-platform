@@ -64,7 +64,7 @@ spec:
       hosts:
         - "{{ $apiHost }}"
       {{- end }}
-      secretName: {{ include "neuraltrust-platform.ingress.effectiveTLSSecretName" (dict "global" .Values.global "localSecretName" $apiIngress.tls.secretName) }}
+      secretName: {{ include "neuraltrust-platform.ingress.effectiveTLSSecretName" (dict "ctx" $ "global" .Values.global "localSecretName" $apiIngress.tls.secretName) }}
   {{- end }}
   rules:
     - {{- if $apiHost }}
