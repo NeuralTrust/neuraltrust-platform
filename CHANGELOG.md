@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v3.7.0] — 2026-10-29
+
 ### Fixed
 
 - **Generated credentials no longer rotate under ArgoCD or Flux.** Both render
