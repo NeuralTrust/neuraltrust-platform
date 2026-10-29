@@ -84,38 +84,61 @@ console.
 
 ### Auto-generated secrets (default — recommended)
 
-Everything not listed above is created for you on first install and reused on
-upgrade:
+Everything not listed above is created for you, once, and never rotated:
 
 ```bash
 helm upgrade --install neuraltrust-platform . --namespace neuraltrust --create-namespace
 ```
 
-| Secret | Kubernetes Secret | Key |
+Which group a credential falls in decides what, if anything, you do with it:
+
+| Group | What you do | Credentials |
 |---|---|---|
-| AgentGateway server key | `agentgateway-secrets` | `SERVER_SECRET_KEY` |
-| Data Plane JWT | `data-plane-jwt-secret` | `DATA_PLANE_JWT_SECRET` |
-| PostgreSQL password | `postgresql-secrets` | `POSTGRES_PASSWORD` |
+| **A. Generated in the cluster** | Nothing, with any deploy tool: Helm, ArgoCD, Flux, ntctl | External installs: every service-to-service signing key, the encryption keys (`AUTH_SECRET_KEY`, `APP_ENCRYPTION_KEY`, `ADMIN_JWT_SECRET`, `SERVER_SECRET_KEY`), the in-cluster PostgreSQL admin and service-role passwords, the in-cluster ClickHouse password, the collector token, the TrustGuard platform client secret, the TrustGate STS key, the config-sync CA and keypair, the self-signed ingress certificate. The AgentGateway machine-credential pair and the MCP OAuth signing key, in every mode |
+| **B. Generated while rendering** | Nothing with `helm install` / `helm upgrade`. With ArgoCD or Flux, pre-create them (`create-secrets.sh`, below) | Hybrid and saas installs today, and a config-sync listener published outside the cluster |
+| **C. Yours** | Create them before installing | The console administrator, the NeuralTrust firewall key, console-issued tokens, the passwords of a database you manage, a certificate from your own CA, the image pull Secret (see [Secrets you must create](#secrets-you-must-create)) |
 
-**External mode only** (control-plane API/app — not rendered in hybrid):
+**How group A works.** A `pre-install,pre-upgrade` hook Job (ArgoCD runs it as
+PreSync on every sync) creates the values in the cluster, in the Secret
+`neuraltrust-generated` and, for certificates, `neuraltrust-generated-<name>-tls`.
+The chart renders no generated value, so `helm template` produces the same
+manifests every time and ArgoCD has nothing to rotate. For each value the Job:
 
-| Secret | Kubernetes Secret | Key |
-|---|---|---|
-| Control Plane JWT | `control-plane-secrets` | `CONTROL_PLANE_JWT_SECRET` |
+1. keeps what `neuraltrust-generated` already holds, and never replaces it;
+2. else adopts the value the chart rendered before (`platform-secrets`,
+   `postgresql-secrets`, `<service>-secrets`, …), so upgrading an existing install
+   rotates nothing;
+3. else generates it.
 
-**How it works:**
+A value you pin in values (`global.platformSecret.values.<KEY>`, a per-service
+`password`, `global.postgresql.password`, `clickhouse.auth.password`) always wins,
+and an `existingSecret` you name keeps that credential yours. The generated
+Secrets carry no release labels and no owner, so neither Helm nor ArgoCD
+overwrites, prunes or deletes them: `helm uninstall` leaves them, and a reinstall
+reuses them. The in-cluster PostgreSQL brings every role's password in line with
+those Secrets each time it starts, so an install whose passwords drifted (for
+example one that ran under ArgoCD before this) heals on its next start.
 
-1. On first install, random 64-character alphanumeric values are generated
-2. On `helm upgrade`, existing values are read from the cluster via `lookup` and reused
-3. Explicit (non-empty) values in your values file always take priority
+`global.secrets.generator.enabled` decides who gets it:
 
-> **Deploy methods without `lookup`.** `lookup` returns nothing during `helm template`,
-> `--dry-run`, ArgoCD/Flux renders, or when the deploy identity lacks RBAC to read Secrets.
-> In those flows step 2 cannot preserve a generated value, so a fresh random value would
-> overwrite the live Secret each upgrade. Generated secrets carry `helm.sh/resource-policy: keep`
-> and the ClickHouse secret skips emission on upgrade when no value is resolvable, which avoids
-> clobbering existing Secrets; for a guaranteed-stable result, install once and then set
-> `global.preserveExistingSecrets: true` (or supply explicit values / `existingSecret`).
+| Value | Behaviour |
+|---|---|
+| `auto` (default) | On for a new install and for every `helm template` render (ArgoCD, Flux). Off for a `helm upgrade` of a release deployed before the generator existed, which keeps generating while rendering exactly as before: Helm's `lookup` reuses its live values, so it never rotated |
+| `true` | On, including for that existing release: the first upgrade adopts its live values into `neuraltrust-generated` |
+| `false` | Off: every credential is generated while rendering (group B behaviour) |
+
+A platform already deployed with Helm therefore keeps working unchanged after the
+upgrade. Set `true` to move it over, which is worth doing before you move that
+install to ArgoCD or Flux.
+
+> **Without hooks.** `helm install --no-hooks` (or any tool that drops Helm hooks)
+> never runs the Job, and the workloads then fail with `CreateContainerConfigError`
+> on the missing `neuraltrust-generated` instead of starting without credentials.
+> Run the install with hooks, or opt out and pre-create the Secrets.
+
+> **Rolling back to a chart without the generator** renders the per-service
+> Secrets again from `lookup`, which no longer finds the values the generator now
+> holds. Copy them back first, or pin them in values, before such a rollback.
 
 **Override a specific secret:**
 
@@ -128,9 +151,11 @@ agentgateway:
 ### Pre-create secrets with the script
 
 `create-secrets.sh` creates, or prints, every Secret an install reads when the
-chart does not create its own: the stable way to install with ArgoCD or Flux,
-which render with `helm template` and so cannot reuse a generated value, and the
-way to keep credentials in a vault. It renders the chart with your values to find
+chart does not create its own (`preserveExistingSecrets: true`): the way to keep
+every credential in a vault, and the stable way to install group B credentials
+with ArgoCD or Flux, which render with `helm template` and so cannot reuse a value
+generated while rendering. External installs need it only for a vault: group A is
+already stable under any deploy tool. It renders the chart with your values to find
 exactly which Secrets and keys your workloads read, and generates each value the
 chart would have generated: passwords, signing keys, TLS material, connection
 strings.

@@ -64,11 +64,15 @@ helm lint "$CHART_DIR" -f "$CHART_DIR/values-required.yaml" \
   "${CLICKSTACK_DEFAULT_ARGS[@]}" >/dev/null
 green "ok  - helm lint passes"
 
+# Scenarios below test the render-time contracts, which the in-cluster secrets
+# generator's opt-out (and hybrid/saas) still ship, so render_default turns the
+# generator off; a scenario can turn it back on. The generator's own contract,
+# the default for external installs, has its dedicated fences.
 render_default() {
   local out="$1"
   shift
   helm template test "$CHART_DIR" --namespace default -f "$CHART_DIR/values-required.yaml" \
-    "${CLICKSTACK_DEFAULT_ARGS[@]}" "$@" > "$out"
+    "${CLICKSTACK_DEFAULT_ARGS[@]}" --set global.secrets.generator.enabled=false "$@" > "$out"
   validate_yaml "$out"
 }
 
@@ -4746,6 +4750,90 @@ for cs in agentgateway-config-sync trustguard-config-sync; do
   fi
 done
 green "ok  - create-secrets.sh (hybrid): 32-byte LKG keys generated, console tokens left to the operator"
+
+# ---------------------------------------------------------------------------
+# In-cluster secrets generator. `helm template` (ArgoCD, Flux) cannot lookup, so
+# any value the chart generates while rendering rotates on every render. External
+# installs must therefore render byte-identical output twice, and every reference
+# into the generated Secret must name a key some component's spec generates.
+# ---------------------------------------------------------------------------
+blue "secrets generator: external renders are stable and fully specified"
+gen_check() {  # render file
+  ruby -ryaml -rjson -e '
+    docs = YAML.load_stream(File.read(ARGV[0])).compact.select { |d| d.is_a?(Hash) }
+    gen = "neuraltrust-generated"
+    specs = docs.select { |d| d["kind"] == "ConfigMap" && d.dig("metadata", "name").to_s.start_with?("neuraltrust-generator-spec-") }
+    abort "no generator spec rendered" if specs.empty?
+    entries = specs.flat_map { |c| JSON.parse(c.dig("data", "spec.json")) }
+    scalar = entries.reject { |e| e["type"] == "tls" }.map { |e| e["key"] }
+    tls = entries.select { |e| e["type"] == "tls" }.map { |e| e["secret"] }
+    role = docs.find { |d| d["kind"] == "Role" && d.dig("metadata", "name").to_s.end_with?("secrets-generator") }
+    abort "generator Role not rendered" unless role
+    readable = role["rules"].select { |r| r["resources"] == ["secrets"] && r["verbs"].include?("get") }.flat_map { |r| r["resourceNames"] || [] }
+    specs_readable = role["rules"].select { |r| r["resources"] == ["configmaps"] }.flat_map { |r| r["resourceNames"] || [] }
+    specs.each { |c| n = c.dig("metadata", "name"); abort "#{n} is not readable by the generator Role" unless specs_readable.include?(n) }
+    entries.each do |e|
+      (e["adopt"] || []).each { |src| abort "#{e["key"] || e["secret"]} adopts from #{src[0]}, which the Role cannot read" unless readable.include?(src[0]) }
+    end
+    refs = []
+    walk = ->(o) { case o
+      when Hash
+        refs << o["secretKeyRef"] if o["secretKeyRef"].is_a?(Hash)
+        refs << { "name" => o["secretName"] } if o["secretName"].is_a?(String)
+        o.each_value { |v| walk.(v) }
+      when Array then o.each { |v| walk.(v) } end }
+    docs.reject { |d| d.dig("metadata", "annotations", "helm.sh/hook") }.each { |d| walk.(d) }
+    refs.each do |r|
+      if r["name"] == gen
+        abort "#{gen}/#{r["key"]} is referenced but no spec generates it" unless scalar.include?(r["key"])
+      elsif r["name"].to_s.start_with?("neuraltrust-generated-")
+        abort "#{r["name"]} is mounted but no spec issues it" unless tls.include?(r["name"])
+      end
+    end
+    abort "a Secret with a generated value is still rendered: #{docs.select { |d| d["kind"] == "Secret" && d.dig("metadata", "name") == "platform-secrets" }.size}" if docs.any? { |d| d["kind"] == "Secret" && d.dig("metadata", "name") == "platform-secrets" }
+  ' "$1"
+}
+gen_shapes=(
+  "external|-f $CHART_DIR/values-required.yaml -f $CHART_DIR/values-external.yaml.example"
+  "external-trustguard-only|-f $CHART_DIR/values-required.yaml -f $CHART_DIR/values-external.yaml.example -f $CHART_DIR/values-external-trustguard-only.yaml.example"
+  "external-managed|-f $CHART_DIR/values-managed-datastores.yaml.example --set global.autoGenerateSecrets=true --set global.preserveExistingSecrets=false"
+  "external-observability|-f $CHART_DIR/values-required.yaml -f $CHART_DIR/values-external.yaml.example -f $CHART_DIR/values-observability-self-hosted.yaml.example"
+)
+for shape in "${gen_shapes[@]}"; do
+  label="${shape%%|*}"
+  read -r -a gargs <<< "${shape#*|}"
+  helm template test "$CHART_DIR" --namespace neuraltrust "${gargs[@]}" > "$TMP/gen-$label-1.yaml"
+  helm template test "$CHART_DIR" --namespace neuraltrust "${gargs[@]}" > "$TMP/gen-$label-2.yaml"
+  if ! cmp -s "$TMP/gen-$label-1.yaml" "$TMP/gen-$label-2.yaml"; then
+    red "FAIL - secrets generator ($label): two renders differ, so ArgoCD would rotate these:"
+    diff "$TMP/gen-$label-1.yaml" "$TMP/gen-$label-2.yaml" | grep '^<' | head -10
+    exit 1
+  fi
+  if ! result="$(gen_check "$TMP/gen-$label-1.yaml" 2>&1)"; then
+    red "FAIL - secrets generator ($label): $result"; exit 1
+  fi
+done
+green "ok  - secrets generator: ${#gen_shapes[@]} external shapes render byte-identical, every generated ref has a spec, every adoption is readable"
+
+# Off: the opt-out, preserve mode and hybrid keep the render-time Secrets and get no Job.
+for off in "opt-out|--set global.secrets.generator.enabled=false" "preserve|--set global.preserveExistingSecrets=true --set global.autoGenerateSecrets=false"; do
+  label="${off%%|*}"
+  read -r -a oargs <<< "${off#*|}"
+  helm template test "$CHART_DIR" --namespace neuraltrust -f "$CHART_DIR/values-required.yaml" -f "$CHART_DIR/values-external.yaml.example" "${oargs[@]}" > "$TMP/gen-off-$label.yaml"
+  assert_not_contains "$TMP/gen-off-$label.yaml" 'neuraltrust-generator-spec-' "secrets generator ($label): no generator spec"
+  assert_not_contains "$TMP/gen-off-$label.yaml" 'name: neuraltrust-generated' "secrets generator ($label): nothing reads the generated Secret"
+done
+render_default "$TMP/gen-off-hybrid.yaml" --set global.secrets.generator.enabled=true
+assert_not_contains "$TMP/gen-off-hybrid.yaml" 'neuraltrust-generator-spec-' "secrets generator (hybrid): not active yet"
+
+# auto (the default) leaves a platform already deployed with Helm exactly as it
+# was: a `helm upgrade` of a release the generator never ran for keeps generating
+# while rendering. Without a cluster `lookup` finds nothing, which is that case.
+helm template test "$CHART_DIR" --namespace neuraltrust --is-upgrade -f "$CHART_DIR/values-required.yaml" -f "$CHART_DIR/values-external.yaml.example" > "$TMP/gen-upgrade-auto.yaml"
+assert_not_contains "$TMP/gen-upgrade-auto.yaml" 'neuraltrust-generator-spec-' "secrets generator (auto, helm upgrade of an existing release): stays off"
+assert_contains "$TMP/gen-upgrade-auto.yaml" 'name: platform-secrets' "secrets generator (auto, helm upgrade of an existing release): platform-secrets still rendered"
+helm template test "$CHART_DIR" --namespace neuraltrust --is-upgrade -f "$CHART_DIR/values-required.yaml" -f "$CHART_DIR/values-external.yaml.example" --set global.secrets.generator.enabled=true > "$TMP/gen-upgrade-on.yaml"
+assert_contains "$TMP/gen-upgrade-on.yaml" 'neuraltrust-generator-spec-platform' "secrets generator (true, helm upgrade): an existing release can opt in"
 
 # ---------------------------------------------------------------------------
 # AlertEngine ClickHouse DB, firewall REDIS_URL,

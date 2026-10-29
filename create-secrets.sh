@@ -148,13 +148,15 @@ render "$WORK/needed.yaml" \
   --set global.autoGenerateSecrets=false --set global.preserveExistingSecrets=true \
   || die "the chart does not render with these values and preserveExistingSecrets=true (above)"
 # What the chart would generate, into the per-service Secrets those workloads read.
+# The in-cluster generator is off here: this render is where the values come from.
 render "$WORK/generated.yaml" \
   --set global.autoGenerateSecrets=true --set global.preserveExistingSecrets=false \
-  --set global.platformSecret.enabled=false \
+  --set global.platformSecret.enabled=false --set global.secrets.generator.enabled=false \
   || die "the chart does not render with these values and autoGenerateSecrets=true (above)"
 # Credentials two services share, generated once so both copies match.
 render "$WORK/shared.yaml" \
   --set global.autoGenerateSecrets=true --set global.preserveExistingSecrets=false \
+  --set global.secrets.generator.enabled=false \
   || die "the chart does not render with these values and autoGenerateSecrets=true (above)"
 
 # --- what the workloads reference -------------------------------------------

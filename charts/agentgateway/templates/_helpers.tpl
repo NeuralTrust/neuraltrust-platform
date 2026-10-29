@@ -272,7 +272,28 @@ Mirrors the TrustGuard implementation so both gateways behave identically.
 */}}
 {{- define "agentgateway.configSyncTls.secretName" -}}
 {{- $tls := (default dict .Values.configSync).grpcTls | default dict -}}
+{{- if eq (include "agentgateway.configSyncTls.generated" .) "true" -}}
+{{- include "neuraltrust-platform.secretsGenerator.tlsName" (dict "id" "agentgateway-configsync") -}}
+{{- else -}}
 {{- $tls.existingSecret | default "agentgateway-configsync-tls" -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Whether the in-cluster secrets generator issues the config-sync keypair instead
+of this chart rendering it: the chart would generate it here (active,
+autoGenerate, no existingSecret), and the listener is not published. A
+published listener's CA is handed to other clusters out of band, so it stays on
+the rendered path until that hand-off can follow a generated CA.
+*/}}
+{{- define "agentgateway.configSyncTls.generated" -}}
+{{- $tls := (default dict .Values.configSync).grpcTls | default dict -}}
+{{- if and
+  (eq (include "neuraltrust-platform.secretsGenerator.active" .) "true")
+  (eq (include "agentgateway.configSyncTls.active" .) "true")
+  (eq (include "agentgateway.configSyncTls.autoGenerate" .) "true")
+  (not ($tls.existingSecret | default ""))
+  (ne (include "neuraltrust-platform.configSync.expose" (dict "ctx" .)) "true") -}}true{{- end -}}
 {{- end }}
 
 {{- define "agentgateway.configSyncTls.mountPath" -}}/etc/agentgateway/configsync-tls{{- end }}
@@ -324,13 +345,18 @@ static password to point at. Emits nothing unless an `existingSecret.name` is se
 {{- $entries := list -}}
 {{- if ne (include "neuraltrust-platform.isHybrid" .) "true" -}}
 {{- if ne (include "neuraltrust-platform.postgres.iamAuth" (dict "ctx" . "database" .Values.database)) "true" -}}
-{{- $db := include "neuraltrust-platform.datastore.credentialEnv" (dict "ref" .Values.database.existingSecret "envName" "DB_PASSWORD") -}}
+{{- $db := include "neuraltrust-platform.datastore.credentialEnv" (dict "ref" (include "neuraltrust-platform.dbPasswordRef" (dict "ctx" . "db" .Values.database "key" "AGENTGATEWAY_DB_PASSWORD") | fromYaml) "envName" "DB_PASSWORD") -}}
 {{- if $db }}{{- $entries = append $entries $db }}{{- end -}}
 {{- end -}}
 {{- if not .Values.redis.iamAuth -}}
 {{- $redis := include "neuraltrust-platform.datastore.credentialEnv" (dict "ref" .Values.redis.existingSecret "envName" "REDIS_PASSWORD") -}}
 {{- if $redis }}{{- $entries = append $entries $redis }}{{- end -}}
 {{- end -}}
+{{- end -}}
+{{- /* agentgateway-secrets no longer carries the STS key under the generator,
+       so read it from the generated Secret instead of through envFrom. */ -}}
+{{- if eq (include "agentgateway.stsSigningKey.generated" .) "true" -}}
+{{- $entries = append $entries (include "neuraltrust-platform.datastore.credentialEnv" (dict "ref" (dict "name" (include "neuraltrust-platform.secretsGenerator.name" .) "key" "STS_SIGNING_KEY") "envName" "STS_SIGNING_KEY")) -}}
 {{- end -}}
 {{- join "\n" $entries -}}
 {{- end }}
@@ -350,3 +376,12 @@ OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: {{ printf "%s/v1/traces" . | quote }}
 OPS_METRICS_ENABLED: "true"
 OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: {{ printf "%s/v1/metrics" . | quote }}
 {{ end }}
+
+{{/*
+Whether the in-cluster secrets generator owns STS_SIGNING_KEY. The chart could
+only adopt a live key through lookup, so under `helm template` it minted a new
+one on every render and every MCP session token stopped verifying.
+*/}}
+{{- define "agentgateway.stsSigningKey.generated" -}}
+{{- if eq (include "neuraltrust-platform.secretsGenerator.active" .) "true" -}}true{{- end -}}
+{{- end }}

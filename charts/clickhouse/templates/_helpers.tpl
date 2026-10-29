@@ -122,3 +122,28 @@ Construct image path with optional global registry prefix.
   {{- printf "%s:%s" $repository $tag }}
 {{- end }}
 {{- end }}
+
+{{/*
+Whether the in-cluster secrets generator owns the admin password (see the
+umbrella's templates/_secrets_generator.tpl). An `auth.existingSecret` keeps it
+the operator's. Consumers resolve the same answer through clickhouse.resolve.
+*/}}
+{{- define "clickhouse.password.generated" -}}
+{{- if and (eq (include "neuraltrust-platform.clickhouse.generated" .) "true") (not .Values.auth.existingSecret) -}}true{{- end -}}
+{{- end }}
+
+{{/*
+secretKeyRef body for the admin password the server and its backups use.
+*/}}
+{{- define "clickhouse.passwordRef" -}}
+{{- if eq (include "clickhouse.password.generated" .ctx) "true" -}}
+name: {{ include "neuraltrust-platform.secretsGenerator.name" .ctx }}
+key: CLICKHOUSE_PASSWORD
+{{- else if .quoteKey -}}
+name: {{ if .ctx.Values.auth.existingSecret }}{{ .ctx.Values.auth.existingSecret }}{{ else }}{{ include "clickhouse.fullname" .ctx }}{{ end }}
+key: {{ .ctx.Values.auth.existingSecretKey | default "admin-password" | quote }}
+{{- else -}}
+name: {{ include "clickhouse.fullname" .ctx }}
+key: admin-password
+{{- end -}}
+{{- end }}

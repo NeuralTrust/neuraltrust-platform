@@ -3,7 +3,7 @@
 {{- $className := include "neuraltrust-platform.ingress.className" (dict "global" .Values.global "local" .Values.ingress.className) }}
 {{- $annotations := include "neuraltrust-platform.ingress.annotations" (dict "global" .Values.global "local" .Values.ingress.annotations) }}
 {{- $renderTLS := include "neuraltrust-platform.ingress.productTLS" . }}
-{{- $tlsSecret := include "neuraltrust-platform.ingress.effectiveTLSSecretName" (dict "global" .Values.global "localSecretName" .Values.ingress.tls.secretName) }}
+{{- $tlsSecret := include "neuraltrust-platform.ingress.effectiveTLSSecretName" (dict "ctx" $ "global" .Values.global "localSecretName" .Values.ingress.tls.secretName) }}
 {{- $dpHost := include "neuraltrust-platform.ingress.host" (dict "host" .Values.ingress.dataPlane.host "prefix" .Values.ingress.dataPlane.hostPrefix "global" .Values.global) }}
 {{- $mcpHost := include "neuraltrust-platform.ingress.host" (dict "host" .Values.ingress.mcp.host "prefix" .Values.ingress.mcp.hostPrefix "global" .Values.global) }}
 {{- $dpExtra := include "agentgateway.ingress.effectiveAdditionalHosts" (dict "ctx" . "plane" "dataPlane") | fromYamlArray }}

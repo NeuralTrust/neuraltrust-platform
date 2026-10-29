@@ -114,7 +114,7 @@ initContainer needs the same host and port split back out of it.
 {{- if $explicit -}}
 {{- $explicit -}}
 {{- else -}}
-{{- $ch := include "neuraltrust-platform.clickhouse.resolve" (dict "local" .Values.clickhouse "global" .Values.global) | fromYaml -}}
+{{- $ch := include "neuraltrust-platform.clickhouse.resolve" (dict "ctx" $ "local" .Values.clickhouse "global" .Values.global) | fromYaml -}}
 {{- $scheme := ternary "https" "http" $ch.tls -}}
 {{- printf "%s://%s:%s" $scheme $ch.host $ch.httpPort -}}
 {{- end -}}

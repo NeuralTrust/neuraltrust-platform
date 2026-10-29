@@ -514,7 +514,7 @@ global database key would collapse a distinction the pipeline depends on.
 
 Returns a YAML dict — pipe through fromYaml:
 
-  {{- $ch := include "neuraltrust-platform.clickhouse.resolve" (dict "local" .Values.clickhouse "global" .Values.global) | fromYaml }}
+  {{- $ch := include "neuraltrust-platform.clickhouse.resolve" (dict "ctx" $ "local" .Values.clickhouse "global" .Values.global) | fromYaml }}
   {{ printf "%s:%v" $ch.host $ch.nativePort }}
 */}}
 {{- define "neuraltrust-platform.clickhouse.resolve" -}}
@@ -534,8 +534,14 @@ Returns a YAML dict — pipe through fromYaml:
 {{- end -}}
 {{- $localSecret := default dict $local.existingSecret -}}
 {{- $globalSecret := default dict $gch.existingSecret -}}
-{{- $secretName := $localSecret.name | default $globalSecret.name | default "clickhouse" -}}
-{{- $secretKey := $localSecret.key | default $globalSecret.key | default "admin-password" -}}
+{{- $defaultName := "clickhouse" -}}
+{{- $defaultKey := "admin-password" -}}
+{{- if and (not $local.host) (eq (include "neuraltrust-platform.clickhouse.generated" .ctx) "true") -}}
+  {{- $defaultName = include "neuraltrust-platform.secretsGenerator.name" . -}}
+  {{- $defaultKey = "CLICKHOUSE_PASSWORD" -}}
+{{- end -}}
+{{- $secretName := $localSecret.name | default $globalSecret.name | default $defaultName -}}
+{{- $secretKey := $localSecret.key | default $globalSecret.key | default $defaultKey -}}
 host: {{ $host | quote }}
 httpPort: {{ $httpPort | quote }}
 nativePort: {{ $nativePort | quote }}
@@ -599,6 +605,62 @@ Usage: {{ include "neuraltrust-platform.postgresql.bootstrapJob.secretValue" (di
 {{- if $s -}}{{- index (default dict $s.data) .key | default "" -}}{{- end -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+Every service that owns a role on the platform's PostgreSQL, for the bootstrap Job
+(which creates them) and the in-cluster instance's password realign (which keeps
+their passwords equal to the Secrets the services read). The two telemetry
+writers resolve their role through the same mode-aware helpers as their env
+ConfigMaps, so neither can disagree with what the pod dials. `defaultKey` is the
+key read from the chart's own Secret; an `existingSecret` (AUT-411), or the
+generated Secret, redirects both name and key.
+
+Skipped: a service not deployed; one on IAM auth, with no password to set; one
+sharing the bootstrap role, which the image itself created (every hybrid service
+resolves to exactly that). Returns YAML {services: [...]}.
+*/}}
+{{- define "neuraltrust-platform.postgresql.serviceRoles" -}}
+{{- $isExternal := eq (include "neuraltrust-platform.isExternal" .) "true" -}}
+{{- $adminRole := include "neuraltrust-platform.v2.hybridPg.user" . -}}
+{{- /* `default` cannot read these: it treats an explicit false as absent. */}}
+{{- $aeEnabled := true }}
+{{- if hasKey (default dict .Values.alertengine) "enabled" }}{{- $aeEnabled = (default dict .Values.alertengine).enabled }}{{- end }}
+{{- $candidates := list
+  (dict "key" "agentgateway" "gate" (eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustgate")) "true") "writer" true "secret" "agentgateway-secrets" "defaultKey" "DB_PASSWORD")
+  (dict "key" "trustguard" "gate" (eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustguard")) "true") "writer" true "secret" "trustguard-secrets" "defaultKey" "DB_PASSWORD")
+  (dict "key" "alertengine" "gate" (and $isExternal $aeEnabled) "secret" "alertengine-secrets" "defaultKey" "DB_PASSWORD")
+  (dict "key" "datacore" "gate" $isExternal "secret" "datacore-secrets" "defaultKey" "POSTGRES_PASSWORD")
+}}
+{{- $services := list }}
+{{- range $c := $candidates }}
+  {{- $vals := default dict (index $.Values $c.key) }}
+  {{- $db := default dict $vals.database }}
+  {{- $role := "" }}
+  {{- $name := "" }}
+  {{- if $c.writer }}
+    {{- $role = include "neuraltrust-platform.v2.writerUser" (dict "ctx" $ "explicit" $db.user "default" $c.key) }}
+    {{- $name = include "neuraltrust-platform.v2.dbName" (dict "ctx" $ "explicit" $db.name "external" $c.key) }}
+  {{- else }}
+    {{- $role = $db.user | default $c.key }}
+    {{- $name = $db.name | default $c.key }}
+  {{- end }}
+  {{- $ref := include "neuraltrust-platform.dbPasswordRef" (dict "ctx" $ "db" $db "key" (printf "%s_DB_PASSWORD" (upper $c.key))) | fromYaml }}
+  {{- $iam := eq (include "neuraltrust-platform.postgres.iamAuth" (dict "ctx" $ "database" $db)) "true" }}
+  {{- if and $c.gate (not $iam) (ne $role $adminRole) }}
+    {{- $services = append $services (dict
+      "key" $c.key
+      "role" $role
+      "db" $name
+      "env" (printf "%s_DB_PASSWORD" (upper $c.key))
+      "secret" ($ref.name | default $c.secret)
+      "secretKey" ($ref.key | default $c.defaultKey)
+      "refName" ($ref.name | default "")
+      "pinned" ($db.password | default "" | toString)
+    ) }}
+  {{- end }}
+{{- end }}
+{{- toYaml (dict "services" $services) }}
+{{- end }}
 
 {{/*
 Gate for the opt-in bootstrap of a PostgreSQL the chart does not run
@@ -1136,7 +1198,12 @@ Callable from the umbrella or from a subchart, since `global` is merged into
 both. Takes the whole `.Values.global.postgresql.passwordSecret` map.
 */}}
 {{- define "neuraltrust-platform.postgresql.passwordSecretRef" -}}
+{{- if eq (include "neuraltrust-platform.postgresql.generatedAdmin" .) "true" -}}
+name: {{ include "neuraltrust-platform.secretsGenerator.name" . | quote }}
+key: POSTGRES_PASSWORD
+{{- else -}}
 {{- default dict (default dict (default dict .Values.global).postgresql).passwordSecret | toYaml -}}
+{{- end -}}
 {{- end }}
 
 {{/*
@@ -1788,12 +1855,23 @@ trustguard-client-credentials
       name: {{ $secretName }}
       key: CLIENT_ID
       optional: true
+{{- /* The secret half comes from the in-cluster secrets generator when it owns
+       it; the id stays in trustguard-client-credentials, where it is identical on
+       every render. */}}
+{{- if eq (include "neuraltrust-platform.trustguardClient.generated" .ctx) "true" }}
+- name: {{ .secretVar }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "neuraltrust-platform.secretsGenerator.name" .ctx | quote }}
+      key: TRUSTGUARD_CLIENT_SECRET
+{{- else }}
 - name: {{ .secretVar }}
   valueFrom:
     secretKeyRef:
       name: {{ $secretName }}
       key: CLIENT_SECRET
       optional: true
+{{- end }}
 {{- end }}
 
 {{/*
@@ -2380,7 +2458,9 @@ Ingress helpers.
 {{- define "neuraltrust-platform.ingress.defaultTLSSecretName" -}}
 {{- $globalIngress := default dict (default dict .global).ingress }}
 {{- $tls := default dict $globalIngress.tls }}
-{{- if $tls.secretName }}
+{{- if eq (include "neuraltrust-platform.ingress.tlsGenerated" (dict "ctx" .ctx "global" .global)) "true" }}
+{{- include "neuraltrust-platform.secretsGenerator.tlsName" (dict "id" "ingress") -}}
+{{- else if $tls.secretName }}
 {{- $tls.secretName -}}
 {{- else -}}
 neuraltrust-ingress-tls
@@ -2402,7 +2482,7 @@ neuraltrust-ingress-tls
 {{- if $localSecretName }}
 {{- $localSecretName -}}
 {{- else -}}
-{{- include "neuraltrust-platform.ingress.defaultTLSSecretName" (dict "global" .global) -}}
+{{- include "neuraltrust-platform.ingress.defaultTLSSecretName" (dict "ctx" .ctx "global" .global) -}}
 {{- end }}
 {{- end }}
 
@@ -3307,10 +3387,17 @@ clickstack-collector-secrets
 {{- end }}
 
 {{- define "neuraltrust-platform.clickstack.externalOtlpHeadersEnv" -}}
+{{- /* The in-cluster secrets generator owns the token, and derives this header
+       from it, whenever it is active: the collector subchart's
+       secrets-generator-spec.yaml contributes both for every external install. */}}
+{{- $name := include "neuraltrust-platform.clickstack.externalCollectorSecretName" . -}}
+{{- if eq (include "neuraltrust-platform.secretsGenerator.active" .) "true" -}}
+{{- $name = include "neuraltrust-platform.secretsGenerator.name" . -}}
+{{- end }}
 - name: OTEL_EXPORTER_OTLP_HEADERS
   valueFrom:
     secretKeyRef:
-      name: {{ include "neuraltrust-platform.clickstack.externalCollectorSecretName" . | quote }}
+      name: {{ $name | quote }}
       key: OTEL_EXPORTER_OTLP_HEADERS
 {{- end }}
 
@@ -3890,6 +3977,100 @@ TELEMETRY_JWT_PRIVATE_KEY_PEM: {legacyName: datacore-secrets, legacyKey: TELEMET
 {{- end }}
 
 {{/*
+Registry keys pinned in values, as `KEY: value`: the per-service value paths that
+fed the legacy Secrets, then `global.platformSecret.values`, which wins. Shared by
+templates/shared-platform-secret.yaml and the secrets generator so both honour
+the same pins. Returns YAML; pipe through fromYaml.
+
+Several per-service paths accept either a plain credential or a
+`{secretName, secretKey}` map pointing at an operator Secret. Only a scalar is a
+value we can store, and b64enc aborts the whole render on a map or list, so those
+shapes are treated as "not pinned here". A numeric credential still works:
+`--set` yields an int, not a string.
+*/}}
+{{- define "neuraltrust-platform.platformSecret.explicit" -}}
+{{- $ag := default dict (index .Values "agentgateway") }}
+{{- $tg := default dict (index .Values "trustguard") }}
+{{- $ae := default dict (index .Values "alertengine") }}
+{{- $fwSecrets := default dict (default dict (default dict .Values.firewall).firewall).secrets }}
+{{- $dpSecrets := default dict (default dict (default dict (index .Values "data-plane-api")).dataPlane).secrets }}
+{{- $cpApiSecrets := default dict (default dict (default dict (index .Values "control-plane-api")).controlPlane).secrets }}
+{{- $cpAppSecrets := default dict (default dict (default dict (index .Values "control-plane-app")).controlPlane).secrets }}
+{{- $cp := merge (deepCopy $cpApiSecrets) $cpAppSecrets }}
+{{- $candidates := dict
+  "SERVER_SECRET_KEY" ($ag.serverSecretKey | default "")
+  "ADMIN_JWT_SECRET" ($tg.adminJwtSecret | default "")
+  "TRUSTGUARD_TOKEN_SIGNING_SECRET" ($tg.tokenSigningSecret | default "")
+  "REDIS_EVENTS_SECRET" ($tg.redisEventsSecret | default "")
+  "AUTH_JWT_SECRET" ($ae.authJwtSecret | default "")
+  "APP_ENCRYPTION_KEY" ($ae.appEncryptionKey | default "")
+  "JWT_SECRET" ($fwSecrets.jwtSecret | default "")
+  "DATA_PLANE_JWT_SECRET" ($dpSecrets.dataPlaneJWTSecret | default "")
+  "CONTROL_PLANE_JWT_SECRET" ($cp.controlPlaneJWTSecret | default "")
+  "AUTH_SECRET" ($cp.authSecret | default "")
+  "MODEL_SCANNER_SECRET" ($cp.modelScannerSecret | default "")
+}}
+{{- /* Direct escape hatch, highest precedence. */}}
+{{- range $k, $v := (default dict (default dict (default dict .Values.global).platformSecret).values) }}
+  {{- $_ := set $candidates $k $v }}
+{{- end }}
+{{- $explicit := dict }}
+{{- range $k, $v := $candidates }}
+  {{- if and $v (not (kindIs "map" $v)) (not (kindIs "slice" $v)) }}
+    {{- $_ := set $explicit $k ($v | toString) }}
+  {{- end }}
+{{- end }}
+{{- toYaml $explicit }}
+{{- end }}
+
+{{/*
+Install shapes in play, as a space-separated list, so an install only carries the
+registry credentials its services read (each row's `requires`). Shared by
+templates/shared-platform-secret.yaml and the secrets generator.
+*/}}
+{{- define "neuraltrust-platform.platformSecret.shapes" -}}
+{{- $shapes := list }}
+{{- if eq (include "neuraltrust-platform.isExternal" .) "true" }}
+  {{- $shapes = append $shapes "external" }}
+{{- end }}
+{{- /* saas is external plus a control plane for data planes elsewhere, so it
+       carries the enrolment and telemetry credentials on top of the external
+       set rather than instead of it. */}}
+{{- if eq (include "neuraltrust-platform.isSaas" .) "true" }}
+  {{- $shapes = append $shapes "saas" }}
+{{- end }}
+{{- range $product := list "trustgate" "trustguard" "dataPlane" }}
+  {{- if eq (include "neuraltrust-platform.product.enabled" (dict "ctx" $ "product" $product)) "true" }}
+    {{- $shapes = append $shapes $product }}
+  {{- end }}
+{{- end }}
+{{- /* AlertEngine is external-only and opt-out via alertengine.enabled. Gate on
+       the same condition as alertengine.deploy so hybrid / disabled installs
+       do not mint AUTH_JWT_SECRET or APP_ENCRYPTION_KEY. */}}
+{{- if and (eq (include "neuraltrust-platform.isExternal" .) "true") (default dict .Values.alertengine).enabled }}
+  {{- $shapes = append $shapes "alertengine" }}
+{{- end }}
+{{- /* MCP OAuth is external-only: the authorization server is the control-plane
+       app, which hybrid does not deploy. It also stays off until a signing key
+       exists, so an install never carries a client secret for a feature the app
+       cannot actually serve across replicas — generating a credential no workload
+       can use is exactly the unused copy this Secret exists to avoid. */}}
+{{- if eq (include "neuraltrust-platform.mcpOAuth.enabled" .) "true" }}
+  {{- $shapes = append $shapes "mcpOAuth" }}
+{{- end }}
+{{- if eq (include "neuraltrust-platform.agentgatewayM2m.enabled" .) "true" }}
+  {{- $shapes = append $shapes "agentgatewayM2m" }}
+{{- end }}
+{{- /* Watchdog usage export calls both the control-plane and data-plane APIs, so
+       it needs their signing keys even in a hybrid install that hosts neither. */}}
+{{- $wd := default dict .Values.watchdog }}
+{{- if and $wd.enabled (default dict $wd.usageExport).enabled }}
+  {{- $shapes = append $shapes "watchdog" }}
+{{- end }}
+{{- join " " $shapes }}
+{{- end }}
+
+{{/*
 MCP OAuth issuer, shared by the authorization server (the control-plane app) and
 by TrustGate as its client. Both sides derive it from the same helper because a
 mismatch is silent until TrustGate tries to fetch JWKS from an issuer nobody
@@ -4414,8 +4595,11 @@ back to the legacy per-service Secret.
 {{- if and (not $existing.name) (ne (include "neuraltrust-platform.autoGenerateSecrets" .) "true") }}
   {{- $enabled = false }}
 {{- end }}
+{{- /* With the in-cluster generator the shared credentials live in its Secret,
+       which no render can rotate (templates/_secrets_generator.tpl). */}}
 {{- if not $enabled }}
 {{- else if $existing.name }}{{- $existing.name -}}
+{{- else if eq (include "neuraltrust-platform.secretsGenerator.active" .) "true" -}}{{- include "neuraltrust-platform.secretsGenerator.name" . -}}
 {{- else -}}platform-secrets{{- end }}
 {{- end }}
 
@@ -4549,3 +4733,13 @@ Usage:
       drop: ["ALL"]
 {{- end -}}
 {{- end -}}
+
+{{/*
+Whether the in-cluster secrets generator issues the shared self-signed ingress
+certificate (templates/ingress-tls-secret.yaml would otherwise render it).
+*/}}
+{{- define "neuraltrust-platform.ingress.tlsGenerated" -}}
+{{- if and
+  (eq (include "neuraltrust-platform.secretsGenerator.active" .ctx) "true")
+  (eq (include "neuraltrust-platform.ingress.autoGenerateTLSSecret" (dict "global" .global)) "true") -}}true{{- end -}}
+{{- end }}

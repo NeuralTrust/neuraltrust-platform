@@ -6,6 +6,9 @@ upgrade in place.
 {{- if include "neuraltrust-platform.postgresql.deploy" . }}
 {{- $pg := default dict (default dict .Values.global).postgresql }}
 {{- $img := default dict $pg.image }}
+{{- /* The admin password the instance runs with: postgresql-secrets, or the
+       generated or operator Secret when one owns it. */}}
+{{- $pgPwRef := include "neuraltrust-platform.postgresql.passwordSecretRef" . | fromYaml }}
 {{- $securityHardening := true }}
 apiVersion: apps/v1
 kind: Deployment
@@ -33,6 +36,98 @@ spec:
         runAsNonRoot: true
       {{- end }}
       {{- include "neuraltrust-platform.postgresql.imagePullSecrets" . | nindent 6 }}
+      {{- /* Under the in-cluster secrets generator, bring every role's password in
+             line with the Secret its service reads, on each start. The image
+             applies POSTGRES_PASSWORD only when it initialises an empty data
+             directory, so a password that changed since (an install that ran under
+             `helm template`, or one adopted on upgrade) would otherwise lock every
+             service out. Socket-only and over the local `trust` the image's initdb
+             sets up, so it needs no password. Fails open: a realign problem is
+             logged and the database still starts. */}}
+      {{- if and (eq (include "neuraltrust-platform.secretsGenerator.active" .) "true") (ne (include "neuraltrust-platform.postgresql.iam" .) "true") }}
+      {{- $roles := (include "neuraltrust-platform.postgresql.serviceRoles" . | fromYaml).services | default list }}
+      initContainers:
+      - name: realign-passwords
+        image: {{ include "neuraltrust-platform.image" (dict "repository" $img.repository "tag" $img.tag "global" .Values.global) | quote }}
+        imagePullPolicy: {{ $img.pullPolicy | default "IfNotPresent" }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+              - ALL
+          runAsNonRoot: true
+          {{- if not (include "neuraltrust-platform.isOpenshift" .) }}
+          runAsUser: 999
+          runAsGroup: 999
+          {{- end }}
+          seccompProfile:
+            type: RuntimeDefault
+        env:
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        - name: ADMIN_ROLE
+          valueFrom:
+            secretKeyRef:
+              name: postgresql-secrets
+              key: POSTGRES_USER
+              optional: true
+        - name: ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgPwRef.name | default "postgresql-secrets" }}
+              key: {{ $pgPwRef.key | default "POSTGRES_PASSWORD" }}
+              optional: true
+        {{- range $i, $r := $roles }}
+        - name: ROLE_{{ $i }}
+          value: {{ $r.role | quote }}
+        - name: PASSWORD_{{ $i }}
+          valueFrom:
+            secretKeyRef:
+              name: {{ $r.secret | quote }}
+              key: {{ $r.secretKey | quote }}
+              optional: true
+        {{- end }}
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -u
+          if [ ! -s "$PGDATA/PG_VERSION" ]; then
+            echo "empty data directory: the image initialises it from POSTGRES_PASSWORD"
+            exit 0
+          fi
+          if ! pg_ctl -D "$PGDATA" -o "-c listen_addresses='' -c unix_socket_directories=/var/run/postgresql" -w -t 120 start; then
+            echo "warning: could not start PostgreSQL to realign passwords; starting it as is" >&2
+            exit 0
+          fi
+          # Name and password reach psql through the environment and its
+          # variables, never the command line; %I and %L quote them server-side.
+          realign() {
+            if [ -z "$1" ] || [ -z "$2" ]; then return 0; fi
+            if R="$1" P="$2" psql -X -q -v ON_ERROR_STOP=1 -h /var/run/postgresql -U "$ADMIN_ROLE" -d postgres <<'SQL'
+          \getenv r R
+          \getenv p P
+          SELECT format('ALTER ROLE %I WITH PASSWORD %L', :'r', :'p') WHERE EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'r') \gexec
+          SQL
+            then echo "role $1: password in line with its Secret"
+            else echo "warning: could not realign role $1" >&2
+            fi
+          }
+          realign "${ADMIN_ROLE:-}" "${ADMIN_PASSWORD:-}"
+          {{- range $i, $r := $roles }}
+          realign "${ROLE_{{ $i }}:-}" "${PASSWORD_{{ $i }}:-}"
+          {{- end }}
+          pg_ctl -D "$PGDATA" -m fast -w stop || echo "warning: PostgreSQL did not stop cleanly" >&2
+          exit 0
+        volumeMounts:
+        - name: postgresql-data
+          mountPath: /var/lib/postgresql/data
+        - name: tmp
+          mountPath: /tmp
+        - name: run-postgresql
+          mountPath: /var/run/postgresql
+      {{- end }}
       containers:
       - name: postgresql
         image: {{ include "neuraltrust-platform.image" (dict "repository" $img.repository "tag" $img.tag "global" .Values.global) | quote }}
@@ -64,8 +159,8 @@ spec:
         - name: POSTGRES_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: postgresql-secrets
-              key: POSTGRES_PASSWORD
+              name: {{ $pgPwRef.name | default "postgresql-secrets" }}
+              key: {{ $pgPwRef.key | default "POSTGRES_PASSWORD" }}
         - name: POSTGRES_DB
           valueFrom:
             secretKeyRef:

@@ -6,8 +6,15 @@
 {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.clickhouse .Values.dataPlane.components.clickhouse.existingSecret }}
 {{- $chPwSecret = .Values.dataPlane.components.clickhouse.existingSecret }}
 {{- end }}
-{{- $chPwSecretName := $chPwSecret.name | default "clickhouse" }}
-{{- $chPwSecretKey := $chPwSecret.key | default "admin-password" }}
+{{- $chPwDefaultName := "clickhouse" }}
+{{- $chPwDefaultKey := "admin-password" }}
+{{- /* The in-cluster secrets generator owns the in-cluster ClickHouse password. */}}
+{{- if eq (include "neuraltrust-platform.clickhouse.generated" .) "true" }}
+  {{- $chPwDefaultName = include "neuraltrust-platform.secretsGenerator.name" . }}
+  {{- $chPwDefaultKey = "CLICKHOUSE_PASSWORD" }}
+{{- end }}
+{{- $chPwSecretName := $chPwSecret.name | default $chPwDefaultName }}
+{{- $chPwSecretKey := $chPwSecret.key | default $chPwDefaultKey }}
 {{- /* Resolve the SQL backend (postgres | clickhouse). v2 hybrid defaults to
        PostgreSQL; v2 external and v1 stay ClickHouse. See the sqlBackend helper. */ -}}
 {{- $sqlBackend := include "neuraltrust-platform.dataPlaneApi.sqlBackend" . }}
@@ -134,7 +141,7 @@ spec:
             # global.clickhouse (AUT-636) -- it was hardcoded to 9000, which meant
             # a managed endpoint on a non-default native/TLS port failed every
             # migration while the API itself connected fine over HTTP.
-            CLICKHOUSE_NATIVE_PORT={{ (include "neuraltrust-platform.clickhouse.resolve" (dict "local" .Values.dataPlane.components.clickhouse "global" .Values.global) | fromYaml).nativePort | quote }}
+            CLICKHOUSE_NATIVE_PORT={{ (include "neuraltrust-platform.clickhouse.resolve" (dict "ctx" $ "local" .Values.dataPlane.components.clickhouse "global" .Values.global) | fromYaml).nativePort | quote }}
             echo "Using port ${CLICKHOUSE_NATIVE_PORT} for migrations (native protocol)"
             
             # Wait for ClickHouse to be ready
