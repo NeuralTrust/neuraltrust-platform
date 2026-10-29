@@ -4424,6 +4424,19 @@ assert_bootstrap "$out19bExt" \
   "managed external: every service role, the control plane's from passwordSecret" \
   postgresql-managed-bootstrap
 
+# A DBA may have provisioned some of it: managed mode only adds what is
+# missing, and never resets a password or takes over a database.
+assert_not_contains "$out19bExt" 'ALTER ROLE' \
+  "managed: an existing role keeps the password it has"
+assert_not_contains "$out19bExt" 'ALTER DATABASE' \
+  "managed: an existing database keeps its owner"
+assert_contains "$out19bExt" 'GRANT :"r" TO CURRENT_USER;' \
+  "managed: the admin still holds a role to create a database it owns"
+assert_contains "$out19bExt" 'elif q -v r=' \
+  "managed: holding a DBA-created role may be refused without failing the Job"
+assert_contains "$out19bExt" 'role to the admin login WITH ADMIN OPTION' \
+  "managed: a database it cannot create is reported, not fatal"
+
 # Asked for, it must be able to run.
 assert_render_fails_with "adminSecret.name is required" \
   "managed bootstrap without an admin Secret fails the render" \
@@ -4814,6 +4827,22 @@ for shape in "${gen_shapes[@]}"; do
   fi
 done
 green "ok  - secrets generator: ${#gen_shapes[@]} external shapes render byte-identical, every generated ref has a spec, every adoption is readable"
+
+# The realign starts PostgreSQL itself, before the image's entrypoint has put
+# PGDATA back to 0700; fsGroup leaves it group-writable on GKE and other CSI
+# volumes, and pg_ctl then refuses to start, so the passwords never realign.
+ruby -ryaml -e '
+  docs = YAML.load_stream(File.read(ARGV[0])).compact.select { |d| d.is_a?(Hash) }
+  pg = docs.find { |d| d["kind"] == "Deployment" && d.dig("metadata", "name") == "control-plane-postgresql" }
+  abort "in-cluster PostgreSQL not rendered" unless pg
+  init = (pg.dig("spec", "template", "spec", "initContainers") || []).find { |c| c["name"] == "realign-passwords" }
+  abort "realign-passwords initContainer not rendered" unless init
+  script = init["command"].last
+  chmod = script.index(%q{chmod 00700 "$PGDATA"})
+  start = script.index("pg_ctl -D")
+  abort "realign does not restore PGDATA to 0700 before pg_ctl" unless chmod && start && chmod < start
+' "$TMP/gen-external-1.yaml" || { red "FAIL: realign-passwords cannot start PostgreSQL on an fsGroup volume"; exit 1; }
+green "ok  - realign-passwords restores PGDATA to 0700 before starting PostgreSQL"
 
 # Off: the opt-out, preserve mode and hybrid keep the render-time Secrets and get no Job.
 for off in "opt-out|--set global.secrets.generator.enabled=false" "preserve|--set global.preserveExistingSecrets=true --set global.autoGenerateSecrets=false"; do

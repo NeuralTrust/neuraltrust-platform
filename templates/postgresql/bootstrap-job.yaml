@@ -35,6 +35,12 @@ with the admin login in `managedBootstrap.adminSecret`, creates the control-plan
 role and database too (there is no image to create them), takes each role it
 must own a database as only for that statement, and creates the extensions the
 services need.
+
+On a managed instance a DBA may have provisioned some of this already, so
+managed mode only creates what is missing: an existing role keeps its password,
+an existing database keeps its owner, and grants or role membership the admin
+is refused are logged, not fatal. Only the in-cluster instance, which the chart
+owns, has passwords and owners re-aligned.
 */ -}}
 {{- $managed := eq (include "neuraltrust-platform.postgresql.managedBootstrap.enabled" .) "true" }}
 {{- if or (eq (include "neuraltrust-platform.postgresql.bootstrapJob.enabled" .) "true") $managed }}
@@ -222,15 +228,80 @@ spec:
                 DB="$1"; ROLE="$2"
               {{- if $managed }}
                 # A managed instance's admin is not a superuser: it can make a
-                # role own a database only while it holds that role itself.
+                # role own a database, or act as it, only while it holds that
+                # role. Holding a role someone else created can be refused
+                # (PostgreSQL 16+ wants ADMIN OPTION on it), which matters only
+                # when there is something left to create.
                 HELD=""
-                if [ "${ROLE}" != "${PGUSER}" ]; then
-                  q -v r="${ROLE}" <<'SQL'
+                CAN_ACT=""
+                if [ "${ROLE}" = "${PGUSER}" ]; then
+                  CAN_ACT=1
+                elif q -v r="${ROLE}" >/dev/null 2>&1 <<'SQL'
               GRANT :"r" TO CURRENT_USER;
               SQL
+                then
                   HELD=1
+                  CAN_ACT=1
                 fi
-              {{- end }}
+                # A database that already exists is left as it is, owner
+                # included: on a managed instance a DBA may have made it, and
+                # taking it over is not this Job's call.
+                if db_exists "${DB}"; then
+                  log "  database \"${DB}\" already present; owner and contents left as they are"
+                elif [ -n "${CAN_ACT}" ]; then
+                  q -v d="${DB}" -v r="${ROLE}" <<'SQL'
+              CREATE DATABASE :"d" OWNER :"r";
+              SQL
+                  log "  created database \"${DB}\" owned by \"${ROLE}\""
+                else
+                  log "  WARNING: database \"${DB}\" does not exist, and the admin cannot create it owned by"
+                  log "           \"${ROLE}\" without holding that role. Create the database, or grant the"
+                  log "           role to the admin login WITH ADMIN OPTION."
+                  NODB="${NODB} ${DB}"
+                  return 0
+                fi
+                # Grants only add. A database or schema this admin does not own
+                # refuses them, and then whoever owns it already decided.
+                if ! q -v d="${DB}" -v r="${ROLE}" >/dev/null 2>&1 <<'SQL'
+              GRANT ALL PRIVILEGES ON DATABASE :"d" TO :"r";
+              SQL
+                then
+                  log "  database \"${DB}\": privileges left as they are (the admin may not grant them)"
+                fi
+                if ! q -d "${DB}" -v r="${ROLE}" >/dev/null 2>&1 <<'SQL'
+              GRANT ALL ON SCHEMA public TO :"r";
+              SQL
+                then
+                  log "  database \"${DB}\": schema public privileges left as they are (the admin may not grant them)"
+                fi
+                # pgcrypto and the like are trusted extensions: the database owner
+                # may create them, the admin may not. Hence SET ROLE to the owner,
+                # while the admin still holds it.
+                for EXT in ${EXTENSIONS}; do
+                  if [ -n "${CAN_ACT}" ] && q -d "${DB}" -v r="${ROLE}" -v e="${EXT}" >/dev/null 2>&1 <<'SQL'
+              SET ROLE :"r";
+              CREATE EXTENSION IF NOT EXISTS :"e";
+              SQL
+                  then
+                    log "  extension ${EXT} present in \"${DB}\""
+                  elif q -d "${DB}" -v e="${EXT}" >/dev/null 2>&1 <<'SQL'
+              CREATE EXTENSION IF NOT EXISTS :"e";
+              SQL
+                  then
+                    log "  extension ${EXT} present in \"${DB}\""
+                  else
+                    log "  WARNING: could not create extension ${EXT} in \"${DB}\". On Azure, allow-list it"
+                    log "           in the server parameter azure.extensions; elsewhere, check it is installed,"
+                    log "           or create it as the database owner."
+                    NOEXT="${NOEXT} ${DB}/${EXT}"
+                  fi
+                done
+                if [ -n "${HELD}" ]; then
+                  q -v r="${ROLE}" <<'SQL'
+              REVOKE :"r" FROM CURRENT_USER;
+              SQL
+                fi
+              {{- else }}
                 if db_exists "${DB}"; then
                   q -v d="${DB}" -v r="${ROLE}" <<'SQL'
               ALTER DATABASE :"d" OWNER TO :"r";
@@ -248,28 +319,6 @@ spec:
                 q -d "${DB}" -v r="${ROLE}" <<'SQL'
               GRANT ALL ON SCHEMA public TO :"r";
               SQL
-              {{- if $managed }}
-                # pgcrypto and the like are trusted extensions: the database owner
-                # may create them, the admin may not. Hence SET ROLE to the owner,
-                # while the admin still holds it.
-                for EXT in ${EXTENSIONS}; do
-                  if q -d "${DB}" -v r="${ROLE}" -v e="${EXT}" >/dev/null 2>&1 <<'SQL'
-              SET ROLE :"r";
-              CREATE EXTENSION IF NOT EXISTS :"e";
-              SQL
-                  then
-                    log "  extension ${EXT} present in \"${DB}\""
-                  else
-                    log "  WARNING: could not create extension ${EXT} in \"${DB}\". On Azure, allow-list it"
-                    log "           in the server parameter azure.extensions; elsewhere, check it is installed."
-                    NOEXT="${NOEXT} ${DB}/${EXT}"
-                  fi
-                done
-                if [ -n "${HELD}" ]; then
-                  q -v r="${ROLE}" <<'SQL'
-              REVOKE :"r" FROM CURRENT_USER;
-              SQL
-                fi
               {{- end }}
               }
 
@@ -290,10 +339,18 @@ spec:
                   return 0
                 fi
                 if role_exists "${ROLE}"; then
+              {{- if $managed }}
+                  # On a managed instance the password may be set outside the
+                  # chart (a DBA, a vault rotation), and changing it would lock
+                  # that out, so an existing role is left as it is.
+                  log "${LABEL}: role \"${ROLE}\" already present; password left as it is."
+                  log "  The service logs in with the password in ${5} (key ${6}), which must be this role's."
+              {{- else }}
                   q -v r="${ROLE}" -v p="${PW}" <<'SQL'
               ALTER ROLE :"r" WITH LOGIN PASSWORD :'p';
               SQL
                   log "${LABEL}: role \"${ROLE}\" already present, password re-aligned"
+              {{- end }}
                 else
                   q -v r="${ROLE}" -v p="${PW}" <<'SQL'
               CREATE ROLE :"r" WITH LOGIN PASSWORD :'p';
@@ -306,6 +363,7 @@ spec:
               SKIPPED=""
               {{- if $managed }}
               NOEXT=""
+              NODB=""
               # Extensions the services' migrations expect, created in every
               # database. A failure is reported, not fatal: the service that needs
               # one says so when it migrates.
@@ -328,6 +386,7 @@ spec:
               {{- end }}
 
               {{- if $managed }}
+              [ -n "${NODB}" ] && SKIPPED="${SKIPPED} databases:${NODB}"
               [ -n "${NOEXT}" ] && SKIPPED="${SKIPPED} extensions:${NOEXT}"
               {{- end }}
 
