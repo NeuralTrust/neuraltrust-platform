@@ -2432,6 +2432,22 @@ if [ "${ch_wait_host}:${ch_wait_port}" != "$ch_app_addr" ]; then
   exit 1
 fi
 green "ok  - the wait targets exactly the endpoint the app is configured to reach"
+# A private-registry mirror copies the tags the install pulls. A wait or migration
+# image pinned to a different tag than the server it serves is a second tag that
+# nobody mirrors, so the pod sits in ImagePullBackOff on an otherwise working install.
+out10c1m="$TMP/scenario-ch-wait-mirror.yaml"
+render_default "$out10c1m" --set global.deploymentMode=external \
+  --set global.imageRegistry=registry.internal.example.com/nt \
+  --set global.postgresql.image.tag=17.99-alpine
+for img in clickhouse-server postgres; do
+  tags="$(yq -N '.. | select(has("image")) | .image' "$out10c1m" | grep "/${img}:" | sort -u)"
+  if [ "$(printf '%s\n' "$tags" | grep -c .)" != "1" ]; then
+    red "FAIL: every ${img} image must resolve to one ref, got:"
+    red "$tags"
+    exit 1
+  fi
+done
+green "ok  - wait/migration initContainers pull the same clickhouse-server and postgres refs as the servers"
 # Hybrid deploys no ClickHouse and none of these workloads, so nothing should appear.
 # Render its own file: $out10b9 belongs to a later scenario and set -u would abort.
 out10c1h="$TMP/scenario-ch-wait-hybrid.yaml"
@@ -4643,131 +4659,93 @@ for da in dataagent dataagent-trustguard; do
 done
 
 # ---------------------------------------------------------------------------
-# create-secrets.sh must track platformSecret.registry and the
-# canonical Postgres family. Drift here is silent until an operator runs the
-# script under preserveExistingSecrets.
+# create-secrets.sh renders the chart to learn what a pre-provisioned install
+# reads, so these test what it produces rather than how. Every reference in a
+# preserveExistingSecrets render must come out with a value or be reported as one
+# only the operator can supply: a key it silently drops is optional in the pod
+# spec, so the install starts and fails later at runtime.
 # ---------------------------------------------------------------------------
-blue "create-secrets.sh registry + Postgres contract"
-SCRIPT_KEYS="$(awk '
-  /PLATFORM_SECRET_REGISTRY_KEYS_BEGIN/ { in_list=1; next }
-  /PLATFORM_SECRET_REGISTRY_KEYS_END/ { in_list=0 }
-  in_list && /^[[:space:]]*[A-Z0-9_]+[[:space:]]*$/ {
-    gsub(/[[:space:]]/, "", $0)
-    print $0
-  }
-' create-secrets.sh | sort)"
-HELPER_KEYS="$(awk '
-  /define "neuraltrust-platform.platformSecret.registry"/ { in_reg=1; next }
-  in_reg && /{{- end }}/ { exit }
-  in_reg && /^[A-Z0-9_]+:/ {
-    sub(/:.*/, "", $0)
-    print $0
-  }
-' templates/_helpers.tpl | sort)"
-if [ "$SCRIPT_KEYS" != "$HELPER_KEYS" ]; then
-  red "FAIL - create-secrets.sh PLATFORM_SECRET_REGISTRY_KEYS drifts from platformSecret.registry"
-  echo "--- script ---"
-  echo "$SCRIPT_KEYS"
-  echo "--- helpers ---"
-  echo "$HELPER_KEYS"
-  exit 1
-fi
-green "ok  - create-secrets.sh registry keys match platformSecret.registry"
-
-for key in $HELPER_KEYS; do
-  if ! grep -q "ensure_platform_secret_key \"$key\"" create-secrets.sh; then
-    red "FAIL - create-secrets.sh never calls ensure_platform_secret_key for $key"
-    exit 1
-  fi
-done
-green "ok  - create-secrets.sh materialises every registry key into platform-secrets"
-
-# The telemetry signing key is the first PEM this script stores. trim_value ends
-# in `tr -d '\n\r'`, which would flatten it into one line that no PEM parser
-# accepts — a Secret that looks correct in kubectl and 401s every OTLP batch at
-# runtime. Drive the real functions with a stubbed kubectl rather than grepping
-# for the guard, so the property is tested and not the implementation.
-pem_probe="$TMP/create-secrets-pem-probe.sh"
-{
-  sed -n '/^trim_value()/,/^}/p' create-secrets.sh
-  sed -n '/^add_secret_key()/,/^}/p' create-secrets.sh
-} > "$TMP/create-secrets-funcs.sh"
-cat > "$pem_probe" <<'PROBE'
-NAMESPACE=nt
-GREEN=''; RED=''; YELLOW=''; NC=''
-captured="$1"
-kubectl() {
-  [ "$1 $2" = "get secret" ] && return 1
-  if [ "$1" = "create" ]; then
-    for a in "$@"; do
-      case "$a" in --from-literal=*) printf '%s' "${a#--from-literal=}" > "$captured" ;; esac
-    done
-    return 0
-  fi
-  cat >/dev/null; return 0
+blue "create-secrets.sh: every Secret a pre-provisioned install reads"
+cs_check() {  # label, output json, stderr, preserve-mode render
+  ruby -ryaml -rjson -e '
+    out = JSON.parse(File.read(ARGV[0])); err = File.read(ARGV[1])
+    docs = YAML.load_stream(File.read(ARGV[2])).compact
+    hooked = docs.select { |d| d.dig("metadata", "annotations", "helm.sh/hook") }
+    minted = []
+    walk_env = ->(o) { case o
+      when Hash then (o["env"] || []).each { |e| minted << e["value"] if e.is_a?(Hash) && e["value"] }; o.each_value { |v| walk_env.(v) }
+      when Array then o.each { |v| walk_env.(v) } end }
+    hooked.each { |d| walk_env.(d) }
+    refs = []
+    walk = ->(o) { case o
+      when Hash
+        r = o["secretKeyRef"]; refs << [r["name"], r["key"]] if r.is_a?(Hash)
+        o.each_value { |v| walk.(v) }
+      when Array then o.each { |v| walk.(v) } end }
+    (docs - hooked).each { |d| walk.(d) }
+    lost = refs.uniq.reject { |n, k| minted.include?(n) || out.dig(n, k) || err.include?("#{n}/#{k}") }
+    abort "not emitted and not reported: #{lost.map { |n, k| "#{n}/#{k}" }.join(", ")}" unless lost.empty?
+    reported = err.scan(%r{^  (\S+/\S+)$}).flatten
+    placeheld = out.flat_map { |n, kv| kv.select { |_, v| v == "REPLACE_ME" }.keys.map { |k| "#{n}/#{k}" } }
+    abort "REPLACE_ME not reported: #{(placeheld - reported).join(", ")}" unless (placeheld - reported).empty?
+  ' "$2" "$3" "$4"
 }
-. "$2"
-pem=$(openssl genrsa -traditional 2048 2>/dev/null || openssl genrsa 2048 2>/dev/null)
-add_secret_key nt-secrets TELEMETRY_JWT_PRIVATE_KEY_PEM "$pem" raw
-PROBE
-bash "$pem_probe" "$TMP/pem-captured" "$TMP/create-secrets-funcs.sh" >/dev/null 2>&1
-if ! sed 's/^TELEMETRY_JWT_PRIVATE_KEY_PEM=//' "$TMP/pem-captured" \
-     | openssl rsa -noout -check >/dev/null 2>&1; then
-  red "FAIL - create-secrets.sh stores TELEMETRY_JWT_PRIVATE_KEY_PEM as an unparseable PEM"
-  red "  stored $(wc -l < "$TMP/pem-captured" | tr -d ' ') line(s); a PEM needs its line structure intact"
-  exit 1
-fi
-green "ok  - create-secrets.sh stores the telemetry signing key as a parseable PEM"
+cs_render() {  # out json, err, preserve render, values args...
+  local json="$1" err="$2" pres="$3"; shift 3
+  bash create-secrets.sh print -o json --chart "$CHART_DIR" --namespace neuraltrust "$@" > "$json" 2> "$err" || {
+    red "FAIL - create-secrets.sh print $*"; cat "$err"; exit 1; }
+  helm template test "$CHART_DIR" --namespace neuraltrust "$@" \
+    --set global.autoGenerateSecrets=false --set global.preserveExistingSecrets=true > "$pres"
+}
 
-# The generated key must be shaped like the chart's own, or the two bootstrap
-# paths hand DataCore structurally different keys for one registry entry.
-if ! grep -q 'openssl genrsa -traditional 4096' create-secrets.sh; then
-  red "FAIL - create-secrets.sh should mint PKCS#1 4096 to match genPrivateKey \"rsa\""
-  exit 1
+cs_ext="$TMP/cs-external.json"
+cs_render "$cs_ext" "$TMP/cs-external.err" "$TMP/cs-external-preserve.yaml" \
+  -f "$CHART_DIR/values-required.yaml" -f "$CHART_DIR/values-external.yaml.example"
+if ! result="$(cs_check external "$cs_ext" "$TMP/cs-external.err" "$TMP/cs-external-preserve.yaml" 2>&1)"; then
+  red "FAIL - create-secrets.sh (external): $result"; exit 1
 fi
-green "ok  - create-secrets.sh matches the chart's own RSA key shape"
+green "ok  - create-secrets.sh (external): every referenced key is emitted or reported"
 
-for needle in POSTGRES_SSLMODE POSTGRES_LOGIN POSTGRES_AUTH_MODE POSTGRES_CONNECTION_TYPE; do
-  if ! grep -q -- "--from-literal=${needle}=" create-secrets.sh; then
-    red "FAIL - create-secrets.sh postgresql-secrets omits ${needle}"
-    exit 1
+# Values hold the shape the chart would have generated, and pairs that must match do.
+if ! result="$(ruby -rjson -ropen3 -e '
+  out = JSON.parse(File.read(ARGV[0]))
+  cp = out.fetch("control-plane-secrets")
+  abort "AUTH_SECRET and NEXTAUTH_SECRET differ" unless cp["AUTH_SECRET"] && cp["AUTH_SECRET"] == cp["NEXTAUTH_SECRET"]
+  pg = out.fetch("postgresql-secrets")
+  %w[POSTGRES_SSLMODE POSTGRES_LOGIN POSTGRES_AUTH_MODE POSTGRES_CONNECTION_TYPE].each { |k| abort "postgresql-secrets lacks #{k}" unless pg.key?(k) }
+  %w[DATABASE_URL SENSIBLE_PG_DSN].each { |k| abort "postgresql-secrets carries retired #{k}" if pg.key?(k) }
+  abort "POSTGRES_PRISMA_URL does not carry POSTGRES_PASSWORD" unless pg["POSTGRES_PRISMA_URL"].to_s.include?(pg["POSTGRES_PASSWORD"].to_s)
+  _, st = Open3.capture2e("openssl", "rsa", "-noout", "-check", stdin_data: out.dig("agentgateway-secrets", "STS_SIGNING_KEY").to_s)
+  abort "STS_SIGNING_KEY is not a parseable RSA key" unless st.success?
+  tls = out.fetch("trustguard-configsync-tls")
+  File.write(ARGV[1] + ".ca", tls["ca.crt"]); File.write(ARGV[1] + ".crt", tls["tls.crt"])
+  o, st = Open3.capture2e("openssl", "verify", "-CAfile", ARGV[1] + ".ca", ARGV[1] + ".crt")
+  abort "configsync tls.crt does not verify against ca.crt: #{o}" unless st.success?
+' "$cs_ext" "$TMP/cs-tls" 2>&1)"; then
+  red "FAIL - create-secrets.sh (external) values: $result"; exit 1
+fi
+green "ok  - create-secrets.sh (external): aliases match, Postgres family canonical, PEMs and TLS chain valid"
+
+# Hybrid preserve renders only with global.postgresql.existingSecret named: the
+# DataAgent readiness gate otherwise reads the cluster.
+cs_hyb="$TMP/cs-hybrid.json"
+cs_render "$cs_hyb" "$TMP/cs-hybrid.err" "$TMP/cs-hybrid-preserve.yaml" \
+  -f "$CHART_DIR/values-required.yaml" "${CLICKSTACK_DEFAULT_ARGS[@]}" \
+  --set global.postgresql.existingSecret.name=postgresql-secrets
+if ! result="$(cs_check hybrid "$cs_hyb" "$TMP/cs-hybrid.err" "$TMP/cs-hybrid-preserve.yaml" 2>&1)"; then
+  red "FAIL - create-secrets.sh (hybrid): $result"; exit 1
+fi
+for cs in agentgateway-config-sync trustguard-config-sync; do
+  lkg="$(CS="$cs" yq -r '.[strenv(CS)].CONFIG_SYNC_LKG_KEY // ""' "$cs_hyb")"
+  bytes="$(printf '%s' "$lkg" | openssl base64 -d -A 2>/dev/null | wc -c | tr -d ' ')"
+  if [ "$bytes" != "32" ]; then
+    red "FAIL - create-secrets.sh (hybrid): $cs CONFIG_SYNC_LKG_KEY decodes to ${bytes:-0} bytes, want 32 (AES-256)"; exit 1
+  fi
+  if [ "$(CS="$cs" yq -r '.[strenv(CS)].CONFIG_SYNC_TOKEN // ""' "$cs_hyb")" != "REPLACE_ME" ]; then
+    red "FAIL - create-secrets.sh (hybrid): $cs CONFIG_SYNC_TOKEN must be left to the operator"; exit 1
   fi
 done
-if grep -q -- '--from-literal=DATABASE_URL=' create-secrets.sh; then
-  red "FAIL - create-secrets.sh still writes retired DATABASE_URL into postgresql-secrets"
-  exit 1
-fi
-if grep -q -- '--from-literal=SENSIBLE_PG_DSN=' create-secrets.sh; then
-  red "FAIL - create-secrets.sh must not compose SENSIBLE_PG_DSN"
-  exit 1
-fi
-green "ok  - create-secrets.sh writes the canonical Postgres family without DSN composition"
-
-# on the pre-provisioned path the chart owns no service Secret, so it
-# references configSync.existingSecret for CONFIG_SYNC_LKG_KEY instead of
-# generating one. The script has to write that key or the data planes will not
-# start. Guard both the call sites and the 32-byte contract, since a wrong-length
-# key fails at runtime rather than at render.
-for product in trustgate trustguard; do
-  if ! grep -q "shape_enabled $product" create-secrets.sh; then
-    red "FAIL - create-secrets.sh never gates the config-sync LKG key on the $product shape"
-    exit 1
-  fi
-done
-if ! grep -q 'ensure_config_sync_lkg_key' create-secrets.sh; then
-  red "FAIL - create-secrets.sh never creates CONFIG_SYNC_LKG_KEY"
-  exit 1
-fi
-if ! grep -q 'openssl rand -base64 32' create-secrets.sh; then
-  red "FAIL - create-secrets.sh config-sync LKG key must be 32 bytes to match randBytes 32"
-  exit 1
-fi
-LKG_DEFAULT_NAMES="$(grep -c -e 'agentgateway-config-sync' -e 'trustguard-config-sync' create-secrets.sh || true)"
-if [ "${LKG_DEFAULT_NAMES:-0}" -lt 2 ]; then
-  red "FAIL - create-secrets.sh must default to the documented config-sync Secret names"
-  exit 1
-fi
-green "ok  - create-secrets.sh creates a 32-byte CONFIG_SYNC_LKG_KEY for both data planes"
+green "ok  - create-secrets.sh (hybrid): 32-byte LKG keys generated, console tokens left to the operator"
 
 # ---------------------------------------------------------------------------
 # AlertEngine ClickHouse DB, firewall REDIS_URL,

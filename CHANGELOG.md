@@ -4,6 +4,32 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Changed
+
+- **`create-secrets.sh` produces every Secret a pre-provisioned install reads,
+  from the chart itself.** It renders the chart with your values to find the
+  Secrets and keys your workloads reference under
+  `preserveExistingSecrets: true`, and generates each value the chart would
+  have: passwords, signing keys, the config-sync TLS material, connection
+  strings. `print` writes them as Secret manifests or JSON, for review or a
+  vault; `apply` creates missing Secrets and keys and never changes an existing
+  value. This is the stable path for ArgoCD and Flux, which render with
+  `helm template` and so cannot reuse a generated value. The old script kept its
+  own list, which had drifted from the chart, and missed keys the workloads
+  read. **The interface changed:** it takes a command (`print` or `apply`) and
+  your values files, and values only you know are passed with
+  `--secret NAME/KEY=VALUE` instead of environment variables. Needs helm, yq v4
+  and openssl; runs on macOS, Linux, and Windows (Git Bash or WSL).
+
+### Fixed
+
+- **Every ClickHouse and PostgreSQL wait container pulls the same image as the
+  server it waits for.** The `wait-for-clickhouse` initContainer pinned
+  `clickhouse-server:26.7` while ClickHouse ran 26.9, because the image bump
+  could not update it, so an install mirroring images into a private registry
+  had to mirror both tags. `wait-for-postgresql` now follows
+  `global.postgresql.image`, the image the in-cluster PostgreSQL runs.
+
 ## [v3.6.3] — 2026-10-27
 
 ### Fixed

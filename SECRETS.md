@@ -75,9 +75,10 @@ Two failure modes are worth knowing because neither points at the Secret:
   `POST /v1/admin/credentials` with HTTP 501 `"not implemented"` and the console
   private-gateway wizard fails *after* creating the gateway row.
 
-`./create-secrets.sh` with `DEPLOYMENT_MODE=saas` writes all five correctly,
-including the alias. Remote data planes are ordinary hybrid installs and need
-the hybrid Secrets above, with their tokens issued by **your** console.
+Leave them to the chart: saas mode refuses `preserveExistingSecrets`, so
+`create-secrets.sh` does not cover it. Remote data planes are ordinary hybrid
+installs and need the hybrid Secrets above, with their tokens issued by **your**
+console.
 
 ## Quick start
 
@@ -126,32 +127,57 @@ agentgateway:
 
 ### Pre-create secrets with the script
 
-For environments that require secrets before deployment:
+`create-secrets.sh` creates, or prints, every Secret an install reads when the
+chart does not create its own: the stable way to install with ArgoCD or Flux,
+which render with `helm template` and so cannot reuse a generated value, and the
+way to keep credentials in a vault. It renders the chart with your values to find
+exactly which Secrets and keys your workloads read, and generates each value the
+chart would have generated: passwords, signing keys, TLS material, connection
+strings.
 
 ```bash
-# Interactive
-./create-secrets.sh --namespace neuraltrust
+# Review, or load into a vault: Secret manifests, or {"secret": {"KEY": "value"}}
+./create-secrets.sh print -f my-values.yaml > secrets.yaml
+./create-secrets.sh print -f my-values.yaml -o json
 
-# With environment variables
-export DATA_PLANE_JWT_SECRET="your-secret"
-export CONTROL_PLANE_JWT_SECRET="your-secret"
-./create-secrets.sh --namespace neuraltrust
+# Create them in the cluster: missing Secrets and keys only, never an existing value
+./create-secrets.sh apply -f my-values.yaml --namespace neuraltrust
 
-# Script options
-./create-secrets.sh --replace-existing      # replace without asking
-./create-secrets.sh --no-replace-existing   # skip existing without asking
-
-# Shape the shared Secret (defaults: external, all products on)
-export DEPLOYMENT_MODE=hybrid
-export ENABLE_TRUSTGATE=true ENABLE_TRUSTGUARD=true ENABLE_DATAPLANE=false
+# A value only you know, or your own instead of a generated one; @path reads a file
+./create-secrets.sh apply -f my-values.yaml \
+  --secret onprem-superadmin/ONPREM_SUPERADMIN_EMAIL=admin@example.com \
+  --secret onprem-superadmin/ONPREM_SUPERADMIN_PASSWORD=@admin-password.txt
 ```
 
-The script writes the canonical `POSTGRES_*` family (including `POSTGRES_SSLMODE`,
-`POSTGRES_LOGIN`, `POSTGRES_AUTH_MODE`, `POSTGRES_CONNECTION_TYPE`) and the shared
-`platform-secrets` keys for the shapes you select. It does **not** compose
-`SENSIBLE_PG_DSN` or store the retired `DATABASE_URL`. Set
-`global.preserveExistingSecrets: true` (or `autoGenerateSecrets: false`) when Helm
-must leave those Secrets alone.
+Then install with:
+
+```yaml
+global:
+  autoGenerateSecrets: false
+  preserveExistingSecrets: true
+```
+
+- Pass the values files and `--set` flags you install with, and the same
+  namespace: the config-sync certificates are issued for services in it.
+- Values only you can supply print as `REPLACE_ME`, are left out by `apply`, and
+  are listed at the end: the console administrator, the NeuralTrust firewall key,
+  console-issued tokens, the passwords of a database you manage. Optional
+  integrations (OpenAI, Google, Resend, Hugging Face) are listed, not emitted.
+- Credentials two services share come from the same registry as
+  `platform-secrets`, so pairs that must match, such as `AUTH_SECRET` and
+  `NEXTAUTH_SECRET`, do.
+- Secrets that the chart's hook Jobs mint in the cluster (the AgentGateway
+  machine-credential pair, the MCP OAuth signing key) are left to the hook. Image
+  pull Secrets are yours.
+- The chart must render with your values and `preserveExistingSecrets: true`, or
+  the script prints the chart's error. In hybrid that needs
+  `global.postgresql.existingSecret.name` set, because the DataAgent readiness
+  check otherwise reads the cluster. saas mode refuses the flag.
+- It renders the chart next to it by default; `--chart oci://… --version X`
+  renders a published one. Needs bash 3.2 or later, helm 3.8+, yq v4
+  ([mikefarah/yq](https://github.com/mikefarah/yq)), openssl, and kubectl for
+  `apply`. Runs on macOS, Linux, and Windows (Git Bash or WSL).
+- `./create-secrets.sh --help` lists every option.
 
 ### Pre-existing secrets (external management)
 
@@ -477,7 +503,7 @@ Created only when explicitly enabled. None are auto-generated — operators brin
 
 | Kubernetes Secret | Key | Required | Description |
 |---|---|---|---|
-| `neuraltrust-observability-token` | `token` | When the umbrella OTel collector needs hosted export (`global.observability.hostedExport.enabled`, default true) | Bearer token for `collector.neuraltrust.ai`. **Never auto-generated randomly.** Supply via `global.observability.hostedExport.auth.tokenValue`, pre-create with `./create-secrets.sh` (`OBSERVABILITY_TOKEN` env), or let Helm preserve an existing Secret via `lookup` on upgrade. Without it, hosted OTLP export is omitted. Watchdog customer installs use ClickStack instead (see Hybrid / External ClickStack rows); an explicit `false` on `hostedExport.enabled` is honoured (Sprig `default` must not treat boolean false as unset). |
+| `neuraltrust-observability-token` | `token` | When the umbrella OTel collector needs hosted export (`global.observability.hostedExport.enabled`, default true) | Bearer token for `collector.neuraltrust.ai`. **Never auto-generated randomly.** Supply via `global.observability.hostedExport.auth.tokenValue`, pre-create it (`./create-secrets.sh --secret neuraltrust-observability-token/token=<token>`), or let Helm preserve an existing Secret via `lookup` on upgrade. Without it, hosted OTLP export is omitted. Watchdog customer installs use ClickStack instead (see Hybrid / External ClickStack rows); an explicit `false` on `hostedExport.enabled` is honoured (Sprig `default` must not treat boolean false as unset). |
 
 ### Firewall
 
@@ -541,38 +567,6 @@ data-plane-api:
 > this document recommended that form; it never applied to the shared Secret and
 > the one template that honoured it has been removed.
 
-## Environment variables for the script
-
-All secrets can be provided via environment variables:
-
-```bash
-# Data Plane
-export DATA_PLANE_JWT_SECRET="your-secret"
-export DATA_PLANE_REDIS_URL="redis://user:pass@host:6379/0"  # optional; requires global.preserveExistingSecrets=true
-export OPENAI_API_KEY="sk-..."
-export GOOGLE_API_KEY="your-key"
-export RESEND_API_KEY="your-key"
-export HUGGINGFACE_TOKEN="your-token"
-
-# Control Plane
-export CONTROL_PLANE_JWT_SECRET="your-secret"
-export FIREWALL_JWT_SECRET="your-secret"
-export MODEL_SCANNER_SECRET="your-secret"
-
-# Infrastructure
-export CLICKHOUSE_PASSWORD="your-password"
-export POSTGRES_HOST="postgres.example.com"
-export POSTGRES_PORT="5432"
-export POSTGRES_USER="postgres"
-export POSTGRES_PASSWORD="your-password"
-export POSTGRES_DB="neuraltrust"
-
-# Hosted observability (hosted OTLP export)
-export OBSERVABILITY_TOKEN="your-customer-token"
-
-./create-secrets.sh --namespace neuraltrust
-```
-
 ## Full secret catalog
 
 Every Secret and key the chart knows about, in one table. All of them follow the
@@ -592,7 +586,7 @@ same name in both places.
 | Secret | Kubernetes Secret | Key | Notes |
 |---|---|---|---|
 | AgentGateway server key | `agentgateway-secrets` | `SERVER_SECRET_KEY` | auto-generated |
-| AgentGateway MCP STS signing | `agentgateway-secrets` | `STS_SIGNING_KEY` | auto-generated RSA PKCS#1 private key (RS256), lookup-preserved so MCP tokens survive upgrades; use `create-secrets.sh` to validate and pre-provision an explicit PEM/base64-PEM key |
+| AgentGateway MCP STS signing | `agentgateway-secrets` | `STS_SIGNING_KEY` | auto-generated RSA PKCS#1 private key (RS256), lookup-preserved so MCP tokens survive upgrades; pre-provisioned installs get one generated by `create-secrets.sh`, or pass your own PEM with `--secret agentgateway-secrets/STS_SIGNING_KEY=@key.pem` |
 | AgentGateway DB password | `agentgateway-secrets` | `DB_PASSWORD` | **External only** — auto-generated (app reads `DB_PASSWORD`, not `DATABASE_PASSWORD`); **omitted when `agentgateway.database.iamAuth=true`**. In **hybrid** the password comes from the shared `postgresql-secrets` (see below). |
 | AgentGateway raw-telemetry Postgres | `postgresql-secrets` → `DB_*` env | (discrete parts) | **Hybrid only** — the telemetry exporter falls back to the service `DatabaseConfig` (`DB_HOST` / `DB_PASSWORD` / …) when no `dsn_env` is set (RUN-1086). `SENSIBLE_PG_DSN` is no longer written or injected. |
 | TrustGuard admin JWT | `trustguard-secrets` | `ADMIN_JWT_SECRET` | auto-generated |
@@ -614,7 +608,7 @@ same name in both places.
 | DataCore / AlertEngine / clickstack / data-plane-api ClickHouse password | `clickhouse` | `admin-password` | **shared** — all read `CLICKHOUSE_PASSWORD` from the in-cluster `clickhouse` secret via `clickhouse.existingSecret` (`dataPlane.components.clickhouse.existingSecret` for data-plane-api; no per-service key). External ClickHouse: point `existingSecret.name`/`key` at your secret. |
 | Hybrid ClickStack OTLP | primary DataAgent enrolment Secret + in-memory access JWT | `ENROLMENT_TOKEN` (egress exchanges at DataCore) | **Hybrid — mandatory when TrustGate and/or TrustGuard enabled.** No direct bearer on apps (or watchdog). Local `clickstack-egress-collector` on the primary DataAgent exchanges enrolment for a short-lived OTLP JWT. Requires per-product `*.dataagent.enrolment`. data-plane-only hybrid skips this (watchdog then has no default OTLP endpoint). Air-gapped / local-only product telemetry → `global.deploymentMode: external`. |
 | Hybrid config-sync token (TrustGate / TrustGuard) | operator Secrets (e.g. `agentgateway-config-sync`, `trustguard-config-sync`) | `CONFIG_SYNC_TOKEN` | **On by default in hybrid** (mode-derived) for each enabled product. Never auto-generated — the console issues it and the control plane verifies it. Prefer `agentgateway.configSync.existingSecret` / `trustguard.configSync.existingSecret`; do not restate `enabled: true`. Set `configSync.enabled: false` only for Postgres-managed configuration. **Scoped to the control plane you dial:** NeuralTrust hosted → same `global.saasRegion` (EU token ≠ US); customer `saas` → that console. |
-| Config-sync LKG cache key (TrustGate / TrustGuard) | `agentgateway-secrets`, `trustguard-secrets` | `CONFIG_SYNC_LKG_KEY` | **Auto-generated** (32 random bytes) **while the chart owns the service Secret** — that is, `global.autoGenerateSecrets: true` and `global.preserveExistingSecrets: false`, the default. Reused across upgrades via `lookup`, delivered through `envFrom`. It encrypts only the local last-known-good snapshot file, which lives on an `emptyDir` and is discarded on restart anyway; the runtimes use it purely as the AES-256-GCM key for that file. Override with `configSync.lkgKey`. Putting the key in your `configSync.existingSecret` has no effect on this path: the chart deliberately does not consult the cluster to discover it, because a `lookup`-dependent reference renders differently under `helm upgrade` than under `helm template` or ArgoCD.<br><br>**Under `autoGenerateSecrets: false` or `preserveExistingSecrets: true` the chart owns no Secret to generate it into, so you must add `CONFIG_SYNC_LKG_KEY` (base64, decoding to exactly 32 bytes) to your `configSync.existingSecret` yourself.** The data planes refuse to start without it. `create-secrets.sh` writes it for you — it generates the key into `agentgateway-config-sync` / `trustguard-config-sync` (override with `CONFIG_SYNC_SECRET_TRUSTGATE` / `CONFIG_SYNC_SECRET_TRUSTGUARD`), so point `configSync.existingSecret.name` at the same Secret and add your console-issued `CONFIG_SYNC_TOKEN` to it. |
+| Config-sync LKG cache key (TrustGate / TrustGuard) | `agentgateway-secrets`, `trustguard-secrets` | `CONFIG_SYNC_LKG_KEY` | **Auto-generated** (32 random bytes) **while the chart owns the service Secret** — that is, `global.autoGenerateSecrets: true` and `global.preserveExistingSecrets: false`, the default. Reused across upgrades via `lookup`, delivered through `envFrom`. It encrypts only the local last-known-good snapshot file, which lives on an `emptyDir` and is discarded on restart anyway; the runtimes use it purely as the AES-256-GCM key for that file. Override with `configSync.lkgKey`. Putting the key in your `configSync.existingSecret` has no effect on this path: the chart deliberately does not consult the cluster to discover it, because a `lookup`-dependent reference renders differently under `helm upgrade` than under `helm template` or ArgoCD.<br><br>**Under `autoGenerateSecrets: false` or `preserveExistingSecrets: true` the chart owns no Secret to generate it into, so you must add `CONFIG_SYNC_LKG_KEY` (base64, decoding to exactly 32 bytes) to your `configSync.existingSecret` yourself.** The data planes refuse to start without it. `create-secrets.sh` writes it for you into whichever Secret `configSync.existingSecret.name` names, and lists the console-issued `CONFIG_SYNC_TOKEN` that goes next to it as a value only you can supply. |
 | External config-sync gRPC TLS (TrustGate / TrustGuard) | `agentgateway-configsync-tls`, `trustguard-configsync-tls` | `tls.crt`, `tls.key`, `ca.crt` | **Chart-generated infrastructure — nothing for you to create, and their presence does not mean config-sync is enabled.** The control plane always starts the config-sync gRPC *server*; whether data planes *dial* it is a separate switch that external leaves off (configuration comes from PostgreSQL). See [README-EXTERNAL.md](./README-EXTERNAL.md) for the two-halves explanation. **External only, and only under a deployed `config.appEnv`** (`prod`/`production`/`staging`/`stage`). Auto-generated self-signed CA + server certificate; the control plane serves it, the data planes verify against the CA. Never rotated (`lookup` + `resource-policy: keep`). Bring your own with `configSync.grpcTls.existingSecret` (`kubernetes.io/tls`, must include `ca.crt`); setting `autoGenerate: false` without one is rejected at render, because the control plane cannot start without a keypair. |
 | External ClickStack OTLP token | `clickstack-collector-secrets` | `OTLP_AUTH_TOKEN`, `OTEL_EXPORTER_OTLP_HEADERS` | **External only** — auto-generated (or `clickstack-otel-collector.otlpAuthToken`). `OTLP_AUTH_TOKEN` is what the collector enforces; `OTEL_EXPORTER_OTLP_HEADERS` is `authorization=<same token>` and is mounted on TrustGuard / AgentGateway / watchdog via `secretKeyRef`. |
 | Control-plane app auth | `control-plane-secrets` | `AUTH_SECRET` / `NEXTAUTH_SECRET` | one generated or reused value exposed under both aliases |
@@ -1109,11 +1103,9 @@ If the same value appears on both sides, something is wrong. Pinning one half
 without the other fails the render rather than shipping a signer TrustGate
 cannot verify.
 
-`create-secrets.sh` derives the public half for you. Answer yes to the
-AgentGateway machine-credential prompt with `AGENTGATEWAY_M2M_PRIVATE_KEY` set —
-as a raw PEM, a base64 PEM, or an `\n`-escaped one — and it prints the exact
-`global.agentgatewayM2m.publicKeys` line to paste. With no private key set it
-says so and leaves the pair to the hook Job.
+To pin a pair of your own, derive the public half from the private key with
+`openssl rsa -in m2m.key -pubout`. `create-secrets.sh` leaves the pair to the hook
+Job.
 
 Rotation is the only case that needs a `kid`: set TrustGate `publicKeys` to a
 JSON array of `{kid,pem}` holding both keys, switch the app to the new private

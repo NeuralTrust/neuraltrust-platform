@@ -72,6 +72,12 @@ spec:
         {{- $pgWaitImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/postgres" }}
         {{- $pgWaitImageTag := "17.11-alpine" }}
         {{- $pgWaitPullPolicy := "IfNotPresent" }}
+        {{- /* Same image as the in-cluster PostgreSQL it waits for (global.postgresql.image); the local key still wins. */}}
+        {{- $pgGlobalImage := dict }}
+        {{- if and .Values.global .Values.global.postgresql .Values.global.postgresql.image }}{{- $pgGlobalImage = .Values.global.postgresql.image }}{{- end }}
+        {{- if $pgGlobalImage.repository }}{{- $pgWaitImageRepo = $pgGlobalImage.repository }}{{- end }}
+        {{- if $pgGlobalImage.tag }}{{- $pgWaitImageTag = $pgGlobalImage.tag }}{{- end }}
+        {{- if $pgGlobalImage.pullPolicy }}{{- $pgWaitPullPolicy = $pgGlobalImage.pullPolicy }}{{- end }}
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.postgresql .Values.controlPlane.components.postgresql.image }}
           {{- if .Values.controlPlane.components.postgresql.image.repository }}{{- $pgWaitImageRepo = .Values.controlPlane.components.postgresql.image.repository }}{{- end }}
           {{- if .Values.controlPlane.components.postgresql.image.tag }}{{- $pgWaitImageTag = .Values.controlPlane.components.postgresql.image.tag }}{{- end }}

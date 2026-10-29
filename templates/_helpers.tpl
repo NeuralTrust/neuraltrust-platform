@@ -4505,9 +4505,12 @@ wrong or unreachable endpoint fails with a readable message instead of hanging a
 rollout forever — the failure mode the issue explicitly asked to avoid.
 
 Image follows the wait-for-postgresql precedent in control-plane-api: a pinned,
-mirrored image resolved through the shared registry helper. It is the same
-clickhouse-server image the release already pulls when the subchart is deployed, so
-IfNotPresent makes it free there.
+mirrored image resolved through the shared registry helper. It must stay the same
+clickhouse-server tag as `clickhouse.image.tag`, so an operator mirroring images for
+a private registry copies one tag and IfNotPresent makes the wait free. The tag is a
+chWaitTag variable assignment so scripts/bump-images.sh and the bump-images
+workflow rewrite it together with `clickhouse.image.tag`; an inline literal is
+invisible to both and drifts.
 
 Usage:
   {{- include "neuraltrust-platform.clickhouse.waitInit" (dict "host" "clickhouse" "port" 9000 "global" .Values.global) | nindent 6 }}
@@ -4515,9 +4518,10 @@ Usage:
 {{- define "neuraltrust-platform.clickhouse.waitInit" -}}
 {{- $host := .host | toString -}}
 {{- $port := .port | toString -}}
+{{- $chWaitTag := "26.9" -}}
 {{- if and $host $port -}}
 - name: wait-for-clickhouse
-  image: {{ include "neuraltrust-platform.image" (dict "repository" "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickhouse-server" "tag" "26.7" "global" .global) | quote }}
+  image: {{ include "neuraltrust-platform.image" (dict "repository" "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickhouse-server" "tag" $chWaitTag "global" .global) | quote }}
   imagePullPolicy: IfNotPresent
   command:
     - /bin/bash

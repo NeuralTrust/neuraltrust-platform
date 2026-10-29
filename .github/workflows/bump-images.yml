@@ -480,6 +480,12 @@ jobs:
           fi
           update_template_tag "charts/data-plane-api/templates/api/deployment.yaml" "chMigrationTag" "$TAG"
           if [[ "$TEMPLATE_TAG_CHANGED" == "1" ]]; then BUMP_DATA_PLANE_API=true; fi
+          # wait-for-clickhouse initContainer (datacore, alertengine, collector).
+          # Parent template, so no subchart bump; same tag or mirrors pull two.
+          update_template_tag "templates/_helpers.tpl" "chWaitTag" "$TAG"
+          if [[ "$TEMPLATE_TAG_CHANGED" == "1" ]]; then
+            CHANGES+=("clickhouse-server (wait-for-clickhouse fallback): → ${TAG}")
+          fi
 
           # =============================================
           # 9. Infrastructure: opentelemetry-collector-contrib
