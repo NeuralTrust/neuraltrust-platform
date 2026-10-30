@@ -29,7 +29,7 @@ blue()  { printf '\033[34m%s\033[0m\n' "$*"; }
 helm dependency build "$CHART_DIR" >/dev/null 2>&1 \
   || helm dependency update "$CHART_DIR" >/dev/null
 
-# Same render setup as scripts/test-helm-render.sh: hybrid needs the per-product
+# Same render setup as scripts/helm-render-tests/lib.sh: hybrid needs the per-product
 # DataAgent enrolment Secret refs, and product slices start with every product off.
 ENROLMENT_ARGS=(
   --set agentgateway.dataagent.enrolment.existingSecret.name=dataagent-enrolment-trustgate

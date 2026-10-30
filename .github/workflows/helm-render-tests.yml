@@ -9,6 +9,7 @@ on:
       - "templates/**"
       - "charts/**"
       - "scripts/test-helm-render.sh"
+      - "scripts/helm-render-tests/**"
       - "scripts/test-sizing-doc.sh"
       - "docs/sizing.md"
       - ".github/workflows/helm-render-tests.yml"
