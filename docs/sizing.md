@@ -58,11 +58,11 @@ the cluster. Values are rounded up to whole vCPU and GiB.
 
 | Scenario | Firewall on CPU | Firewall on GPU: CPU pool | Firewall on GPU: GPU pool |
 |---|---|---|---|
-| Hybrid, all products (`values-required.yaml`) | 13 vCPU / 37 GiB | 6 vCPU / 15 GiB | 7 vCPU / 28 GiB, 7 GPU shares |
-| Hybrid, TrustGuard only | 9 vCPU / 25 GiB | 3 vCPU / 6 GiB | 6 vCPU / 24 GiB, 6 GPU shares |
+| Hybrid, all products (`values-required.yaml`) | 13 vCPU / 36 GiB | 6 vCPU / 15 GiB | 7 vCPU / 28 GiB, 7 GPU shares |
+| Hybrid, TrustGuard only | 9 vCPU / 24 GiB | 3 vCPU / 6 GiB | 6 vCPU / 24 GiB, 6 GPU shares |
 | Hybrid, TrustGate only | 3 vCPU / 6 GiB | — | — |
-| External (`values-external.yaml.example`) | 18 vCPU / 46 GiB | 11 vCPU / 24 GiB | 7 vCPU / 28 GiB, 7 GPU shares |
-| SaaS (central control plane) | 19 vCPU / 47 GiB | 12 vCPU / 25 GiB | 7 vCPU / 28 GiB, 7 GPU shares |
+| External (`values-external.yaml.example`) | 18 vCPU / 45 GiB | 11 vCPU / 24 GiB | 7 vCPU / 28 GiB, 7 GPU shares |
+| SaaS (central control plane) | 19 vCPU / 46 GiB | 12 vCPU / 25 GiB | 7 vCPU / 28 GiB, 7 GPU shares |
 
 - **Managed PostgreSQL and Redis** lower memory requests by 2 GiB.
 - **SaaS** is External plus two DataBridge and two ingest-gateway replicas.
