@@ -44,7 +44,7 @@ firewall:
     replicas: 1
     # CPU-worker default: one HF transformer (~86M-class) per pod via ONNX.
     # 3Gi/4Gi gives ONNX runtime headroom under concurrent requests. The heavier
-    # prompt-moderation worker (e5-base embedder + 13 LightGBM) overrides this below.
+    # topic-guard worker overrides this below.
     resources:
       limits:
         cpu: "2"
@@ -92,25 +92,14 @@ firewall:
     prompt-jailbreak:
       enabled: true
       module: src.workers.prompt_jailbreak.app:app
-      extraEnv: []
-      extraEnvFrom: []
-    prompt-moderation:
-      enabled: true
-      module: src.workers.prompt_moderation.app:app
-      # Heaviest CPU worker: loads intfloat/multilingual-e5-base embedder + 13
-      # LightGBM classifiers. Override workerDefaults with a larger floor.
-      resources:
-        requests:
-          cpu: "1"
-          memory: 4Gi
-        limits:
-          cpu: "2"
-          memory: 6Gi
-      extraEnv: []
-      extraEnvFrom: []
-    response-jailbreak:
-      enabled: true
-      module: src.workers.response_jailbreak.app:app
+      # Two replicas: TrustGuard's prompt guard calls this on every request.
+      # A worker's autoscaling block replaces workerDefaults.autoscaling whole.
+      replicas: 2
+      autoscaling:
+        enabled: false
+        minReplicas: 2
+        maxReplicas: 3
+        targetCPUUtilizationPercentage: 80
       extraEnv: []
       extraEnvFrom: []
     # Scores prompt complexity for TrustGate's smart-routing load balancer, which
@@ -133,6 +122,14 @@ firewall:
     topic-guard:
       enabled: true
       module: src.workers.topic_guard.app:app
+      # Two replicas: TrustGuard topic policies call this on every request.
+      # A worker's autoscaling block replaces workerDefaults.autoscaling whole.
+      replicas: 2
+      autoscaling:
+        enabled: false
+        minReplicas: 2
+        maxReplicas: 3
+        targetCPUUtilizationPercentage: 80
       # ONNX weights are ~1.15Gi and ONNX Runtime plus the tokenizer peak past the
       # 4Gi workerDefaults limit under load, so this worker gets the same 5Gi
       # ceiling the prod overlay gives it. A worker's `resources` merges over
@@ -146,6 +143,30 @@ firewall:
           memory: 5Gi
       extraEnv: []
       extraEnvFrom: []
+  # --- Redis cache ---
+  # Recommended: backs the firewall's model-score caches with Redis so every
+  # replica shares what any of them computed. Optional, the firewall works
+  # without it. Host, port, username, password and tls follow global.redis.
+  # Off on its own when no Redis exists (global.redis.deploy=false and no
+  # global.redis.host) or the Redis is a cluster (global.redis.cluster).
+  redis:
+    enabled: true
+    # Keys are prefixed "fw:", so sharing db 0 with the other services is safe.
+    db: "0"
+    # Token login instead of a password, for a managed Redis (global.redis.deploy=false):
+    #   ""     password (global.redis.password), or GCP Memorystore IAM through
+    #          global.redis.authMode=iam + global.gcpIdentity
+    #   aws    ElastiCache IAM. The pod signs with its IRSA / Pod Identity role
+    #          (global.irsa or serviceAccount.annotations), which needs
+    #          elasticache:Connect on the replication group and the user.
+    #   azure  Entra ID, from global.azureIdentity (workload identity, managed
+    #          identity or service principal). Give the identity a data access
+    #          policy on the cache.
+    # IAM logins always use TLS.
+    login: ""
+    iamUser: ""       # aws: the ElastiCache IAM user ID (REDIS_USERNAME)
+    iamCacheName: ""  # aws: the replication group ID (REDIS_CACHE_NAME)
+    iamRegion: ""     # aws: AWS_REGION; IRSA usually sets it
   # --- ServiceAccount ---
   serviceAccount:
     create: true

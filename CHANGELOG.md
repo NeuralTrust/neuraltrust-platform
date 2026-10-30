@@ -4,6 +4,38 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Changed
+
+- **The firewall caches model scores in the shared Redis.** It now reads
+  `FIREWALL_CACHE_REDIS` and discrete `REDIS_*` variables instead of
+  `REDIS_URL`, so the chart writes `REDIS_HOST`, `REDIS_PORT`, `REDIS_DB` and,
+  when set, `REDIS_USERNAME` / `REDIS_TLS` from `global.redis` into
+  `firewall-config`. The password moves from a `REDIS_URL` key to
+  `REDIS_PASSWORD` in `firewall-secrets`.
+
+  IAM logins are supported for all three clouds. GCP Memorystore follows
+  `global.redis.authMode=iam` (`REDIS_LOGIN=gcp`). AWS ElastiCache and Azure
+  use the new `firewall.firewall.redis.login` (`aws` or `azure`), with
+  `iamUser` / `iamCacheName` / `iamRegion` for AWS and `global.azureIdentity`
+  for Azure. A login that cannot work (no managed host, missing IAM user or
+  cache name, no Azure identity) fails the render.
+
+  The cache is on by default and optional. A firewall pod with `REDIS_HOST` set
+  exits when it cannot reach Redis at startup, so the chart leaves the cache off
+  when no Redis exists (`global.redis.deploy=false` with no host) or the Redis
+  is a cluster. Opt out with `firewall.firewall.redis.enabled=false`.
+
+- **`topic-guard` and `prompt-jailbreak` run two replicas by default**
+  (`autoscaling.minReplicas: 2`, `maxReplicas: 3`).
+
+### Removed
+
+- **The `prompt-moderation` and `response-jailbreak` firewall workers.** The
+  firewall image no longer has them. Their Deployments, Services and
+  `*_WORKER_URL` entries are gone. A custom values file that still sets
+  `enabled: true` and a `module` for either one would deploy a worker that
+  crash-loops, so remove those entries before upgrading.
+
 ## [v3.7.1] — 2026-10-29
 
 ### Fixed

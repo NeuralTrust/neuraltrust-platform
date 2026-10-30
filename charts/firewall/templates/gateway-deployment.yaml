@@ -22,8 +22,15 @@ spec:
     metadata:
       labels:
         {{- include "firewall.gateway.labels" . | nindent 8 }}
+        {{- /* Pod-only: the Azure Workload Identity marker. The firewall uses
+               an Azure identity only for REDIS_LOGIN=azure. */}}
+        {{- if eq (include "neuraltrust-platform.firewall.redis.login" (dict "ctx" . "fw" .Values.firewall)) "azure" }}
+        {{- with include "neuraltrust-platform.podLabels" (dict "ctx" .) }}
+        {{- . | nindent 8 }}
+        {{- end }}
+        {{- end }}
       annotations:
-        {{- /* AUT-403: envFrom is ConfigMap-only; JWT/REDIS_URL use secretKeyRef. */}}
+        {{- /* AUT-403: envFrom is ConfigMap-only; JWT/REDIS_PASSWORD use secretKeyRef. */}}
         {{- include "neuraltrust-platform.checksumAnnotations" (dict "context" . "files" (list "/configmap.yaml")) | nindent 8 }}
     spec:
       {{- if .Values.firewall.serviceAccount.create }}
@@ -89,13 +96,18 @@ spec:
                   name: firewall-secrets
                   key: HUGGINGFACE_TOKEN
                   optional: true
-            {{- if eq (include "neuraltrust-platform.firewall.redisUrl.hasPassword" .) "true" }}
-            # Password-bearing REDIS_URL lives in firewall-secrets, not the ConfigMap.
-            - name: REDIS_URL
+            {{- if include "neuraltrust-platform.firewall.redis.password" (dict "ctx" . "fw" .Values.firewall) }}
+            # The Redis password lives in firewall-secrets, not the ConfigMap.
+            - name: REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: firewall-secrets
-                  key: REDIS_URL
+                  key: REDIS_PASSWORD
+            {{- end }}
+            {{- if eq (include "neuraltrust-platform.firewall.redis.login" (dict "ctx" . "fw" .Values.firewall)) "azure" }}
+            {{- with include "neuraltrust-platform.azureIdentity.env" (dict "ctx" . "skip" .Values.firewall.gateway.extraEnv) | trim }}
+            {{- . | nindent 12 }}
+            {{- end }}
             {{- end }}
             {{- with .Values.firewall.gateway.extraEnv }}
             {{- toYaml . | nindent 12 }}
