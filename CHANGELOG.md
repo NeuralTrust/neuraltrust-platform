@@ -4,6 +4,17 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Fixed
+
+- **The firewall reads its Redis password from `global.redis.existingSecret`.**
+  Since 3.8.0 the firewall's Redis cache turned on whenever `global.redis.host`
+  was set, but the password reached it only from an inline
+  `global.redis.password`. With the password in `global.redis.existingSecret`,
+  every firewall pod connected without one and exited at startup. The gateway
+  and every worker now read `REDIS_PASSWORD` from that Secret (key
+  `global.redis.existingSecret.keys.password`, default `REDIS_PASSWORD`), as the
+  other Redis consumers do, and `firewall-secrets` no longer copies it.
+
 ## [v3.9.0] — 2026-10-30
 
 ### Removed

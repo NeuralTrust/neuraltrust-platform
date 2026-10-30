@@ -1363,12 +1363,48 @@ Usage: {{ include "neuraltrust-platform.firewall.redis.login" (dict "ctx" . "fw"
 {{- end }}
 
 {{/*
-The firewall's REDIS_PASSWORD. Lives in firewall-secrets, never the ConfigMap.
-Empty for the IAM logins, which ignore it.
+The firewall's inline REDIS_PASSWORD. Lives in firewall-secrets, never the
+ConfigMap. Empty for the IAM logins, which ignore it, and when
+global.redis.existingSecret holds the password instead.
 Usage: {{ include "neuraltrust-platform.firewall.redis.password" (dict "ctx" . "fw" .Values.firewall) }}
 */}}
 {{- define "neuraltrust-platform.firewall.redis.password" -}}
-{{- if and (eq (include "neuraltrust-platform.firewall.redis.enabled" .) "true") (not (include "neuraltrust-platform.firewall.redis.login" .)) -}}{{- include "neuraltrust-platform.redis.password" (dict "ctx" .ctx "password" "") -}}
+{{- if and (eq (include "neuraltrust-platform.firewall.redis.enabled" .) "true") (not (include "neuraltrust-platform.firewall.redis.login" .)) (not (include "neuraltrust-platform.firewall.redis.existingSecret" .)) -}}{{- include "neuraltrust-platform.redis.password" (dict "ctx" .ctx "password" "") -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+The operator Secret holding the firewall's Redis password, as
+`name: …` / `key: …` YAML: global.redis.existingSecret, the Secret every other
+Redis consumer reads it from. Empty for the IAM logins and when the cache is off.
+*/}}
+{{- define "neuraltrust-platform.firewall.redis.existingSecret" -}}
+{{- if and (eq (include "neuraltrust-platform.firewall.redis.enabled" .) "true") (not (include "neuraltrust-platform.firewall.redis.login" .)) -}}
+{{- $es := default dict (default dict (default dict .ctx.Values.global).redis).existingSecret -}}
+{{- with $es.name }}
+name: {{ . | quote }}
+key: {{ (default dict $es.keys).password | default "REDIS_PASSWORD" | quote }}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+The firewall's REDIS_PASSWORD env entry: from global.redis.existingSecret when
+the operator supplies one, else from firewall-secrets when an inline password
+is set. Nothing for the IAM logins or a Redis without a password.
+Usage: {{ include "neuraltrust-platform.firewall.redis.passwordEnv" (dict "ctx" . "fw" .Values.firewall) }}
+*/}}
+{{- define "neuraltrust-platform.firewall.redis.passwordEnv" -}}
+{{- with include "neuraltrust-platform.firewall.redis.existingSecret" . | fromYaml -}}
+{{- include "neuraltrust-platform.datastore.credentialEnv" (dict "ref" . "envName" "REDIS_PASSWORD") -}}
+{{- else -}}
+{{- if include "neuraltrust-platform.firewall.redis.password" . -}}
+- name: REDIS_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: firewall-secrets
+      key: REDIS_PASSWORD
+{{- end -}}
 {{- end -}}
 {{- end }}
 

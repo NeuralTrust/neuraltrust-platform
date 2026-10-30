@@ -70,6 +70,29 @@ for w in "firewall:gateway" "toxicity-worker:worker" "topic-guard-worker:worker"
 done
 assert_env_value "$out22" firewall gateway REDIS_PASSWORD ABSENT \
   "firewall redis: no REDIS_PASSWORD for the passwordless in-cluster Redis"
+# A password in global.redis.existingSecret reaches the firewall like every
+# other consumer. Without it the cache turns on with no password and every
+# firewall pod exits at startup.
+out22es="$TMP/scenario-firewall-redis-existing-secret.yaml"
+render_default "$out22es" --set global.deploymentMode=saas \
+  --set global.redis.deploy=false \
+  --set global.redis.host=cache.example.com \
+  --set-string global.redis.tls=true \
+  --set global.redis.existingSecret.name=my-redis
+for w in "firewall:gateway" "toxicity-worker:worker" "topic-guard-worker:worker"; do
+  IFS=: read -r workload container <<< "$w"
+  assert_env_value "$out22es" "$workload" "$container" REDIS_PASSWORD secretKeyRef:my-redis/REDIS_PASSWORD \
+    "firewall redis: $workload reads REDIS_PASSWORD from global.redis.existingSecret"
+done
+if ! ruby -ryaml -e '
+  docs = YAML.load_stream(File.read(ARGV[0])).compact
+  sec = docs.find { |d| d["kind"] == "Secret" && d.dig("metadata", "name") == "firewall-secrets" }
+  abort "firewall-secrets stores REDIS_PASSWORD" if sec && sec.fetch("data", {}).key?("REDIS_PASSWORD")
+' "$out22es"; then
+  red "FAIL: firewall-secrets copies a password global.redis.existingSecret holds"
+  exit 1
+fi
+green "ok  - firewall-secrets holds no Redis password when global.redis.existingSecret does"
 out22gcp="$TMP/scenario-firewall-redis-gcp.yaml"
 render_default "$out22gcp" "${gcp_args[@]}" --set global.redis.deploy=false \
   --set global.redis.host=10.0.0.6 --set global.redis.tls=true --set global.redis.authMode=iam
