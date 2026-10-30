@@ -44,7 +44,7 @@ on the CPU pool. The GPU pool needs:
 - The NVIDIA device plugin, with the nodes tainted `nvidia.com/gpu:NoSchedule`
   and labelled `accelerator: nvidia`, or the selector you set in the example.
 - **CUDA MPS sharing with four clients per GPU**, so that two L4 nodes can host
-  all seven workers. On GKE, set the node pool's GPU sharing strategy to `MPS`
+  all seven worker pods. On GKE, set the node pool's GPU sharing strategy to `MPS`
   with `max_shared_clients_per_gpu = 4`; on EKS, enable MPS sharing in the NVIDIA
   device plugin with four replicas. Four is the most an L4 can hold: each client
   may pin up to 6000 MB of device memory, and the L4 has 24 GB. Without sharing,
@@ -78,7 +78,7 @@ installation sustains. Measure under your own traffic before tuning.
 
 | Area | Default request / limit | Notes |
 |---|---|---|
-| Firewall CPU workers | 1 vCPU / 3 GiB each; limit 2 vCPU / 4 GiB | Seven with all products, six with TrustGuard only. `prompt-moderation` requests 4 GiB (limit 6 GiB) and `topic-guard` is limited at 5 GiB. Together they are 60 % of Hybrid's memory requests |
+| Firewall CPU workers | 1 vCPU / 3 GiB each; limit 2 vCPU / 4 GiB | Five Deployments and seven pods with all products (`topic-guard` and `prompt-jailbreak` run two replicas each); four and six with TrustGuard only, which drops `complexity`. `topic-guard` is limited at 5 GiB |
 | `data-plane-api` | 1 vCPU / 3 GiB per replica, two replicas; limit 2 vCPU / 6 GiB | Runs evaluations in-process unless `k8sJobs` is on |
 | ClickHouse (External, SaaS) | 1 vCPU / 4 GiB; limit 4 vCPU / 8 GiB | 50 GiB volume; keep headroom for analytics queries |
 | In-cluster PostgreSQL | 500m / 2 GiB | Prefer managed stores in production |

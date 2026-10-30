@@ -189,6 +189,29 @@ no Kubernetes resource when validation succeeds.
     {{- end -}}
   {{- end -}}
 {{- end -}}
+{{- /* Firewall Redis token login. A firewall pod that cannot authenticate to
+       Redis exits at startup, so a login that cannot work fails here instead. */ -}}
+{{- $fwRedis := default dict (default dict (default dict .Values.firewall).firewall).redis -}}
+{{- $fwRedisOn := true -}}
+{{- if hasKey $fwRedis "enabled" -}}{{- $fwRedisOn = $fwRedis.enabled -}}{{- end -}}
+{{- $fwLogin := $fwRedis.login | default "" | toString | trim | lower -}}
+{{- if and $fwLogin $fwRedisOn (eq (include "neuraltrust-platform.firewall.deploy" .) "true") -}}
+  {{- if not (has $fwLogin (list "aws" "azure")) -}}
+    {{- fail (printf "firewall.firewall.redis.login must be \"\", \"aws\" or \"azure\" (got %q). For GCP Memorystore IAM use global.redis.authMode=iam." $fwLogin) -}}
+  {{- end -}}
+  {{- if or (ne (include "neuraltrust-platform.redis.external" .) "true") (not $cloudRedis.host) -}}
+    {{- fail (printf "firewall.firewall.redis.login=%s describes a managed Redis: set global.redis.deploy=false and global.redis.host." $fwLogin) -}}
+  {{- end -}}
+  {{- if $cloudRedisIam -}}
+    {{- fail (printf "firewall.firewall.redis.login=%s conflicts with global.redis.authMode=iam (GCP): pick one." $fwLogin) -}}
+  {{- end -}}
+  {{- if and (eq $fwLogin "aws") (or (not $fwRedis.iamUser) (not $fwRedis.iamCacheName)) -}}
+    {{- fail "firewall.firewall.redis.login=aws needs firewall.firewall.redis.iamUser (the ElastiCache IAM user ID) and iamCacheName (the replication group ID)." -}}
+  {{- end -}}
+  {{- if and (eq $fwLogin "azure") (ne (include "neuraltrust-platform.postgres.tokenProvider" .) "azure") -}}
+    {{- fail "firewall.firewall.redis.login=azure needs global.azureIdentity.method (workload-identity, managed-identity or service-principal)." -}}
+  {{- end -}}
+{{- end -}}
 {{- if $cloudRedis.cluster -}}
   {{- $agwDb := (default dict (default dict (index .Values "agentgateway")).redis).db | default "0" | toString -}}
   {{- if ne $agwDb "0" -}}
