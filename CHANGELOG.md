@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v3.8.0] — 2026-10-30
+
 ### Changed
 
 - **The firewall caches model scores in the shared Redis.** It now reads
