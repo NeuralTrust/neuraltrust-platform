@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v3.8.1] — 2026-10-30
+
 ### Removed
 
 - **Secret keys that nothing in the install reads.** Existing installs keep
