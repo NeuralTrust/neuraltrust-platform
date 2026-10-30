@@ -88,13 +88,9 @@ spec:
                  endpoint without this token exports into a 401 that is silent on
                  both sides. Empty unless that collector is the destination. */}}
           {{- with (include "neuraltrust-platform.observability.otlpHeadersEnv" .) }}{{- . | nindent 12 }}{{- end }}
-            {{- if include "neuraltrust-platform.firewall.redis.password" (dict "ctx" . "fw" .Values.firewall) }}
-            # The Redis password lives in firewall-secrets, not the ConfigMap.
-            - name: REDIS_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: firewall-secrets
-                  key: REDIS_PASSWORD
+            {{- /* The Redis password comes from a Secret, never the ConfigMap. */}}
+            {{- with include "neuraltrust-platform.firewall.redis.passwordEnv" (dict "ctx" . "fw" .Values.firewall) }}
+            {{- . | nindent 12 }}
             {{- end }}
             {{- if eq (include "neuraltrust-platform.firewall.redis.login" (dict "ctx" . "fw" .Values.firewall)) "azure" }}
             {{- with include "neuraltrust-platform.azureIdentity.env" (dict "ctx" . "skip" .Values.firewall.gateway.extraEnv) | trim }}

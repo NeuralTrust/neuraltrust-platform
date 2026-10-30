@@ -401,6 +401,7 @@ rejected at render, since only one of the two can win.
 | `agentgateway.redis.existingSecret` | `REDIS_PASSWORD` | `REDIS_PASSWORD` |
 | `trustguard.database.existingSecret` | `DB_PASSWORD` | `DB_PASSWORD` |
 | `trustguard.redis.existingSecret` | `REDIS_PASSWORD` | `REDIS_PASSWORD` |
+| `global.redis.existingSecret` (firewall) | `REDIS_PASSWORD` | `REDIS_PASSWORD` (`keys.password`) |
 | `alertengine.database.existingSecret` | `DB_PASSWORD` | `DB_PASSWORD` |
 | `datacore.database.existingSecret` | `POSTGRES_PASSWORD` | `POSTGRES_PASSWORD` |
 | `data-plane-api.dataPlane.components.api.redis.existingSecret` | `REDIS_URL` | `REDIS_URL` |
@@ -831,8 +832,11 @@ install, missing Secrets/keys are created; later upgrades reuse them with `looku
 - **Firewall Redis cache**: on by default and recommended; the firewall works
   without it. The chart writes `FIREWALL_CACHE_REDIS`, `REDIS_HOST`,
   `REDIS_PORT`, `REDIS_DB` and, when set, `REDIS_USERNAME` / `REDIS_TLS` from
-  `global.redis` into `firewall-config`. The password goes in
-  `firewall-secrets` as `REDIS_PASSWORD`. The cache is left off when no Redis
+  `global.redis` into `firewall-config`. The password is read from
+  `global.redis.existingSecret` (key `keys.password`, default `REDIS_PASSWORD`)
+  when that is set, as every other Redis consumer reads it; an inline
+  `global.redis.password` goes in `firewall-secrets` as `REDIS_PASSWORD`. The
+  cache is left off when no Redis
   exists (`global.redis.deploy=false` with no host), and against a Redis
   Cluster, which the firewall client does not support. A firewall pod with
   `REDIS_HOST` set exits if it cannot reach Redis at startup. Opt out with
