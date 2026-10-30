@@ -126,14 +126,6 @@ spec:
                  endpoint without this token exports into a 401 that is silent on
                  both sides. Empty unless that collector is the destination. */}}
           {{- with (include "neuraltrust-platform.observability.otlpHeadersEnv" $) }}{{- . | nindent 12 }}{{- end }}
-            # Optional: models are bundled in the image at build time, so this
-            # is unset for official images. Kept for custom runtime-download builds.
-            - name: HUGGINGFACE_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: firewall-secrets
-                  key: HUGGINGFACE_TOKEN
-                  optional: true
             {{- if include "neuraltrust-platform.firewall.redis.password" (dict "ctx" $ "fw" $.Values.firewall) }}
             # The Redis password lives in firewall-secrets, not the ConfigMap.
             - name: REDIS_PASSWORD

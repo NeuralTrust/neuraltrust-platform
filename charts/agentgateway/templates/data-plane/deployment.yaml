@@ -65,6 +65,9 @@ spec:
             name: agentgateway-env-vars
         - secretRef:
             name: agentgateway-secrets
+            {{- if eq (include "neuraltrust-platform.serviceSecret.chartOwned" .) "true" }}
+            optional: true
+            {{- end }}
         {{- if eq (include "neuraltrust-platform.isHybrid" .) "true" }}
         {{- /* REDIS_HOST/REDIS_PORT/REDIS_PASSWORD come from `redis-secrets`.
                Listed last so the shared credentials win over any legacy

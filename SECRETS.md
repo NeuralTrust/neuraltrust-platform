@@ -187,7 +187,7 @@ global:
 - Values only you can supply print as `REPLACE_ME`, are left out by `apply`, and
   are listed at the end: the console administrator, the NeuralTrust firewall key,
   console-issued tokens, the passwords of a database you manage. Optional
-  integrations (OpenAI, Google, Resend, Hugging Face) are listed, not emitted.
+  integrations (OpenAI, Google, Resend) are listed, not emitted.
 - Credentials two services share come from the same registry as
   `platform-secrets`, so pairs that must match, such as
   `ENROLMENT_INTROSPECTION_TOKEN` and `DATACORE_SERVICE_TOKEN`, do.
@@ -227,11 +227,10 @@ to start without it.
 | Kubernetes Secret | Key | Required | Description |
 |---|---|---|---|
 | `data-plane-jwt-secret` | `DATA_PLANE_JWT_SECRET` | Auto-generated | JWT for Data Plane API auth |
-| `data-plane-jwt-secret` | `REDIS_URL` | Auto-generated | Evaluation-progress cache. Defaults to the in-cluster shared Redis; regenerated from `data-plane-api.dataPlane.components.api.redis.*` on every render, so pre-provisioned/`preserveExistingSecrets` setups must set this key themselves when pointing at external/ACL/IAM Redis. |
+| `data-plane-jwt-secret` | `REDIS_URL` | Only with a Redis password | Evaluation-progress cache. Composed from `data-plane-api.dataPlane.components.api.redis.*`, then `global.redis`. Stored here only when the URL carries a password; without one (the in-cluster default, or a token login) it is configuration and data-plane-api gets it as a plain value. Pre-provisioned/`preserveExistingSecrets` setups set this key themselves. |
 | `openai-secrets` | `OPENAI_API_KEY` | No | OpenAI API key |
 | `google-secrets` | `GOOGLE_API_KEY` | No | Google API key |
 | `resend-secrets` | `RESEND_API_KEY` | No | Resend email API key |
-| `huggingface-secrets` | `HUGGINGFACE_TOKEN` | No | Not needed to run the data-plane (image bundles fastText). Only forwarded to evaluation Jobs that use HF-gated models. |
 
 ### Control Plane (external mode only)
 
@@ -250,7 +249,7 @@ after first login when possible. Empty defaults leave the feature off.
 | `<your-name>` (caller-controlled) | `ONPREM_SUPERADMIN_EMAIL` / `ONPREM_SUPERADMIN_PASSWORD` (override via `emailKey` / `passwordKey`) | Only when `global.superadmin.existingSecret.name` is set | Bootstrap admin for control-plane-app. Chart does not create this Secret. |
 | `control-plane-secrets` | `CONTROL_PLANE_JWT_SECRET` | Auto-generated | JWT for Control Plane API auth |
 | `control-plane-secrets` | `FIREWALL_JWT_SECRET` | No | JWT for firewall service |
-| `control-plane-secrets` | `FIREWALL_API_URL` | Auto-populated | Firewall base URL (FQDN when firewall enabled, data-plane fallback otherwise) |
+| `control-plane-secrets` | `FIREWALL_API_URL` | No | Firewall base URL for the app. Written only when `controlPlane.secrets.firewallApiUrl` is set (a value already in the live Secret is kept); the chart does not derive it |
 | `control-plane-secrets` | `OPENAI_API_KEY` | No | OpenAI API key; written only when `controlPlane.secrets.openaiApiKey` is set (a value already in the live Secret is kept) |
 | `control-plane-secrets` | `ONPREM_SUPERADMIN_EMAIL` | No | Bootstrap admin address; only when `global.superadmin.email`/`password` are set inline |
 | `control-plane-secrets` | `ONPREM_SUPERADMIN_PASSWORD` | No | Bootstrap admin password; referenced via `secretKeyRef`, never a plain env value |
@@ -258,8 +257,8 @@ after first login when possible. Empty defaults leave the feature off.
 | `control-plane-secrets` | `SES_ACCESS_KEY_ID` | No | Static SES key, only with `global.email.provider: ses`; omit to use the pod IAM role |
 | `control-plane-secrets` | `SES_SECRET_ACCESS_KEY` | No | Static SES secret, only with `global.email.provider: ses`; omit to use the pod IAM role |
 | `control-plane-secrets` | `resend-api-key` | No | Resend API key (`global.email.resend.apiKey`, or the legacy `controlPlane.secrets.resendApiKey`), injected as `RESEND_API_KEY`; written only when set. With `global.email.existingSecret`, the app reads `RESEND_API_KEY` from that Secret instead |
-| `control-plane-secrets` | `resend-alert-sender` | No | Legacy "from" address; superseded by `global.email.from` |
-| `control-plane-secrets` | `resend-reply-to` | No | Legacy Reply-To; superseded by `global.email.replyTo` |
+| `control-plane-secrets` | `resend-alert-sender` | No | Legacy "from" address, written only when set; superseded by `global.email.from` |
+| `control-plane-secrets` | `resend-reply-to` | No | Legacy Reply-To, written only when set; superseded by `global.email.replyTo` |
 
 ### Login CAPTCHA (`TURNSTILE_SECRET_KEY`) — optional
 
@@ -516,7 +515,6 @@ External mode only — hybrid deploys no ClickHouse.
 | Kubernetes Secret | Key | Required | Description |
 |---|---|---|---|
 | `clickhouse` | `admin-password` | Auto-generated | ClickHouse admin password. Shared: DataCore, AlertEngine, the ClickStack collector, and `data-plane-api` all read it rather than keeping their own copy. |
-| `clickhouse-secrets` | `CLICKHOUSE_HOST`, `CLICKHOUSE_PORT`, `CLICKHOUSE_USER`, `CLICKHOUSE_DATABASE` | Auto-generated | Non-secret connection metadata, kept alongside the password so consumers resolve one reference. Contains no credentials. |
 
 > **`global.customCaCert`.** Mounts a corporate CA bundle for HTTP/TLS egress (LLM APIs, etc.).
 
@@ -537,7 +535,6 @@ Created when this release deploys the firewall: TrustGuard is selected
 | Kubernetes Secret | Key | Required | Description |
 |---|---|---|---|
 | `firewall-secrets` | `JWT_SECRET` | Yes | Shared with services calling the firewall |
-| `firewall-secrets` | `HUGGINGFACE_TOKEN` | No | Not needed for official images (models are baked in at build time). Only for custom runtime-download builds. |
 
 In external mode the Control Plane validates firewall tokens, so
 `control-plane-api.controlPlane.secrets.firewallJwtSecret` (`FIREWALL_JWT_SECRET`)
@@ -606,6 +603,25 @@ On names: **TrustGate** is the product; **AgentGateway** is its chart and
 Kubernetes identity, so its resources are `agentgateway-*`. TrustGuard uses the
 same name in both places.
 
+**What a Secret holds.** Only credentials. Connection settings — ClickHouse host,
+ports, user and database, a Redis URL without a password, the collector endpoint,
+the TrustGuard client id under the in-cluster generator — are configuration, set
+as plain values on each workload from `global.*` and the service's values. The one
+exception is `postgresql-secrets`, which keeps its connection keys because
+operators and DataAgent read it as a contract.
+
+A Secret the chart owns is rendered only when it has something to hold. Under the
+in-cluster generator, `alertengine-secrets`, `trustguard-secrets`,
+`agentgateway-secrets`, `datacore-secrets`, `clickstack-collector-secrets`,
+`data-plane-jwt-secret`, `control-plane-secrets`, `firewall-secrets`,
+`trustguard-client-credentials` and the DataAgent Secrets often have nothing left,
+so they are not rendered, and workloads load them with an optional `envFrom` while
+the chart owns them (it stays required under `preserveExistingSecrets` or
+`autoGenerateSecrets: false`, where you supply them). An upgraded install keeps the
+copies an earlier chart wrote, because they carry `helm.sh/resource-policy: keep`;
+nothing reads them any more, and explicit `env` entries outrank whatever an old
+`envFrom` copy still holds. You may delete them.
+
 | Secret | Kubernetes Secret | Key | Notes |
 |---|---|---|---|
 | AgentGateway server key | `agentgateway-secrets` | `SERVER_SECRET_KEY` | auto-generated |
@@ -620,7 +636,7 @@ same name in both places.
 | TrustGuard raw-telemetry Postgres | `postgresql-secrets` → `DB_*` env | (discrete parts) | Hybrid only, same as AgentGateway (RUN-1086). |
 | Shared hybrid Postgres credential | `postgresql-secrets` | `POSTGRES_*` — see [One canonical name per fact](#one-canonical-name-per-fact) | **Hybrid only** — the umbrella renders one shared Secret from `global.postgresql.*` (default `user`/`database` = `neuraltrust`), and every hybrid workload connects as that one role. Containers receive `DB_*` / `POSTGRES_*` names through explicit `env` mappings; those are **not** keys in the Secret. Set `global.postgresql.existingSecret.name` to supply your own instead — but then the chart injects it with `envFrom` and cannot rename anything, so **your keys must be `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` / `DB_SSL_MODE`** (gateways) or the canonical `POSTGRES_*` family (DataAgent). |
 | Shared hybrid Redis credential | `redis-secrets` | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` / `REDIS_USERNAME` / `REDIS_TLS` | **Hybrid only** — taken wholesale with `envFrom`, and rendered from `global.redis.*`. Empty `REDIS_PASSWORD` for the passwordless in-cluster default. Set `global.redis.existingSecret.name` to reuse a pre-created Secret. TLS is stored once as `REDIS_TLS`, which is the name TrustGuard reads; AgentGateway reads `REDIS_TLS_ENABLED` and is given that name through an explicit `env` mapping, so a supplied Secret only needs `REDIS_TLS`. |
-| Shared TrustGuard client creds | `trustguard-client-credentials` | `CLIENT_ID` / `CLIENT_SECRET` | Only when TrustGate and TrustGuard are both enabled: TrustGate is the only client. id defaults to `agentgateway-platform`; secret auto-generated (or `global.v2.trustguardClientSecret`). Injected into both AgentGateway (`TRUSTGUARD_CLIENT_ID`/`_SECRET`) and TrustGuard (`TRUSTGUARD_PLATFORM_CLIENT_ID`/`_SECRET`) so the pair matches. Setting `global.v2.trustguardClientSecret` or `trustguardClientSecretName` keeps the pair with either product alone, for a client or server outside this release. The prerelease `v2-trustguard-client-secret` values are copied during upgrade. |
+| Shared TrustGuard client creds | `trustguard-client-credentials` | `CLIENT_ID` / `CLIENT_SECRET` | Only when TrustGate and TrustGuard are both enabled: TrustGate is the only client. Under the in-cluster generator the secret comes from `neuraltrust-generated/TRUSTGUARD_CLIENT_SECRET`, the id is a plain value on both Deployments, and this Secret is not rendered. id defaults to `agentgateway-platform`; secret auto-generated (or `global.v2.trustguardClientSecret`). Injected into both AgentGateway (`TRUSTGUARD_CLIENT_ID`/`_SECRET`) and TrustGuard (`TRUSTGUARD_PLATFORM_CLIENT_ID`/`_SECRET`) so the pair matches. Setting `global.v2.trustguardClientSecret` or `trustguardClientSecretName` keeps the pair with either product alone, for a client or server outside this release. The prerelease `v2-trustguard-client-secret` values are copied during upgrade. |
 | DataAgent Postgres | `postgresql-secrets` (shared) | `POSTGRES_HOST` / `PORT` / `USER` / `PASSWORD` / `DB` / `SSLMODE` | **Hybrid** — DataAgent builds a libpq keyword connection string from these parts when `DATABASE_URL` is unset (RUN-1093). It connects as `global.postgresql.user` (default `neuraltrust`). |
 | DataAgent enrolment token | operator Secret (e.g. `dataagent-enrolment-trustgate`), or `dataagent-secrets` / `dataagent-trustguard-secrets` when supplied inline | `ENROLMENT_TOKEN` (configurable key) | **Never** auto-generated — from `agentgateway.dataagent.enrolment` / `trustguard.dataagent.enrolment`. With the preferred `existingSecret.name` path the chart-managed `dataagent-*-secrets` render empty and the token is read straight from your Secret. **Scoped to the control plane you dial:** NeuralTrust hosted → issue in the same `global.saasRegion`; customer `saas` → issue from *that* console (`global.controlPlane.domain`). |
 | AlertEngine DB password | `alertengine-secrets` | `DB_PASSWORD` | auto-generated (own `alertengine` DB; external only); **omitted when `alertengine.database.iamAuth=true`** |

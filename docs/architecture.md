@@ -297,8 +297,8 @@ per fact** — no aliases:
 
 - `postgresql-secrets` — `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`,
   `POSTGRES_PASSWORD`, `POSTGRES_DB`, `POSTGRES_SSLMODE`, `POSTGRES_LOGIN`,
-  `POSTGRES_AUTH_MODE`, and `POSTGRES_CONNECTION_TYPE`, plus one connection
-  string: hybrid adds `SENSIBLE_PG_DSN`, external adds `POSTGRES_PRISMA_URL`.
+  `POSTGRES_AUTH_MODE`, and `POSTGRES_CONNECTION_TYPE`, plus, in external, the
+  `POSTGRES_PRISMA_URL` connection string.
   Setting `global.postgresql.passwordSecret` (external only) drops both
   `POSTGRES_PASSWORD` and `POSTGRES_PRISMA_URL`, and the console assembles its
   own connection from the parts.
@@ -309,7 +309,7 @@ Stored key names and the environment variables a container sees are deliberately
 different. Workloads take `redis-secrets` wholesale with `envFrom`, but read
 PostgreSQL through explicit `env` entries so each pod receives only the variables
 it uses under the names its binary expects: the Go services get `DB_*`, and
-DataAgent gets `DATABASE_URL` from `SENSIBLE_PG_DSN`. Effective values are
+DataAgent gets the discrete `POSTGRES_*` parts. Effective values are
 identical either way — all hybrid workloads connect as the single `neuraltrust`
 role to the shared `neuraltrust` database. Do not expect `DB_*` or `DATABASE_URL`
 to exist as keys inside the chart-managed Secret.

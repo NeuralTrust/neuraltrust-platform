@@ -291,26 +291,13 @@ spec:
 
             echo "Migration $MIGRATION_HASH applied successfully."
           env:
-          - name: CLICKHOUSE_HOST
-            valueFrom:
-              secretKeyRef:
-                name: clickhouse-secrets
-                key: CLICKHOUSE_HOST
-          - name: CLICKHOUSE_USER
-            valueFrom:
-              secretKeyRef:
-                name: clickhouse-secrets
-                key: CLICKHOUSE_USER
+          {{- include "data-plane.clickhouseEnv" (dict "ctx" . "keys" (list "CLICKHOUSE_HOST" "CLICKHOUSE_USER")) | nindent 10 }}
           - name: CLICKHOUSE_PASSWORD
             valueFrom:
               secretKeyRef:
                 name: {{ $chPwSecretName | quote }}
                 key: {{ $chPwSecretKey | quote }}
-          - name: CLICKHOUSE_DATABASE
-            valueFrom:
-              secretKeyRef:
-                name: clickhouse-secrets
-                key: CLICKHOUSE_DATABASE
+          {{- include "data-plane.clickhouseEnv" (dict "ctx" . "keys" (list "CLICKHOUSE_DATABASE")) | nindent 10 }}
           {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "go" "ctx" .) | nindent 10 }}
           resources:
             {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.initContainerResources }}
@@ -450,6 +437,13 @@ spec:
             value: {{ $dpRedisBackend | quote }}
           {{- if eq $dpRedisBackend "redis" }}
           {{- $dpRedisSecret := default dict $dpRedisCfg.existingSecret }}
+          {{- /* A URL with no password is configuration: a plain value, unless the
+                 operator supplies the Secrets (preserve mode), where it has
+                 always come from data-plane-jwt-secret. */}}
+          {{- if and (not $dpRedisSecret.name) (eq (include "neuraltrust-platform.serviceSecret.chartOwned" .) "true") (ne (include "neuraltrust-platform.dataPlaneApi.redisUrlHasPassword" .) "true") }}
+          - name: REDIS_URL
+            value: {{ include "neuraltrust-platform.dataPlaneApi.redisUrl" . | quote }}
+          {{- else }}
           - name: REDIS_URL
             valueFrom:
               secretKeyRef:
@@ -462,6 +456,7 @@ spec:
                 name: {{ if and .Values.dataPlane.secrets .Values.dataPlane.secrets.dataPlaneJWTSecretName }}{{ .Values.dataPlane.secrets.dataPlaneJWTSecretName }}{{ else }}data-plane-jwt-secret{{ end }}
                 key: REDIS_URL
                 {{- end }}
+          {{- end }}
           - name: REDIS_MAX_CONNECTIONS
             value: {{ $dpRedisCfg.maxConnections | default 100 | quote }}
           - name: REDIS_MGET_CHUNK_SIZE
@@ -512,26 +507,7 @@ spec:
           # App defaults SQL_DATABASE to postgres when unset; must be explicit for ClickHouse.
           - name: SQL_DATABASE
             value: "clickhouse"
-          - name: CLICKHOUSE_HOST
-            valueFrom:
-              secretKeyRef:
-                name: clickhouse-secrets
-                key: CLICKHOUSE_HOST
-          - name: CLICKHOUSE_PORT
-            valueFrom:
-              secretKeyRef:
-                name: clickhouse-secrets
-                key: CLICKHOUSE_PORT
-          - name: CLICKHOUSE_DATABASE
-            valueFrom:
-              secretKeyRef:
-                name: clickhouse-secrets
-                key: CLICKHOUSE_DATABASE
-          - name: CLICKHOUSE_USER
-            valueFrom:
-              secretKeyRef:
-                name: clickhouse-secrets
-                key: CLICKHOUSE_USER
+          {{- include "data-plane.clickhouseEnv" (dict "ctx" . "keys" (list "CLICKHOUSE_HOST" "CLICKHOUSE_PORT" "CLICKHOUSE_DATABASE" "CLICKHOUSE_USER")) | nindent 10 }}
           - name: CLICKHOUSE_PASSWORD
             valueFrom:
               secretKeyRef:

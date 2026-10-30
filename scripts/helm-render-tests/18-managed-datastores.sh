@@ -52,13 +52,22 @@ ruby -ryaml -e '
 ' "$out17" || { red "FAIL: a service ignored the global blocks and dialed an in-cluster Service"; exit 1; }
 green "ok  - external: every service inherits the managed endpoints from the global blocks"
 
-# data-plane-api composes its cache DSN in a Secret rather than reading env.
+# data-plane-api composes its cache DSN: a plain value without a password, in
+# data-plane-jwt-secret with one. Either way it must target the managed cache.
 ruby -ryaml -rbase64 -e '
   docs = []
   YAML.load_stream(File.read(ARGV.fetch(0), encoding: "UTF-8")) { |d| docs << d if d.is_a?(Hash) }
-  s = docs.find { |d| d["kind"] == "Secret" && d.dig("metadata", "name") == "data-plane-jwt-secret" }
-  abort "data-plane-jwt-secret not rendered" if s.nil?
-  url = Base64.decode64(s.fetch("data").fetch("REDIS_URL"))
+  dp = docs.find { |d| d["kind"] == "Deployment" && d.dig("metadata", "name") == "data-plane-api" }
+  abort "data-plane-api not rendered" if dp.nil?
+  e = dp.dig("spec", "template", "spec", "containers").flat_map { |c| c["env"] || [] }.find { |x| x["name"] == "REDIS_URL" }
+  abort "data-plane-api has no REDIS_URL" if e.nil?
+  url = e["value"]
+  if url.nil?
+    ref = e.dig("valueFrom", "secretKeyRef")
+    s = docs.find { |d| d["kind"] == "Secret" && d.dig("metadata", "name") == ref["name"] }
+    abort "#{ref["name"]} not rendered" if s.nil?
+    url = Base64.decode64(s.fetch("data").fetch(ref["key"]))
+  end
   abort "REDIS_URL=#{url.inspect} does not target the managed cache" unless url.include?("cache.example.com:6380")
   abort "REDIS_URL=#{url.inspect} should use the TLS scheme" unless url.start_with?("rediss://")
 ' "$out17" || { red "FAIL: the data-plane cache DSN ignored global.redis"; exit 1; }

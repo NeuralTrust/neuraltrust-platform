@@ -88,6 +88,9 @@ spec:
         {{- if or $dataSecret.name $managedDataSecret }}
         - secretRef:
             name: {{ include "dataagent.secretName" . | quote }}
+            {{- if and $managedDataSecret (not $dataSecret.name) }}
+            optional: true
+            {{- end }}
         {{- end }}
         env:
         {{- $storeBackend := (default dict .Values.store).backend | default "" | toString | lower }}

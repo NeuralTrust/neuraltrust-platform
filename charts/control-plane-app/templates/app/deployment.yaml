@@ -685,10 +685,8 @@ spec:
                  host (app.<domain>). See control-plane.appPublicUrl helper. */}}
           value: "{{ $nextAuthUrl | default (include "control-plane.appPublicUrl" .) }}"
         - name: FIREWALL_API_URL
-          # Resolved by the parent chart (templates/platform-secrets.yaml):
-          # explicit controlPlane.components.app.config.firewallApiUrl >
-          # existing control-plane-secrets value > firewall service FQDN
-          # when TrustGuard is selected, else data-plane API.
+          # controlPlane.secrets.firewallApiUrl, written into control-plane-secrets
+          # by the parent chart only when set; the chart does not derive it.
           valueFrom:
             secretKeyRef:
               name: control-plane-secrets

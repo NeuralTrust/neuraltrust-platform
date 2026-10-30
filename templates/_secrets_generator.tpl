@@ -179,7 +179,8 @@ on every render.
 {{- define "neuraltrust-platform.trustguardClient.generated" -}}
 {{- if and
   (eq (include "neuraltrust-platform.secretsGenerator.active" .) "true")
-  (eq (include "neuraltrust-platform.trustguardClient.enabled" .) "true") -}}true{{- end -}}
+  (eq (include "neuraltrust-platform.trustguardClient.enabled" .) "true")
+  (not (default dict (default dict .Values.global).v2).trustguardClientSecretName) -}}true{{- end -}}
 {{- end }}
 
 {{/*
@@ -199,10 +200,16 @@ entries: list of dicts, each one key of the generated Secret (or one TLS Secret)
   tls       cn, sans, days, selfSigned, caCn; `secret` names the TLS Secret
 pins: key -> value. Rendered only from values, so it is identical on every render.
 
-The hook-delete policy is before-hook-creation only: under Argo a Secret or
-ConfigMap hook "succeeds" the moment it exists, so hook-succeeded could delete it
-before the Job (a later weight) reads it.
+Both are deleted once the sync succeeds (hook-succeeded), like the Job's
+ServiceAccount and Role: Helm deletes succeeded hooks only after every hook of the
+event has run, and Argo only when the whole operation has completed, so the Job (a
+later weight) always reads them first. A component the next render drops then
+leaves no spec behind for the Job to act on, and pinned values do not linger in
+the namespace. The `specLabel` marks the format: the Job ignores, and
+removes, spec objects an earlier chart left without it.
 */}}
+{{- define "neuraltrust-platform.secretsGenerator.specLabel" -}}neuraltrust.ai/generator-spec{{- end }}
+{{- define "neuraltrust-platform.secretsGenerator.specFormat" -}}2{{- end }}
 {{- define "neuraltrust-platform.secretsGenerator.specObjects" -}}
 {{- $ctx := .ctx -}}
 {{- if and (eq (include "neuraltrust-platform.secretsGenerator.active" $ctx) "true") .entries }}
@@ -215,10 +222,11 @@ metadata:
   annotations:
     helm.sh/hook: pre-install,pre-upgrade
     helm.sh/hook-weight: "-20"
-    helm.sh/hook-delete-policy: before-hook-creation
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
   labels:
     app.kubernetes.io/managed-by: {{ $ctx.Release.Service }}
     app.kubernetes.io/component: secrets-generator
+    {{ include "neuraltrust-platform.secretsGenerator.specLabel" . }}: {{ include "neuraltrust-platform.secretsGenerator.specFormat" . | quote }}
 data:
   spec.json: {{ toJson .entries | quote }}
 {{- if .pins }}
@@ -231,10 +239,11 @@ metadata:
   annotations:
     helm.sh/hook: pre-install,pre-upgrade
     helm.sh/hook-weight: "-20"
-    helm.sh/hook-delete-policy: before-hook-creation
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
   labels:
     app.kubernetes.io/managed-by: {{ $ctx.Release.Service }}
     app.kubernetes.io/component: secrets-generator
+    {{ include "neuraltrust-platform.secretsGenerator.specLabel" . }}: {{ include "neuraltrust-platform.secretsGenerator.specFormat" . | quote }}
 type: Opaque
 data:
   {{- range $k := (keys .pins | sortAlpha) }}
@@ -271,6 +280,8 @@ const base = 'https://kubernetes.default.svc:' + port + '/api/v1/namespaces/' + 
 const auth = { Authorization: 'Bearer ' + token }
 const TARGET = process.env.GENERATED_SECRET
 const COMPONENTS = (process.env.SPEC_COMPONENTS || '').split(' ').filter(Boolean)
+const SPEC_LABEL = process.env.SPEC_LABEL
+const SPEC_FORMAT = process.env.SPEC_FORMAT
 
 // Untracked on purpose: no app.kubernetes.io/instance label and no owner, so no
 // release manages, overwrites or prunes these. The Argo annotations are a second
@@ -291,6 +302,23 @@ async function get(kind, name) {
   if (res.status === 404) return null
   if (!res.ok) throw new Error('read ' + kind + '/' + name + ' failed: ' + res.status + ' ' + (await res.text()))
   return res.json()
+}
+
+async function remove(kind, name) {
+  const res = await fetch(base + '/' + kind + '/' + name, { method: 'DELETE', headers: auth })
+  if (!res.ok && res.status !== 404) throw new Error('delete ' + kind + '/' + name + ' failed: ' + res.status + ' ' + (await res.text()))
+}
+
+// A spec object this chart rendered carries the format label. One without it was
+// left by an earlier chart, for a component the current render no longer asks
+// for: acting on it would keep or create a Secret nothing reads.
+async function currentSpec(kind, name) {
+  const obj = await get(kind, name)
+  if (!obj) return null
+  if (((obj.metadata || {}).labels || {})[SPEC_LABEL] === SPEC_FORMAT) return obj
+  await remove(kind, name)
+  console.log(kind.replace(/s$/, '') + ' ' + name + ': left by an earlier chart, removed')
+  return null
 }
 
 function decode(obj) {
@@ -421,10 +449,11 @@ async function main() {
   const specs = []
   const pins = {}
   for (const c of COMPONENTS) {
-    const cm = await get('configmaps', 'neuraltrust-generator-spec-' + c)
+    const cm = await currentSpec('configmaps', 'neuraltrust-generator-spec-' + c)
+    const pinned = await currentSpec('secrets', 'neuraltrust-generator-pins-' + c)
     if (!cm) continue
     for (const e of JSON.parse(cm.data['spec.json'])) specs.push(e)
-    Object.assign(pins, decode(await get('secrets', 'neuraltrust-generator-pins-' + c)))
+    Object.assign(pins, decode(pinned))
   }
 
   const live = await get('secrets', TARGET)

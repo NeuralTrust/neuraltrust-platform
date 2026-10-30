@@ -225,3 +225,25 @@ both the API Deployment and its Jobs.
 {{- end -}}
 {{- include "data-plane.image" (dict "repository" $repo "tag" $tag "global" .Values.global) -}}
 {{- end }}
+
+{{/*
+ClickHouse connection settings, as env entries. Configuration, not credentials,
+so they are plain values resolved from values (global.clickhouse, then
+dataPlane.components.clickhouse), like every other ClickHouse consumer; the
+password comes from its own Secret. A bare service name (no dot) expands to the
+in-cluster FQDN; a dotted host (an external endpoint or an already-qualified
+FQDN) is used verbatim.
+  (dict "ctx" . "keys" (list "CLICKHOUSE_HOST" "CLICKHOUSE_USER"))
+*/}}
+{{- define "data-plane.clickhouseEnv" -}}
+{{- $ctx := .ctx -}}
+{{- $chComp := default dict (default dict (default dict $ctx.Values.dataPlane).components).clickhouse -}}
+{{- $ch := include "neuraltrust-platform.clickhouse.resolve" (dict "ctx" $ctx "local" $chComp "global" $ctx.Values.global) | fromYaml -}}
+{{- $host := $ch.host -}}
+{{- if not (contains "." $host) -}}{{- $host = printf "%s.%s.svc.cluster.local" $host $ctx.Release.Namespace -}}{{- end -}}
+{{- $values := dict "CLICKHOUSE_HOST" $host "CLICKHOUSE_PORT" ($ch.httpPort | toString) "CLICKHOUSE_DATABASE" ($chComp.database | default "neuraltrust") "CLICKHOUSE_USER" $ch.user -}}
+{{- range $k := .keys }}
+- name: {{ $k }}
+  value: {{ index $values $k | quote }}
+{{- end }}
+{{- end }}

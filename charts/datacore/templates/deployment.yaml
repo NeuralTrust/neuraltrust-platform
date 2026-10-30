@@ -88,6 +88,14 @@ spec:
             secretKeyRef:
               name: {{ $ch.secretName | quote }}
               key: {{ $ch.secretKey | quote }}
+        {{- /* Configuration, not a credential. Explicit, so it also outranks the
+               copy an older chart left in datacore-secrets. */}}
+        {{- $own := list }}
+        {{- range (default list .Values.extraEnv) }}{{- $own = append $own .name }}{{- end }}
+        {{- if not (has "CLICKHOUSE_USER" $own) }}
+        - name: CLICKHOUSE_USER
+          value: {{ $ch.user | quote }}
+        {{- end }}
         {{- with .Values.extraEnv }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

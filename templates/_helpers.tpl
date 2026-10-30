@@ -948,6 +948,30 @@ Check if autoGenerateSecrets is enabled.
 {{- end }}
 
 {{/*
+One optional key of control-plane-secrets, base64-encoded for `data`: the value
+configured in values, else the value already in the live Secret (an operator may
+have patched it in by hand, and dropping the key from the manifest would delete
+it on upgrade), else empty, which leaves the key out.
+  (dict "value" $v "existing" $liveSecret "key" "OPENAI_API_KEY")
+*/}}
+{{- define "neuraltrust-platform.controlPlaneSecret.liveOrValue" -}}
+{{- if .value -}}{{- .value | toString | b64enc -}}
+{{- else if and .existing .existing.data (index .existing.data .key) -}}{{- index .existing.data .key -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Whether the chart owns the per-service Secrets (`<service>-secrets`). It then
+renders one only when something is left to store in it, so a workload's envFrom
+of it is optional. When the operator supplies them (autoGenerateSecrets=false
+or preserveExistingSecrets) the reference stays required, so a missing Secret
+still fails loudly.
+*/}}
+{{- define "neuraltrust-platform.serviceSecret.chartOwned" -}}
+{{- if and (eq (include "neuraltrust-platform.autoGenerateSecrets" .) "true") (not (default dict .Values.global).preserveExistingSecrets) -}}true{{- end -}}
+{{- end }}
+
+{{/*
 Effective v2 service database name, keyed on deployment mode.
   - hybrid:   all services share one DB (global.postgresql.database).
   - external: each service owns its own DB (falls back to per-service default).
@@ -1891,22 +1915,24 @@ server that lives outside this release.
 {{- define "neuraltrust-platform.trustguardClientEnv" -}}
 {{- if eq (include "neuraltrust-platform.trustguardClient.enabled" .ctx) "true" }}
 {{- $secretName := include "neuraltrust-platform.trustguardClientSecretName" (dict "ctx" .ctx) }}
-- name: {{ .idVar }}
-  valueFrom:
-    secretKeyRef:
-      name: {{ $secretName }}
-      key: CLIENT_ID
-      optional: true
-{{- /* The secret half comes from the in-cluster secrets generator when it owns
-       it; the id stays in trustguard-client-credentials, where it is identical on
-       every render. */}}
+{{- /* With the in-cluster generator owning the secret half, the id is plain
+       configuration: identical on every render and always paired with a secret,
+       so it needs no Secret of its own. */}}
 {{- if eq (include "neuraltrust-platform.trustguardClient.generated" .ctx) "true" }}
+- name: {{ .idVar }}
+  value: {{ (default dict (default dict .ctx.Values.global).v2).trustguardClientId | default "agentgateway-platform" | quote }}
 - name: {{ .secretVar }}
   valueFrom:
     secretKeyRef:
       name: {{ include "neuraltrust-platform.secretsGenerator.name" .ctx | quote }}
       key: TRUSTGUARD_CLIENT_SECRET
 {{- else }}
+- name: {{ .idVar }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ $secretName }}
+      key: CLIENT_ID
+      optional: true
 - name: {{ .secretVar }}
   valueFrom:
     secretKeyRef:
@@ -2229,6 +2255,20 @@ needs this tunable. Prefer `global.postgresql.connectionLimit`, else 15.
   {{- end }}
 {{- end }}
 {{- printf "%s://%s%s:%v/%s" $scheme $authority $host $port $db -}}
+{{- end }}
+{{- end -}}
+
+{{/*
+Whether the composed data-plane-api REDIS_URL carries a password. Only then is it
+a credential that belongs in data-plane-jwt-secret; otherwise (passwordless or a
+token login) it is configuration and the Deployment sets it as a plain value.
+*/}}
+{{- define "neuraltrust-platform.dataPlaneApi.redisUrlHasPassword" -}}
+{{- if eq (include "neuraltrust-platform.dataPlaneApi.redisBackend" .) "redis" }}
+{{- $cfg := include "neuraltrust-platform.dataPlaneApi.redisConfig" . | fromYaml }}
+{{- $globalRedis := default dict (default dict .Values.global).redis }}
+{{- $iamAuth := or ($cfg.iamAuth | default false) (eq (include "neuraltrust-platform.redis.gcpIam" .) "true") }}
+{{- if and (not $iamAuth) ($cfg.password | default $globalRedis.password | default "") -}}true{{- end -}}
 {{- end }}
 {{- end -}}
 

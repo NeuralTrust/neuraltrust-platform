@@ -166,8 +166,10 @@ for w in "trustguard-control-plane:control-plane" "trustguard-data-plane:data-pl
 done
 assert_env_value "$out3d" data-plane-api api K8S_JOB_REDIS_CA_SECRET_NAME redis-ca \
   "redis CA: data-plane-api hands the CA Secret to its evaluation Jobs"
-assert_contains "$out3d" "REDIS_URL: $(printf 'rediss://10.0.0.6:6379/0' | base64)" \
+assert_env_value "$out3d" data-plane-api api REDIS_URL rediss://10.0.0.6:6379/0 \
   "redis gcp: data-plane-api's REDIS_URL carries no credential and uses TLS"
+assert_not_contains "$out3d" 'REDIS_URL: ' \
+  "redis gcp: a REDIS_URL without a credential is not stored in a Secret"
 out3d_hybrid="$TMP/scenario-hybrid-redis-cluster-iam.yaml"
 render_default "$out3d_hybrid" "${redis_args[@]}" --set global.gcpIdentity.method=workload-identity
 assert_env_value "$out3d_hybrid" agentgateway-proxy proxy REDIS_LOGIN gcp \

@@ -20,6 +20,10 @@ carries ENROLMENT_TOKEN when using shared PG.
   {{- $token = index $existingData "ENROLMENT_TOKEN" | b64dec }}
 {{- end }}
 {{- $useExplicitDb := or .Values.databaseUrl .Values.database.password }}
+{{- /* With the enrolment token in its own Secret and the shared PostgreSQL, there
+       is nothing to hold: not rendered, and the Deployment's envFrom of it is
+       optional while the chart owns it. */}}
+{{- if or $token $useExplicitDb }}
 apiVersion: v1
 kind: Secret
 metadata:
@@ -48,6 +52,7 @@ stringData:
   DATABASE_URL: {{ $dsn | quote }}
   DB_PASSWORD: {{ $dbPw | quote }}
   {{- end }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- end }}

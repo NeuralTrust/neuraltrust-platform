@@ -284,10 +284,12 @@ platformNamespace: ""
 # Connection envs sourced from existing cluster secrets.
 secretEnv:
   clickhouse:
-    # Reuse platform ClickHouse secrets (see create-secrets.sh / data-plane hook).
-    userSecret: clickhouse-secrets
+    # Empty follows the platform: the user from global.clickhouse and, in
+    # external and saas, the password from the Secret every ClickHouse consumer
+    # reads. Name a Secret here to read either from your own instead.
+    userSecret: ""
     userKey: CLICKHOUSE_USER
-    passwordSecret: clickhouse
+    passwordSecret: ""
     passwordKey: admin-password
   redis:
     passwordSecret: ""
