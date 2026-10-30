@@ -66,12 +66,40 @@ data:
   OTEL_SERVICE_NAME: {{ .Values.firewall.config.otelServiceName | quote }}
   {{- end }}
   OTEL_ENVIRONMENT: {{ .Values.firewall.config.otelEnvironment | quote }}
-  {{- /* REDIS_URL without a password is safe in the ConfigMap. When a password
-         is present the URL goes in firewall-secrets instead (see secrets.yaml /
-         platform-secrets.yaml) and is injected via an env entry on the pods. */}}
-  {{- $redisUrl := include "neuraltrust-platform.firewall.redisUrl" . }}
-  {{- if and $redisUrl (ne (include "neuraltrust-platform.firewall.redisUrl.hasPassword" .) "true") }}
-  REDIS_URL: {{ $redisUrl | quote }}
+  {{- /* Shared Redis cache for model scores. Host/port/username/tls follow
+         global.redis; REDIS_PASSWORD lives in firewall-secrets and is injected
+         via an env entry on the pods. The IAM logins mint a token per
+         connection and ship no password. */}}
+  {{- $fwCtx := dict "ctx" . "fw" .Values.firewall }}
+  {{- if eq (include "neuraltrust-platform.firewall.redis.enabled" $fwCtx) "true" }}
+  {{- $fwRedis := .Values.firewall.redis }}
+  {{- $redisLogin := include "neuraltrust-platform.firewall.redis.login" $fwCtx }}
+  {{- $redisUser := include "neuraltrust-platform.redis.username" (dict "ctx" . "username" "") }}
+  {{- $redisTls := include "neuraltrust-platform.redis.tls" (dict "ctx" . "tls" "") }}
+  FIREWALL_CACHE_REDIS: "true"
+  REDIS_HOST: {{ include "neuraltrust-platform.redis.host" (dict "ctx" . "host" "") | quote }}
+  REDIS_PORT: {{ include "neuraltrust-platform.redis.port" (dict "ctx" . "port" "") | quote }}
+  REDIS_DB: {{ $fwRedis.db | default "0" | quote }}
+  {{- if and $redisUser (not $redisLogin) }}
+  REDIS_USERNAME: {{ $redisUser | quote }}
+  {{- end }}
+  {{- if $redisTls }}
+  REDIS_TLS: {{ $redisTls | quote }}
+  {{- end }}
+  {{- if $redisLogin }}
+  REDIS_LOGIN: {{ $redisLogin | quote }}
+  {{- end }}
+  {{- if eq $redisLogin "aws" }}
+  # ElastiCache IAM: a SigV4 token signed with the pod's IRSA / Pod Identity role.
+  REDIS_USERNAME: {{ $fwRedis.iamUser | quote }}
+  REDIS_CACHE_NAME: {{ $fwRedis.iamCacheName | quote }}
+  {{- with $fwRedis.iamRegion }}
+  AWS_REGION: {{ . | quote }}
+  {{- end }}
+  {{- else if eq $redisLogin "gcp" }}
+  # Memorystore's in-transit encryption uses a per-instance CA the pod does not trust.
+  REDIS_TLS_INSECURE_SKIP_VERIFY: "true"
+  {{- end }}
   {{- end }}
   {{- range $workerName, $workerCfg := .Values.firewall.workers }}
   {{- if eq (include "firewall.workerEnabled" (dict "ctx" $ "name" $workerName "cfg" $workerCfg)) "true" }}
