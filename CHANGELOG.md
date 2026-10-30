@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v3.8.2] — 2026-10-30
+
 ### Fixed
 
 - **The ingest gateway sets every log-record tenant attribute from the verified
