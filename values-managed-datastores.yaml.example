@@ -29,7 +29,7 @@
 # and `database.name` / `database.user` default to the service name.
 #
 # With preserveExistingSecrets=true, pre-create at least:
-# - control-plane-secrets: AUTH_SECRET, NEXTAUTH_SECRET, CONTROL_PLANE_JWT_SECRET
+# - control-plane-secrets: AUTH_SECRET, CONTROL_PLANE_JWT_SECRET
 # - postgresql-secrets: POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER, POSTGRES_DB,
 #   POSTGRES_SSLMODE, POSTGRES_LOGIN, POSTGRES_AUTH_MODE, POSTGRES_CONNECTION_TYPE
 #   (and POSTGRES_PASSWORD in password mode, unless

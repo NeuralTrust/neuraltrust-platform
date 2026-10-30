@@ -4,6 +4,42 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Removed
+
+- **Secret keys that nothing in the install reads.** Existing installs keep
+  the values they already hold; the chart just stops writing or wiring them.
+  - `MODEL_SCANNER_SECRET`: no service reads it. Removed from
+    `control-plane-secrets`, the shared registry and the app's env, together
+    with the `controlPlane.secrets.modelScannerSecret` value.
+  - `NEXTAUTH_SECRET`: every app release reads `AUTH_SECRET` first and falls
+    back to `NEXTAUTH_SECRET` only when it is empty, so the chart no longer
+    stores the alias or injects it. Under `preserveExistingSecrets`,
+    `control-plane-secrets` now needs only `AUTH_SECRET`.
+  - `control-plane-secrets/RESEND_API_KEY`: a copy the app never read; it reads
+    `resend-api-key`.
+
+### Changed
+
+- **Credentials are generated only for the services that use them.**
+  - The firewall `JWT_SECRET` is generated only when this release deploys the
+    firewall. With `global.firewall.deploy: false`, every caller already signs
+    with the key in `global.firewall.existingSecret`.
+  - The TrustGuard platform client pair (`trustguard-client-credentials`, and
+    `TRUSTGUARD_CLIENT_SECRET` from the generator) exists only when TrustGate
+    and TrustGuard are both enabled, since TrustGate is the only client. A pair
+    set with `global.v2.trustguardClientSecret` or
+    `global.v2.trustguardClientSecretName` is still honoured, so keep one of
+    those if a TrustGate outside this release authenticates to this TrustGuard.
+  - The self-signed ingress certificate is issued only when an Ingress can use
+    it: not under `global.ingress.provider: gateway-api`, where TLS ends at
+    your Gateway, and not with a cloud-managed certificate.
+- **Email and integration credentials are written only when configured.**
+  `control-plane-secrets` carries `OPENAI_API_KEY` and `resend-api-key` only
+  when set in values, and only the selected `global.email.provider`'s
+  credentials (`SMTP_PASSWORD` for smtp, the SES keys for ses). Both app
+  references are optional, so an absent key behaves like the empty one before.
+  Under `helm upgrade`, a value already in the live Secret is kept.
+
 ## [v3.8.0] — 2026-10-30
 
 ### Changed

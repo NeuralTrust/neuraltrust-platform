@@ -171,15 +171,15 @@ the generated Secret, through the same path an operator `passwordSecret` takes.
 {{- end }}
 
 {{/*
-Whether the generator owns the TrustGuard platform client secret: a product that
-uses the client pair is on. CLIENT_ID stays in trustguard-client-credentials; it
-is configuration, not a secret, and identical on every render.
+Whether the generator owns the TrustGuard platform client secret: the install
+carries the client pair (`trustguardClient.enabled`). CLIENT_ID stays in
+trustguard-client-credentials; it is configuration, not a secret, and identical
+on every render.
 */}}
 {{- define "neuraltrust-platform.trustguardClient.generated" -}}
 {{- if and
   (eq (include "neuraltrust-platform.secretsGenerator.active" .) "true")
-  (or (eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustgate")) "true")
-      (eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustguard")) "true")) -}}true{{- end -}}
+  (eq (include "neuraltrust-platform.trustguardClient.enabled" .) "true") -}}true{{- end -}}
 {{- end }}
 
 {{/*

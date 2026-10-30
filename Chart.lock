@@ -4,13 +4,13 @@ dependencies:
   version: 1.0.7
 - name: data-plane-api
   repository: file://./charts/data-plane-api
-  version: 1.7.16
+  version: 1.7.17
 - name: control-plane-api
   repository: file://./charts/control-plane-api
-  version: 0.1.17
+  version: 0.1.18
 - name: control-plane-app
   repository: file://./charts/control-plane-app
-  version: 0.1.70
+  version: 0.1.71
 - name: agentgateway
   repository: file://./charts/agentgateway
   version: 0.1.86
@@ -40,6 +40,6 @@ dependencies:
   version: 2.1.35
 - name: watchdog
   repository: file://./charts/watchdog
-  version: 0.3.28
-digest: sha256:db91b157d446254bcc89958d1cb915db86fe314c9b69a9ad72645e54f40d31d9
-generated: "2026-10-29T18:51:34.448574+01:00"
+  version: 0.3.29
+digest: sha256:8aac7310db5659ea3159cd058d71dfe886b088a66da6009ab11421769592b82a
+generated: "2026-10-30T13:25:11.345364+01:00"

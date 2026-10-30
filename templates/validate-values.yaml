@@ -395,8 +395,8 @@ no Kubernetes resource when validation succeeds.
 {{- if and $controlPlaneInCluster $preserveExisting -}}
   {{- $existingControlPlane := lookup "v1" "Secret" .Release.Namespace "control-plane-secrets" -}}
   {{- if and $existingControlPlane (kindIs "map" $existingControlPlane) $existingControlPlane.data -}}
-    {{- if or (not (hasKey $existingControlPlane.data "AUTH_SECRET")) (not (hasKey $existingControlPlane.data "NEXTAUTH_SECRET")) -}}
-      {{- fail "preserveExistingSecrets=true requires control-plane-secrets to contain both AUTH_SECRET and NEXTAUTH_SECRET before an external upgrade." -}}
+    {{- if not (hasKey $existingControlPlane.data "AUTH_SECRET") -}}
+      {{- fail "preserveExistingSecrets=true requires control-plane-secrets to contain AUTH_SECRET before an external upgrade." -}}
     {{- end -}}
   {{- end -}}
 {{- end -}}
