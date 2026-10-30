@@ -15,6 +15,7 @@ concurrency:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   diff:
@@ -30,8 +31,12 @@ jobs:
       - name: Diff against the merge base
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
+        # Labels are read live, not from the event: a re-run replays the original
+        # event, so a label added after the failure would otherwise never count.
         run: |
+          LABELS="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json labels --jq '[.labels[].name] | join(",")')"
           ruby scripts/render-diff.rb "$(git merge-base "$BASE_SHA" HEAD)" \
             --labels "$LABELS" --summary summary.md || status=$?
           tee -a "$GITHUB_STEP_SUMMARY" < summary.md
