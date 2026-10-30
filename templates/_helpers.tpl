@@ -1871,7 +1871,25 @@ trustguard-client-credentials
 {{- end -}}
 {{- end }}
 
+{{/*
+Whether this install carries the TrustGuard platform client pair. AgentGateway
+presents it to TrustGuard's /v1/token, and AgentGateway only calls a TrustGuard
+when both products are on, so with one of them off nobody presents it. A pair
+the operator pinned (global.v2.trustguardClientSecret, or their own Secret via
+global.v2.trustguardClientSecretName) is honoured regardless, for a client or
+server that lives outside this release.
+*/}}
+{{- define "neuraltrust-platform.trustguardClient.enabled" -}}
+{{- $v2 := default dict (default dict .Values.global).v2 -}}
+{{- if or
+  (and (eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustgate")) "true")
+       (eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustguard")) "true"))
+  ($v2.trustguardClientSecret | default "")
+  ($v2.trustguardClientSecretName | default "") -}}true{{- end -}}
+{{- end }}
+
 {{- define "neuraltrust-platform.trustguardClientEnv" -}}
+{{- if eq (include "neuraltrust-platform.trustguardClient.enabled" .ctx) "true" }}
 {{- $secretName := include "neuraltrust-platform.trustguardClientSecretName" (dict "ctx" .ctx) }}
 - name: {{ .idVar }}
   valueFrom:
@@ -1895,6 +1913,7 @@ trustguard-client-credentials
       name: {{ $secretName }}
       key: CLIENT_SECRET
       optional: true
+{{- end }}
 {{- end }}
 {{- end }}
 
@@ -3927,7 +3946,7 @@ drift this Secret exists to prevent.
 
 `aliasOf` marks a key that must hold the same value as another key. Aliases are
 resolved from their target rather than independently, which is what keeps
-documented invariants (NEXTAUTH_SECRET == AUTH_SECRET) true on a fresh install
+documented invariants (DATACORE_SERVICE_TOKEN == ENROLMENT_INTROSPECTION_TOKEN) true on a fresh install
 too.
 
 Notes on the cross-service keys that carry a constraint the row cannot express:
@@ -3978,12 +3997,10 @@ REDIS_EVENTS_SECRET: {legacyName: trustguard-secrets, legacyKey: REDIS_EVENTS_SE
 AUTH_JWT_HS256_SECRET: {legacyName: datacore-secrets, legacyKey: AUTH_JWT_HS256_SECRET, generate: random, length: 64, requires: external}
 AUTH_JWT_SECRET: {legacyName: alertengine-secrets, legacyKey: AUTH_JWT_SECRET, generate: random, length: 64, requires: alertengine}
 APP_ENCRYPTION_KEY: {legacyName: alertengine-secrets, legacyKey: APP_ENCRYPTION_KEY, generate: random, length: 32, requires: alertengine}
-JWT_SECRET: {legacyName: firewall-secrets, legacyKey: JWT_SECRET, generate: random, length: 64, requires: trustguard}
+JWT_SECRET: {legacyName: firewall-secrets, legacyKey: JWT_SECRET, generate: random, length: 64, requires: firewall}
 DATA_PLANE_JWT_SECRET: {legacyName: data-plane-jwt-secret, legacyKey: DATA_PLANE_JWT_SECRET, generate: random, length: 64, requires: external dataPlane watchdog}
 CONTROL_PLANE_JWT_SECRET: {legacyName: control-plane-secrets, legacyKey: CONTROL_PLANE_JWT_SECRET, generate: random, length: 64, requires: external watchdog}
 AUTH_SECRET: {legacyName: control-plane-secrets, legacyKey: AUTH_SECRET, generate: random, length: 64, requires: external}
-NEXTAUTH_SECRET: {legacyName: control-plane-secrets, legacyKey: NEXTAUTH_SECRET, aliasOf: AUTH_SECRET, requires: external}
-MODEL_SCANNER_SECRET: {legacyName: control-plane-secrets, legacyKey: MODEL_SCANNER_SECRET, generate: adopt, requires: external}
 MCP_OAUTH_CLIENT_SECRET: {legacyName: control-plane-secrets, legacyKey: MCP_OAUTH_CLIENT_SECRET, generate: random, length: 64, requires: mcpOAuth}
 MCP_OAUTH_SIGNING_KEY: {legacyName: control-plane-secrets, legacyKey: MCP_OAUTH_SIGNING_KEY, generate: adopt, requires: mcpOAuth}
 AGENTGATEWAY_M2M_PRIVATE_KEY: {legacyName: control-plane-secrets, legacyKey: AGENTGATEWAY_M2M_PRIVATE_KEY, generate: adopt, requires: agentgatewayM2m}
@@ -4032,7 +4049,6 @@ shapes are treated as "not pinned here". A numeric credential still works:
   "DATA_PLANE_JWT_SECRET" ($dpSecrets.dataPlaneJWTSecret | default "")
   "CONTROL_PLANE_JWT_SECRET" ($cp.controlPlaneJWTSecret | default "")
   "AUTH_SECRET" ($cp.authSecret | default "")
-  "MODEL_SCANNER_SECRET" ($cp.modelScannerSecret | default "")
 }}
 {{- /* Direct escape hatch, highest precedence. */}}
 {{- range $k, $v := (default dict (default dict (default dict .Values.global).platformSecret).values) }}
@@ -4073,6 +4089,13 @@ templates/shared-platform-secret.yaml and the secrets generator.
        do not mint AUTH_JWT_SECRET or APP_ENCRYPTION_KEY. */}}
 {{- if and (eq (include "neuraltrust-platform.isExternal" .) "true") (default dict .Values.alertengine).enabled }}
   {{- $shapes = append $shapes "alertengine" }}
+{{- end }}
+{{- /* The firewall JWT key is only the chart's to mint when this release runs the
+       firewall. An external firewall holds its own key, which every caller reads
+       from global.firewall.existingSecret (or an operator-owned platform Secret);
+       a chart-generated copy would match nothing and be read by nothing. */}}
+{{- if eq (include "neuraltrust-platform.firewall.deploy" .) "true" }}
+  {{- $shapes = append $shapes "firewall" }}
 {{- end }}
 {{- /* MCP OAuth is external-only: the authorization server is the control-plane
        app, which hybrid does not deploy. It also stays off until a signing key
@@ -4765,5 +4788,20 @@ certificate (templates/ingress-tls-secret.yaml would otherwise render it).
 {{- define "neuraltrust-platform.ingress.tlsGenerated" -}}
 {{- if and
   (eq (include "neuraltrust-platform.secretsGenerator.active" .ctx) "true")
-  (eq (include "neuraltrust-platform.ingress.autoGenerateTLSSecret" (dict "global" .global)) "true") -}}true{{- end -}}
+  (eq (include "neuraltrust-platform.ingress.autoGenerateTLSSecret" (dict "global" .global)) "true")
+  (eq (include "neuraltrust-platform.ingress.sharedTLSUsed" (dict "global" .global)) "true") -}}true{{- end -}}
+{{- end }}
+
+{{/*
+Whether an Ingress can reference the shared self-signed certificate at all.
+Under gateway-api every component renders an HTTPRoute and TLS ends at the
+operator's Gateway listener; with a cloud-managed certificate (ACM, GCP managed
+certificates, Azure) renderTLS drops the tls block. Either way nothing reads the
+certificate, so the chart does not issue one.
+Args: dict "global" .Values.global
+*/}}
+{{- define "neuraltrust-platform.ingress.sharedTLSUsed" -}}
+{{- if and
+  (ne (include "neuraltrust-platform.ingress.gatewayApi" (dict "global" .global)) "true")
+  (include "neuraltrust-platform.ingress.renderTLS" (dict "global" .global "tlsEnabled" true)) -}}true{{- end -}}
 {{- end }}

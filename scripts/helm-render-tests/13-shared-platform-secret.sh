@@ -31,7 +31,6 @@ assert_shared_secret_wiring() {
       "DATA_PLANE_JWT_SECRET" => ["data-plane-jwt-secret", "DATA_PLANE_JWT_SECRET"],
       "CONTROL_PLANE_JWT_SECRET" => ["control-plane-secrets", "CONTROL_PLANE_JWT_SECRET"],
       "AUTH_SECRET" => ["control-plane-secrets", "AUTH_SECRET"],
-      "MODEL_SCANNER_SECRET" => ["control-plane-secrets", "MODEL_SCANNER_SECRET"],
       "AGENTGATEWAY_M2M_PRIVATE_KEY" => ["control-plane-secrets", "AGENTGATEWAY_M2M_PRIVATE_KEY"],
     }
     shared = docs.find { |d| d["kind"] == "Secret" && d.dig("metadata", "name") == "platform-secrets" }
@@ -71,7 +70,7 @@ assert_shared_secret_wiring() {
     # would otherwise be generated independently.
     # An alias is only present when the install shape needs it, so compare the
     # pair only when both were emitted.
-    [["AUTH_SECRET", "NEXTAUTH_SECRET"]].each do |a, b|
+    [["ENROLMENT_INTROSPECTION_TOKEN", "DATACORE_SERVICE_TOKEN"]].each do |a, b|
       next unless data.key?(a) && data.key?(b)
       errors << "#{a} != #{b}" if data[a] != data[b]
     end
@@ -114,11 +113,11 @@ assert_shared_secret_wiring "$out12hyb" \
 blue "==> Scenario 12a: keys are gated to the install shape"
 assert_platform_keys "$out12hyb" absent \
   "hybrid: platform-secrets omits control-plane-only key" \
-  CONTROL_PLANE_JWT_SECRET AUTH_SECRET NEXTAUTH_SECRET \
+  CONTROL_PLANE_JWT_SECRET AUTH_SECRET \
   AUTH_JWT_HS256_SECRET AUTH_JWT_SECRET APP_ENCRYPTION_KEY
 assert_platform_keys "$out12ext" present \
   "external: platform-secrets carries" \
-  CONTROL_PLANE_JWT_SECRET AUTH_SECRET NEXTAUTH_SECRET \
+  CONTROL_PLANE_JWT_SECRET AUTH_SECRET \
   AUTH_JWT_HS256_SECRET AUTH_JWT_SECRET APP_ENCRYPTION_KEY
 
 # AlertEngine off ⇒ its credentials must not be minted.
@@ -136,17 +135,17 @@ assert_platform_keys "$out12hyb" absent \
   "hybrid: platform-secrets omits unused" \
   TRUSTGATE_JWT_SECRET
 
-# MODEL_SCANNER_SECRET is adopt-only: an empty legacy value must stay empty
-# rather than becoming a generated credential for a peer that is not deployed.
-assert_platform_key "$out12ext" absent MODEL_SCANNER_SECRET \
-  "external: platform-secrets does not invent MODEL_SCANNER_SECRET"
-out12ms="$TMP/scenario-shared-secret-model-scanner.yaml"
+# No service reads MODEL_SCANNER_SECRET, and the app reads AUTH_SECRET before
+# NEXTAUTH_SECRET, so neither is stored or wired any more, even when pinned.
+out12ms="$TMP/scenario-shared-secret-unread-keys.yaml"
 render_default "$out12ms" --set global.deploymentMode=external \
   --set global.platformSecret.values.MODEL_SCANNER_SECRET=ms-pinned
-assert_platform_key "$out12ms" present MODEL_SCANNER_SECRET \
-  "external: an operator-supplied MODEL_SCANNER_SECRET is still emitted"
-assert_contains "$out12ms" 'bXMtcGlubmVk' \
-  "external: the pinned MODEL_SCANNER_SECRET value reaches platform-secrets"
+for key in MODEL_SCANNER_SECRET NEXTAUTH_SECRET; do
+  assert_platform_key "$out12ms" absent "$key" \
+    "external: platform-secrets does not store the unread ${key}"
+done
+assert_not_contains "$out12ms" 'MODEL_SCANNER_SECRET|NEXTAUTH_SECRET' \
+  "external: no Secret or workload carries MODEL_SCANNER_SECRET or NEXTAUTH_SECRET"
 # Disabling a product drops the credentials only that product reads.
 out12tgoff="$TMP/scenario-shared-secret-trustguard-off.yaml"
 render_default "$out12tgoff" --set global.deploymentMode=hybrid --set global.products.trustguard=false
@@ -203,16 +202,17 @@ assert_contains "$out12wdoff" 'name: my-watchdog-secret' \
 # An alias key exists because two names must hold one value. Pinning the alias
 # instead of its target cannot be honoured, so it must fail loudly rather than
 # be silently overwritten by the mirror.
-assert_render_fails "pinning an alias key is rejected with a pointer to its target" \
-  --set global.deploymentMode=external \
-  --set global.platformSecret.values.NEXTAUTH_SECRET=pinned-alias
+assert_render_fails_with "must equal ENROLMENT_INTROSPECTION_TOKEN" \
+  "pinning an alias key is rejected with a pointer to its target" \
+  --set global.deploymentMode=saas \
+  --set global.platformSecret.values.DATACORE_SERVICE_TOKEN=pinned-alias
 
 # A credential path that accepts either a string or a {secretName, secretKey}
 # map must not reach b64enc as a map, which would abort the whole render.
 out12map="$TMP/scenario-shared-secret-map-value.yaml"
 render_default "$out12map" --set global.deploymentMode=external \
-  --set-json 'global.platformSecret.values.MODEL_SCANNER_SECRET={"secretName":"ms","secretKey":"k"}'
-assert_platform_key "$out12map" absent MODEL_SCANNER_SECRET \
+  --set-json 'global.platformSecret.values.MCP_OAUTH_SIGNING_KEY={"secretName":"ms","secretKey":"k"}'
+assert_platform_key "$out12map" absent MCP_OAUTH_SIGNING_KEY \
   "a map-shaped credential is ignored rather than aborting the render"
 
 # AUTH_SECRET_KEY encrypts SSO client secrets and SMTP credentials at rest. The

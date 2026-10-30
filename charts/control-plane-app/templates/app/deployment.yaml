@@ -67,7 +67,7 @@ spec:
       initContainers:
       - name: init-db
         {{- $initImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
-        {{- $initImageTag := "v2.20.0" }}
+        {{- $initImageTag := "v2.22.0" }}
         {{- $initPullPolicy := "IfNotPresent" }}
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.image }}
           {{- if .Values.controlPlane.components.app.image.repository }}{{- $initImageRepo = .Values.controlPlane.components.app.image.repository }}{{- end }}
@@ -250,7 +250,7 @@ spec:
       containers:
       - name: app
         {{- $appImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
-        {{- $appImageTag := "v2.20.0" }}
+        {{- $appImageTag := "v2.22.0" }}
         {{- $appPullPolicy := "IfNotPresent" }}
         {{- $appPort := 3000 }}
         {{- $nodeEnv := "production" }}
@@ -587,10 +587,6 @@ spec:
           valueFrom:
             secretKeyRef:
               {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "AUTH_SECRET") | nindent 14 }}
-        - name: NEXTAUTH_SECRET
-          valueFrom:
-            secretKeyRef:
-              {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "NEXTAUTH_SECRET") | nindent 14 }}
         {{- /* Encrypts SSO client secrets and SMTP credentials at rest, and is a
                different key from AUTH_SECRET above, which signs sessions.
                Optional because the chart only generates it on a fresh install:
@@ -714,10 +710,6 @@ spec:
           {{- end }}
         - name: MODEL_SCANNER_API_URL
           value: "{{ $modelScannerApiUrl }}"
-        - name: MODEL_SCANNER_SECRET
-          valueFrom:
-            secretKeyRef:
-              {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "MODEL_SCANNER_SECRET" "optional" true) | nindent 14 }}
         {{- /* v2 backend services the console (BFF) calls. Core backend
                credentials are required so the app fails closed on an incomplete
                external install. AlertEngine remains optional. */}}

@@ -283,7 +283,8 @@ green "ok  - create-secrets.sh (external): every referenced key is emitted or re
 if ! result="$(ruby -rjson -ropen3 -e '
   out = JSON.parse(File.read(ARGV[0]))
   cp = out.fetch("control-plane-secrets")
-  abort "AUTH_SECRET and NEXTAUTH_SECRET differ" unless cp["AUTH_SECRET"] && cp["AUTH_SECRET"] == cp["NEXTAUTH_SECRET"]
+  abort "control-plane-secrets lacks AUTH_SECRET" unless cp["AUTH_SECRET"]
+  abort "control-plane-secrets still carries the unread NEXTAUTH_SECRET" if cp.key?("NEXTAUTH_SECRET")
   pg = out.fetch("postgresql-secrets")
   %w[POSTGRES_SSLMODE POSTGRES_LOGIN POSTGRES_AUTH_MODE POSTGRES_CONNECTION_TYPE].each { |k| abort "postgresql-secrets lacks #{k}" unless pg.key?(k) }
   %w[DATABASE_URL SENSIBLE_PG_DSN].each { |k| abort "postgresql-secrets carries retired #{k}" if pg.key?(k) }

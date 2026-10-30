@@ -438,7 +438,7 @@ Add `--api-versions route.openshift.io/v1` when rendering for OpenShift.
 Generated secrets are reused through Helm `lookup`. Deployment engines that
 cannot use `lookup` should pre-create secrets and set
 `global.preserveExistingSecrets: true` — in external mode that requires
-`AUTH_SECRET` and `NEXTAUTH_SECRET` to already exist in `control-plane-secrets`.
+`AUTH_SECRET` to already exist in `control-plane-secrets`.
 Persistent volume claims are retained by default. Review release notes before
 each upgrade.
 

@@ -189,8 +189,8 @@ global:
   console-issued tokens, the passwords of a database you manage. Optional
   integrations (OpenAI, Google, Resend, Hugging Face) are listed, not emitted.
 - Credentials two services share come from the same registry as
-  `platform-secrets`, so pairs that must match, such as `AUTH_SECRET` and
-  `NEXTAUTH_SECRET`, do.
+  `platform-secrets`, so pairs that must match, such as
+  `ENROLMENT_INTROSPECTION_TOKEN` and `DATACORE_SERVICE_TOKEN`, do.
 - Secrets that the chart's hook Jobs mint in the cluster (the AgentGateway
   machine-credential pair, the MCP OAuth signing key) are left to the hook. Image
   pull Secrets are yours.
@@ -251,15 +251,13 @@ after first login when possible. Empty defaults leave the feature off.
 | `control-plane-secrets` | `CONTROL_PLANE_JWT_SECRET` | Auto-generated | JWT for Control Plane API auth |
 | `control-plane-secrets` | `FIREWALL_JWT_SECRET` | No | JWT for firewall service |
 | `control-plane-secrets` | `FIREWALL_API_URL` | Auto-populated | Firewall base URL (FQDN when firewall enabled, data-plane fallback otherwise) |
-| `control-plane-secrets` | `MODEL_SCANNER_SECRET` | No | Model scanner service secret |
-| `control-plane-secrets` | `OPENAI_API_KEY` | No | OpenAI API key |
+| `control-plane-secrets` | `OPENAI_API_KEY` | No | OpenAI API key; written only when `controlPlane.secrets.openaiApiKey` is set (a value already in the live Secret is kept) |
 | `control-plane-secrets` | `ONPREM_SUPERADMIN_EMAIL` | No | Bootstrap admin address; only when `global.superadmin.email`/`password` are set inline |
 | `control-plane-secrets` | `ONPREM_SUPERADMIN_PASSWORD` | No | Bootstrap admin password; referenced via `secretKeyRef`, never a plain env value |
-| `control-plane-secrets` | `RESEND_API_KEY` | No | Resend API key (`global.email.resend.apiKey`) |
-| `control-plane-secrets` | `SMTP_PASSWORD` | No | SMTP password; injected as `SMTP_PASS`, the name the app reads |
-| `control-plane-secrets` | `SES_ACCESS_KEY_ID` | No | Static SES key; omit to use the pod IAM role |
-| `control-plane-secrets` | `SES_SECRET_ACCESS_KEY` | No | Static SES secret; omit to use the pod IAM role |
-| `control-plane-secrets` | `resend-api-key` | No | Legacy alias of `RESEND_API_KEY`, kept in sync |
+| `control-plane-secrets` | `SMTP_PASSWORD` | No | SMTP password, only with `global.email.provider: smtp`; injected as `SMTP_PASS`, the name the app reads |
+| `control-plane-secrets` | `SES_ACCESS_KEY_ID` | No | Static SES key, only with `global.email.provider: ses`; omit to use the pod IAM role |
+| `control-plane-secrets` | `SES_SECRET_ACCESS_KEY` | No | Static SES secret, only with `global.email.provider: ses`; omit to use the pod IAM role |
+| `control-plane-secrets` | `resend-api-key` | No | Resend API key (`global.email.resend.apiKey`, or the legacy `controlPlane.secrets.resendApiKey`), injected as `RESEND_API_KEY`; written only when set. With `global.email.existingSecret`, the app reads `RESEND_API_KEY` from that Secret instead |
 | `control-plane-secrets` | `resend-alert-sender` | No | Legacy "from" address; superseded by `global.email.from` |
 | `control-plane-secrets` | `resend-reply-to` | No | Legacy Reply-To; superseded by `global.email.replyTo` |
 
@@ -622,7 +620,7 @@ same name in both places.
 | TrustGuard raw-telemetry Postgres | `postgresql-secrets` → `DB_*` env | (discrete parts) | Hybrid only, same as AgentGateway (RUN-1086). |
 | Shared hybrid Postgres credential | `postgresql-secrets` | `POSTGRES_*` — see [One canonical name per fact](#one-canonical-name-per-fact) | **Hybrid only** — the umbrella renders one shared Secret from `global.postgresql.*` (default `user`/`database` = `neuraltrust`), and every hybrid workload connects as that one role. Containers receive `DB_*` / `POSTGRES_*` names through explicit `env` mappings; those are **not** keys in the Secret. Set `global.postgresql.existingSecret.name` to supply your own instead — but then the chart injects it with `envFrom` and cannot rename anything, so **your keys must be `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` / `DB_SSL_MODE`** (gateways) or the canonical `POSTGRES_*` family (DataAgent). |
 | Shared hybrid Redis credential | `redis-secrets` | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` / `REDIS_USERNAME` / `REDIS_TLS` | **Hybrid only** — taken wholesale with `envFrom`, and rendered from `global.redis.*`. Empty `REDIS_PASSWORD` for the passwordless in-cluster default. Set `global.redis.existingSecret.name` to reuse a pre-created Secret. TLS is stored once as `REDIS_TLS`, which is the name TrustGuard reads; AgentGateway reads `REDIS_TLS_ENABLED` and is given that name through an explicit `env` mapping, so a supplied Secret only needs `REDIS_TLS`. |
-| Shared TrustGuard client creds | `trustguard-client-credentials` | `CLIENT_ID` / `CLIENT_SECRET` | id defaults to `agentgateway-platform`; secret auto-generated (or `global.v2.trustguardClientSecret`). Injected into both AgentGateway (`TRUSTGUARD_CLIENT_ID`/`_SECRET`) and TrustGuard (`TRUSTGUARD_PLATFORM_CLIENT_ID`/`_SECRET`) so the pair matches. The prerelease `v2-trustguard-client-secret` values are copied during upgrade. |
+| Shared TrustGuard client creds | `trustguard-client-credentials` | `CLIENT_ID` / `CLIENT_SECRET` | Only when TrustGate and TrustGuard are both enabled: TrustGate is the only client. id defaults to `agentgateway-platform`; secret auto-generated (or `global.v2.trustguardClientSecret`). Injected into both AgentGateway (`TRUSTGUARD_CLIENT_ID`/`_SECRET`) and TrustGuard (`TRUSTGUARD_PLATFORM_CLIENT_ID`/`_SECRET`) so the pair matches. Setting `global.v2.trustguardClientSecret` or `trustguardClientSecretName` keeps the pair with either product alone, for a client or server outside this release. The prerelease `v2-trustguard-client-secret` values are copied during upgrade. |
 | DataAgent Postgres | `postgresql-secrets` (shared) | `POSTGRES_HOST` / `PORT` / `USER` / `PASSWORD` / `DB` / `SSLMODE` | **Hybrid** — DataAgent builds a libpq keyword connection string from these parts when `DATABASE_URL` is unset (RUN-1093). It connects as `global.postgresql.user` (default `neuraltrust`). |
 | DataAgent enrolment token | operator Secret (e.g. `dataagent-enrolment-trustgate`), or `dataagent-secrets` / `dataagent-trustguard-secrets` when supplied inline | `ENROLMENT_TOKEN` (configurable key) | **Never** auto-generated — from `agentgateway.dataagent.enrolment` / `trustguard.dataagent.enrolment`. With the preferred `existingSecret.name` path the chart-managed `dataagent-*-secrets` render empty and the token is read straight from your Secret. **Scoped to the control plane you dial:** NeuralTrust hosted → issue in the same `global.saasRegion`; customer `saas` → issue from *that* console (`global.controlPlane.domain`). |
 | AlertEngine DB password | `alertengine-secrets` | `DB_PASSWORD` | auto-generated (own `alertengine` DB; external only); **omitted when `alertengine.database.iamAuth=true`** |
@@ -636,7 +634,7 @@ same name in both places.
 | Config-sync LKG cache key (TrustGate / TrustGuard) | `agentgateway-secrets`, `trustguard-secrets` | `CONFIG_SYNC_LKG_KEY` | **Auto-generated** (32 random bytes) **while the chart owns the service Secret** — that is, `global.autoGenerateSecrets: true` and `global.preserveExistingSecrets: false`, the default. Reused across upgrades via `lookup`, delivered through `envFrom`. It encrypts only the local last-known-good snapshot file, which lives on an `emptyDir` and is discarded on restart anyway; the runtimes use it purely as the AES-256-GCM key for that file. Override with `configSync.lkgKey`. Putting the key in your `configSync.existingSecret` has no effect on this path: the chart deliberately does not consult the cluster to discover it, because a `lookup`-dependent reference renders differently under `helm upgrade` than under `helm template` or ArgoCD.<br><br>**Under `autoGenerateSecrets: false` or `preserveExistingSecrets: true` the chart owns no Secret to generate it into, so you must add `CONFIG_SYNC_LKG_KEY` (base64, decoding to exactly 32 bytes) to your `configSync.existingSecret` yourself.** The data planes refuse to start without it. `create-secrets.sh` writes it for you into whichever Secret `configSync.existingSecret.name` names, and lists the console-issued `CONFIG_SYNC_TOKEN` that goes next to it as a value only you can supply. |
 | External config-sync gRPC TLS (TrustGate / TrustGuard) | `agentgateway-configsync-tls`, `trustguard-configsync-tls` | `tls.crt`, `tls.key`, `ca.crt` | **Chart-generated infrastructure — nothing for you to create, and their presence does not mean config-sync is enabled.** The control plane always starts the config-sync gRPC *server*; whether data planes *dial* it is a separate switch that external leaves off (configuration comes from PostgreSQL). See [README-EXTERNAL.md](./README-EXTERNAL.md) for the two-halves explanation. **External only, and only under a deployed `config.appEnv`** (`prod`/`production`/`staging`/`stage`). Auto-generated self-signed CA + server certificate; the control plane serves it, the data planes verify against the CA. Never rotated (`lookup` + `resource-policy: keep`). Bring your own with `configSync.grpcTls.existingSecret` (`kubernetes.io/tls`, must include `ca.crt`); setting `autoGenerate: false` without one is rejected at render, because the control plane cannot start without a keypair. |
 | External ClickStack OTLP token | `clickstack-collector-secrets` | `OTLP_AUTH_TOKEN`, `OTEL_EXPORTER_OTLP_HEADERS` | **External only** — auto-generated (or `clickstack-otel-collector.otlpAuthToken`). `OTLP_AUTH_TOKEN` is what the collector enforces; `OTEL_EXPORTER_OTLP_HEADERS` is `authorization=<same token>` and is mounted on TrustGuard / AgentGateway / watchdog via `secretKeyRef`. |
-| Control-plane app auth | `control-plane-secrets` | `AUTH_SECRET` / `NEXTAUTH_SECRET` | one generated or reused value exposed under both aliases |
+| Control-plane app auth | `control-plane-secrets` | `AUTH_SECRET` | generated or reused session-signing key. The app reads `AUTH_SECRET` first and falls back to `NEXTAUTH_SECRET` only when it is empty, so the chart no longer stores or injects `NEXTAUTH_SECRET`; a value left in an existing Secret is unread |
 
 AlertEngine URLs are non-secret values wired directly into the control-plane app
 Deployment, alongside the other backend service URLs. On first
@@ -870,15 +868,13 @@ Resolution order per key: `global.platformSecret.values` → live `platform-secr
 | `ADMIN_JWT_SECRET` | `trustguard-secrets` / `ADMIN_JWT_SECRET` | generated | external, TrustGuard |
 | `TRUSTGUARD_TOKEN_SIGNING_SECRET` | `trustguard-secrets` / `TRUSTGUARD_TOKEN_SIGNING_SECRET` | generated | external, TrustGuard |
 | `REDIS_EVENTS_SECRET` | `trustguard-secrets` / `REDIS_EVENTS_SECRET` | generated | external, TrustGuard |
-| `JWT_SECRET` | `firewall-secrets` / `JWT_SECRET` | generated | external, TrustGuard |
+| `JWT_SECRET` | `firewall-secrets` / `JWT_SECRET` | generated | when this release deploys the firewall. An external firewall's key comes from `global.firewall.existingSecret` |
 | `DATA_PLANE_JWT_SECRET` | `data-plane-jwt-secret` / `DATA_PLANE_JWT_SECRET` | generated | external, data plane |
 | `CONTROL_PLANE_JWT_SECRET` | `control-plane-secrets` / `CONTROL_PLANE_JWT_SECRET` | generated | external |
 | `AUTH_SECRET` | `control-plane-secrets` / `AUTH_SECRET` | generated | external |
-| `NEXTAUTH_SECRET` | `control-plane-secrets` / `NEXTAUTH_SECRET` | **= `AUTH_SECRET`** | external |
 | `AUTH_JWT_HS256_SECRET` | `datacore-secrets` / `AUTH_JWT_HS256_SECRET` | generated | external |
 | `AUTH_JWT_SECRET` | `alertengine-secrets` / `AUTH_JWT_SECRET` | generated | external |
 | `APP_ENCRYPTION_KEY` | `alertengine-secrets` / `APP_ENCRYPTION_KEY` | generated | external |
-| `MODEL_SCANNER_SECRET` | `control-plane-secrets` / `MODEL_SCANNER_SECRET` | adopted only | external |
 | `AUTH_SECRET_KEY` | `control-plane-secrets` / `AUTH_SECRET_KEY` | generated on install only | external |
 | `MCP_OAUTH_CLIENT_SECRET` | `control-plane-secrets` / `MCP_OAUTH_CLIENT_SECRET` | generated | external, when MCP OAuth is on |
 | `MCP_OAUTH_SIGNING_KEY` | `control-plane-secrets` / `MCP_OAUTH_SIGNING_KEY` | adopted only — a key you supply. Otherwise generated into its own `mcp-oauth-signing` Secret by a hook Job | external, when you supply a key |
