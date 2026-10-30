@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v3.9.0] — 2026-10-30
+
 ### Removed
 
 - **The firewall's `HUGGINGFACE_TOKEN`.** The firewall images ship every model
