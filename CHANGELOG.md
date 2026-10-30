@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v3.9.1] — 2026-10-30
+
 ### Fixed
 
 - **The firewall reads its Redis password from `global.redis.existingSecret`.**
