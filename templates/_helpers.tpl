@@ -1300,41 +1300,52 @@ rather than letting all three consumers fail to authenticate at runtime.
 {{- end }}
 
 {{/*
-Firewall REDIS_URL composed from the shared Redis helpers (AUT-386).
+Whether the firewall backs its score/decision caches with Redis
+(FIREWALL_CACHE_REDIS). Optional: the firewall works without it.
 
-The firewall Python client reads only REDIS_URL and otherwise falls back to
-redis://localhost:6379/0, which is never reachable in-cluster. Emit a URL only
-when a host resolves so that fallback is never shipped silently.
+A firewall pod with REDIS_HOST set pings Redis at startup and exits when it
+cannot connect, so this is "true" only when a Redis exists: the in-cluster one
+(global.redis.deploy) or an explicit global.redis.host. Cluster mode is left
+out because the firewall client is standalone and fails multi-key reads there.
 
-ElastiCache IAM is unsupported: the client has no SigV4 / REDIS_LOGIN path, so
-an IAM-only cache needs a static password (or an in-cluster Redis) instead.
+`fw` is the firewall values block: .Values.firewall in the subchart,
+.Values.firewall.firewall in the umbrella.
+Usage: {{ include "neuraltrust-platform.firewall.redis.enabled" (dict "ctx" . "fw" .Values.firewall) }}
 */}}
-{{- define "neuraltrust-platform.firewall.redisUrl" -}}
-{{- $host := include "neuraltrust-platform.redis.host" (dict "ctx" . "host" "") -}}
-{{- if $host -}}
-{{- $port := include "neuraltrust-platform.redis.port" (dict "ctx" . "port" "") -}}
-{{- $user := include "neuraltrust-platform.redis.username" (dict "ctx" . "username" "") -}}
-{{- $tls := include "neuraltrust-platform.redis.tls" (dict "ctx" . "tls" "") -}}
-{{- $pw := include "neuraltrust-platform.redis.password" (dict "ctx" . "password" "") -}}
-{{- $scheme := "redis" -}}
-{{- if eq ($tls | toString) "true" }}{{- $scheme = "rediss" }}{{- end -}}
-{{- $authority := "" -}}
-{{- if $user -}}
-  {{- $authority = printf "%s:%s@" ($user | urlquery) ($pw | urlquery) -}}
-{{- else if $pw -}}
-  {{- $authority = printf ":%s@" ($pw | urlquery) -}}
+{{- define "neuraltrust-platform.firewall.redis.enabled" -}}
+{{- $r := default dict (default dict .ctx.Values.global).redis -}}
+{{- $fwRedis := default dict (default dict .fw).redis -}}
+{{- $on := true -}}
+{{- if hasKey $fwRedis "enabled" -}}{{- $on = $fwRedis.enabled -}}{{- end -}}
+{{- $exists := or (ne (include "neuraltrust-platform.redis.external" .ctx) "true") $r.host -}}
+{{- if and $on $exists (ne (include "neuraltrust-platform.redis.cluster" .ctx) "true") -}}true{{- end -}}
+{{- end }}
+
+{{/*
+The firewall's REDIS_LOGIN: "aws" or "azure" from firewall.redis.login, "gcp"
+from global.redis.authMode=iam (Memorystore), else "" for a password login or
+when the cache is off.
+Usage: {{ include "neuraltrust-platform.firewall.redis.login" (dict "ctx" . "fw" .Values.firewall) }}
+*/}}
+{{- define "neuraltrust-platform.firewall.redis.login" -}}
+{{- if eq (include "neuraltrust-platform.firewall.redis.enabled" .) "true" -}}
+{{- $fwRedis := default dict (default dict .fw).redis -}}
+{{- with $fwRedis.login | default "" | toString | trim | lower -}}
+{{- . -}}
+{{- else -}}
+{{- if eq (include "neuraltrust-platform.redis.gcpIam" .ctx) "true" -}}gcp{{- end -}}
 {{- end -}}
-{{- printf "%s://%s%s:%v/0" $scheme $authority $host $port -}}
 {{- end -}}
 {{- end }}
 
 {{/*
-Whether the composed firewall REDIS_URL carries a password (must live in a
-Secret, never a ConfigMap).
+The firewall's REDIS_PASSWORD. Lives in firewall-secrets, never the ConfigMap.
+Empty for the IAM logins, which ignore it.
+Usage: {{ include "neuraltrust-platform.firewall.redis.password" (dict "ctx" . "fw" .Values.firewall) }}
 */}}
-{{- define "neuraltrust-platform.firewall.redisUrl.hasPassword" -}}
-{{- $pw := include "neuraltrust-platform.redis.password" (dict "ctx" . "password" "") -}}
-{{- if $pw }}true{{- end -}}
+{{- define "neuraltrust-platform.firewall.redis.password" -}}
+{{- if and (eq (include "neuraltrust-platform.firewall.redis.enabled" .) "true") (not (include "neuraltrust-platform.firewall.redis.login" .)) -}}{{- include "neuraltrust-platform.redis.password" (dict "ctx" .ctx "password" "") -}}
+{{- end -}}
 {{- end }}
 
 {{/*
@@ -1486,6 +1497,48 @@ default
 {{- end }}
 
 {{/*
+Entra ID credential env for global.azureIdentity, for any token-auth client.
+managed-identity names a user-assigned identity; service-principal needs the
+full tenant/client/secret triple; workload-identity emits nothing (see
+postgres.cloudAuthEnv below). `skip` takes the component's extraEnv.
+Usage: {{ include "neuraltrust-platform.azureIdentity.env" (dict "ctx" . "skip" .Values.extraEnv) }}
+*/}}
+{{- define "neuraltrust-platform.azureIdentity.env" -}}
+{{- $azure := default dict (default dict .ctx.Values.global).azureIdentity -}}
+{{- $skip := list -}}
+{{- range $e := (default list .skip) -}}{{- $skip = append $skip $e.name -}}{{- end -}}
+{{- $method := $azure.method | default "" | toString | trim -}}
+{{- $clientId := $azure.clientId | default "" | toString -}}
+{{- if and (eq $method "managed-identity") $clientId (not (has "AZURE_CLIENT_ID" $skip)) }}
+{{- /* Selects which user-assigned identity IMDS should present; omitted for the
+       system-assigned identity, which needs no hint. */}}
+- name: AZURE_CLIENT_ID
+  value: {{ $clientId | quote }}
+{{- end }}
+{{- if eq $method "service-principal" }}
+{{- $secret := default dict $azure.clientSecret -}}
+{{- if not (has "AZURE_TENANT_ID" $skip) }}
+- name: AZURE_TENANT_ID
+  value: {{ $azure.tenantId | default "" | quote }}
+{{- end }}
+{{- if not (has "AZURE_CLIENT_ID" $skip) }}
+- name: AZURE_CLIENT_ID
+  value: {{ $clientId | quote }}
+{{- end }}
+{{- if not (has "AZURE_CLIENT_SECRET" $skip) }}
+{{- /* Required, not optional: a wrong key must stop the pod with
+       CreateContainerConfigError rather than let it reach Entra with no
+       credential and fall through to another link in the chain. */}}
+- name: AZURE_CLIENT_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: {{ $secret.name | default "" | quote }}
+      key: {{ $secret.key | default "AZURE_CLIENT_SECRET" | quote }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
 Cloud credential env for a Postgres token-auth client, beside postgresEnv.
 
 Hybrid delivered no region or identity env at all, so an AWS IAM install there
@@ -1521,39 +1574,10 @@ Usage: {{ include "neuraltrust-platform.postgres.cloudAuthEnv" (dict "ctx" . "sk
 {{- if eq (include "neuraltrust-platform.postgresRequired" $ctx) "true" -}}
 {{- if eq (include "neuraltrust-platform.postgres.iamAuth" (dict "ctx" $ctx "database" dict)) "true" -}}
 {{- $globalPg := default dict (default dict $ctx.Values.global).postgresql -}}
-{{- $azure := default dict (default dict $ctx.Values.global).azureIdentity -}}
 {{- $skip := list -}}
 {{- range $e := (default list .skip) -}}{{- $skip = append $skip $e.name -}}{{- end -}}
 {{- if eq (include "neuraltrust-platform.postgres.tokenProvider" $ctx) "azure" -}}
-{{- $method := $azure.method | toString | trim -}}
-{{- $clientId := $azure.clientId | default "" | toString -}}
-{{- if and (eq $method "managed-identity") $clientId (not (has "AZURE_CLIENT_ID" $skip)) }}
-{{- /* Selects which user-assigned identity IMDS should present; omitted for the
-       system-assigned identity, which needs no hint. */}}
-- name: AZURE_CLIENT_ID
-  value: {{ $clientId | quote }}
-{{- end }}
-{{- if eq $method "service-principal" }}
-{{- $secret := default dict $azure.clientSecret -}}
-{{- if not (has "AZURE_TENANT_ID" $skip) }}
-- name: AZURE_TENANT_ID
-  value: {{ $azure.tenantId | default "" | quote }}
-{{- end }}
-{{- if not (has "AZURE_CLIENT_ID" $skip) }}
-- name: AZURE_CLIENT_ID
-  value: {{ $clientId | quote }}
-{{- end }}
-{{- if not (has "AZURE_CLIENT_SECRET" $skip) }}
-{{- /* Required, not optional: a wrong key must stop the pod with
-       CreateContainerConfigError rather than let it reach Entra with no
-       credential and fall through to another link in the chain. */}}
-- name: AZURE_CLIENT_SECRET
-  valueFrom:
-    secretKeyRef:
-      name: {{ $secret.name | default "" | quote }}
-      key: {{ $secret.key | default "AZURE_CLIENT_SECRET" | quote }}
-{{- end }}
-{{- end }}
+{{- include "neuraltrust-platform.azureIdentity.env" (dict "ctx" $ctx "skip" .skip) }}
 {{- $scopeVar := .scopeVar | default "DB_AZURE_SCOPE" -}}
 {{- with $globalPg.azureScope | default "" | toString | trim }}
 {{- if not (has $scopeVar $skip) }}

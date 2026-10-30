@@ -28,13 +28,9 @@ firewall:
           effect: "NoSchedule"
       hostIPC: true
     # A worker's own `resources` merges over workerDefaults.resources, so every
-    # worker inherits the GPU request. These two carry larger memory in the chart
-    # defaults; raise it further for the GPU image.
+    # worker inherits the GPU request. topic-guard carries larger memory in the
+    # chart defaults; raise it further for the GPU image.
     workers:
-      prompt-moderation:
-        resources:
-          limits:
-            memory: 8Gi
       topic-guard:
         resources:
           requests:

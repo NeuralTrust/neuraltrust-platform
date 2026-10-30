@@ -1430,23 +1430,14 @@ firewall:
         module: src.workers.prompt_jailbreak.app:app
         extraEnv: []
         extraEnvFrom: []
-      prompt-moderation:
-        enabled: true
-        module: src.workers.prompt_moderation.app:app
-        resources:
-          requests:
-            cpu: "1"
-            memory: 4Gi
-          limits:
-            cpu: "2"
-            memory: 6Gi
-        extraEnv: []
-        extraEnvFrom: []
-      response-jailbreak:
-        enabled: true
-        module: src.workers.response_jailbreak.app:app
-        extraEnv: []
-        extraEnvFrom: []
+    # Recommended Redis cache for model scores; see charts/firewall/values.yaml.
+    redis:
+      enabled: true
+      db: "0"
+      login: "" # "" (password, or GCP IAM via global.redis.authMode) | aws | azure
+      iamUser: ""
+      iamCacheName: ""
+      iamRegion: ""
     config:
       pythonUnbuffered: "1"
       pythonDontWriteBytecode: "1"

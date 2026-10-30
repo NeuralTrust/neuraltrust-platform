@@ -190,12 +190,12 @@ contains:
 **TrustGuard and Firewall**
 
 
-| Workload                                                                                                                                   | Role                                                        |
-| ------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------- |
-| `trustguard-control-plane`                                                                                                                 | Policy and admin API                                        |
-| `trustguard-data-plane`                                                                                                                    | `/v1/guard` evaluation runtime                              |
-| `firewall`                                                                                                                                 | NeuralTrust Firewall model server, deployed with TrustGuard |
-| `prompt-jailbreak-worker`, `response-jailbreak-worker`, `prompt-moderation-worker`, `toxicity-worker`, `indirect-prompt-injections-worker` | Per-detector Firewall workers                               |
+| Workload                                                                                                                     | Role                                                        |
+| ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `trustguard-control-plane`                                                                                                   | Policy and admin API                                        |
+| `trustguard-data-plane`                                                                                                      | `/v1/guard` evaluation runtime                              |
+| `firewall`                                                                                                                   | NeuralTrust Firewall model server, deployed with TrustGuard |
+| `prompt-jailbreak-worker`, `toxicity-worker`, `indirect-prompt-injections-worker`, `topic-guard-worker`, `complexity-worker` | Per-detector Firewall workers                               |
 
 
 **Platform control plane**

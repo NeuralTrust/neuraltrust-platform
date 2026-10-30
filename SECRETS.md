@@ -814,12 +814,29 @@ install, missing Secrets/keys are created; later upgrades reuse them with `looku
 
   Each service account needs `roles/redis.dbConnectionUser`. Leave any
   `<service>.redis.existingSecret` password unset: it is not used.
-- **Firewall Redis URL (AUT-386)**: the firewall Python client reads only
-  `REDIS_URL` (defaulting to `redis://localhost:6379/0` when unset). The chart
-  composes that URL from the shared Redis helpers into `firewall-config` (no
-  password) or `firewall-secrets` (password present). **ElastiCache IAM is not
-  supported** by this client — an IAM-only cache needs a static password or an
-  in-cluster Redis.
+- **Firewall Redis cache**: on by default and recommended; the firewall works
+  without it. The chart writes `FIREWALL_CACHE_REDIS`, `REDIS_HOST`,
+  `REDIS_PORT`, `REDIS_DB` and, when set, `REDIS_USERNAME` / `REDIS_TLS` from
+  `global.redis` into `firewall-config`. The password goes in
+  `firewall-secrets` as `REDIS_PASSWORD`. The cache is left off when no Redis
+  exists (`global.redis.deploy=false` with no host), and against a Redis
+  Cluster, which the firewall client does not support. A firewall pod with
+  `REDIS_HOST` set exits if it cannot reach Redis at startup. Opt out with
+  `firewall.firewall.redis.enabled=false`.
+
+  IAM logins mint a token per connection, so no password is shipped:
+  - **GCP Memorystore**: `global.redis.authMode=iam` with `global.gcpIdentity`
+    (`REDIS_LOGIN=gcp`), shared with the other Redis clients.
+  - **AWS ElastiCache**: `firewall.firewall.redis.login=aws` with `iamUser`
+    (the IAM user ID) and `iamCacheName` (the replication group ID); `iamRegion`
+    when IRSA does not set `AWS_REGION`. The `firewall` ServiceAccount's role
+    (`global.irsa` or `firewall.firewall.serviceAccount.annotations`) needs
+    `elasticache:Connect` on the replication group and the user.
+  - **Azure Cache for Redis / Azure Managed Redis**:
+    `firewall.firewall.redis.login=azure` with `global.azureIdentity`. Workload
+    identity gets the pod label and ServiceAccount annotation, managed identity
+    and service principal get the `AZURE_*` env. Give the identity a data access
+    policy on the cache.
 - **Each selected product DataAgent** renders when its nested `dataagent`
   has either `enrolment.token` or (preferred)
   `enrolment.existingSecret.name` (never generated). The JWT
