@@ -73,6 +73,35 @@ if [[ "$gw_ing_backend" != "otlp-http" ]]; then
 fi
 green "ok  - saas: ingest gateway Ingress backends OTLP/HTTP"
 
+# The ingest views read the tenant from log-record attributes, so the edge must
+# rewrite each of them from the verified claim. Only as `update`: `upsert`
+# would add a key to records that lack it and move them into another table.
+gw_cfg="$TMP/scenario-saas-ingest-gateway-collector.yaml"
+yq -N 'select(.kind == "ConfigMap" and .metadata.name == "clickstack-ingest-gateway-config")
+  | .data["collector.yaml"]' "$out25" > "$gw_cfg"
+for key in usage.tenant_id trustgate.tenant_id trustguard.tenant_id \
+           trustgate.topic.tenant_id trustgate.label.tenant_id \
+           trustguard.shadow.tenant_id team.id; do
+  got=$(yq -N ".processors[\"attributes/tenant_from_claims\"].actions[]
+    | select(.key == \"$key\") | .action + \" \" + .from_context" "$gw_cfg")
+  if [[ "$got" != "update auth.claims.tenant_id" ]]; then
+    red "FAIL: saas: ingest gateway must update $key from auth.claims.tenant_id (got: ${got:-<none>})"
+    exit 1
+  fi
+done
+green "ok  - saas: ingest gateway rewrites every log-record tenant key from the token"
+gw_logs=$(yq -N '.service.pipelines.logs.processors | join(",")' "$gw_cfg")
+if [[ "$gw_logs" != *"resource/tenant_from_claims,transform/dedupe_log_attributes,attributes/tenant_from_claims,"*batch ]]; then
+  red "FAIL: saas: ingest gateway logs pipeline must collapse duplicate keys, then apply attributes/tenant_from_claims, before batch (got: $gw_logs)"
+  exit 1
+fi
+gw_traces=$(yq -N '.service.pipelines.traces.processors | join(",")' "$gw_cfg")
+if [[ "$gw_traces" == *attributes/tenant_from_claims* ]]; then
+  red "FAIL: saas: log-record tenant processor belongs to the logs pipeline only (traces: $gw_traces)"
+  exit 1
+fi
+green "ok  - saas: ingest gateway collapses duplicate keys, then applies it in the logs pipeline, before batch"
+
 # --- saas NOTES name the mode and the four remote-plane endpoints
 notes25="$TMP/scenario-saas-notes.txt"
 render_notes "$notes25" "${SAAS_ARGS[@]}"

@@ -4,6 +4,17 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Fixed
+
+- **The ingest gateway sets every log-record tenant attribute from the verified
+  token.** It already did this for `nt.tenant_id` and `trustgate.team_id` on the
+  resource. The logs pipeline now does the same for `usage.tenant_id`,
+  `trustgate.tenant_id`, `trustguard.tenant_id`, `trustgate.topic.tenant_id`,
+  `trustgate.label.tenant_id`, `trustguard.shadow.tenant_id` and `team.id`,
+  which the analytics views read. Only keys already on a record are set, so
+  each record still lands in the same table. Repeated attribute keys on a
+  record are collapsed to one first.
+
 ## [v3.8.1] — 2026-10-30
 
 ### Removed
