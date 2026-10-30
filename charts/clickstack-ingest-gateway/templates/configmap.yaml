@@ -45,6 +45,29 @@ data:
             action: upsert
             from_context: auth.claims.scope
 
+      # OTLP allows a key to repeat on one record, and `update` below rewrites
+      # only its first occurrence. Collapsing the attributes into a map first
+      # leaves one entry per key.
+      transform/dedupe_log_attributes:
+        error_mode: propagate
+        log_statements:
+          - statements:
+              - merge_maps(log.cache, log.attributes, "upsert")
+              - set(log.attributes, log.cache)
+
+      # The DataCore ingest views read the tenant from log-record attributes,
+      # not from the resource, so the claim is applied there too. `update`
+      # rewrites only keys the record already carries: the views route rows by
+      # which keys are present, and adding one would move a record into another
+      # table.
+      attributes/tenant_from_claims:
+        actions:
+          {{- range $key := list "usage.tenant_id" "trustgate.tenant_id" "trustguard.tenant_id" "trustgate.topic.tenant_id" "trustgate.label.tenant_id" "trustguard.shadow.tenant_id" "team.id" }}
+          - key: {{ $key }}
+            action: update
+            from_context: auth.claims.tenant_id
+          {{- end }}
+
       # Authenticated but unusable: no tenant on the token, or a token minted for
       # something other than writing telemetry.
       filter/require_tenant_and_scope:
@@ -118,7 +141,7 @@ data:
         {{- range $signal := list "logs" "traces" "metrics" }}
         {{ $signal }}:
           receivers: [otlp]
-          processors: [memory_limiter, resource/tenant_from_claims, filter/require_tenant_and_scope, resource/drop_scope_attr, batch]
+          processors: [memory_limiter, resource/tenant_from_claims, {{ if eq $signal "logs" }}transform/dedupe_log_attributes, attributes/tenant_from_claims, {{ end }}filter/require_tenant_and_scope, resource/drop_scope_attr, batch]
           exporters: [otlphttp/clickstack]
         {{- end }}
       telemetry:
