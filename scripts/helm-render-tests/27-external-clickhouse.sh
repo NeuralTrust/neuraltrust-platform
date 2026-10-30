@@ -36,17 +36,18 @@ assert_contains "$out10c3" '^  CLICKHOUSE_USERNAME: "ch_operator"$' \
 # --- HTTP consumers: the ClickStack collector composes a URL -----------------
 # This chart is the only one configured by URL, and the scheme has to follow tls
 # or a TLS-only managed endpoint refuses the connection.
-assert_contains "$out10c3" 'CLICKHOUSE_ENDPOINT: "https://ch\.managed\.example\.com:8443"' \
+assert_env_value "$out10c3" clickstack-collector collector CLICKHOUSE_ENDPOINT https://ch.managed.example.com:8443 \
   "external CH: the collector composes an https endpoint from host + httpPort + tls"
 
-# --- data-plane-api keeps its own Secret, values decoded ---------------------
-dpa_host=$(yq -N 'select(.kind == "Secret" and .metadata.name == "clickhouse-secrets") | .data.CLICKHOUSE_HOST' "$out10c3" | head -1 | base64 -d)
-dpa_port=$(yq -N 'select(.kind == "Secret" and .metadata.name == "clickhouse-secrets") | .data.CLICKHOUSE_PORT' "$out10c3" | head -1 | base64 -d)
-if [[ "$dpa_host" != "ch.managed.example.com" || "$dpa_port" != "8443" ]]; then
-  red "FAIL: external CH: data-plane-api resolved ${dpa_host}:${dpa_port}, want ch.managed.example.com:8443"
-  exit 1
-fi
-green "ok  - external CH: data-plane-api's clickhouse-secrets carries the managed host and HTTP port"
+# --- data-plane-api: plain env, no Secret for connection settings -----------
+assert_env_value "$out10c3" data-plane-api api CLICKHOUSE_HOST ch.managed.example.com \
+  "external CH: data-plane-api dials the managed host"
+assert_env_value "$out10c3" data-plane-api api CLICKHOUSE_PORT 8443 \
+  "external CH: data-plane-api uses the managed HTTP port"
+assert_env_value "$out10c3" data-plane-api api CLICKHOUSE_USER ch_operator \
+  "external CH: data-plane-api's user follows global.clickhouse.user"
+assert_resource_count "$out10c3" Secret clickhouse-secrets 0 \
+  "external CH: connection settings are not stored in a Secret"
 
 # A dotted host must pass through verbatim rather than being expanded to an
 # in-cluster FQDN. That heuristic uses "is it dotted?" as the proxy for "is it
@@ -94,7 +95,7 @@ out10c3d="$TMP/scenario-ch-incluster-default.yaml"
 render_default "$out10c3d" --set global.deploymentMode=external --set watchdog.enabled=true
 assert_contains "$out10c3d" '^  CLICKHOUSE_ADDR: "clickhouse:9000"$' \
   "in-cluster default: CLICKHOUSE_ADDR unchanged by the global.clickhouse rewiring"
-assert_contains "$out10c3d" 'CLICKHOUSE_ENDPOINT: "http://clickhouse:8123"' \
+assert_env_value "$out10c3d" clickstack-collector collector CLICKHOUSE_ENDPOINT http://clickhouse:8123 \
   "in-cluster default: the collector endpoint is unchanged"
 assert_contains "$out10c3d" '^  CLICKHOUSE_TLS: "false"$' \
   "in-cluster default: TLS stays off"

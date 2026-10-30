@@ -1233,8 +1233,6 @@ data-plane-api:
           key: ""
         auth:
           username: "neuraltrust"
-        secrets:
-          name: "clickhouse-secrets"
         # The ClickHouse DDL ships inside the data-plane-api image and is copied into
         # place at startup, so no ConfigMap is rendered. Set a name here only to mount
         # a ConfigMap you manage yourself, carrying the DDL under the init-db.sql key.
@@ -1287,7 +1285,6 @@ data-plane-api:
           tag: v1.58.1
           pullPolicy: IfNotPresent
         accessMode: ReadWriteOnce
-        huggingfaceToken: ""
         storage: 10Gi
         replicas: 2
         autoscaling:
@@ -1450,7 +1447,6 @@ firewall:
       otelEnabled: ""
     secrets:
       jwtSecret: ""
-      huggingFaceToken: ""
     serviceAccount:
       create: true
       name: firewall

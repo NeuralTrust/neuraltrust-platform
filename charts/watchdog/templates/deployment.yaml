@@ -134,21 +134,33 @@ spec:
                   key: {{ .Values.actions.slack.secretKey }}
                   optional: true
             {{- end }}
-            {{- with .Values.secretEnv.clickhouse }}
-            {{- if .userSecret }}
+            {{- $chEnv := default dict .Values.secretEnv.clickhouse }}
+            {{- $wch := include "neuraltrust-platform.clickhouse.resolve" (dict "ctx" $ "local" dict "global" .Values.global) | fromYaml }}
+            {{- if $chEnv.userSecret }}
             - name: CLICKHOUSE_USER
               valueFrom:
                 secretKeyRef:
-                  name: {{ .userSecret }}
-                  key: {{ .userKey | default "username" }}
+                  name: {{ $chEnv.userSecret }}
+                  key: {{ $chEnv.userKey | default "username" }}
+            {{- else }}
+            - name: CLICKHOUSE_USER
+              value: {{ $wch.user | quote }}
             {{- end }}
-            {{- if .passwordSecret }}
+            {{- if $chEnv.passwordSecret }}
             - name: CLICKHOUSE_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ .passwordSecret }}
-                  key: {{ .passwordKey | default "password" }}
-            {{- end }}
+                  name: {{ $chEnv.passwordSecret }}
+                  key: {{ $chEnv.passwordKey | default "password" }}
+            {{- else if eq (include "neuraltrust-platform.isExternal" .) "true" }}
+            {{- /* The Secret DataCore, AlertEngine and the collector read: the
+                   in-cluster generator's, an operator's global.clickhouse one, or
+                   the chart's `clickhouse`. */}}
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $wch.secretName | quote }}
+                  key: {{ $wch.secretKey | quote }}
             {{- end }}
             {{- with .Values.secretEnv.redis }}
             {{- if .passwordSecret }}

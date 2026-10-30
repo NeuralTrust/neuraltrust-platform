@@ -4,6 +4,65 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Removed
+
+- **The firewall's `HUGGINGFACE_TOKEN`.** The firewall images ship every model
+  baked in at build time and read no Hugging Face token at runtime, and no
+  other service reads one. The `firewall.firewall.secrets.huggingFaceToken`
+  and `data-plane-api…huggingfaceToken` values, the `firewall-secrets` key and
+  the env entry on the firewall gateway and workers are gone. A custom image
+  that downloads models at runtime can still receive a token through
+  `firewall.firewall.gateway.extraEnv` and each worker's `extraEnv`.
+
+### Changed
+
+- **Secrets hold credentials only.** Connection settings are configuration and
+  now reach the workloads as plain values from `global.*` and each service's
+  values:
+  - the ClickHouse user on DataCore and the collector, and the collector's
+    `CLICKHOUSE_ENDPOINT` (no longer in `datacore-secrets` /
+    `clickstack-collector-secrets`);
+  - data-plane-api's ClickHouse host, port, database and user. The
+    `clickhouse-secrets` hook Secret is no longer rendered or read, in every
+    mode, so the values must describe your ClickHouse, as they already must
+    for DataCore and AlertEngine (a `clickhouse-secrets` you created yourself
+    under `preserveExistingSecrets` is no longer read);
+  - data-plane-api's `REDIS_URL` when it carries no password. With a password
+    it stays in `data-plane-jwt-secret`;
+  - the TrustGuard client id under the in-cluster generator.
+- **A Secret with nothing to hold is not rendered.** Under the generator,
+  `alertengine-secrets`, `trustguard-secrets`, `agentgateway-secrets`,
+  `datacore-secrets`, `clickstack-collector-secrets`, `data-plane-jwt-secret`,
+  `control-plane-secrets`, `firewall-secrets`, `trustguard-client-credentials`
+  and the DataAgent Secrets usually have none. Workloads load them with an
+  optional `envFrom` while the chart owns them; under
+  `preserveExistingSecrets` or `autoGenerateSecrets: false`, where you supply
+  them, the reference stays required. On an upgraded install the earlier copies
+  stay (`helm.sh/resource-policy: keep`) and nothing reads them; you may delete
+  them.
+- **`control-plane-secrets` writes `FIREWALL_API_URL`, `resend-alert-sender`
+  and `resend-reply-to` only when set**, like the integration keys. Under
+  `helm upgrade`, a value already in the live Secret is kept.
+- **`global.v2.trustguardClientSecretName` is honoured end to end.** With it set,
+  both halves of the TrustGuard client pair come from your Secret and the chart
+  renders no `trustguard-client-credentials`. Under the in-cluster generator the
+  secret half used to come from the generator instead.
+
+### Fixed
+
+- **Watchdog reads the ClickHouse password every other consumer reads.** Its
+  `secretEnv.clickhouse` defaults pointed at `clickhouse-secrets` and the
+  `clickhouse` Secret, which the in-cluster generator does not render, so an
+  external install with watchdog enabled could not start it. Empty defaults now
+  follow `global.clickhouse` for the user and the shared password Secret; a
+  Secret named there still wins.
+- **The secrets generator no longer acts on specs an earlier render left
+  behind.** Its spec ConfigMaps and pins Secrets are deleted once the sync
+  succeeds, and the Job ignores and removes unlabelled ones from earlier charts.
+  After an upgrade that dropped a component (TrustGate off, `gateway-api`),
+  the Job kept maintaining that component's Secrets. Pinned values no longer
+  linger in the namespace either.
+
 ## [v3.8.2] — 2026-10-30
 
 ### Fixed

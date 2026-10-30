@@ -51,7 +51,7 @@ DEFAULT_OCI_CHART="oci://europe-west1-docker.pkg.dev/neuraltrust-app-prod/helm-c
 PLACEHOLDER="REPLACE_ME"
 # Optional integrations: referenced by the workloads, needed only when you use them.
 OPTIONAL_SECRETS="openai-secrets google-secrets resend-secrets"
-OPTIONAL_KEYS="firewall-secrets/HUGGINGFACE_TOKEN"
+OPTIONAL_KEYS=""
 
 usage() { sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 die() { printf 'Error: %s\n' "$*" >&2; exit 1; }

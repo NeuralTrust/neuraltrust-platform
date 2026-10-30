@@ -62,6 +62,9 @@ spec:
             name: trustguard-env-vars
         - secretRef:
             name: trustguard-secrets
+            {{- if eq (include "neuraltrust-platform.serviceSecret.chartOwned" .) "true" }}
+            optional: true
+            {{- end }}
         env:
         {{- /* Shared credentials come from platform-secrets; an explicit env
                entry outranks the legacy copy still arriving via envFrom. */}}

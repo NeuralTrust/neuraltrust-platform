@@ -143,10 +143,14 @@ assert_resource_count "$o" Secret neuraltrust-ingress-tls 1 \
 
 blue "==> Scenario 43d: control-plane-secrets carries only configured credentials"
 o="$TMP/unread-cp-default.yaml"
-render_default "$o" --set global.deploymentMode=external "${GEN[@]}"
+render_default "$o" --set global.deploymentMode=external --set global.secrets.generator.enabled=false
 assert_secret_keys "$o" control-plane-secrets absent \
   "defaults: control-plane-secrets omits" \
   MODEL_SCANNER_SECRET NEXTAUTH_SECRET RESEND_API_KEY OPENAI_API_KEY resend-api-key SMTP_PASSWORD SES_ACCESS_KEY_ID
+o="$TMP/unread-cp-default-gen.yaml"
+render_default "$o" --set global.deploymentMode=external "${GEN[@]}"
+assert_resource_count "$o" Secret control-plane-secrets 0 \
+  "defaults, generator: control-plane-secrets has nothing to hold and is not rendered"
 o="$TMP/unread-cp-configured.yaml"
 render_default "$o" --set global.deploymentMode=external "${GEN[@]}" \
   --set control-plane-api.controlPlane.secrets.openaiApiKey=sk-example \

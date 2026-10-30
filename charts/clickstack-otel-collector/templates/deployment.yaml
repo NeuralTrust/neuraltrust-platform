@@ -75,6 +75,18 @@ spec:
               {{- $ch := include "neuraltrust-platform.clickhouse.resolve" (dict "ctx" $ "local" .Values.clickhouse "global" .Values.global) | fromYaml }}
               name: {{ $ch.secretName | quote }}
               key: {{ $ch.secretKey | quote }}
+        {{- /* Configuration, not credentials. Explicit, so they also outrank the
+               copies an older chart left in the collector Secret. */}}
+        {{- $own := list }}
+        {{- range (default list .Values.extraEnv) }}{{- $own = append $own .name }}{{- end }}
+        {{- if not (has "CLICKHOUSE_ENDPOINT" $own) }}
+        - name: CLICKHOUSE_ENDPOINT
+          value: {{ include "clickstack-otel-collector.clickhouseEndpoint" . | quote }}
+        {{- end }}
+        {{- if not (has "CLICKHOUSE_USER" $own) }}
+        - name: CLICKHOUSE_USER
+          value: {{ $ch.user | quote }}
+        {{- end }}
         - name: HYPERDX_OTEL_EXPORTER_CLICKHOUSE_DATABASE
           value: {{ .Values.clickhouse.database | quote }}
         - name: HYPERDX_LOG_LEVEL

@@ -15,7 +15,8 @@ data:
       {{- /* ClickStack sink for red / otlp_freshness. external+saas get the
              ClickHouse native address when the operator left
              runner.clickstack.address empty; hybrid stays empty (no local CH).
-             Credentials always reuse CLICKHOUSE_* from clickhouse-secrets. */ -}}
+             Credentials come from CLICKHOUSE_USER / CLICKHOUSE_PASSWORD on the
+             StatefulSet (secretEnv.clickhouse). */ -}}
       {{- $cs := default dict .Values.runner.clickstack -}}
       {{- $csAddr := default "" $cs.address -}}
       {{- /* AUT-636: this was the literal "clickhouse:9000", so an external
