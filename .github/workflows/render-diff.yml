@@ -34,5 +34,8 @@ jobs:
         run: |
           ruby scripts/render-diff.rb "$(git merge-base "$BASE_SHA" HEAD)" \
             --labels "$LABELS" --summary summary.md || status=$?
-          cat summary.md >> "$GITHUB_STEP_SUMMARY"
+          tee -a "$GITHUB_STEP_SUMMARY" < summary.md
+          if [ "${status:-0}" -ne 0 ]; then
+            echo "::error title=Render diff::$(head -n1 summary.md | sed 's/^## //'). The job summary lists what changed."
+          fi
           exit "${status:-0}"
