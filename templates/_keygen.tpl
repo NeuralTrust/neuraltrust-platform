@@ -22,6 +22,10 @@ Helm creates any manifest, so a Job that pre-created the chart-owned Secret woul
 collide with Helm's ownership metadata on install. Hook-owned also means
 `helm uninstall` leaves it in place and a reinstall keeps the same key.
 
+When the in-cluster secrets generator writes `platform-secrets`
+(`secretsGenerator.ownsPlatform`), it mints both keys there instead, and the
+callers do not render this hook.
+
 Callers gate on their own generate helper, so this template renders
 unconditionally. Parameters:
 

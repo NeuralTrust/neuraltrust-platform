@@ -10,7 +10,9 @@ Secret — lives in `_keygen.tpl`.
 Skipped entirely when an operator supplies a key, or when they turn the generator
 off to own the key themselves.
 */}}
-{{- if eq (include "neuraltrust-platform.mcpOAuth.generateSigningKey" .) "true" }}
+{{- /* The in-cluster secrets generator mints the key into platform-secrets
+       instead whenever it writes that Secret. */}}
+{{- if and (eq (include "neuraltrust-platform.mcpOAuth.generateSigningKey" .) "true") (ne (include "neuraltrust-platform.secretsGenerator.ownsPlatform" .) "true") }}
 {{- include "neuraltrust-platform.keygenHook" (dict
       "ctx" .
       "component" "mcp-signing-key"

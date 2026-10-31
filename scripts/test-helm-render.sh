@@ -52,7 +52,9 @@ green "ok  - helm lint passes"
 ls -S "${files[@]}" | xargs -n 1 -P "$JOBS" bash -c '
   name="$(basename "$2" .sh)"
   start=$SECONDS
-  if bash "$2" >"$1/$name.log" 2>&1; then
+  # Bash 3.2 (macOS) exits 0 when an unbound variable aborts a scenario inside
+  # an `if` condition, so the message itself counts as a failure.
+  if bash "$2" >"$1/$name.log" 2>&1 && ! grep -q ": unbound variable" "$1/$name.log"; then
     printf "  done %-40s %4ss\n" "$name" "$((SECONDS - start))"
   else
     touch "$1/$name.failed"

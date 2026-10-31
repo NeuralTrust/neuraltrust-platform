@@ -177,6 +177,27 @@ true
 {{- end }}
 
 {{/*
+Whether the in-cluster secrets generator issues the southbound keypair instead
+of southbound-tls-secret.yaml rendering it: the chart would mint it, under the
+name the generator's Role is scoped to.
+*/}}
+{{- define "databridge.tlsGenerated" -}}
+{{- if and
+  (eq (include "neuraltrust-platform.secretsGenerator.active" .) "true")
+  (eq (include "databridge.tlsAutoGenerate" .) "true")
+  (eq (include "databridge.tlsSecretName" .) (include "neuraltrust-platform.secretsGenerator.tlsName" (dict "id" "databridge-southbound"))) -}}true{{- end -}}
+{{- end }}
+
+{{/*
+The southbound certificate's names, in the order its SANs digest is taken.
+*/}}
+{{- define "databridge.tlsAltNames" -}}
+{{- $ns := .Release.Namespace -}}
+{{- $svc := printf "%s-southbound" (include "databridge.fullname" .) -}}
+{{- list (include "databridge.southboundHost" .) $svc (printf "%s.%s" $svc $ns) (printf "%s.%s.svc" $svc $ns) (printf "%s.%s.svc.cluster.local" $svc $ns) | toJson -}}
+{{- end }}
+
+{{/*
 Public southbound hostname agents dial and the TLS certificate must cover.
 Same derivation the DataAgent side uses, so the two cannot disagree.
 */}}

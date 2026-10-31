@@ -52,7 +52,10 @@ assert_secret_shape() {
       errors << "#{name} holds only configuration: #{keys.sort.join(", ")}" if !keys.empty? && (keys - config).empty? && !frozen.include?(name)
     end
     # Created in the cluster by the generator and the keygen hook Jobs.
-    known = rendered + %w[neuraltrust-generated agentgateway-m2m-keys mcp-oauth-signing] + operator
+    known = rendered + %w[agentgateway-m2m-keys mcp-oauth-signing] + operator
+    if docs.any? { |d| d["kind"] == "Job" && d.dig("metadata", "labels", "app.kubernetes.io/component") == "secrets-generator" }
+      known += %w[platform-secrets trustguard-configsync-tls agentgateway-configsync-tls neuraltrust-ingress-tls]
+    end
     docs.each do |d|
       next unless %w[Deployment StatefulSet Job].include?(d["kind"])
       pod = d.dig("spec", "template", "spec") || {}
@@ -96,12 +99,27 @@ render_default "$o" --set global.deploymentMode=hybrid
 assert_secret_shape "$o" "hybrid"
 o="$TMP/shape-saas.yaml"
 render_default "$o" --set global.deploymentMode=saas
-assert_secret_shape "$o" "saas"
+assert_secret_shape "$o" "saas, render-time"
+o="$TMP/shape-saas-gen.yaml"
+render_default "$o" --set global.deploymentMode=saas "${GEN[@]}"
+assert_secret_shape "$o" "saas, generator"
 o="$TMP/shape-watchdog.yaml"
 render_default "$o" --set global.deploymentMode=external --set watchdog.enabled=true "${GEN[@]}"
 assert_secret_shape "$o" "external with watchdog, generator"
 
 blue "==> Scenario 44b: a Secret with nothing to hold is not rendered"
+# autoGenerateSecrets=false is the operator's promise to supply the credentials:
+# the firewall subchart renders firewall-secrets from a pinned value, never one
+# it invents, which under Argo changed on every sync.
+o="$TMP/shape-firewall-operator.yaml"
+render_default "$o" --set global.deploymentMode=external --set global.autoGenerateSecrets=false
+assert_resource_count "$o" Secret firewall-secrets 0 \
+  "autoGenerateSecrets=false: no invented firewall JWT_SECRET"
+o="$TMP/shape-firewall-pinned.yaml"
+render_default "$o" --set global.deploymentMode=external --set global.autoGenerateSecrets=false \
+  --set firewall.firewall.secrets.jwtSecret=pinned-jwt
+assert_contains "$o" "JWT_SECRET: $(printf pinned-jwt | base64)\$" \
+  "autoGenerateSecrets=false: firewall-secrets carries the pinned JWT_SECRET"
 o="$TMP/shape-guard-only.yaml"
 for s in alertengine-secrets trustguard-secrets datacore-secrets clickstack-collector-secrets \
          data-plane-jwt-secret control-plane-secrets trustguard-client-credentials clickhouse-secrets; do
@@ -207,30 +225,6 @@ if command -v node >/dev/null 2>&1; then
     job = docs.find { |d| d["kind"] == "Job" && d.dig("metadata", "name").to_s.end_with?("secrets-generator") }
     File.write(ARGV.fetch(1), job.dig("spec", "template", "spec", "containers", 0, "command").last)
   ' "$TMP/shape-external-gen.yaml" "$TMP/generator.js"
-  cat > "$TMP/fake-api.js" <<'JS'
-// Stands in for the service-account files and the Kubernetes API the generator uses.
-const fs = require('node:fs')
-const state = JSON.parse(fs.readFileSync(process.env.FAKE_STATE, 'utf8'))
-const realRead = fs.readFileSync
-fs.readFileSync = (p, ...rest) => {
-  if (String(p).startsWith('/var/run/secrets/kubernetes.io/serviceaccount/')) return String(p).endsWith('namespace') ? 'ns' : 'token'
-  return realRead(p, ...rest)
-}
-const reply = (status, body) => ({ ok: status < 300, status, json: async () => body, text: async () => JSON.stringify(body || {}) })
-global.fetch = async (url, opts = {}) => {
-  const [, kind, name] = new URL(url).pathname.match(/\/namespaces\/ns\/(\w+)(?:\/(.+))?$/)
-  const coll = (state[kind] ||= {})
-  const method = opts.method || 'GET'
-  if (method === 'GET') return coll[name] ? reply(200, coll[name]) : reply(404)
-  if (method === 'DELETE') { delete coll[name]; return reply(200, {}) }
-  const body = JSON.parse(opts.body)
-  if (method === 'POST') { coll[body.metadata.name] = body; return reply(201, body) }
-  const live = coll[name]
-  Object.assign((live.data ||= {}), body.data)
-  return reply(200, live)
-}
-process.on('exit', () => fs.writeFileSync(process.env.FAKE_STATE, JSON.stringify(state)))
-JS
   b64() { printf '%s' "$1" | base64; }
   cat > "$TMP/fake-state.json" <<JSON
 {"configmaps": {
@@ -243,14 +237,15 @@ JS
   "neuraltrust-generator-pins-ingress": {"metadata": {"labels": {}}, "data": {"STALE": "$(b64 pinned)"}}}}
 JSON
   run_generator() {
-    FAKE_STATE="$TMP/fake-state.json" GENERATED_SECRET=neuraltrust-generated SPEC_COMPONENTS="platform ingress" \
-      SPEC_LABEL=neuraltrust.ai/generator-spec SPEC_FORMAT=2 \
-      node --require "$TMP/fake-api.js" "$TMP/generator.js"
+    FAKE_STATE="$TMP/fake-state.json" GENERATED_SECRET=platform-secrets SPEC_COMPONENTS="platform ingress" \
+      SPEC_LABEL=neuraltrust.ai/generator-spec SPEC_FORMAT=2 PREVIOUS_SECRET=neuraltrust-generated \
+      MARKER=neuraltrust.ai/secrets-generator \
+      node --require "$(cd "$(dirname "$0")" && pwd)/fake-kube-api.js" "$TMP/generator.js"
   }
   run_generator > "$TMP/generator-1.log" 2>&1 || { red "FAIL: the generator script fails at runtime"; sed 's/^/  /' "$TMP/generator-1.log"; exit 1; }
   ruby -rjson -rbase64 -e '
     s = JSON.parse(File.read(ARGV.fetch(0)))
-    gen = s.dig("secrets", "neuraltrust-generated") or abort "no generated Secret was created"
+    gen = s.dig("secrets", "platform-secrets") or abort "no generated Secret was created"
     d = gen["data"].transform_values { |v| Base64.decode64(v) }
     abort "ADOPTED=#{d["ADOPTED"].inspect}, want the legacy value" unless d["ADOPTED"] == "kept-legacy-value"
     abort "FRESH was not generated" unless d["FRESH"].to_s.length == 24

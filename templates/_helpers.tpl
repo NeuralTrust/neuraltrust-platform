@@ -1179,7 +1179,8 @@ not rely on that — the key is absent from the chart Secret whenever this fires
 so there is only ever one source.
 
   ctx      the subchart context
-  ref      the `existingSecret` map (name, key)
+  ref      the `existingSecret` map (name, key; `optional` true for a
+           reference the chart inferred rather than one the operator named)
   envName  the variable the runtime reads
   default  key to read when `ref.key` is unset, normally envName
 */}}
@@ -1191,6 +1192,36 @@ so there is only ever one source.
     secretKeyRef:
       name: {{ $ref.name | quote }}
       key: {{ $ref.key | default (.default | default .envName) | quote }}
+      {{- if $ref.optional }}
+      optional: true
+      {{- end }}
+{{- end -}}
+{{- end }}
+
+{{/*
+Where a service's Redis password comes from, as `name`/`key` YAML (empty when
+the chart writes it, or there is none):
+
+  1. the service's own `redis.existingSecret`, as named;
+  2. else, unless the service pins an inline `redis.password`, the
+     `global.redis.existingSecret` every consumer shares (key
+     `keys.password`). It is optional: a Secret that names the Redis but holds
+     no password (one without auth) must not stop the pod.
+
+GCP IAM logins (global.redis.authMode=iam) send a token and read no password.
+
+  (dict "ctx" . "redis" .Values.redis)
+*/}}
+{{- define "neuraltrust-platform.redis.passwordRef" -}}
+{{- $redis := default dict .redis -}}
+{{- $own := default dict $redis.existingSecret -}}
+{{- $ges := default dict (default dict (default dict .ctx.Values.global).redis).existingSecret -}}
+{{- if $own.name -}}
+{{- toYaml $own -}}
+{{- else if and $ges.name (not ($redis.password | default "")) (ne (include "neuraltrust-platform.redis.gcpIam" .ctx) "true") -}}
+name: {{ $ges.name | quote }}
+key: {{ (default dict $ges.keys).password | default "REDIS_PASSWORD" | quote }}
+optional: true
 {{- end -}}
 {{- end }}
 
@@ -1384,6 +1415,7 @@ Redis consumer reads it from. Empty for the IAM logins and when the cache is off
 {{- with $es.name }}
 name: {{ . | quote }}
 key: {{ (default dict $es.keys).password | default "REDIS_PASSWORD" | quote }}
+optional: true
 {{- end -}}
 {{- end -}}
 {{- end }}
@@ -3505,6 +3537,19 @@ External-mode OTLP auth: mount the shared header from clickstack-collector-secre
 clickstack-collector-secrets
 {{- end }}
 
+{{/*
+The Secret holding the collector's receiver token, OTLP_AUTH_TOKEN, for a reader
+outside the collector subchart: the in-cluster secrets generator's whenever it
+is active, as the collector itself reads it.
+*/}}
+{{- define "neuraltrust-platform.clickstack.otlpTokenSecretName" -}}
+{{- if eq (include "neuraltrust-platform.secretsGenerator.active" .) "true" -}}
+{{- include "neuraltrust-platform.secretsGenerator.name" . -}}
+{{- else -}}
+{{- include "neuraltrust-platform.clickstack.externalCollectorSecretName" . -}}
+{{- end -}}
+{{- end }}
+
 {{- define "neuraltrust-platform.clickstack.externalOtlpHeadersEnv" -}}
 {{- /* The in-cluster secrets generator owns the token, and derives this header
        from it, whenever it is active: the collector subchart's
@@ -4035,16 +4080,19 @@ MCP_DEFAULT_IDP_CLIENT_SECRET, so the two env names differ while the value does
 not.
 
 MCP_OAUTH_SIGNING_KEY — RS256 key for the tokens that server mints, and
-adopt-only on purpose. The app loads it with `importPKCS8`, while Helm's
-`genPrivateKey "rsa"` emits PKCS#1, so anything the chart generated would fail
-to parse. SECRETS.md carries the `openssl genpkey` command. While it is absent
-the app mints an ephemeral key per replica, which only works with one replica.
+adopt-only in this rendered Secret on purpose. The app loads it with
+`importPKCS8`, while Helm's `genPrivateKey "rsa"` emits PKCS#1, so anything the
+chart rendered would fail to parse. The in-cluster secrets generator, which can,
+mints it into its `platform-secrets` (templates/secrets-generator.yaml); SECRETS.md
+carries the `openssl genpkey` command. While it is absent the app mints an
+ephemeral key per replica, which only works with one replica.
 
 AGENTGATEWAY_M2M_PRIVATE_KEY — RS256 PKCS#8 key the app uses to sign Admin API
-machine-credential tokens (ENG-1212). Adopt-only in this Secret for the same
-reason as MCP_OAUTH_SIGNING_KEY; the matching public half never lives here — it
-is either `global.agentgatewayM2m.publicKeys` or the hook-owned
-`agentgateway-m2m-keys` Secret the generator writes next to the private key.
+machine-credential tokens (ENG-1212). Adopt-only in this rendered Secret for the
+same reason as MCP_OAUTH_SIGNING_KEY; the matching public half is
+`global.agentgatewayM2m.publicKeys`, the hook-owned `agentgateway-m2m-keys`, or,
+when the in-cluster secrets generator writes `platform-secrets`,
+`ADMIN_M2M_PUBLIC_KEYS` derived there next to the private key.
 
 AUTH_SECRET_KEY — encrypts SSO client secrets and SMTP credentials at rest
 (scrypt into AES-256-GCM). Deliberately independent of AUTH_SECRET, which signs
@@ -4240,6 +4288,10 @@ Usage: {{ include "neuraltrust-platform.platformCredentialPresent" (dict "ctx" .
 {{- $key := .key -}}
 {{- $ps := default dict (default dict $ctx.Values.global).platformSecret -}}
 {{- $pinned := index (default dict $ps.values) $key | default "" -}}
+{{- /* `chartOwned`: the caller's key is one the generator mints. A
+       `platform-secrets` the generator manages then holds the chart's own key,
+       which must not read back as one the operator supplied. */ -}}
+{{- $marker := include "neuraltrust-platform.secretsGenerator.marker" $ctx -}}
 {{- if and $pinned (not (kindIs "map" $pinned)) (not (kindIs "slice" $pinned)) -}}
 true
 {{- else -}}
@@ -4247,7 +4299,8 @@ true
 {{- range $name := (list "platform-secrets" ((default dict $ps.existingSecret).name | default "") "control-plane-secrets") -}}
 {{- if and $name (not $found) -}}
 {{- $live := lookup "v1" "Secret" $ctx.Release.Namespace $name -}}
-{{- if and $live $live.data (index $live.data $key) -}}
+{{- $managed := eq (index (default dict (default dict (default dict $live).metadata).annotations) $marker | default "") "managed" -}}
+{{- if and $live $live.data (index $live.data $key) (not (and $.chartOwned $managed)) -}}
 {{- $found = "true" -}}
 {{- end -}}
 {{- end -}}
@@ -4264,7 +4317,7 @@ replica signs fail JWKS verification against another. That makes "is a key
 available" the real precondition for the feature, not the operator's intent.
 */}}
 {{- define "neuraltrust-platform.mcpOAuth.signingKeyPresent" -}}
-{{- include "neuraltrust-platform.platformCredentialPresent" (dict "ctx" . "key" "MCP_OAUTH_SIGNING_KEY") -}}
+{{- include "neuraltrust-platform.platformCredentialPresent" (dict "ctx" . "key" "MCP_OAUTH_SIGNING_KEY" "chartOwned" (eq (include "neuraltrust-platform.secretsGenerator.ownsPlatform" .) "true")) -}}
 {{- end }}
 
 {{/*
@@ -4364,7 +4417,11 @@ An operator who later pins their own key moves this reference to
 invalidates tokens signed by the old key, which is why nothing does it implicitly.
 */}}
 {{- define "neuraltrust-platform.mcpOAuth.signingKeyRef" -}}
-{{- if eq (include "neuraltrust-platform.mcpOAuth.generateSigningKey" .) "true" -}}
+{{- if and (eq (include "neuraltrust-platform.mcpOAuth.generateSigningKey" .) "true") (eq (include "neuraltrust-platform.secretsGenerator.ownsPlatform" .) "true") -}}
+name: {{ include "neuraltrust-platform.secretsGenerator.name" . | quote }}
+key: "MCP_OAUTH_SIGNING_KEY"
+optional: true
+{{- else if eq (include "neuraltrust-platform.mcpOAuth.generateSigningKey" .) "true" -}}
 name: {{ include "neuraltrust-platform.mcpOAuth.generatedSecretName" . | quote }}
 key: "MCP_OAUTH_SIGNING_KEY"
 optional: true
@@ -4507,7 +4564,10 @@ Usage:
 Whether an operator-supplied private key is already available.
 */}}
 {{- define "neuraltrust-platform.agentgatewayM2m.privateKeyPresent" -}}
-{{- include "neuraltrust-platform.platformCredentialPresent" (dict "ctx" . "key" "AGENTGATEWAY_M2M_PRIVATE_KEY") -}}
+{{- /* With no public key in values the pair is the chart's: the generator mints
+       both halves into platform-secrets. */ -}}
+{{- $chartOwned := and (eq (include "neuraltrust-platform.secretsGenerator.ownsPlatform" .) "true") (not (include "neuraltrust-platform.agentgatewayM2m.publicKeys" .)) -}}
+{{- include "neuraltrust-platform.platformCredentialPresent" (dict "ctx" . "key" "AGENTGATEWAY_M2M_PRIVATE_KEY" "chartOwned" $chartOwned) -}}
 {{- end }}
 
 {{- define "neuraltrust-platform.agentgatewayM2m.publicKeys" -}}
@@ -4517,6 +4577,18 @@ Whether an operator-supplied private key is already available.
 
 {{- define "neuraltrust-platform.agentgatewayM2m.generatedSecretName" -}}
 agentgateway-m2m-keys
+{{- end }}
+
+{{/*
+Where the pair the chart mints is read from: `platform-secrets` when the
+secrets generator writes it, else the keygen hook's own Secret.
+*/}}
+{{- define "neuraltrust-platform.agentgatewayM2m.keysSecretName" -}}
+{{- if eq (include "neuraltrust-platform.secretsGenerator.ownsPlatform" .) "true" -}}
+{{- include "neuraltrust-platform.secretsGenerator.name" . -}}
+{{- else -}}
+{{- include "neuraltrust-platform.agentgatewayM2m.generatedSecretName" . -}}
+{{- end -}}
 {{- end }}
 
 {{/*
@@ -4621,7 +4693,7 @@ true
 
 {{- define "neuraltrust-platform.agentgatewayM2m.privateKeyRef" -}}
 {{- if eq (include "neuraltrust-platform.agentgatewayM2m.generateKeys" .) "true" -}}
-name: {{ include "neuraltrust-platform.agentgatewayM2m.generatedSecretName" . | quote }}
+name: {{ include "neuraltrust-platform.agentgatewayM2m.keysSecretName" . | quote }}
 key: "AGENTGATEWAY_M2M_PRIVATE_KEY"
 {{- else -}}
 {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "AGENTGATEWAY_M2M_PRIVATE_KEY" "optional" true) -}}
@@ -4676,7 +4748,7 @@ the Admin API, so this stays off those workloads.
 {{- if eq (include "neuraltrust-platform.agentgatewayM2m.generateKeys" $ctx) "true" }}
   valueFrom:
     secretKeyRef:
-      name: {{ include "neuraltrust-platform.agentgatewayM2m.generatedSecretName" $ctx | quote }}
+      name: {{ include "neuraltrust-platform.agentgatewayM2m.keysSecretName" $ctx | quote }}
       key: "ADMIN_M2M_PUBLIC_KEYS"
 {{- else }}
   value: {{ include "neuraltrust-platform.agentgatewayM2m.publicKeys" $ctx | quote }}

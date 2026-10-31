@@ -117,7 +117,7 @@ assert_contains "$o" 'name: TRUSTGUARD_PLATFORM_CLIENT_SECRET' \
 blue "==> Scenario 43c: the shared ingress certificate only where an Ingress can use it"
 o="$TMP/unread-ingress-gwapi-gen.yaml"
 render_default "$o" --set global.deploymentMode=external "${GATEWAY_API[@]}" "${GEN[@]}"
-assert_spec_entry "$o" absent "ingress neuraltrust-generated-ingress-tls" \
+assert_spec_entry "$o" absent "ingress neuraltrust-ingress-tls" \
   "gateway-api, generator: no ingress certificate is issued"
 o="$TMP/unread-ingress-gwapi.yaml"
 render_default "$o" --set global.deploymentMode=external "${GATEWAY_API[@]}"
@@ -130,11 +130,11 @@ assert_resource_count "$o" Secret neuraltrust-ingress-tls 0 \
 o="$TMP/unread-ingress-managed.yaml"
 render_default "$o" --set global.deploymentMode=external --set global.platform=gcp \
   --set global.ingress.gcp.managedCertificates=true "${GEN[@]}"
-assert_spec_entry "$o" absent "ingress neuraltrust-generated-ingress-tls" \
+assert_spec_entry "$o" absent "ingress neuraltrust-ingress-tls" \
   "cloud-managed certificates: no self-signed certificate is issued"
 o="$TMP/unread-ingress-default-gen.yaml"
 render_default "$o" --set global.deploymentMode=external "${GEN[@]}"
-assert_spec_entry "$o" present "ingress neuraltrust-generated-ingress-tls" \
+assert_spec_entry "$o" present "ingress neuraltrust-ingress-tls" \
   "Ingress with TLS, generator: the self-signed certificate is issued"
 o="$TMP/unread-ingress-default-hybrid.yaml"
 render_default "$o" --set global.deploymentMode=hybrid

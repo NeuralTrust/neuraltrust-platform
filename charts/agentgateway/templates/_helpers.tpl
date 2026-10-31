@@ -282,9 +282,10 @@ Mirrors the TrustGuard implementation so both gateways behave identically.
 {{/*
 Whether the in-cluster secrets generator issues the config-sync keypair instead
 of this chart rendering it: the chart would generate it here (active,
-autoGenerate, no existingSecret), and the listener is not published. A
-published listener's CA is handed to other clusters out of band, so it stays on
-the rendered path until that hand-off can follow a generated CA.
+autoGenerate, no existingSecret). A published listener's CA is handed to other
+clusters out of band (scripts/export-controlplane-ca.sh), which reads the
+Secret by the same name either way; the generator reissues it only when the
+names it covers change, as the rendered one was.
 */}}
 {{- define "agentgateway.configSyncTls.generated" -}}
 {{- $tls := (default dict .Values.configSync).grpcTls | default dict -}}
@@ -292,8 +293,7 @@ the rendered path until that hand-off can follow a generated CA.
   (eq (include "neuraltrust-platform.secretsGenerator.active" .) "true")
   (eq (include "agentgateway.configSyncTls.active" .) "true")
   (eq (include "agentgateway.configSyncTls.autoGenerate" .) "true")
-  (not ($tls.existingSecret | default ""))
-  (ne (include "neuraltrust-platform.configSync.expose" (dict "ctx" .)) "true") -}}true{{- end -}}
+  (not ($tls.existingSecret | default "")) -}}true{{- end -}}
 {{- end }}
 
 {{- define "agentgateway.configSyncTls.mountPath" -}}/etc/agentgateway/configsync-tls{{- end }}
@@ -349,7 +349,7 @@ static password to point at. Emits nothing unless an `existingSecret.name` is se
 {{- if $db }}{{- $entries = append $entries $db }}{{- end -}}
 {{- end -}}
 {{- if not .Values.redis.iamAuth -}}
-{{- $redis := include "neuraltrust-platform.datastore.credentialEnv" (dict "ref" .Values.redis.existingSecret "envName" "REDIS_PASSWORD") -}}
+{{- $redis := include "neuraltrust-platform.datastore.credentialEnv" (dict "ref" (include "neuraltrust-platform.redis.passwordRef" (dict "ctx" . "redis" .Values.redis) | fromYaml) "envName" "REDIS_PASSWORD") -}}
 {{- if $redis }}{{- $entries = append $entries $redis }}{{- end -}}
 {{- end -}}
 {{- end -}}

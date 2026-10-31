@@ -94,21 +94,56 @@ Which group a credential falls in decides what, if anything, you do with it:
 
 | Group | What you do | Credentials |
 |---|---|---|
-| **A. Generated in the cluster** | Nothing, with any deploy tool: Helm, ArgoCD, Flux, ntctl | External installs: every service-to-service signing key, the encryption keys (`AUTH_SECRET_KEY`, `APP_ENCRYPTION_KEY`, `ADMIN_JWT_SECRET`, `SERVER_SECRET_KEY`), the in-cluster PostgreSQL admin and service-role passwords, the in-cluster ClickHouse password, the collector token, the TrustGuard platform client secret, the TrustGate STS key, the config-sync CA and keypair, the self-signed ingress certificate. The AgentGateway machine-credential pair and the MCP OAuth signing key, in every mode |
-| **B. Generated while rendering** | Nothing with `helm install` / `helm upgrade`. With ArgoCD or Flux, pre-create them (`create-secrets.sh`, below) | Hybrid and saas installs today, and a config-sync listener published outside the cluster |
+| **A. Generated in the cluster** | Nothing, with any deploy tool: Helm, ArgoCD, Flux, ntctl | External and saas installs: every service-to-service signing key, the encryption keys (`AUTH_SECRET_KEY`, `APP_ENCRYPTION_KEY`, `ADMIN_JWT_SECRET`, `SERVER_SECRET_KEY`), the PostgreSQL control-plane and service-role passwords the chart creates (its own instance, or `managedBootstrap` on yours), the in-cluster ClickHouse password, the collector token, the TrustGuard platform client secret, the TrustGate STS key, the config-sync CA and keypair, the self-signed ingress certificate, and in saas the certificates other clusters dial: the published config-sync listeners, the DataBridge southbound listener and the telemetry ingress. The AgentGateway machine-credential pair and the MCP OAuth signing key, in every mode |
+| **B. Generated while rendering** | Nothing with `helm install` / `helm upgrade`. With ArgoCD or Flux, pre-create them (`create-secrets.sh`, below) | Hybrid installs today: the generator runs in the control-plane image, which a hybrid install does not pull |
 | **C. Yours** | Create them before installing | The console administrator, the NeuralTrust firewall key, console-issued tokens, the passwords of a database you manage, a certificate from your own CA, the image pull Secret (see [Secrets you must create](#secrets-you-must-create)) |
 
 **How group A works.** A `pre-install,pre-upgrade` hook Job (ArgoCD runs it as
-PreSync on every sync) creates the values in the cluster, in the Secret
-`neuraltrust-generated` and, for certificates, `neuraltrust-generated-<name>-tls`.
-The chart renders no generated value, so `helm template` produces the same
-manifests every time and ArgoCD has nothing to rotate. For each value the Job:
+PreSync on every sync) creates the values in the cluster, in `platform-secrets`
+and, for certificates, `trustguard-configsync-tls`, `agentgateway-configsync-tls`
+and `neuraltrust-ingress-tls`. The chart renders no generated value, so
+`helm template` produces the same manifests every time and ArgoCD has nothing to
+rotate. For each value the Job:
 
-1. keeps what `neuraltrust-generated` already holds, and never replaces it;
-2. else adopts the value the chart rendered before (`platform-secrets`,
-   `postgresql-secrets`, `<service>-secrets`, …), so upgrading an existing install
-   rotates nothing;
+1. keeps what the Secret already holds once the Job manages it, and never
+   replaces it;
+2. else adopts the value the services read until now: first from
+   `neuraltrust-generated` / `neuraltrust-generated-<name>-tls`, where charts 3.7
+   to 3.9 wrote them, then from the Secrets the chart rendered before
+   (`platform-secrets`, `postgresql-secrets`, `<service>-secrets`, …), so
+   upgrading an existing install rotates nothing;
 3. else generates it.
+
+**Secrets the chart rendered before 3.7** carry the same names, and under ArgoCD
+the Application tracks them. Before writing anything, the Job takes each one over:
+it removes ArgoCD's tracking (the `argocd.argoproj.io/tracking-id` annotation and
+the `app.kubernetes.io/instance` label) and adds
+`argocd.argoproj.io/sync-options: Prune=false,Delete=false`, so the sync that stops
+rendering it cannot prune it. Helm's labels and annotations stay, so a Helm
+rollback can adopt it again. If a takeover is refused, the Job fails and the sync
+stops before ArgoCD prunes anything. Every Secret the Job writes carries
+`neuraltrust.ai/secrets-generator: managed`.
+
+**Certificates other clusters dial** (saas: the published config-sync listeners,
+`databridge-southbound-tls`, and `clickstack-ingest-gateway-tls` when the
+telemetry ingress mints its own) are issued the same way, under the same names,
+so `scripts/export-controlplane-ca.sh` hands out the same CA. Each carries
+`neuraltrust.ai/tls-sans`, a digest of the names it covers: the Job keeps a
+certificate while that digest matches, so remote data planes keep trusting it,
+and issues a new one when the names change, which is what retargeting
+`global.controlPlane.domain` relies on. A certificate an earlier chart rendered
+carries the same digest and is adopted as it is. After a reissue, export the CA
+again and hand it to every remote data plane.
+
+**A `platform-secrets` you supply** is never written: one with ownerReferences
+(External Secrets), one annotated `neuraltrust.ai/secrets-generator: external`,
+or one named in `global.platformSecret.existingSecret.name`. The Job only checks
+that it holds every key the install needs, and fails naming the missing ones.
+
+`neuraltrust-generated` and `neuraltrust-generated-<name>-tls`, on installs that
+ran 3.7 to 3.9, stay in place and nothing reads them. Delete them once the
+upgrade has synced, unless you may still roll back to a 3.7 to 3.9 revision: a
+rollback runs no hook, so that revision would start without them.
 
 A value you pin in values (`global.platformSecret.values.<KEY>`, a per-service
 `password`, `global.postgresql.password`, `clickhouse.auth.password`) always wins,
@@ -124,7 +159,7 @@ example one that ran under ArgoCD before this) heals on its next start.
 | Value | Behaviour |
 |---|---|
 | `auto` (default) | On for a new install and for every `helm template` render (ArgoCD, Flux). Off for a `helm upgrade` of a release deployed before the generator existed, which keeps generating while rendering exactly as before: Helm's `lookup` reuses its live values, so it never rotated |
-| `true` | On, including for that existing release: the first upgrade adopts its live values into `neuraltrust-generated` |
+| `true` | On, including for that existing release: the first upgrade adopts its live values and takes `platform-secrets` over |
 | `false` | Off: every credential is generated while rendering (group B behaviour) |
 
 A platform already deployed with Helm therefore keeps working unchanged after the
@@ -133,12 +168,14 @@ install to ArgoCD or Flux.
 
 > **Without hooks.** `helm install --no-hooks` (or any tool that drops Helm hooks)
 > never runs the Job, and the workloads then fail with `CreateContainerConfigError`
-> on the missing `neuraltrust-generated` instead of starting without credentials.
+> on the missing `platform-secrets` instead of starting without credentials.
 > Run the install with hooks, or opt out and pre-create the Secrets.
 
 > **Rolling back to a chart without the generator** renders the per-service
 > Secrets again from `lookup`, which no longer finds the values the generator now
 > holds. Copy them back first, or pin them in values, before such a rollback.
+> Under ArgoCD, rolling back renders `platform-secrets` with new values, as every
+> render did before 3.7.
 
 **Override a specific secret:**
 
@@ -401,7 +438,7 @@ rejected at render, since only one of the two can win.
 | `agentgateway.redis.existingSecret` | `REDIS_PASSWORD` | `REDIS_PASSWORD` |
 | `trustguard.database.existingSecret` | `DB_PASSWORD` | `DB_PASSWORD` |
 | `trustguard.redis.existingSecret` | `REDIS_PASSWORD` | `REDIS_PASSWORD` |
-| `global.redis.existingSecret` (firewall) | `REDIS_PASSWORD` | `REDIS_PASSWORD` (`keys.password`) |
+| `global.redis.existingSecret` (firewall; in external and saas also TrustGate and TrustGuard when they name no Secret of their own, optionally, so a Redis without auth needs no key) | `REDIS_PASSWORD` | `REDIS_PASSWORD` (`keys.password`) |
 | `alertengine.database.existingSecret` | `DB_PASSWORD` | `DB_PASSWORD` |
 | `datacore.database.existingSecret` | `POSTGRES_PASSWORD` | `POSTGRES_PASSWORD` |
 | `data-plane-api.dataPlane.components.api.redis.existingSecret` | `REDIS_URL` | `REDIS_URL` |
@@ -637,7 +674,7 @@ nothing reads them any more, and explicit `env` entries outrank whatever an old
 | TrustGuard raw-telemetry Postgres | `postgresql-secrets` → `DB_*` env | (discrete parts) | Hybrid only, same as AgentGateway (RUN-1086). |
 | Shared hybrid Postgres credential | `postgresql-secrets` | `POSTGRES_*` — see [One canonical name per fact](#one-canonical-name-per-fact) | **Hybrid only** — the umbrella renders one shared Secret from `global.postgresql.*` (default `user`/`database` = `neuraltrust`), and every hybrid workload connects as that one role. Containers receive `DB_*` / `POSTGRES_*` names through explicit `env` mappings; those are **not** keys in the Secret. Set `global.postgresql.existingSecret.name` to supply your own instead — but then the chart injects it with `envFrom` and cannot rename anything, so **your keys must be `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` / `DB_SSL_MODE`** (gateways) or the canonical `POSTGRES_*` family (DataAgent). |
 | Shared hybrid Redis credential | `redis-secrets` | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` / `REDIS_USERNAME` / `REDIS_TLS` | **Hybrid only** — taken wholesale with `envFrom`, and rendered from `global.redis.*`. Empty `REDIS_PASSWORD` for the passwordless in-cluster default. Set `global.redis.existingSecret.name` to reuse a pre-created Secret. TLS is stored once as `REDIS_TLS`, which is the name TrustGuard reads; AgentGateway reads `REDIS_TLS_ENABLED` and is given that name through an explicit `env` mapping, so a supplied Secret only needs `REDIS_TLS`. |
-| Shared TrustGuard client creds | `trustguard-client-credentials` | `CLIENT_ID` / `CLIENT_SECRET` | Only when TrustGate and TrustGuard are both enabled: TrustGate is the only client. Under the in-cluster generator the secret comes from `neuraltrust-generated/TRUSTGUARD_CLIENT_SECRET`, the id is a plain value on both Deployments, and this Secret is not rendered. id defaults to `agentgateway-platform`; secret auto-generated (or `global.v2.trustguardClientSecret`). Injected into both AgentGateway (`TRUSTGUARD_CLIENT_ID`/`_SECRET`) and TrustGuard (`TRUSTGUARD_PLATFORM_CLIENT_ID`/`_SECRET`) so the pair matches. Setting `global.v2.trustguardClientSecret` or `trustguardClientSecretName` keeps the pair with either product alone, for a client or server outside this release. The prerelease `v2-trustguard-client-secret` values are copied during upgrade. |
+| Shared TrustGuard client creds | `trustguard-client-credentials` | `CLIENT_ID` / `CLIENT_SECRET` | Only when TrustGate and TrustGuard are both enabled: TrustGate is the only client. Under the in-cluster generator the secret comes from `platform-secrets/TRUSTGUARD_CLIENT_SECRET`, the id is a plain value on both Deployments, and this Secret is not rendered. id defaults to `agentgateway-platform`; secret auto-generated (or `global.v2.trustguardClientSecret`). Injected into both AgentGateway (`TRUSTGUARD_CLIENT_ID`/`_SECRET`) and TrustGuard (`TRUSTGUARD_PLATFORM_CLIENT_ID`/`_SECRET`) so the pair matches. Setting `global.v2.trustguardClientSecret` or `trustguardClientSecretName` keeps the pair with either product alone, for a client or server outside this release. The prerelease `v2-trustguard-client-secret` values are copied during upgrade. |
 | DataAgent Postgres | `postgresql-secrets` (shared) | `POSTGRES_HOST` / `PORT` / `USER` / `PASSWORD` / `DB` / `SSLMODE` | **Hybrid** — DataAgent builds a libpq keyword connection string from these parts when `DATABASE_URL` is unset (RUN-1093). It connects as `global.postgresql.user` (default `neuraltrust`). |
 | DataAgent enrolment token | operator Secret (e.g. `dataagent-enrolment-trustgate`), or `dataagent-secrets` / `dataagent-trustguard-secrets` when supplied inline | `ENROLMENT_TOKEN` (configurable key) | **Never** auto-generated — from `agentgateway.dataagent.enrolment` / `trustguard.dataagent.enrolment`. With the preferred `existingSecret.name` path the chart-managed `dataagent-*-secrets` render empty and the token is read straight from your Secret. **Scoped to the control plane you dial:** NeuralTrust hosted → issue in the same `global.saasRegion`; customer `saas` → issue from *that* console (`global.controlPlane.domain`). |
 | AlertEngine DB password | `alertengine-secrets` | `DB_PASSWORD` | auto-generated (own `alertengine` DB; external only); **omitted when `alertengine.database.iamAuth=true`** |
@@ -897,8 +934,8 @@ Resolution order per key: `global.platformSecret.values` → live `platform-secr
 | `APP_ENCRYPTION_KEY` | `alertengine-secrets` / `APP_ENCRYPTION_KEY` | generated | external |
 | `AUTH_SECRET_KEY` | `control-plane-secrets` / `AUTH_SECRET_KEY` | generated on install only | external |
 | `MCP_OAUTH_CLIENT_SECRET` | `control-plane-secrets` / `MCP_OAUTH_CLIENT_SECRET` | generated | external, when MCP OAuth is on |
-| `MCP_OAUTH_SIGNING_KEY` | `control-plane-secrets` / `MCP_OAUTH_SIGNING_KEY` | adopted only — a key you supply. Otherwise generated into its own `mcp-oauth-signing` Secret by a hook Job | external, when you supply a key |
-| `AGENTGATEWAY_M2M_PRIVATE_KEY` | `control-plane-secrets` / `AGENTGATEWAY_M2M_PRIVATE_KEY` | adopted only — a key you supply. Otherwise generated into its own `agentgateway-m2m-keys` Secret by a hook Job (public half lives there too, never here) | external/saas, when you supply a key |
+| `MCP_OAUTH_SIGNING_KEY` | `control-plane-secrets` / `MCP_OAUTH_SIGNING_KEY` | a key you supply, else generated: by the in-cluster secrets generator into this Secret when it writes it (adopting `mcp-oauth-signing` first), otherwise into its own `mcp-oauth-signing` Secret by a hook Job | external, when a key exists |
+| `AGENTGATEWAY_M2M_PRIVATE_KEY` | `control-plane-secrets` / `AGENTGATEWAY_M2M_PRIVATE_KEY` | a key you supply, else generated: by the in-cluster secrets generator into this Secret when it writes it, with its public half `ADMIN_M2M_PUBLIC_KEYS` derived next to it (adopting `agentgateway-m2m-keys` first), otherwise into its own `agentgateway-m2m-keys` Secret by a hook Job | external/saas, when a key pair exists |
 | `ENROLMENT_INTROSPECTION_TOKEN` | `datacore-secrets` / `ENROLMENT_INTROSPECTION_TOKEN` | generated | **saas** |
 | `DATACORE_SERVICE_TOKEN` | `databridge-secrets` / `DATACORE_SERVICE_TOKEN` | **= `ENROLMENT_INTROSPECTION_TOKEN`** | **saas** |
 | `ENROLMENT_SIGNING_SECRET` | `datacore-secrets` / `ENROLMENT_SIGNING_SECRET` | generated | **saas** |
@@ -1032,6 +1069,12 @@ hook Job instead, which:
   off with `global.mcpOAuth.generateSigningKey: false` if you want to own the key —
   MCP OAuth then stays off until you do.
 
+When the in-cluster secrets generator writes `platform-secrets` (external and
+saas installs, see group A), it mints this key there instead, as a 2048-bit
+PKCS#8 key, and this hook does not render. It adopts the key the hook wrote into
+`mcp-oauth-signing` first, so tokens already issued keep verifying; that Secret
+is then left in place, unread.
+
 Because the Secret is hook-owned rather than release-owned, `helm uninstall` leaves
 it in place and a later reinstall keeps the same key.
 
@@ -1133,6 +1176,12 @@ half, so the chart generates both with a `pre-install,pre-upgrade` hook Job that
   it if an interrupted run left only one side;
 - is skipped as soon as you supply a pair of your own, and can be turned off
   with `global.agentgatewayM2m.generateKeys: false`.
+
+When the in-cluster secrets generator writes `platform-secrets`, it mints the
+pair there instead and this hook does not render: the private key, adopted from
+`agentgateway-m2m-keys` when the hook made one, and `ADMIN_M2M_PUBLIC_KEYS`,
+always derived from it in the same single-line base64 form, so the two halves
+cannot drift apart.
 
 Because the Secret is hook-owned, `helm uninstall` leaves it in place.
 

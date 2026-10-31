@@ -187,7 +187,7 @@ global:
   autoGenerateSecrets: true
   preserveExistingSecrets: false
   # External installs: a hook Job creates every generated credential in the
-  # cluster once, into `neuraltrust-generated`, so `helm template` (ArgoCD, Flux)
+  # cluster once, into `platform-secrets`, so `helm template` (ArgoCD, Flux)
   # can never rotate one. auto: on, except a `helm upgrade` of a release that
   # predates it, which keeps working as before; true opts that one in (adopting
   # the live values); false turns it off. See SECRETS.md.
