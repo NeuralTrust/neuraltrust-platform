@@ -9,7 +9,9 @@ service token. The hook itself lives in `_keygen.tpl`.
 Skipped entirely when an operator supplies the pair, or when they turn the
 generator off to own the keys themselves.
 */}}
-{{- if eq (include "neuraltrust-platform.agentgatewayM2m.generateKeys" .) "true" }}
+{{- /* The in-cluster secrets generator mints the pair into platform-secrets
+       instead whenever it writes that Secret. */}}
+{{- if and (eq (include "neuraltrust-platform.agentgatewayM2m.generateKeys" .) "true") (ne (include "neuraltrust-platform.secretsGenerator.ownsPlatform" .) "true") }}
 {{- include "neuraltrust-platform.keygenHook" (dict
       "ctx" .
       "component" "agentgateway-m2m-keys"

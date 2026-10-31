@@ -4,6 +4,67 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Changed
+
+- **The in-cluster secrets generator writes `platform-secrets`.** Generated
+  credentials and certificates go back under the names the chart rendered before
+  3.7: `platform-secrets`, `trustguard-configsync-tls`,
+  `agentgateway-configsync-tls` and `neuraltrust-ingress-tls`, read the same way
+  whether the generator, preserve mode or your own Secret supplies them.
+  - On an upgrade from 3.7 to 3.9, values are adopted from `neuraltrust-generated`
+    and `neuraltrust-generated-<name>-tls`, so nothing rotates. Those Secrets stay
+    in place, unread; you may delete them after the upgrade.
+  - On an upgrade from before 3.7 under ArgoCD, the Job takes the rendered
+    `platform-secrets` and TLS Secrets over before writing anything: it removes
+    the Application's tracking and marks them `Prune=false,Delete=false`, so the
+    sync cannot prune them. A refused takeover fails the Job, and the sync stops.
+  - A `platform-secrets` you supply (External Secrets ownerReferences, the
+    `neuraltrust.ai/secrets-generator: external` annotation, or
+    `global.platformSecret.existingSecret.name: platform-secrets`) is never
+    written; the Job fails if it lacks a key the install needs.
+- **saas installs use the in-cluster secrets generator.** Under ArgoCD or Flux
+  every render used to mint new credentials and certificates for a saas control
+  plane, so each sync rotated them. Upgrades adopt the values in use, as for
+  external installs.
+  - The certificates other clusters dial are generated too: the published
+    config-sync listeners, `databridge-southbound-tls`, and
+    `clickstack-ingest-gateway-tls` when `ingress.tls.autoGenerate` is on. They
+    keep their names, so `scripts/export-controlplane-ca.sh` is unchanged, and
+    are reissued only when the names they cover change (for instance a new
+    `global.controlPlane.domain`); then export the CA again for the remote data
+    planes.
+  - The ClickStack ingest gateway reads the collector token from where the
+    generator writes it. Hybrid installs keep render-time generation.
+- **The generator also mints the TrustGate machine-credential pair and the MCP
+  OAuth signing key** into `platform-secrets`, so the two keygen hooks no longer
+  render wherever it writes that Secret. The keys those hooks wrote into
+  `agentgateway-m2m-keys` and `mcp-oauth-signing` are adopted first, so every
+  issued token keeps verifying; those Secrets stay in place, unread. A
+  `platform-secrets` you supply must now hold `AGENTGATEWAY_M2M_PRIVATE_KEY`,
+  `ADMIN_M2M_PUBLIC_KEYS` and `MCP_OAUTH_SIGNING_KEY` when TrustGate runs
+  (`ntctl secrets print` includes them).
+- **`managedBootstrap` no longer changes the control-plane password on every
+  sync.** With `global.postgresql.managedBootstrap` and no password of your own,
+  the generator now creates it once, adopting the one in `postgresql-secrets`.
+  Rendered, it changed on every ArgoCD sync, and the bootstrap Job reset the role
+  to it only after the pods had restarted.
+
+### Fixed
+
+- **`global.redis.existingSecret` now reaches TrustGate and TrustGuard in
+  external and saas installs.** Without a per-service `redis.existingSecret`,
+  they had no Redis password at all; they now read the shared Secret's
+  password key, as the firewall does. The reference is optional, so a Secret
+  that names a Redis without auth keeps working. A per-service
+  `redis.existingSecret` or inline `redis.password` still wins.
+- **The firewall no longer invents its `JWT_SECRET` with
+  `global.autoGenerateSecrets: false`.** `firewall-secrets` renders only from
+  `firewall.firewall.secrets.jwtSecret` or the live Secret. Action needed for
+  that setting under ArgoCD without a pinned value, where the key changed on
+  every sync: create `firewall-secrets` yourself (key `JWT_SECRET`), or pin the
+  value, before upgrading, since the chart stops rendering it and ArgoCD prunes
+  it.
+
 ## [v3.9.1] — 2026-10-30
 
 ### Fixed

@@ -331,7 +331,9 @@ blue "secrets generator: external renders are stable and fully specified"
 gen_check() {  # render file
   ruby -ryaml -rjson -e '
     docs = YAML.load_stream(File.read(ARGV[0])).compact.select { |d| d.is_a?(Hash) }
-    gen = "neuraltrust-generated"
+    gen = "platform-secrets"
+    tls_targets = %w[trustguard-configsync-tls agentgateway-configsync-tls neuraltrust-ingress-tls]
+    rendered = docs.select { |d| d["kind"] == "Secret" && !d.dig("metadata", "annotations", "helm.sh/hook") }.map { |d| d.dig("metadata", "name") }
     specs = docs.select { |d| d["kind"] == "ConfigMap" && d.dig("metadata", "name").to_s.start_with?("neuraltrust-generator-spec-") }
     abort "no generator spec rendered" if specs.empty?
     entries = specs.flat_map { |c| JSON.parse(c.dig("data", "spec.json")) }
@@ -356,8 +358,10 @@ gen_check() {  # render file
     refs.each do |r|
       if r["name"] == gen
         abort "#{gen}/#{r["key"]} is referenced but no spec generates it" unless scalar.include?(r["key"])
-      elsif r["name"].to_s.start_with?("neuraltrust-generated-")
-        abort "#{r["name"]} is mounted but no spec issues it" unless tls.include?(r["name"])
+      elsif tls_targets.include?(r["name"])
+        abort "#{r["name"]} is mounted but neither rendered nor issued by a spec" unless tls.include?(r["name"]) || rendered.include?(r["name"])
+      elsif r["name"].to_s.start_with?("neuraltrust-generated")
+        abort "#{r["name"]} is referenced: chart 3.7 to 3.9 wrote it, and nothing reads it now"
       end
     end
     abort "a Secret with a generated value is still rendered: #{docs.select { |d| d["kind"] == "Secret" && d.dig("metadata", "name") == "platform-secrets" }.size}" if docs.any? { |d| d["kind"] == "Secret" && d.dig("metadata", "name") == "platform-secrets" }
@@ -368,6 +372,10 @@ gen_shapes=(
   "external-trustguard-only|-f $CHART_DIR/values-required.yaml -f $CHART_DIR/values-external.yaml.example -f $CHART_DIR/values-external-trustguard-only.yaml.example"
   "external-managed|-f $CHART_DIR/values-managed-datastores.yaml.example --set global.autoGenerateSecrets=true --set global.preserveExistingSecrets=false"
   "external-observability|-f $CHART_DIR/values-required.yaml -f $CHART_DIR/values-external.yaml.example -f $CHART_DIR/values-observability-self-hosted.yaml.example"
+  "saas|--set global.deploymentMode=saas --set global.domain=cp.example.com"
+  "saas-managed|-f $CHART_DIR/values-managed-datastores.yaml.example --set global.deploymentMode=saas --set global.domain=cp.example.com --set global.autoGenerateSecrets=true --set global.preserveExistingSecrets=false"
+  "managed-bootstrap|-f $CHART_DIR/values-managed-datastores.yaml.example --set global.autoGenerateSecrets=true --set global.preserveExistingSecrets=false --set global.postgresql.passwordSecret.name= --set global.postgresql.managedBootstrap.enabled=true --set global.postgresql.managedBootstrap.adminSecret.name=pg-admin"
+  "saas-telemetry-tls|--set global.deploymentMode=saas --set global.domain=cp.example.com --set clickstack-ingest-gateway.ingress.tls.autoGenerate=true"
 )
 for shape in "${gen_shapes[@]}"; do
   label="${shape%%|*}"
@@ -383,7 +391,7 @@ for shape in "${gen_shapes[@]}"; do
     red "FAIL - secrets generator ($label): $result"; exit 1
   fi
 done
-green "ok  - secrets generator: ${#gen_shapes[@]} external shapes render byte-identical, every generated ref has a spec, every adoption is readable"
+green "ok  - secrets generator: ${#gen_shapes[@]} external and saas shapes render byte-identical, every generated ref has a spec, every adoption is readable"
 
 # The realign starts PostgreSQL itself, before the image's entrypoint has put
 # PGDATA back to 0700; fsGroup leaves it group-writable on GKE and other CSI
@@ -407,7 +415,7 @@ for off in "opt-out|--set global.secrets.generator.enabled=false" "preserve|--se
   read -r -a oargs <<< "${off#*|}"
   helm template test "$CHART_DIR" --namespace neuraltrust -f "$CHART_DIR/values-required.yaml" -f "$CHART_DIR/values-external.yaml.example" "${oargs[@]}" > "$TMP/gen-off-$label.yaml"
   assert_not_contains "$TMP/gen-off-$label.yaml" 'neuraltrust-generator-spec-' "secrets generator ($label): no generator spec"
-  assert_not_contains "$TMP/gen-off-$label.yaml" 'name: neuraltrust-generated' "secrets generator ($label): nothing reads the generated Secret"
+  assert_not_contains "$TMP/gen-off-$label.yaml" 'component: secrets-generator' "secrets generator ($label): no generator Job"
 done
 render_default "$TMP/gen-off-hybrid.yaml" --set global.secrets.generator.enabled=true
 assert_not_contains "$TMP/gen-off-hybrid.yaml" 'neuraltrust-generator-spec-' "secrets generator (hybrid): not active yet"

@@ -169,6 +169,18 @@ TLS to the ingress controller's default certificate.
 {{- end }}
 
 {{/*
+Whether the in-cluster secrets generator issues the telemetry certificate
+instead of ingress-tls-secret.yaml rendering it: the chart would mint it, under
+the name the generator's Role is scoped to.
+*/}}
+{{- define "clickstack-ingest-gateway.tlsGenerated" -}}
+{{- if and
+  (eq (include "neuraltrust-platform.secretsGenerator.active" .) "true")
+  (eq (include "clickstack-ingest-gateway.tlsAutoGenerate" .) "true")
+  (eq (include "clickstack-ingest-gateway.tlsSecretName" .) (include "neuraltrust-platform.secretsGenerator.tlsName" (dict "id" "clickstack-ingest-gateway"))) -}}true{{- end -}}
+{{- end }}
+
+{{/*
 Public hostname senders reach this gateway on. Same derivation the DataAgent
 egress sidecar uses for its OTLP endpoint.
 */}}

@@ -14,6 +14,14 @@ creates them in the cluster, once, into Secrets that no release owns: no
 `app.kubernetes.io/instance` label and no ownerReferences, so neither Helm nor
 Argo tracks, overwrites or prunes them. Workloads reference those Secrets.
 
+The Secrets keep the names the chart rendered before: `platform-secrets` and the
+TLS Secrets' own names. One the chart rendered (before 3.7) is taken over before
+anything is written: the Job removes Argo's tracking and marks it
+`Prune=false,Delete=false`, so the sync that stops rendering it cannot prune it.
+A failed takeover fails the Job, and Argo stops the sync before pruning. 3.7 to
+3.9 wrote to `neuraltrust-generated` and `neuraltrust-generated-<id>-tls`; their
+values are adopted first and the Secrets are left in place, unread.
+
 Each component describes what it needs in a hook ConfigMap rendered from its own
 context (`secretsGenerator.specObjects`), because only a subchart sees its own
 values.yaml defaults. Values an operator pinned in values travel in a matching
@@ -21,7 +29,8 @@ hook Secret and always win. Per key the Job keeps an existing value, else adopts
 the value the chart rendered before (so upgrades rotate nothing), else
 generates.
 
-Scope: external installs. Hybrid and saas keep render-time generation for now.
+Scope: external and saas installs. Hybrid keeps render-time generation: it runs
+no control-plane image, which the Job uses.
 */}}
 
 {{/*
@@ -32,7 +41,8 @@ Needs the chart's root context (umbrella or subchart): `.Release` and `lookup`.
   true   on
   false  off: every credential is generated while rendering, as before
   auto   (default) on, except for a `helm upgrade` of a release the generator has
-         never run for (no `neuraltrust-generated` in the namespace). That release
+         never run for (neither a `platform-secrets` it marked nor the earlier
+         `neuraltrust-generated` in the namespace). That release
          keeps generating while rendering, which is safe there because Helm's
          `lookup` reuses the live values, so a platform already deployed with Helm
          keeps working exactly as it did. `helm template` — what ArgoCD and Flux's
@@ -50,37 +60,70 @@ Needs the chart's root context (umbrella or subchart): `.Release` and `lookup`.
 {{- $enabled := eq $mode "true" -}}
 {{- if eq $mode "auto" -}}
   {{- if .Release.IsInstall -}}{{- $enabled = true -}}
-  {{- else if lookup "v1" "Secret" .Release.Namespace "neuraltrust-generated" -}}{{- $enabled = true -}}
+  {{- else if lookup "v1" "Secret" .Release.Namespace (include "neuraltrust-platform.secretsGenerator.previousName" .) -}}{{- $enabled = true -}}
+  {{- else -}}
+    {{- $live := lookup "v1" "Secret" .Release.Namespace (include "neuraltrust-platform.secretsGenerator.name" .) -}}
+    {{- $annotations := default dict (default dict (default dict $live).metadata).annotations -}}
+    {{- if eq (index $annotations (include "neuraltrust-platform.secretsGenerator.marker" .) | default "") "managed" -}}{{- $enabled = true -}}{{- end -}}
   {{- end -}}
 {{- end -}}
 {{- if and $enabled
   (eq (include "neuraltrust-platform.autoGenerateSecrets" .) "true")
   (not $g.preserveExistingSecrets)
-  (eq (include "neuraltrust-platform.isExternal" .) "true")
-  (ne (include "neuraltrust-platform.isSaas" .) "true") -}}true{{- end -}}
+  (eq (include "neuraltrust-platform.isExternal" .) "true") -}}true{{- end -}}
 {{- end }}
 
-{{- define "neuraltrust-platform.secretsGenerator.name" -}}neuraltrust-generated{{- end }}
+{{- define "neuraltrust-platform.secretsGenerator.name" -}}platform-secrets{{- end }}
 
 {{/*
 Name of a generated TLS Secret. `id` is one of the names in
 `secretsGenerator.tlsIds`, which the Job's Role is scoped to.
 */}}
-{{- define "neuraltrust-platform.secretsGenerator.tlsName" -}}neuraltrust-generated-{{ .id }}-tls{{- end }}
-{{- define "neuraltrust-platform.secretsGenerator.tlsIds" -}}trustguard-configsync agentgateway-configsync ingress{{- end }}
+{{- define "neuraltrust-platform.secretsGenerator.tlsName" -}}
+{{- if eq .id "ingress" -}}neuraltrust-ingress-tls{{- else -}}{{ .id }}-tls{{- end -}}
+{{- end }}
+{{- define "neuraltrust-platform.secretsGenerator.tlsIds" -}}trustguard-configsync agentgateway-configsync ingress databridge-southbound clickstack-ingest-gateway{{- end }}
+
+{{/*
+Where chart 3.7 to 3.9 wrote the same values. Adopted first, then left in place.
+*/}}
+{{- define "neuraltrust-platform.secretsGenerator.previousName" -}}neuraltrust-generated{{- end }}
+{{- define "neuraltrust-platform.secretsGenerator.previousTlsName" -}}neuraltrust-generated-{{ .id }}-tls{{- end }}
+
+{{/*
+Annotation on every Secret the generator writes: `managed` once it has created or
+taken it over. An operator who sets it to `external` keeps the generator from
+ever writing that Secret; the Job then only checks it holds every key it needs.
+*/}}
+{{- define "neuraltrust-platform.secretsGenerator.marker" -}}neuraltrust.ai/secrets-generator{{- end }}
 
 {{/*
 Components that may contribute a spec. The Job reads
 `neuraltrust-generator-spec-<component>` (and `-pins-<component>`) for each, so a
 new contributor has to be added here, where the Role is also scoped.
 */}}
-{{- define "neuraltrust-platform.secretsGenerator.components" -}}platform postgresql trustguard-client ingress alertengine datacore trustguard agentgateway clickhouse clickstack-collector{{- end }}
+{{- define "neuraltrust-platform.secretsGenerator.components" -}}platform postgresql trustguard-client ingress alertengine datacore trustguard agentgateway clickhouse clickstack-collector databridge clickstack-ingest-gateway{{- end }}
 
 {{/*
 Secrets the Job may read to adopt a value the chart rendered before. Adoption
 entries outside this list fail the Job's Role, so keep it in step with the specs.
 */}}
-{{- define "neuraltrust-platform.secretsGenerator.adoptable" -}}platform-secrets control-plane-secrets data-plane-jwt-secret postgresql-secrets firewall-secrets alertengine-secrets datacore-secrets trustguard-secrets agentgateway-secrets clickhouse clickstack-collector-secrets trustguard-client-credentials trustguard-configsync-tls agentgateway-configsync-tls neuraltrust-ingress-tls{{- end }}
+{{- define "neuraltrust-platform.secretsGenerator.adoptable" -}}platform-secrets control-plane-secrets data-plane-jwt-secret postgresql-secrets firewall-secrets alertengine-secrets datacore-secrets trustguard-secrets agentgateway-secrets clickhouse clickstack-collector-secrets trustguard-client-credentials trustguard-configsync-tls agentgateway-configsync-tls neuraltrust-ingress-tls databridge-southbound-tls clickstack-ingest-gateway-tls agentgateway-m2m-keys mcp-oauth-signing{{- end }}
+
+{{/*
+Whether the generator writes the registry keys into `platform-secrets`: it is
+active, consumers read the shared Secret, and the operator does not supply it
+under another name. Then it also mints the RSA keys the keygen hooks
+(templates/_keygen.tpl) used to, so no install needs a hook beyond the
+generator's.
+*/}}
+{{- define "neuraltrust-platform.secretsGenerator.ownsPlatform" -}}
+{{- $target := include "neuraltrust-platform.secretsGenerator.name" . -}}
+{{- if and
+  (eq (include "neuraltrust-platform.secretsGenerator.active" .) "true")
+  (eq (include "neuraltrust-platform.platformSecret.name" .) $target)
+  (not (default dict (default dict (default dict .Values.global).platformSecret).existingSecret).name) -}}true{{- end -}}
+{{- end }}
 
 {{/*
 In-cluster PostgreSQL that the chart runs itself (deploy on, no host). Only then
@@ -152,19 +195,23 @@ the password. Takes the chart's root context.
 {{- end }}
 
 {{/*
-Whether the generator owns the in-cluster PostgreSQL admin password: the chart
-runs the instance, auth is a password, and the operator named neither a
+Whether the generator owns the control-plane PostgreSQL password: the chart
+mints it, because it runs the instance or creates the roles on a managed one
+(managedBootstrap), auth is a password, and the operator named neither a
 `passwordSecret`, a whole `existingSecret`, nor a `global.postgresql.password`
 (pinned, it renders identically every time and keeps its old path). Then
 `postgresql.passwordSecretRef`
 points every reader (the server itself, the bootstrap Job, the app and APIs) at
 the generated Secret, through the same path an operator `passwordSecret` takes.
+Rendered instead, a managed role's password changed on every ArgoCD sync, and
+the bootstrap Job reset the role to it only after the pods had rolled.
 */}}
 {{- define "neuraltrust-platform.postgresql.generatedAdmin" -}}
 {{- $pg := default dict (default dict .Values.global).postgresql -}}
 {{- if and
   (eq (include "neuraltrust-platform.secretsGenerator.active" .) "true")
-  (eq (include "neuraltrust-platform.secretsGenerator.pgInCluster" .) "true")
+  (or (eq (include "neuraltrust-platform.secretsGenerator.pgInCluster" .) "true")
+      (eq (include "neuraltrust-platform.postgresql.managedBootstrap.enabled" .) "true"))
   (not (default dict $pg.passwordSecret).name)
   (not (default dict $pg.existingSecret).name)
   (not ($pg.password | default "")) -}}true{{- end -}}
@@ -191,13 +238,17 @@ and a hook Secret with the values the operator pinned for them.
 
 entries: list of dicts, each one key of the generated Secret (or one TLS Secret):
   key       key in `neuraltrust-generated`
-  type      alnum (length), base64 (bytes), rsa-pkcs1, rsa-pkcs8, install (alnum,
-            generated only on a fresh install, see freshIf), adopt (never
-            generated), alias (= source), derived (format with %s = source), tls
+  type      alnum (length), base64 (bytes), rsa-pkcs1, rsa-pkcs8 (bits, default
+            4096), install (alnum, generated only on a fresh install, see
+            freshIf), adopt (never generated), alias (= source), derived
+            (format with %s = source), public-key (the public half of the
+            private key in source, as base64 of its SPKI PEM), tls
   length    alnum / install length, or base64 byte count
   adopt     ordered [secretName, key] pairs the chart rendered the value into before
   freshIf   install: generate only when none of these Secrets exists
-  tls       cn, sans, days, selfSigned, caCn; `secret` names the TLS Secret
+  tls       cn, sans, days, selfSigned, caCn; `secret` names the TLS Secret;
+            `reissue` replaces one issued for other SANs (a published listener);
+            `annotations` are written on it alongside the SANs digest
 pins: key -> value. Rendered only from values, so it is identical on every render.
 
 Both are deleted once the sync succeeds (hook-succeeded), like the Job's
@@ -282,19 +333,25 @@ const TARGET = process.env.GENERATED_SECRET
 const COMPONENTS = (process.env.SPEC_COMPONENTS || '').split(' ').filter(Boolean)
 const SPEC_LABEL = process.env.SPEC_LABEL
 const SPEC_FORMAT = process.env.SPEC_FORMAT
+const PREVIOUS = process.env.PREVIOUS_SECRET
+const PREVIOUS_TLS = JSON.parse(process.env.PREVIOUS_TLS || '{}')
+const MARKER = process.env.MARKER
+// Secrets the operator supplies under a name the generator would write.
+const OPERATOR = (process.env.OPERATOR_SECRETS || '').split(' ').filter(Boolean)
 
 // Untracked on purpose: no app.kubernetes.io/instance label and no owner, so no
 // release manages, overwrites or prunes these. The Argo annotations are a second
 // line of defence for label-tracking setups.
+const ARGO = {
+  'argocd.argoproj.io/compare-options': 'IgnoreExtraneous',
+  'argocd.argoproj.io/sync-options': 'Prune=false,Delete=false',
+}
 const METADATA = {
   labels: {
     'app.kubernetes.io/part-of': 'neuraltrust-platform',
     'app.kubernetes.io/managed-by': 'neuraltrust-secrets-generator',
   },
-  annotations: {
-    'argocd.argoproj.io/compare-options': 'IgnoreExtraneous',
-    'argocd.argoproj.io/sync-options': 'Prune=false,Delete=false',
-  },
+  annotations: Object.assign({ [MARKER]: 'managed' }, ARGO),
 }
 
 async function get(kind, name) {
@@ -331,6 +388,40 @@ function encode(values) {
   const out = {}
   for (const [k, v] of Object.entries(values)) out[k] = Buffer.from(v, 'utf8').toString('base64')
   return out
+}
+
+// Who owns a Secret the generator writes, decided before anything is written:
+//   absent    the generator creates it
+//   managed   created or taken over by an earlier run: its values stand
+//   external  the operator's (ownerReferences, e.g. External Secrets; the
+//             marker set to external; or named in values): never written,
+//             only checked
+//   taken     rendered by an earlier chart (Helm, Argo): taken over now
+// Taking over removes Argo's tracking and marks it Prune=false,Delete=false, so
+// the sync that stops rendering it cannot prune it. A failed patch fails the Job,
+// and Argo stops the sync before its prune step.
+async function claim(name) {
+  const live = await get('secrets', name)
+  if (!live) return { live: null, owner: 'absent' }
+  const meta = live.metadata || {}
+  const marker = (meta.annotations || {})[MARKER]
+  if (marker === 'managed') return { live: live, owner: 'managed' }
+  if (OPERATOR.includes(name) || marker === 'external' || (meta.ownerReferences || []).length) {
+    return { live: live, owner: 'external' }
+  }
+  const res = await fetch(base + '/secrets/' + name, {
+    method: 'PATCH',
+    headers: Object.assign({ 'Content-Type': 'application/merge-patch+json' }, auth),
+    body: JSON.stringify({
+      metadata: {
+        labels: { 'app.kubernetes.io/instance': null },
+        annotations: Object.assign({ 'argocd.argoproj.io/tracking-id': null, [MARKER]: 'managed' }, ARGO),
+      },
+    }),
+  })
+  if (!res.ok) throw new Error('take over ' + name + ' failed: ' + res.status + ' ' + (await res.text()))
+  console.log(name + ': taken over from the release that rendered it')
+  return { live: await res.json(), owner: 'taken' }
 }
 
 async function write(name, live, data, type, annotations) {
@@ -378,9 +469,9 @@ function generate(e) {
       return crypto.randomBytes(e.length || 32).toString('base64')
     // Same shape as Sprig's genPrivateKey "rsa": a 4096-bit PKCS#1 PEM.
     case 'rsa-pkcs1':
-      return crypto.generateKeyPairSync('rsa', { modulusLength: 4096 }).privateKey.export({ type: 'pkcs1', format: 'pem' }).toString()
+      return crypto.generateKeyPairSync('rsa', { modulusLength: e.bits || 4096 }).privateKey.export({ type: 'pkcs1', format: 'pem' }).toString()
     case 'rsa-pkcs8':
-      return crypto.generateKeyPairSync('rsa', { modulusLength: 4096 }).privateKey.export({ type: 'pkcs8', format: 'pem' }).toString()
+      return crypto.generateKeyPairSync('rsa', { modulusLength: e.bits || 4096 }).privateKey.export({ type: 'pkcs8', format: 'pem' }).toString()
   }
   throw new Error('unknown type ' + e.type + ' for ' + e.key)
 }
@@ -424,25 +515,59 @@ async function source(name) {
   return sources[name]
 }
 
-async function tls(e) {
-  const annotations = { 'neuraltrust.ai/tls-sans': sansHash(e.sans) }
+// The SANs digest a TLS Secret was issued for, from its annotation.
+function issuedFor(obj) {
+  return (((obj && obj.metadata) || {}).annotations || {})['neuraltrust.ai/tls-sans'] || ''
+}
+
+// The certificate the services use now, first that applies: the TLS Secret when
+// the generator already manages it; the earlier generator's copy (3.7 to 3.9);
+// the Secret itself as an earlier chart rendered it; the other adoption sources;
+// otherwise a new one.
+//
+// `reissue` marks a certificate other clusters dial under its public name: one
+// issued for other names no longer fits, so only a certificate whose SANs digest
+// matches counts, and a new set of names (global.controlPlane.domain retargeted)
+// issues a new one, as the chart's own template did.
+async function tls(e, claimed) {
+  const hash = sansHash(e.sans)
+  const annotations = Object.assign({}, e.annotations || {}, { 'neuraltrust.ai/tls-sans': hash })
+  const fits = (obj) => !e.reissue || issuedFor(obj) === hash
   const complete = (d) => d['tls.crt'] && d['tls.key'] && (e.selfSigned || d['ca.crt'])
-  const live = await get('secrets', e.secret)
-  if (live && complete(decode(live))) {
+  const { live, owner } = claimed
+  const own = decode(live)
+  if (owner === 'external') {
+    if (!complete(own)) throw new Error(e.secret + ' is supplied by the operator but lacks tls.crt, tls.key or ca.crt; the generator does not write it')
+    console.log(e.secret + ': supplied by the operator, kept')
+    return
+  }
+  if (owner === 'managed' && complete(own) && fits(live)) {
     console.log(e.secret + ': present, kept')
     return
   }
-  for (const [name] of e.adopt || []) {
-    const d = decode(await source(name))
-    if (complete(d)) {
-      if (!d['ca.crt']) d['ca.crt'] = d['tls.crt']
-      await write(e.secret, live, { 'tls.crt': d['tls.crt'], 'tls.key': d['tls.key'], 'ca.crt': d['ca.crt'] }, 'kubernetes.io/tls', annotations)
+  const candidates = []
+  if (PREVIOUS_TLS[e.secret]) candidates.push([PREVIOUS_TLS[e.secret], await source(PREVIOUS_TLS[e.secret])])
+  candidates.push([e.secret, live])
+  for (const [name] of e.adopt || []) if (name !== e.secret) candidates.push([name, await source(name)])
+  for (const [name, obj] of candidates) {
+    const d = decode(obj)
+    if (!complete(d) || !fits(obj)) continue
+    const data = { 'tls.crt': d['tls.crt'], 'tls.key': d['tls.key'], 'ca.crt': d['ca.crt'] || d['tls.crt'] }
+    if (Object.keys(data).every((k) => own[k] === data[k])) {
+      console.log(e.secret + ': present, kept')
+    } else {
+      await write(e.secret, live, data, 'kubernetes.io/tls', annotations)
       console.log(e.secret + ': adopted from ' + name)
-      return
     }
+    return
   }
   await write(e.secret, live, issue(e), 'kubernetes.io/tls', annotations)
   console.log(e.secret + ': issued for ' + e.sans.join(', '))
+}
+
+// Keys the generator would have to write into a Secret it may not write.
+function missing(entries, values) {
+  return entries.filter((e) => e.type !== 'adopt' && !((e.type === 'alias' || e.type === 'public-key') && !values[e.source]) && !values[e.key]).map((e) => e.key)
 }
 
 async function main() {
@@ -456,17 +581,44 @@ async function main() {
     Object.assign(pins, decode(pinned))
   }
 
-  const live = await get('secrets', TARGET)
-  const current = decode(live)
-  const next = Object.assign({}, current)
-  const late = ['alias', 'derived']
+  // Every takeover happens before any value is written, so a refused patch
+  // leaves everything as it was.
   const scalars = specs.filter((e) => e.type !== 'tls')
+  const tlsSpecs = specs.filter((e) => e.type === 'tls')
+  const target = scalars.length ? await claim(TARGET) : null
+  const tlsTargets = {}
+  for (const e of tlsSpecs) tlsTargets[e.secret] = await claim(e.secret)
+
+  if (target && target.owner === 'external') {
+    const absent = missing(scalars, decode(target.live))
+    if (absent.length) {
+      throw new Error(TARGET + ' is supplied by the operator, so the generator does not write it, and it lacks: ' + absent.join(', '))
+    }
+    console.log(TARGET + ': supplied by the operator, holds every key')
+    for (const e of tlsSpecs) await tls(e, tlsTargets[e.secret])
+    return
+  }
+
+  const live = target ? target.live : null
+  const current = decode(live)
+  // A Secret an earlier chart rendered holds what that chart rendered; the
+  // earlier generator's copy holds what the services read since, so it wins.
+  const next = target && target.owner === 'managed' ? Object.assign({}, current) : Object.assign({}, current, decode(await source(PREVIOUS)))
+  const late = ['alias', 'derived', 'public-key']
   const ordered = scalars.filter((e) => !late.includes(e.type)).concat(scalars.filter((e) => late.includes(e.type)))
   for (const e of ordered) {
     const k = e.key
     if (e.type === 'alias' || e.type === 'derived') {
       const src = next[e.source]
       if (src) next[k] = e.type === 'alias' ? src : e.format.replace('%s', src)
+      continue
+    }
+    // The public half of a private key in this Secret, as the keygen hook wrote
+    // it: the SPKI PEM, base64-encoded onto one line. Always derived, so the
+    // two halves cannot drift apart.
+    if (e.type === 'public-key') {
+      const src = next[e.source]
+      if (src) next[k] = Buffer.from(crypto.createPublicKey(crypto.createPrivateKey(src)).export({ type: 'spki', format: 'pem' }).toString()).toString('base64')
       continue
     }
     if (pins[k]) {
@@ -490,7 +642,8 @@ async function main() {
     }
     if (e.type === 'adopt') continue
     if (e.type === 'install') {
-      let predates = false
+      // The earlier generator's Secret means the install predates this run too.
+      let predates = !!(await source(PREVIOUS))
       for (const name of e.freshIf || []) if (await source(name)) predates = true
       if (predates) {
         console.log(k + ': not generated, the install predates it and may hold data under the default')
@@ -503,7 +656,9 @@ async function main() {
 
   const changed = {}
   for (const [k, v] of Object.entries(next)) if (current[k] !== v) changed[k] = v
-  if (!live && Object.keys(next).length) {
+  if (!target) {
+    // No scalar entries in this install: nothing to write.
+  } else if (!live && Object.keys(next).length) {
     await write(TARGET, null, next, 'Opaque')
     console.log(TARGET + ': created with ' + Object.keys(next).length + ' keys')
   } else if (Object.keys(changed).length) {
@@ -513,7 +668,7 @@ async function main() {
     console.log(TARGET + ': nothing to do, ' + Object.keys(current).length + ' keys already present')
   }
 
-  for (const e of specs.filter((s) => s.type === 'tls')) await tls(e)
+  for (const e of tlsSpecs) await tls(e, tlsTargets[e.secret])
 }
 
 main().catch((err) => {

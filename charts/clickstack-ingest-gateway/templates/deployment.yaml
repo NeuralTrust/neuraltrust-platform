@@ -75,7 +75,7 @@ spec:
             - name: OTLP_AUTH_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "neuraltrust-platform.clickstack.externalCollectorSecretName" . | quote }}
+                  name: {{ include "neuraltrust-platform.clickstack.otlpTokenSecretName" . | quote }}
                   key: OTLP_AUTH_TOKEN
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
