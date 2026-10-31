@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v3.10.0] — 2026-10-31
+
 ### Changed
 
 - **The in-cluster secrets generator writes `platform-secrets`.** Generated
