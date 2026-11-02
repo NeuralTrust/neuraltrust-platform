@@ -29,8 +29,8 @@ DEDICATED_ARGS=(
   --set agentgateway.config.autoWildcardHosts=false
   --set agentgateway.configSync.endpoint=agentgateway-admin.agentgateway.svc.cluster.local:8083
   --set agentgateway.configSync.existingSecret.name=trustgate-abc-credentials
-  --set agentgateway.ingress.dataPlane.host=abc.trustgate.dp.eu.dev.example.com
-  --set agentgateway.ingress.mcp.host=abc.mcp.dp.eu.dev.example.com
+  --set agentgateway.ingress.dataPlane.host=acme.llm.dev.example.com
+  --set agentgateway.ingress.mcp.host=acme.mcp.dev.example.com
   --set-string agentgateway.redis.db=3
 )
 
@@ -74,9 +74,9 @@ for absent in dataagent clickstack-egress-collector control-plane-postgresql 'na
 done
 assert_not_contains "$out34" '^kind: Ingress$' \
   "dedicated: attaches HTTPRoutes to the cluster Gateway instead of creating a load balancer"
-assert_contains "$out34" '"abc.trustgate.dp.eu.dev.example.com"' \
+assert_contains "$out34" '"acme.llm.dev.example.com"' \
   "dedicated: the proxy route serves the plane's own host"
-assert_contains "$out34" '"abc.mcp.dp.eu.dev.example.com"' \
+assert_contains "$out34" '"acme.mcp.dev.example.com"' \
   "dedicated: the MCP route serves the plane's own MCP host"
 assert_not_contains "$out34" '\*\.' \
   "dedicated: no wildcard host that would overlap the shared SaaS hosts"
@@ -88,8 +88,6 @@ assert_contains "$out34" 'TELEMETRY_EXPORTERS_RAW: "\[\{\\"name\\":\\"raw-otlp\\
   "dedicated: raw telemetry is exported, never stored locally"
 assert_contains "$out34" 'name: OTEL_EXPORTER_OTLP_HEADERS'$'\n''          valueFrom:'$'\n''            secretKeyRef:'$'\n''              name: "trustgate-abc-credentials"' \
   "dedicated: the collector auth header comes from the DataCore Secret"
-assert_contains "$out34" 'SOLE_GATEWAY_FALLBACK: "true"' \
-  "dedicated: the plane serves its only gateway on hosts without the slug"
 assert_contains "$out34" 'REDIS_DB: "3"' \
   "dedicated: Redis DB follows agentgateway.redis.db"
 assert_not_contains "$out34" 'name: (DB_HOST|POSTGRES_HOST)' \

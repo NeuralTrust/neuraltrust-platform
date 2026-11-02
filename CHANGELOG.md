@@ -15,8 +15,6 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
   - OTLP goes straight to `global.clickstack.endpoint`, Redis is
     `global.redis.host`, and `SERVER_SECRET_KEY` and the optional
     `OTEL_EXPORTER_OTLP_HEADERS` come from `global.platformSecret.existingSecret`.
-  - TrustGate gets `SOLE_GATEWAY_FALLBACK=true`: the plane holds one gateway and
-    serves it on hosts that do not carry its slug.
   - The render fails unless exactly one product is enabled and every one of those
     inputs, plus the config-sync Secret and the plane's own `ingress.dataPlane.host`,
     is set, so a missing value never falls back to a shared SaaS host.
