@@ -134,6 +134,9 @@ data:
   OPENTELEMETRY_INSECURE: "true"
   OPENTELEMETRY_TRACES_ENDPOINT: {{ printf "clickstack-collector.%s.svc.cluster.local:4318" .Release.Namespace | quote }}
   OPENTELEMETRY_METRICS_ENDPOINT: {{ printf "clickstack-collector.%s.svc.cluster.local:4318" .Release.Namespace | quote }}
+  {{- else if eq (include "neuraltrust-platform.isDedicated" .) "true" }}
+  # Dedicated: OTLP straight to the NeuralTrust collector (global.clickstack.endpoint).
+  {{- include "neuraltrust-platform.clickstack.dedicatedOtlpEnv" . | nindent 2 }}
   {{- else if eq (include "neuraltrust-platform.clickstackHybridEnabled" .) "true" }}
   # Hybrid: plain OTLP to local clickstack-egress-collector (enrolment auth).
   {{- include "neuraltrust-platform.clickstack.otlpEnv" . | nindent 2 }}
