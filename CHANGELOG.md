@@ -4,6 +4,19 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Added
+
+- **Hybrid installs can use the in-cluster secrets generator** with
+  `global.secrets.generator.enabled: true`. Under ArgoCD a hybrid install minted
+  its credentials anew on every hard refresh (TrustGate's `SERVER_SECRET_KEY`,
+  TrustGuard's `ADMIN_JWT_SECRET` and signing keys, `DATA_PLANE_JWT_SECRET`, the
+  config-sync cache keys); with it on, the first sync adopts the values in use and
+  none changes again. The Job runs in the control-plane app image, so a registry
+  mirror must carry it; that is why `auto` leaves it off for hybrid.
+- **SECRETS.md: recovering an install whose credentials rotated** — what to
+  issue and enter again after ArgoCD rotated an install's credentials, and in
+  which order.
+
 ## [v3.10.0] — 2026-10-31
 
 ### Changed

@@ -29,8 +29,9 @@ hook Secret and always win. Per key the Job keeps an existing value, else adopts
 the value the chart rendered before (so upgrades rotate nothing), else
 generates.
 
-Scope: external and saas installs. Hybrid keeps render-time generation: it runs
-no control-plane image, which the Job uses.
+Scope: external and saas installs, and hybrid installs that set `enabled: true`.
+`auto` leaves hybrid on render-time generation: it runs no control-plane image,
+which the Job uses, so turning it on unasked would add an image to every mirror.
 */}}
 
 {{/*
@@ -40,7 +41,8 @@ Needs the chart's root context (umbrella or subchart): `.Release` and `lookup`.
 `global.secrets.generator.enabled`:
   true   on
   false  off: every credential is generated while rendering, as before
-  auto   (default) on, except for a `helm upgrade` of a release the generator has
+  auto   (default) on in external and saas installs (never in hybrid, which
+         needs `true`), except for a `helm upgrade` of a release the generator has
          never run for (neither a `platform-secrets` it marked nor the earlier
          `neuraltrust-generated` in the namespace). That release
          keeps generating while rendering, which is safe there because Helm's
@@ -67,10 +69,13 @@ Needs the chart's root context (umbrella or subchart): `.Release` and `lookup`.
     {{- if eq (index $annotations (include "neuraltrust-platform.secretsGenerator.marker" .) | default "") "managed" -}}{{- $enabled = true -}}{{- end -}}
   {{- end -}}
 {{- end -}}
-{{- if and $enabled
+{{- /* Hybrid only when asked for (`enabled: true`): the Job runs the
+       control-plane app image, which a hybrid install does not otherwise pull,
+       so `auto` turning it on would add an image every mirror must carry. */ -}}
+{{- $mode_ok := or (eq (include "neuraltrust-platform.isExternal" .) "true") (eq $mode "true") -}}
+{{- if and $enabled $mode_ok
   (eq (include "neuraltrust-platform.autoGenerateSecrets" .) "true")
-  (not $g.preserveExistingSecrets)
-  (eq (include "neuraltrust-platform.isExternal" .) "true") -}}true{{- end -}}
+  (not $g.preserveExistingSecrets) -}}true{{- end -}}
 {{- end }}
 
 {{- define "neuraltrust-platform.secretsGenerator.name" -}}platform-secrets{{- end }}
