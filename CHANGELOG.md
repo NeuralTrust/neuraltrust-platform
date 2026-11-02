@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v3.13.0] — 2026-11-02
+
 ### Added
 
 - **TrustGuard can use the NeuralTrust-hosted firewall with its own client.**
