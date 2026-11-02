@@ -121,6 +121,11 @@ trustguard:
         name: "dataagent-enrolment-trustguard"
 ```
 
+> **Upcoming change.** A coming release makes hybrid call the NeuralTrust-hosted
+> Firewall by default. To keep the Firewall in your cluster, add
+> `global.firewall.deploy: true` to your values now; it changes nothing today.
+> See [CHANGELOG.md](./CHANGELOG.md).
+
 Product flags default to **off** and at least one must be `true`. They are keyed
 by product id, which for TrustGate is **not** the same as its values block:
 `global.products.trustgate` selects it, `agentgateway:` configures it. Older

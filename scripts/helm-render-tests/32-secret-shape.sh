@@ -38,7 +38,8 @@ assert_secret_shape() {
     # Secrets SECRETS.md tells the operator to create: console-issued tokens, the
     # first admin, the external firewall key, the pull secret.
     operator = %w[onprem-superadmin operator-firewall gcr-secret agentgateway-config-sync trustguard-config-sync
-                  dataagent-enrolment-trustgate dataagent-enrolment-trustguard]
+                  dataagent-enrolment-trustgate dataagent-enrolment-trustguard trustguard-firewall
+                  agentgateway-firewall]
     errors = []
     rendered = []
     docs.each do |d|

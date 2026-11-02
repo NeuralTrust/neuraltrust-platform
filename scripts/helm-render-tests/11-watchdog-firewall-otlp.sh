@@ -66,7 +66,7 @@ assert_not_contains "$out10b" 'NEURAL_TRUST_FIREWALL_BASE_URL' \
 
 blue "==> Scenario 10b2: Firewall v2.15 production worker module set"
 out10b2="$TMP/scenario-firewall-workers.yaml"
-render_default "$out10b2"
+render_default "$out10b2" --set global.firewall.deploy=true
 assert_contains "$out10b2" 'name: firewall$' \
   "firewall workers: gateway Deployment present"
 assert_contains "$out10b2" 'name: toxicity-worker' \
@@ -117,7 +117,7 @@ assert_contains "$out10b2" 'COMPLEXITY_WORKER_URL: "http://complexity-worker:80"
 
 blue "==> Scenario 10b3: TrustGate complexity scoring wiring"
 out10b3="$TMP/scenario-firewall-complexity-wiring.yaml"
-render_default "$out10b3"
+render_default "$out10b3" --set global.firewall.deploy=true
 # The binary reads FIREWALL_BASE_URL / FIREWALL_SECRET_KEY, and appends
 # /v1/complexity — a route on the firewall GATEWAY, so this must be the `firewall`
 # Service and not the complexity worker.
@@ -129,7 +129,7 @@ assert_contains "$out10b3" 'name: FIREWALL_SECRET_KEY' \
 # Opting out must remove the variable entirely rather than emit an empty one, or
 # the binary would treat "" as configured-but-broken.
 out10b4="$TMP/scenario-firewall-complexity-optout.yaml"
-render_default "$out10b4" --set agentgateway.config.firewallBaseURL=""
+render_default "$out10b4" --set global.firewall.deploy=true --set agentgateway.config.firewallBaseURL=""
 assert_not_contains "$out10b4" '^  FIREWALL_BASE_URL' \
   "complexity: firewallBaseURL=\"\" opts out of scoring"
 
@@ -169,19 +169,19 @@ render_default "$out10b4b" "${HYBRID_NO_PRODUCTS[@]}" --set global.products.trus
   --set global.firewall.deploy=false
 assert_not_contains "$out10b4b" 'FIREWALL_BASE_URL|FIREWALL_SECRET_KEY' \
   "external firewall: inert while TrustGuard is off"
-assert_render_fails_with "requires global.firewall.baseURL" \
+assert_render_fails_with "global.firewall.baseURL must be the http(s) URL" \
   "external firewall: missing baseURL fails the render" \
   --set global.firewall.deploy=false --set global.firewall.existingSecret.name=firewall-jwt
-assert_render_fails_with "requires global.firewall.baseURL" \
+assert_render_fails_with "global.firewall.baseURL must be the http(s) URL" \
   "external firewall: baseURL without a scheme fails the render" \
   --set global.firewall.deploy=false --set global.firewall.baseURL=firewall \
   --set global.firewall.existingSecret.name=firewall-jwt
-assert_render_fails_with "requires the external firewall's JWT_SECRET" \
+assert_render_fails_with "which needs its JWT_SECRET" \
   "external firewall: no key source fails the render" \
   --set global.firewall.deploy=false --set global.firewall.baseURL=http://firewall.firewall.svc.cluster.local
 assert_render_fails_with "only apply with global.firewall.deploy=false" \
   "external firewall keys are rejected while the firewall is deployed" \
-  --set global.firewall.baseURL=http://firewall.firewall.svc.cluster.local
+  --set global.firewall.deploy=true --set global.firewall.baseURL=http://firewall.firewall.svc.cluster.local
 # trustguard.firewall.existingSecret is allowed once it names the same Secret as
 # the external firewall's: both signers then agree.
 out10b4b="$TMP/scenario-firewall-external-aligned.yaml"
@@ -189,10 +189,10 @@ render_default "$out10b4b" "${FW_EXTERNAL_ARGS[@]}" \
   --set trustguard.firewall.existingSecret.name=firewall-jwt
 assert_contains "$out10b4b" 'NEURAL_TRUST_FIREWALL_BASE_URL: "http://firewall\.firewall\.svc\.cluster\.local"$' \
   "external firewall: trustguard.firewall.existingSecret aligned with global renders"
-# NeuralTrust-hosted firewall: the same https URL serves internet and Private
-# Service Connect callers, and must reach both signers untouched in every mode.
-# Leaving baseURL empty must still fail (covered above): prompts are never sent
-# to a hosted firewall by default.
+# NeuralTrust-hosted firewall reached with an issued JWT_SECRET instead of a
+# FIREWALL_JWT (the contract before per-install clients): the same https URL
+# serves internet and Private Service Connect callers, and must reach both
+# signers untouched in every mode.
 for fw_mode in hybrid external saas; do
   out10b4b="$TMP/scenario-firewall-hosted-$fw_mode.yaml"
   render_default "$out10b4b" --set global.deploymentMode="$fw_mode" --set global.domain=cp.example.com \
@@ -455,7 +455,7 @@ assert_contains "$out10c" 'http://clickstack-egress-collector.default.svc.cluste
 
 blue "==> Scenario 10d: GPU Firewall workers (dataplane-gpu example shape)"
 out10d="$TMP/scenario-firewall-gpu.yaml"
-render_default "$out10d" \
+render_default "$out10d" --set global.firewall.deploy=true \
   --set firewall.firewall.workerDefaults.image.repository=europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-gpu \
   --set 'firewall.firewall.workerDefaults.resources.requests.nvidia\.com/gpu=1' \
   --set 'firewall.firewall.workerDefaults.resources.limits.nvidia\.com/gpu=1' \
@@ -508,7 +508,7 @@ blue "==> Scenario 10f: Firewall OTLP endpoint resolution"
 # which no customer cluster has. Enabling OTel without an endpoint must leave
 # the variable unset rather than ship an address that cannot resolve.
 out10f_fw="$TMP/scenario-firewall-otel-unset.yaml"
-render_default "$out10f_fw" \
+render_default "$out10f_fw" --set global.firewall.deploy=true \
   --set firewall.firewall.config.otelEnabled=true
 document_named "$out10f_fw" firewall-config "$TMP/firewall-config-unset.yaml"
 assert_contains "$TMP/firewall-config-unset.yaml" 'OTEL_ENABLED: "true"' \
@@ -519,7 +519,7 @@ assert_not_contains "$out10f_fw" 'opentelemetry-collector.opentelemetry' \
   "firewall otel: retired collector namespace is not a default"
 
 out10f_glob="$TMP/scenario-firewall-otel-umbrella.yaml"
-render_default "$out10f_glob" \
+render_default "$out10f_glob" --set global.firewall.deploy=true \
   --set firewall.firewall.config.otelEnabled=true \
   --set firewall.firewall.config.otelExporterOtlpEndpoint=http://per-component:4318 \
   --set global.observability.collector.endpoint=http://umbrella:4318
@@ -597,7 +597,7 @@ assert_env_value "$out10g_off" control-plane-app app OTEL_EXPORTER_OTLP_HEADERS 
 # egress collector carries enrolment-scoped product telemetry to SaaS rather
 # than a customer's own service logs.
 out10g_hy="$TMP/scenario-otel-hybrid.yaml"
-render_default "$out10g_hy"
+render_default "$out10g_hy" --set global.firewall.deploy=true
 assert_not_contains "$out10g_hy" 'name: control-plane-app-otel' \
   "otel derivation: hybrid renders no platform OTel ConfigMap"
 document_named "$out10g_hy" firewall-config "$TMP/firewall-config-hybrid.yaml"
