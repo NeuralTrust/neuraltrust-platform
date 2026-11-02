@@ -94,8 +94,8 @@ Which group a credential falls in decides what, if anything, you do with it:
 
 | Group | What you do | Credentials |
 |---|---|---|
-| **A. Generated in the cluster** | Nothing, with any deploy tool: Helm, ArgoCD, Flux, ntctl | External and saas installs: every service-to-service signing key, the encryption keys (`AUTH_SECRET_KEY`, `APP_ENCRYPTION_KEY`, `ADMIN_JWT_SECRET`, `SERVER_SECRET_KEY`), the PostgreSQL control-plane and service-role passwords the chart creates (its own instance, or `managedBootstrap` on yours), the in-cluster ClickHouse password, the collector token, the TrustGuard platform client secret, the TrustGate STS key, the config-sync CA and keypair, the self-signed ingress certificate, and in saas the certificates other clusters dial: the published config-sync listeners, the DataBridge southbound listener and the telemetry ingress. The AgentGateway machine-credential pair and the MCP OAuth signing key, in every mode |
-| **B. Generated while rendering** | Nothing with `helm install` / `helm upgrade`. With ArgoCD or Flux, pre-create them (`create-secrets.sh`, below) | Hybrid installs today: the generator runs in the control-plane image, which a hybrid install does not pull |
+| **A. Generated in the cluster** | Nothing, with any deploy tool: Helm, ArgoCD, Flux, ntctl | External and saas installs, and hybrid installs that set `global.secrets.generator.enabled: true`: every service-to-service signing key, the encryption keys (`AUTH_SECRET_KEY`, `APP_ENCRYPTION_KEY`, `ADMIN_JWT_SECRET`, `SERVER_SECRET_KEY`), the PostgreSQL control-plane and service-role passwords the chart creates (its own instance, or `managedBootstrap` on yours), the in-cluster ClickHouse password, the collector token, the TrustGuard platform client secret, the TrustGate STS key, the config-sync CA and keypair, the self-signed ingress certificate, and in saas the certificates other clusters dial: the published config-sync listeners, the DataBridge southbound listener and the telemetry ingress. The AgentGateway machine-credential pair and the MCP OAuth signing key, in every mode |
+| **B. Generated while rendering** | Nothing with `helm install` / `helm upgrade`. With ArgoCD, set `global.secrets.generator.enabled: true` (below), or pre-create them (`create-secrets.sh`) | Hybrid installs that leave the generator off, its default there |
 | **C. Yours** | Create them before installing | The console administrator, the NeuralTrust firewall key, console-issued tokens, the passwords of a database you manage, a certificate from your own CA, the image pull Secret (see [Secrets you must create](#secrets-you-must-create)) |
 
 **How group A works.** A `pre-install,pre-upgrade` hook Job (ArgoCD runs it as
@@ -134,6 +134,16 @@ and issues a new one when the names change, which is what retargeting
 `global.controlPlane.domain` relies on. A certificate an earlier chart rendered
 carries the same digest and is adopted as it is. After a reissue, export the CA
 again and hand it to every remote data plane.
+
+**Hybrid installs** run the generator only with
+`global.secrets.generator.enabled: true`, because its Job runs in the
+control-plane app image, which a hybrid install does not otherwise pull: a
+registry mirror must carry that image too. Under ArgoCD set it, and keep it set.
+Left off, `helm template` mints the hybrid credentials anew on every hard refresh
+(TrustGate's `SERVER_SECRET_KEY`, TrustGuard's `ADMIN_JWT_SECRET` and signing
+keys, `DATA_PLANE_JWT_SECRET`, the config-sync cache keys). Helm itself reuses
+the live values through `lookup`, so `helm upgrade` installs are safe either way.
+The first sync with it on adopts the values in use, so nothing rotates.
 
 **A `platform-secrets` you supply** is never written: one with ownerReferences
 (External Secrets), one annotated `neuraltrust.ai/secrets-generator: external`,
@@ -1283,6 +1293,35 @@ spec:
 5. **Restrict access with RBAC** — limit who can read Kubernetes secrets
 
 ## Troubleshooting
+
+### Recovering an install whose credentials rotated
+
+An install applied by ArgoCD (or another tool that renders with `helm template`
+and never reads the cluster) while the chart still rendered its generated
+credentials got new ones on every hard refresh or manifest-cache expiry: external
+installs before 3.7, saas installs before 3.10, and hybrid installs without
+`global.secrets.generator.enabled: true`. `ntctl doctor` reports it as NT-DR-025.
+Fix it in this order.
+
+1. **Stop the rotation.** Upgrade to 3.10 or later (external, saas), or set
+   `global.secrets.generator.enabled: true` (hybrid). The generator adopts the
+   values in use at that moment and never renders them again.
+2. **Issue again what was signed with an earlier value.** The upgrade cannot
+   bring back a key that already changed, so anything issued before the last
+   rotation stays rejected:
+   - saas: each private TrustGate and TrustGuard instance's config-sync and
+     enrolment tokens (rotate them in the console), and the CA bundle every
+     remote data plane trusts (`scripts/export-controlplane-ca.sh`, applied in
+     each data-plane cluster);
+   - tokens customers hold with no expiry (SDK, Discover and red-team tokens);
+     generate them again and redeploy the clients that use them.
+3. **Enter again what was encrypted with an earlier value**, which can no longer
+   be read: TrustGate's MCP upstream connections (each user reconnects) and the
+   registry and auth secrets saved in it; TrustGuard's hook, firewall and plugin
+   secrets; the console's SSO and email settings; AlertEngine integrations.
+
+Short-lived tokens (service, firewall, M2M and telemetry tokens) and console
+sessions recover on their own.
 
 ### Secret not found
 

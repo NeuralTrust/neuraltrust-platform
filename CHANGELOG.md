@@ -13,12 +13,45 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
     only that product's data plane: no DataAgent or egress collector, no Postgres
     (raw telemetry is always exported), no data-plane-api, no in-cluster Redis.
   - OTLP goes straight to `global.clickstack.endpoint`, Redis is
-    `global.redis.host`, and `SERVER_SECRET_KEY` comes from
-    `global.platformSecret.existingSecret`.
+    `global.redis.host`, and `SERVER_SECRET_KEY` and the optional
+    `OTEL_EXPORTER_OTLP_HEADERS` come from `global.platformSecret.existingSecret`.
+  - TrustGate gets `SOLE_GATEWAY_FALLBACK=true`: the plane holds one gateway and
+    serves it on hosts that do not carry its slug.
   - The render fails unless exactly one product is enabled and every one of those
     inputs, plus the config-sync Secret and the plane's own `ingress.dataPlane.host`,
     is set, so a missing value never falls back to a shared SaaS host.
   - hybrid, external and saas render exactly as before.
+
+## [v3.12.0] — 2026-11-02
+
+### Added
+
+- **TrustGate data planes can use their own firewall client.** Set
+  `agentgateway.firewall.jwt`, the `FIREWALL_JWT` the console shows once when it
+  creates a hybrid gateway, or `agentgateway.firewall.existingSecret.name`.
+  - Smart-routing complexity scoring then authenticates with that per-install
+    client. The token carries the firewall URL, so scoring works with or without
+    TrustGuard in the release.
+  - With it set, the data plane no longer receives the shared firewall
+    `JWT_SECRET` as `FIREWALL_SECRET_KEY`.
+  - `FIREWALL_BASE_URL` is then emitted only from an explicit
+    `agentgateway.config.firewallBaseURL`.
+  - An inline `jwt` needs chart Secret generation; otherwise use `existingSecret`.
+
+## [v3.11.0] — 2026-11-02
+
+### Added
+
+- **Hybrid installs can use the in-cluster secrets generator** with
+  `global.secrets.generator.enabled: true`. Under ArgoCD a hybrid install minted
+  its credentials anew on every hard refresh (TrustGate's `SERVER_SECRET_KEY`,
+  TrustGuard's `ADMIN_JWT_SECRET` and signing keys, `DATA_PLANE_JWT_SECRET`, the
+  config-sync cache keys); with it on, the first sync adopts the values in use and
+  none changes again. The Job runs in the control-plane app image, so a registry
+  mirror must carry it; that is why `auto` leaves it off for hybrid.
+- **SECRETS.md: recovering an install whose credentials rotated** — what to
+  issue and enter again after ArgoCD rotated an install's credentials, and in
+  which order.
 
 ## [v3.10.0] — 2026-10-31
 

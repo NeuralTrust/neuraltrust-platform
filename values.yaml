@@ -193,11 +193,13 @@ global:
   imagePullSecrets: []
   autoGenerateSecrets: true
   preserveExistingSecrets: false
-  # External installs: a hook Job creates every generated credential in the
-  # cluster once, into `platform-secrets`, so `helm template` (ArgoCD, Flux)
-  # can never rotate one. auto: on, except a `helm upgrade` of a release that
+  # A hook Job creates every generated credential in the cluster once, into
+  # `platform-secrets`, so `helm template` (ArgoCD, Flux) can never rotate one.
+  # auto: on for external and saas, except a `helm upgrade` of a release that
   # predates it, which keeps working as before; true opts that one in (adopting
-  # the live values); false turns it off. See SECRETS.md.
+  # the live values), and is how a hybrid install turns it on (set it under
+  # ArgoCD; the Job runs the control-plane app image); false turns it off.
+  # See SECRETS.md.
   secrets:
     generator:
       enabled: auto
@@ -954,7 +956,7 @@ control-plane-app:
         replicas: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v2.22.0"
+          tag: "v2.22.1"
           pullPolicy: IfNotPresent
         config:
           nodeEnv: production
@@ -1059,7 +1061,7 @@ agentgateway:
 # TrustGuard: control-plane + data-plane (/v1/evaluate).
 trustguard:
   image:
-    tag: "v0.57.0"
+    tag: "v0.58.0"
   # Empty host/port/sslMode/username/tls inherit — see the agentgateway note.
   database:
     sslMode: ""

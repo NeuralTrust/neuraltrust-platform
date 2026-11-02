@@ -101,7 +101,14 @@ spec:
                firewall JWT_SECRET the workers verify with, so no separate token is
                provisioned. Only wired when a firewall is reachable (deployed here or
                external), matching the FIREWALL_BASE_URL gate in the ConfigMap. */}}
-        {{- if eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustguard")) "true" }}
+        {{- /* An install with its own firewall client (FIREWALL_JWT) never gets
+               the shared signing key: TrustGate would ignore it, and keeping it
+               off the pod is the point of the per-install client. */}}
+        {{- if eq (include "agentgateway.firewallJwt.configured" .) "true" }}
+        {{- with include "agentgateway.firewallJwtEnv" . }}
+        {{- . | nindent 8 }}
+        {{- end }}
+        {{- else if eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustguard")) "true" }}
         {{- include "neuraltrust-platform.firewall.secretEnv" (dict "ctx" . "envName" "FIREWALL_SECRET_KEY" "skip" .Values.dataPlane.extraEnv) | nindent 8 }}
         {{- end }}
         {{- with include "agentgateway.datastoreCredentialEnv" . }}
