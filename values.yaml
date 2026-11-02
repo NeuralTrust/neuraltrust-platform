@@ -107,24 +107,29 @@ global:
   #   hybrid           — opt-in: a product deploys only when set to true.
   #   external / saas  — opt-out: everything deploys unless set to false, e.g.
   #                      trustgate: false for a TrustGuard-only install.
-  # Firewall follows TrustGuard. In external the console also reads runtime
-  # activity from data-plane-api, so keep dataPlane on there. The audit trail
-  # does not use it: see docs/observability.md.
+  # Firewall follows TrustGuard (see firewall below). In external the console
+  # also reads runtime activity from data-plane-api, so keep dataPlane on there.
+  # The audit trail does not use it: see docs/observability.md.
   products: {}
   # trustgate: true
   # trustguard: true
   # dataPlane: true
-  # deploy=false skips the firewall subchart and points TrustGuard (and TrustGate
-  # complexity scoring) at a firewall you already run. Both then need baseURL and
-  # the firewall's JWT_SECRET, from existingSecret or global.platformSecret.
-  # For the NeuralTrust-hosted firewall, use the key NeuralTrust issues and the
-  # regional URL below; it is the same over the internet or Private Service
-  # Connect (VALUES_SCENARIOS.md).
+  # Where TrustGuard (and TrustGate complexity scoring) reach the firewall.
+  # Unset, it runs in this cluster in every mode. A coming release makes hybrid
+  # default to the NeuralTrust-hosted firewall: set deploy: true now to keep the
+  # in-cluster one through that change.
+  # deploy: false plus trustguard.firewall.jwt (the FIREWALL_JWT the console
+  # shows, or a key NeuralTrust issues for external) uses the hosted firewall;
+  # it needs a TrustGuard release that reads FIREWALL_JWT.
+  # deploy: false with baseURL and the firewall's JWT_SECRET (existingSecret or
+  # global.platformSecret) points both at a firewall you run yourself.
+  # Hosted endpoints, also over Private Service Connect (VALUES_SCENARIOS.md):
+  # https://firewall.neuraltrust.ai (EU), https://firewall.us.neuraltrust.ai (US).
   firewall:
-    deploy: true
-    baseURL: "" # e.g. http://firewall.<namespace>.svc.cluster.local, https://firewall.neuraltrust.ai, https://firewall.us.neuraltrust.ai
+    # deploy: true
+    baseURL: "" # firewall you run, e.g. http://firewall.<namespace>.svc.cluster.local
     existingSecret:
-      name: "" # Secret in this namespace holding the external firewall's JWT_SECRET
+      name: "" # Secret in this namespace holding that firewall's JWT_SECRET
       key: "JWT_SECRET"
   # v2 knobs: shared client_credentials pair AgentGateway presents to
   # TrustGuard. Both sides read the same Secret so id/secret stay in sync.
