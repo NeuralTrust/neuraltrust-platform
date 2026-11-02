@@ -4,6 +4,20 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Added
+
+- **TrustGate data planes can use their own firewall client.** Set
+  `agentgateway.firewall.jwt`, the `FIREWALL_JWT` the console shows once when it
+  creates a hybrid gateway, or `agentgateway.firewall.existingSecret.name`.
+  - Smart-routing complexity scoring then authenticates with that per-install
+    client. The token carries the firewall URL, so scoring works with or without
+    TrustGuard in the release.
+  - With it set, the data plane no longer receives the shared firewall
+    `JWT_SECRET` as `FIREWALL_SECRET_KEY`.
+  - `FIREWALL_BASE_URL` is then emitted only from an explicit
+    `agentgateway.config.firewallBaseURL`.
+  - An inline `jwt` needs chart Secret generation; otherwise use `existingSecret`.
+
 ## [v3.11.0] — 2026-11-02
 
 ### Added
