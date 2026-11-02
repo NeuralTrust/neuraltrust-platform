@@ -122,6 +122,23 @@ assert_contains "$o" 'name: neuraltrust-platform-agentgateway-m2m-keys$' \
 assert_env_value "$o" agentgateway-admin admin ADMIN_M2M_PUBLIC_KEYS secretKeyRef:agentgateway-m2m-keys/ADMIN_M2M_PUBLIC_KEYS \
   "generator off: TrustGate admin reads the hook's Secret"
 
+# Hybrid runs the generator only when asked: the Job uses the control-plane
+# image, which a hybrid install does not otherwise pull, so `auto` leaves it off.
+o="$TMP/takeover-hybrid-auto.yaml"
+helm template test "$CHART_DIR" --namespace default -f "$CHART_DIR/values-required.yaml" "${CLICKSTACK_DEFAULT_ARGS[@]}" > "$o"
+assert_not_contains "$o" 'name: neuraltrust-platform-secrets-generator$' \
+  "hybrid, auto: no generator Job"
+o="$TMP/takeover-hybrid-on.yaml"
+render_default "$o" --set global.deploymentMode=hybrid "${GEN[@]}"
+assert_contains "$o" 'name: neuraltrust-platform-secrets-generator$' \
+  "hybrid, enabled=true: the generator Job renders"
+assert_resource_count "$o" Secret platform-secrets 0 \
+  "hybrid, enabled=true: platform-secrets is the Job's"
+assert_env_value "$o" trustguard-data-plane data-plane CONFIG_SYNC_LKG_KEY secretKeyRef:platform-secrets/TRUSTGUARD_CONFIG_SYNC_LKG_KEY \
+  "hybrid, enabled=true: the config-sync cache key comes from the generator"
+assert_env_value "$o" agentgateway-proxy proxy CONFIG_SYNC_LKG_KEY secretKeyRef:platform-secrets/AGENTGATEWAY_CONFIG_SYNC_LKG_KEY \
+  "hybrid, enabled=true: TrustGate's cache key comes from the generator"
+
 for off in "opt-out|--set global.secrets.generator.enabled=false" "hybrid|--set global.deploymentMode=hybrid"; do
   label="${off%%|*}"
   read -r -a oargs <<< "${off#*|}"

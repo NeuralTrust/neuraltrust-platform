@@ -97,6 +97,9 @@ assert_secret_shape "$o" "external, TrustGuard only, external firewall, gateway-
 o="$TMP/shape-hybrid.yaml"
 render_default "$o" --set global.deploymentMode=hybrid
 assert_secret_shape "$o" "hybrid"
+o="$TMP/shape-hybrid-gen.yaml"
+render_default "$o" --set global.deploymentMode=hybrid "${GEN[@]}"
+assert_secret_shape "$o" "hybrid, generator (opt-in)"
 o="$TMP/shape-saas.yaml"
 render_default "$o" --set global.deploymentMode=saas
 assert_secret_shape "$o" "saas, render-time"
