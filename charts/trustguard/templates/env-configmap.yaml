@@ -111,8 +111,16 @@ data:
   {{- $fw := default dict .Values.firewall }}
   {{- /* In-cluster Firewall Service is named `firewall` (port 80). Private
          cluster DNS is allowed by TrustGuard's default
-         FIREWALL_ALLOW_PRIVATE_EGRESS=true. */}}
-  NEURAL_TRUST_FIREWALL_BASE_URL: {{ $fw.baseURL | default (include "neuraltrust-platform.firewall.baseURL" .) | quote }}
+         FIREWALL_ALLOW_PRIVATE_EGRESS=true. With FIREWALL_JWT the URL comes
+         from the token, issued by the firewall that registered the client; a
+         derived URL would override it, so only an explicit one is set. */}}
+  {{- $fwBase := $fw.baseURL | default "" }}
+  {{- if and (not $fwBase) (ne (include "trustguard.firewallJwt.configured" .) "true") }}
+  {{- $fwBase = include "neuraltrust-platform.firewall.baseURL" . }}
+  {{- end }}
+  {{- if $fwBase }}
+  NEURAL_TRUST_FIREWALL_BASE_URL: {{ $fwBase | quote }}
+  {{- end }}
   FIREWALL_ALLOW_PRIVATE_EGRESS: "true"
   OPENTELEMETRY_SERVICE_NAME: "trustguard"
   # Exporters come from env vars; no telemetry.yaml is mounted. FILE is pinned

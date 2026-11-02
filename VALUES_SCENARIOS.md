@@ -220,6 +220,13 @@ The chart does not fill in `baseURL` for you, even in hybrid. Leaving it unset
 fails the render, so prompts are never sent to a hosted firewall unless you
 asked for it in writing.
 
+With a TrustGuard release that reads `FIREWALL_JWT`, the per-install client
+replaces the shared key: keep `deploy: false`, drop `baseURL` and
+`existingSecret`, and set `trustguard.firewall.jwtExistingSecret.name` to a
+Secret holding the `FIREWALL_JWT` the console showed (key `FIREWALL_JWT`). The
+token carries the URL. A coming release makes this the hybrid default; set
+`global.firewall.deploy: true` now to keep the in-cluster firewall through it.
+
 Allow outbound TCP 443 to that hostname
 ([docs/hybrid-network.md](./docs/hybrid-network.md)), or reach it privately:
 

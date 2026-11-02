@@ -200,3 +200,39 @@ static password to point at. Emits nothing unless an `existingSecret.name` is se
 {{- end -}}
 {{- join "\n" $entries -}}
 {{- end }}
+
+{{/*
+"true" when TrustGuard authenticates to the firewall with this install's own
+OAuth client (firewall.jwt or firewall.jwtExistingSecret.name) instead of a
+shared firewall JWT_SECRET. Ignored while the operator runs the firewall, in
+this release (global.firewall.deploy=true) or elsewhere (global.firewall.baseURL):
+that firewall does not know the client, and prompts must not leave for the
+hosted one the token names.
+*/}}
+{{- define "trustguard.firewallJwt.configured" -}}
+{{- $fw := default dict .Values.firewall -}}
+{{- if and (or $fw.jwt (default dict $fw.jwtExistingSecret).name) (not (include "neuraltrust-platform.firewall.baseURL" .)) -}}true{{- end -}}
+{{- end }}
+
+{{/*
+FIREWALL_JWT env entry for an operator-managed Secret. An inline firewall.jwt
+reaches the pod through trustguard-secrets (envFrom) instead. Fails the render
+on an ambiguous or unstorable configuration.
+*/}}
+{{- define "trustguard.firewallJwtEnv" -}}
+{{- $fw := default dict .Values.firewall -}}
+{{- $es := default dict $fw.jwtExistingSecret -}}
+{{- if and $fw.jwt $es.name -}}
+{{- fail "trustguard.firewall: set jwt or jwtExistingSecret.name, not both" -}}
+{{- end -}}
+{{- if and $fw.jwt (not (and (include "neuraltrust-platform.autoGenerateSecrets" .) (not .Values.global.preserveExistingSecrets))) -}}
+{{- fail "trustguard.firewall.jwt is stored in trustguard-secrets, which this chart only writes while global.autoGenerateSecrets=true and global.preserveExistingSecrets=false: put the FIREWALL_JWT in a Secret and set trustguard.firewall.jwtExistingSecret.name instead" -}}
+{{- end -}}
+{{- with $es.name }}
+- name: FIREWALL_JWT
+  valueFrom:
+    secretKeyRef:
+      name: {{ . | quote }}
+      key: {{ $es.key | default "FIREWALL_JWT" | quote }}
+{{- end -}}
+{{- end }}

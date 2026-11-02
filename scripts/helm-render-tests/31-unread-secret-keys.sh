@@ -85,9 +85,14 @@ render_default "$o" --set global.deploymentMode=external "${GEN[@]}"
 assert_spec_entry "$o" present "platform JWT_SECRET" \
   "firewall deployed, generator: JWT_SECRET is generated"
 o="$TMP/unread-fw-deployed-hybrid.yaml"
-render_default "$o" --set global.deploymentMode=hybrid
+render_default "$o" --set global.deploymentMode=hybrid --set global.firewall.deploy=true
 assert_platform_key "$o" present JWT_SECRET \
   "firewall deployed, hybrid: platform-secrets carries JWT_SECRET"
+o="$TMP/unread-fw-hosted-hybrid.yaml"
+render_default "$o" --set global.deploymentMode=hybrid --set global.firewall.deploy=false \
+  --set trustguard.firewall.jwtExistingSecret.name=trustguard-firewall
+assert_platform_key "$o" absent JWT_SECRET \
+  "hosted firewall, hybrid: platform-secrets carries no JWT_SECRET"
 
 blue "==> Scenario 43b: the TrustGuard client pair needs a client and a server"
 o="$TMP/unread-tgc-guard-only-gen.yaml"

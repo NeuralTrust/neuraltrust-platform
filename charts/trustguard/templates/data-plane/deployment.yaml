@@ -123,6 +123,14 @@ spec:
         {{- else if eq (include "neuraltrust-platform.isDedicated" .) "true" }}
         {{- include "neuraltrust-platform.clickstack.dedicatedOtlpHeadersEnv" . | nindent 8 }}
         {{- end }}
+        {{- if eq (include "trustguard.firewallJwt.configured" .) "true" }}
+        {{- /* This install's own firewall client: FIREWALL_JWT carries the URL and
+               the credentials, so the shared signing key stays off the pod. An
+               inline jwt arrives through trustguard-secrets (envFrom). */}}
+        {{- with include "trustguard.firewallJwtEnv" . }}
+        {{- . | nindent 8 }}
+        {{- end }}
+        {{- else }}
         {{- $fw := default dict .Values.firewall }}
         {{- $fwSecret := default dict $fw.existingSecret }}
         {{- $fwSecretName := $fwSecret.name | default "" }}
@@ -140,6 +148,7 @@ spec:
               {{- else }}
               {{- include "neuraltrust-platform.secretRef" (dict "ctx" . "logical" "JWT_SECRET") | nindent 14 }}
               {{- end }}
+        {{- end }}
         {{- if .Values.securityHardening }}
         securityContext:
           allowPrivilegeEscalation: false
