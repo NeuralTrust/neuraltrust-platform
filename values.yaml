@@ -10,6 +10,12 @@ global:
   #   planes that live somewhere else. Happy path: set global.domain only
   #   (UI hosts + hybrid dial names). Override with controlPlane.domain for
   #   split-DNS.
+  # "dedicated" → one TrustGate or TrustGuard data plane that NeuralTrust runs
+  #   for a single instance, in a NeuralTrust cluster. Rendered by DataCore, not
+  #   by hand: no DataAgent, no Postgres, the cluster's Redis
+  #   (global.redis.host) and collector (global.clickstack.endpoint), the
+  #   plane's own hosts, and SERVER_SECRET_KEY from
+  #   global.platformSecret.existingSecret.
   deploymentMode: "hybrid"
   # Which NeuralTrust SaaS the hybrid control-plane traffic goes to:
   #   "eu" (default) → *.neuraltrust.ai
@@ -139,6 +145,7 @@ global:
   # Hybrid product OTLP: apps → local clickstack-egress-collector (DataAgent
   # enrolment). No direct authToken. Air-gapped → deploymentMode=external.
   # Ignored in external (in-cluster clickstack-otel-collector → ClickHouse).
+  # dedicated: endpoint is the OTLP/HTTP base URL of the cluster's collector.
   clickstack:
     endpoint: ""
     protocol: ""

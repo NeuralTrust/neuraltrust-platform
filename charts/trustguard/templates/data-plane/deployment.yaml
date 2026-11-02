@@ -120,6 +120,8 @@ spec:
         {{- include "neuraltrust-platform.appVersionEnv" (dict "tag" .Values.image.tag) | nindent 8 }}
         {{- if eq (include "neuraltrust-platform.isExternal" .) "true" }}
         {{- include "neuraltrust-platform.clickstack.externalOtlpHeadersEnv" . | nindent 8 }}
+        {{- else if eq (include "neuraltrust-platform.isDedicated" .) "true" }}
+        {{- include "neuraltrust-platform.clickstack.dedicatedOtlpHeadersEnv" . | nindent 8 }}
         {{- end }}
         {{- $fw := default dict .Values.firewall }}
         {{- $fwSecret := default dict $fw.existingSecret }}

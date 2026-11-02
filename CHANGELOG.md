@@ -4,6 +4,22 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Added
+
+- **`global.deploymentMode: dedicated`.** One TrustGate or TrustGuard data plane
+  that NeuralTrust runs for a single instance, in a NeuralTrust cluster. DataCore
+  renders it, one release per instance; it is not meant to be installed by hand.
+  - It is wired like a hybrid data plane (config-sync, opt-in products) and renders
+    only that product's data plane: no DataAgent or egress collector, no Postgres
+    (raw telemetry is always exported), no data-plane-api, no in-cluster Redis.
+  - OTLP goes straight to `global.clickstack.endpoint`, Redis is
+    `global.redis.host`, and `SERVER_SECRET_KEY` comes from
+    `global.platformSecret.existingSecret`.
+  - The render fails unless exactly one product is enabled and every one of those
+    inputs, plus the config-sync Secret and the plane's own `ingress.dataPlane.host`,
+    is set, so a missing value never falls back to a shared SaaS host.
+  - hybrid, external and saas render exactly as before.
+
 ## [v3.10.0] — 2026-10-31
 
 ### Changed
