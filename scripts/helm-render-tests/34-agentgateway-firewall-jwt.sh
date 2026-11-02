@@ -6,7 +6,7 @@ suite_full || exit 0
 
 blue "==> Scenario 34: TrustGate data plane firewall client (FIREWALL_JWT)"
 DP_NAME="$(ruby -ryaml -e 'puts YAML.load_file(ARGV[0]).dig("dataPlane", "name")' charts/agentgateway/values.yaml)"
-JWT="eyJhbGciOiJIUzI1NiJ9.eyJ0eXAiOiJmaXJld2FsbC1jbGllbnQifQ.c2ln"
+JWT="test-gateway-firewall-jwt"
 # agentgateway-secrets is written as stringData, which assert_secret_key does not read.
 assert_ag_secret() {
   local file="$1" mode="$2" msg="$3" doc="$TMP/ag-secret-$RANDOM.yaml"
@@ -75,6 +75,11 @@ assert_ag_secret "$out34e" absent \
   "unset: no FIREWALL_JWT"
 assert_contains "$out34e" 'name: FIREWALL_SECRET_KEY' \
   "unset: shared firewall signing key wiring unchanged"
+out34f="$TMP/scenario-fwjwt-unset-hosted.yaml"
+render_default "$out34f" --set global.firewall.deploy=false \
+  --set trustguard.firewall.jwtExistingSecret.name=trustguard-firewall
+assert_not_contains "$out34f" 'name: FIREWALL_SECRET_KEY' \
+  "unset, hosted firewall: no shared firewall signing key"
 
 assert_render_fails_with "set jwt or existingSecret.name, not both" \
   "jwt and existingSecret together fail the render" \

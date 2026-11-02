@@ -578,21 +578,30 @@ Secret produces a pod that cannot start. Fail at render instead.
        allowed — both sides then agree, which is the only thing being enforced. */ -}}
 {{- $sharedSecretName := (default dict (default dict $global.platformSecret).existingSecret).name | default "" -}}
 
-{{- /* External firewall (global.firewall.deploy=false). Nothing in this release
-       verifies the firewall JWT any more, so TrustGuard and TrustGate must sign
-       with the key the external firewall holds. A chart-generated key can never
-       match it, and the legacy firewall-secrets is not rendered, so a missing
-       source is rejected here rather than surfacing as 401s at request time. */ -}}
+{{- /* Firewall not deployed here (global.firewall.deploy=false, or unset in
+       hybrid). TrustGuard needs one of two credentials, and a missing one is
+       rejected here rather than surfacing as firewall errors at request time:
+         - its own FIREWALL_JWT for the NeuralTrust-hosted firewall
+           (trustguard.firewall.jwt / jwtExistingSecret.name); the token
+           carries the URL.
+         - an external firewall's URL and JWT_SECRET. Nothing in this release
+           verifies the firewall JWT any more, so TrustGuard and TrustGate must
+           sign with the key the external firewall holds. A chart-generated key
+           can never match it, and the legacy firewall-secrets is not rendered. */ -}}
 {{- $gFw := default dict $global.firewall -}}
 {{- $gFwSecretName := (default dict $gFw.existingSecret).name | default "" -}}
 {{- $fwExternal := eq (include "neuraltrust-platform.firewall.external" .) "true" -}}
-{{- if $fwExternal -}}
+{{- $tgFw := default dict (default dict .Values.trustguard).firewall -}}
+{{- $tgFwJwt := or $tgFw.jwt (default dict $tgFw.jwtExistingSecret).name -}}
+{{- if and $fwExternal (or $gFw.baseURL $gFwSecretName) -}}
   {{- if not (regexMatch "^https?://[^/]" ($gFw.baseURL | default "" | toString)) -}}
-    {{- fail (printf "global.firewall.deploy=false requires global.firewall.baseURL to be the external firewall's http(s) URL (for example http://firewall.<namespace>.svc.cluster.local, or https://firewall.neuraltrust.ai / https://firewall.us.neuraltrust.ai for the NeuralTrust-hosted firewall), got %q." ($gFw.baseURL | default "" | toString)) -}}
+    {{- fail (printf "global.firewall.baseURL must be the http(s) URL of the firewall you run (for example http://firewall.<namespace>.svc.cluster.local), got %q. For the NeuralTrust-hosted firewall leave it empty and set trustguard.firewall.jwt: the token carries the URL." ($gFw.baseURL | default "" | toString)) -}}
   {{- end -}}
   {{- if not (or $gFwSecretName $sharedSecretName) -}}
-    {{- fail "global.firewall.deploy=false requires the external firewall's JWT_SECRET: set global.firewall.existingSecret.name (a Secret in this namespace, key global.firewall.existingSecret.key) or global.platformSecret.existingSecret.name carrying JWT_SECRET. A chart-generated key would not match the external firewall and every firewall call would fail authentication." -}}
+    {{- fail "global.firewall.baseURL points at a firewall you run, which needs its JWT_SECRET: set global.firewall.existingSecret.name (a Secret in this namespace, key global.firewall.existingSecret.key) or global.platformSecret.existingSecret.name carrying JWT_SECRET. A chart-generated key would not match that firewall and every firewall call would fail authentication." -}}
   {{- end -}}
+{{- else if and $fwExternal (not $tgFwJwt) -}}
+  {{- fail "global.firewall.deploy=false leaves TrustGuard without a firewall. For the NeuralTrust-hosted firewall, set trustguard.firewall.jwt (or trustguard.firewall.jwtExistingSecret.name) to its FIREWALL_JWT: the console shows it when it creates a hybrid TrustGuard, and NeuralTrust issues one for external installs. For a firewall you run, set global.firewall.baseURL and global.firewall.existingSecret.name. To run it in this cluster, set global.firewall.deploy: true." -}}
 {{- else if and (or $gFw.baseURL $gFwSecretName) (eq (include "neuraltrust-platform.firewall.deploy" .) "true") -}}
   {{- fail "global.firewall.baseURL / global.firewall.existingSecret only apply with global.firewall.deploy=false; this release deploys its own firewall and would ignore them. Remove them, or set global.firewall.deploy=false to use the external firewall." -}}
 {{- end -}}
