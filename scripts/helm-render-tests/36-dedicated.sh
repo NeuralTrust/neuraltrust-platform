@@ -28,6 +28,8 @@ DEDICATED_ARGS=(
   --set global.ingress.tls.autoGenerate=false
   --set agentgateway.config.autoWildcardHosts=false
   --set agentgateway.configSync.endpoint=agentgateway-admin.agentgateway.svc.cluster.local:8083
+  --set agentgateway.trustguard.baseURL=http://trustguard-data.trustguard.svc.cluster.local:8081
+  --set global.v2.trustguardClientSecretName=trustgate-abc-credentials
   --set agentgateway.configSync.existingSecret.name=trustgate-abc-credentials
   --set agentgateway.ingress.dataPlane.host=acme.llm.dev.example.com
   --set agentgateway.ingress.mcp.host=acme.mcp.dev.example.com
@@ -90,6 +92,14 @@ assert_contains "$out36" 'name: OTEL_EXPORTER_OTLP_HEADERS'$'\n''          value
   "dedicated: the collector auth header comes from the platform Secret"
 assert_contains "$out36" 'REDIS_DB: "3"' \
   "dedicated: Redis DB follows agentgateway.redis.db"
+assert_contains "$out36" 'TRUSTGUARD_BASE_URL: "http://trustguard-data.trustguard.svc.cluster.local:8081"' \
+  "dedicated: the plane calls the TrustGuard the controller names"
+assert_contains "$out36" 'name: TRUSTGUARD_CLIENT_SECRET'$'\n''          valueFrom:'$'\n''            secretKeyRef:'$'\n''              name: trustgate-abc-credentials' \
+  "dedicated: the TrustGuard client comes from the controller's Secret"
+out36b="$TMP/scenario-dedicated-no-guard.yaml"
+render_dedicated "$out36b" --set agentgateway.trustguard.baseURL=
+assert_not_contains "$out36b" 'TRUSTGUARD_BASE_URL' \
+  "dedicated: no TrustGuard URL unless the controller names one"
 assert_not_contains "$out36" 'name: (DB_HOST|POSTGRES_HOST)' \
   "dedicated: no Postgres wiring"
 assert_contains "$out36" 'name: "?trustgate-abc-credentials"?'$'\n''              key: "?SERVER_SECRET_KEY"?' \

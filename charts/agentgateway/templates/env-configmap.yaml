@@ -128,6 +128,11 @@ data:
   # TrustGuard runs outside this release. TRUSTGUARD_CLIENT_ID/_SECRET are wired
   # from the shared trustguard-client-credentials Secret in the Deployment env.
   TRUSTGUARD_BASE_URL: {{ $tg.baseURL | default (printf "http://trustguard-data-plane.%s.svc.cluster.local" .Release.Namespace) | quote }}
+  {{- else if and (eq (include "neuraltrust-platform.isDedicated" .) "true") $tg.baseURL -}}
+  # Dedicated: the TrustGuard the controller points this plane at (the shared one,
+  # or the instance's own dedicated guard). Credentials come from
+  # global.v2.trustguardClientSecretName in the Deployment env.
+  TRUSTGUARD_BASE_URL: {{ $tg.baseURL | quote }}
   {{- end -}}
   {{- /* Firewall complexity scoring for the smart-routing load balancer (AUT-402).
          The binary reads FIREWALL_BASE_URL / FIREWALL_SECRET_KEY — not
