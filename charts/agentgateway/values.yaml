@@ -179,6 +179,20 @@ configSync:
     loadBalancerIP: ""
     externalTrafficPolicy: ""
 # TrustGuard integration (proxy → trustguard /v1/evaluate via client-credentials).
+# Firewall client this install's data plane scores smart-routing requests with:
+# the FIREWALL_JWT the console shows once on the gateway's deploy step. It
+# carries the firewall URL, so it works with or without TrustGuard in this
+# release. When set, FIREWALL_SECRET_KEY (the shared firewall JWT_SECRET) is no
+# longer wired, and FIREWALL_BASE_URL is only emitted from an explicit
+# config.firewallBaseURL. Set jwt, or existingSecret.name for a Secret you
+# manage — not both. jwt is stored in agentgateway-secrets, so it needs chart
+# Secret generation (global.autoGenerateSecrets, preserveExistingSecrets=false).
+firewall:
+  jwt: ""
+  existingSecret:
+    name: ""
+    key: "FIREWALL_JWT"
+
 trustguard:
   # Empty ⇒ auto-derived to the in-cluster data-plane Service
   # (http://trustguard-data-plane.<release-namespace>.svc.cluster.local, port 80).
