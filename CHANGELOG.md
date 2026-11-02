@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v3.12.0] — 2026-11-02
+
 ### Added
 
 - **TrustGate data planes can use their own firewall client.** Set
