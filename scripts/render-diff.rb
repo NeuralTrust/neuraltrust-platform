@@ -37,6 +37,7 @@ SHAPES = {
   'external-managed'         => %w[values-managed-datastores.yaml.example],
   'external-trustguard-only' => [EXTERNAL, 'values-external-trustguard-only.yaml.example'],
   'external-observability'   => [EXTERNAL, 'values-observability-self-hosted.yaml.example'],
+  'dedicated-trustgate'      => %w[values-dedicated.yaml.example],
 }.freeze
 API_VERSIONS = %w[route.openshift.io/v1 monitoring.coreos.com/v1].freeze
 
