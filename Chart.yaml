@@ -2,7 +2,7 @@ apiVersion: v2
 name: neuraltrust-platform
 description: NeuralTrust platform Helm chart (v2 hybrid + external)
 type: application
-version: 3.10.0
+version: 3.12.0
 appVersion: "2.0.0"
 icon: https://neuraltrust.ai/favicon.ico
 # For v1 clusters pin --version ~1.14.0.
@@ -30,7 +30,7 @@ dependencies:
       - v2
   # Control-plane App/UI — external only.
   - name: control-plane-app
-    version: 0.1.71
+    version: 0.1.72
     repository: file://./charts/control-plane-app
     tags:
       - neuraltrust
@@ -45,7 +45,7 @@ dependencies:
       - v2
   # TrustGuard. Hybrid gated by global.products.trustguard.
   - name: trustguard
-    version: 0.1.70
+    version: 0.1.71
     repository: file://./charts/trustguard
     tags:
       - neuraltrust
@@ -102,7 +102,7 @@ dependencies:
       - neuraltrust
   # Watchdog — optional self-monitoring/self-healing.
   - name: watchdog
-    version: 0.3.29
+    version: 0.3.30
     repository: file://./charts/watchdog
     condition: watchdog.enabled
     tags:

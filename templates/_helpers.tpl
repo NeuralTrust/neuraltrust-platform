@@ -3288,7 +3288,39 @@ emptyDir that is discarded on restart regardless, and a mismatch costs one
 refetch. Operators who need a specific value set `configSync.lkgKey`, which is
 deterministic and does not depend on how the chart was rendered.
 */}}
+{{/*
+Whether the in-cluster secrets generator owns this component's config-sync LKG
+key: config-sync is on, the generator is active, and the chart owns the service
+Secret the key would otherwise live in. Decided from values alone, so the pod
+spec is the same under helm upgrade and helm template. Subchart context.
+*/}}
+{{- define "neuraltrust-platform.configSync.lkgGenerated" -}}
+{{- if and
+  (eq (include "neuraltrust-platform.configSync.enabled" .) "true")
+  (eq (include "neuraltrust-platform.secretsGenerator.active" .) "true")
+  (include "neuraltrust-platform.autoGenerateSecrets" .)
+  (not .Values.global.preserveExistingSecrets) -}}true{{- end -}}
+{{- end }}
+
+{{/*
+The key of the generated Secret holding this component's LKG key, e.g.
+TRUSTGUARD_CONFIG_SYNC_LKG_KEY. One per component, as each had its own.
+*/}}
+{{- define "neuraltrust-platform.configSync.lkgGeneratedKey" -}}
+{{- printf "%s_CONFIG_SYNC_LKG_KEY" (.Chart.Name | upper | replace "-" "_") -}}
+{{- end }}
+
 {{- define "neuraltrust-platform.configSyncTokenEnv" -}}
+{{- /* Under the secrets generator the LKG key is read from the generated
+       Secret: an explicit env entry, which outranks the copy an older chart
+       left in the service Secret loaded with envFrom. */}}
+{{- if eq (include "neuraltrust-platform.configSync.lkgGenerated" .) "true" }}
+- name: CONFIG_SYNC_LKG_KEY
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "neuraltrust-platform.secretsGenerator.name" . | quote }}
+      key: {{ include "neuraltrust-platform.configSync.lkgGeneratedKey" . | quote }}
+{{- end }}
 {{- $cs := default dict .Values.configSync -}}
 {{- $existing := default dict $cs.existingSecret -}}
 {{- if and (eq (include "neuraltrust-platform.configSync.enabled" .) "true") $existing.name }}

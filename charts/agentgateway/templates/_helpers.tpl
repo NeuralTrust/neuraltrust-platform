@@ -362,6 +362,39 @@ static password to point at. Emits nothing unless an `existingSecret.name` is se
 {{- end }}
 
 {{/*
+"true" when the data plane authenticates to the firewall with its own OAuth
+client (firewall.jwt or firewall.existingSecret.name) instead of the shared
+firewall JWT_SECRET.
+*/}}
+{{- define "agentgateway.firewallJwt.configured" -}}
+{{- $fw := default dict .Values.firewall -}}
+{{- if or $fw.jwt (default dict $fw.existingSecret).name -}}true{{- end -}}
+{{- end }}
+
+{{/*
+FIREWALL_JWT env entry for an operator-managed Secret. An inline firewall.jwt
+reaches the pod through agentgateway-secrets (envFrom) instead. Fails the render
+on an ambiguous or unstorable configuration.
+*/}}
+{{- define "agentgateway.firewallJwtEnv" -}}
+{{- $fw := default dict .Values.firewall -}}
+{{- $es := default dict $fw.existingSecret -}}
+{{- if and $fw.jwt $es.name -}}
+{{- fail "agentgateway.firewall: set jwt or existingSecret.name, not both" -}}
+{{- end -}}
+{{- if and $fw.jwt (not (and (include "neuraltrust-platform.autoGenerateSecrets" .) (not .Values.global.preserveExistingSecrets))) -}}
+{{- fail "agentgateway.firewall.jwt is stored in agentgateway-secrets, which this chart only writes while global.autoGenerateSecrets=true and global.preserveExistingSecrets=false: put the FIREWALL_JWT the console showed in a Secret and set agentgateway.firewall.existingSecret.name instead" -}}
+{{- end -}}
+{{- with $es.name }}
+- name: FIREWALL_JWT
+  valueFrom:
+    secretKeyRef:
+      name: {{ . | quote }}
+      key: {{ $es.key | default "FIREWALL_JWT" | quote }}
+{{- end -}}
+{{- end }}
+
+{{/*
 Operational traces and metrics (the gateway's own server spans and RED
 metrics), sent to the same collector as product logs. The binary defaults both
 switches off, and an enabled signal with no endpoint fails startup, so the

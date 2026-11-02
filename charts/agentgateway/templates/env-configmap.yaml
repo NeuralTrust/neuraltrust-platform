@@ -151,7 +151,10 @@ data:
   {{- $fwBase := "" -}}
   {{- if hasKey .Values.config "firewallBaseURL" -}}
   {{- $fwBase = .Values.config.firewallBaseURL | toString -}}
-  {{- else -}}
+  {{- else if ne (include "agentgateway.firewallJwt.configured" .) "true" -}}
+  {{- /* With FIREWALL_JWT the URL comes from the token, issued for the firewall
+         that registered the client; a derived in-release URL would override it
+         and send the client to a firewall that does not know it. */ -}}
   {{- $fwBase = include "neuraltrust-platform.firewall.baseURL" . -}}
   {{- end -}}
   {{- if $fwBase }}

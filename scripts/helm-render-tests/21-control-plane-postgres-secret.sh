@@ -376,6 +376,7 @@ gen_shapes=(
   "saas-managed|-f $CHART_DIR/values-managed-datastores.yaml.example --set global.deploymentMode=saas --set global.domain=cp.example.com --set global.autoGenerateSecrets=true --set global.preserveExistingSecrets=false"
   "managed-bootstrap|-f $CHART_DIR/values-managed-datastores.yaml.example --set global.autoGenerateSecrets=true --set global.preserveExistingSecrets=false --set global.postgresql.passwordSecret.name= --set global.postgresql.managedBootstrap.enabled=true --set global.postgresql.managedBootstrap.adminSecret.name=pg-admin"
   "saas-telemetry-tls|--set global.deploymentMode=saas --set global.domain=cp.example.com --set clickstack-ingest-gateway.ingress.tls.autoGenerate=true"
+  "hybrid-opt-in|-f $CHART_DIR/values-required.yaml --set global.secrets.generator.enabled=true"
 )
 for shape in "${gen_shapes[@]}"; do
   label="${shape%%|*}"
@@ -417,8 +418,10 @@ for off in "opt-out|--set global.secrets.generator.enabled=false" "preserve|--se
   assert_not_contains "$TMP/gen-off-$label.yaml" 'neuraltrust-generator-spec-' "secrets generator ($label): no generator spec"
   assert_not_contains "$TMP/gen-off-$label.yaml" 'component: secrets-generator' "secrets generator ($label): no generator Job"
 done
-render_default "$TMP/gen-off-hybrid.yaml" --set global.secrets.generator.enabled=true
-assert_not_contains "$TMP/gen-off-hybrid.yaml" 'neuraltrust-generator-spec-' "secrets generator (hybrid): not active yet"
+# Hybrid only on request: auto leaves it off, under helm template too, since the
+# Job's image is one a hybrid install does not otherwise pull.
+helm template test "$CHART_DIR" --namespace neuraltrust -f "$CHART_DIR/values-required.yaml" > "$TMP/gen-off-hybrid.yaml"
+assert_not_contains "$TMP/gen-off-hybrid.yaml" 'neuraltrust-generator-spec-' "secrets generator (hybrid, auto): off"
 
 # auto (the default) leaves a platform already deployed with Helm exactly as it
 # was: a `helm upgrade` of a release the generator never ran for keeps generating
