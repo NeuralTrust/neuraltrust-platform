@@ -7,8 +7,10 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 ### Added
 
 - **`global.deploymentMode: dedicated`.** One TrustGate or TrustGuard data plane
-  that NeuralTrust runs for a single instance, in a NeuralTrust cluster. DataCore
-  renders it, one release per instance; it is not meant to be installed by hand.
+  for a single instance, deployed into a cluster that already runs its control
+  plane, Redis and OTLP collector, one release per instance. NeuralTrust SaaS
+  creates these through Flux; a self-hosted install can render the same profile.
+  See `values-dedicated.yaml.example`.
   - It is wired like a hybrid data plane (config-sync, opt-in products) and renders
     only that product's data plane: no DataAgent or egress collector, no Postgres
     (raw telemetry is always exported), no data-plane-api, no in-cluster Redis.
@@ -17,7 +19,9 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
     `OTEL_EXPORTER_OTLP_HEADERS` come from `global.platformSecret.existingSecret`.
   - The render fails unless exactly one product is enabled and every one of those
     inputs, plus the config-sync Secret and the plane's own `ingress.dataPlane.host`,
-    is set, so a missing value never falls back to a shared SaaS host.
+    is set, so a missing value never falls back to the shared default host.
+  - Exposure follows `global.ingress.gatewayApi.parentRefs`: attach the routes to
+    a public or a private (for example Private Service Connect) Gateway.
   - hybrid, external and saas render exactly as before.
 
 ## [v3.13.0] — 2026-11-02

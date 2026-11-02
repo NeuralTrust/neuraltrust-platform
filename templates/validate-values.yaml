@@ -7,37 +7,42 @@ no Kubernetes resource when validation succeeds.
 {{- if not (has $mode (list "hybrid" "external" "saas" "dedicated")) -}}
   {{- fail (printf "global.deploymentMode must be one of: hybrid, external, saas, dedicated (got %q)" $mode) -}}
 {{- end -}}
-{{- /* dedicated is rendered by DataCore, one release per product instance, into a
-       NeuralTrust cluster that already runs Redis and the collector. Every input
-       below comes from DataCore, so a missing one is a controller bug: fail
+{{- /* dedicated is one release per product instance, in a cluster that already
+       runs the control plane, Redis and the collector. Fail on a missing input
        instead of falling back to a hybrid default that would deploy DataAgent,
-       an in-cluster Redis or the shared SaaS hostnames. */ -}}
+       an in-cluster Redis or the shared default hostnames. */ -}}
 {{- if eq $mode "dedicated" -}}
   {{- $dProducts := default dict $global.products -}}
   {{- if $dProducts.dataPlane -}}
     {{- fail "global.deploymentMode=dedicated serves one product data plane: global.products.dataPlane is not supported" -}}
   {{- end -}}
-  {{- if eq (ternary 1 0 (eq ($dProducts.trustgate | toString) "true") | add (ternary 1 0 (eq ($dProducts.trustguard | toString) "true"))) 1 | not -}}
+  {{- $dEnabled := 0 -}}
+  {{- range $p := list "trustgate" "trustguard" -}}
+    {{- if eq (include "neuraltrust-platform.product.enabled" (dict "ctx" $ "product" $p)) "true" -}}
+      {{- $dEnabled = add1 $dEnabled -}}
+    {{- end -}}
+  {{- end -}}
+  {{- if ne $dEnabled 1 -}}
     {{- fail "global.deploymentMode=dedicated needs exactly one of global.products.trustgate and global.products.trustguard set to true" -}}
   {{- end -}}
   {{- if not (default dict (default dict $global.platformSecret).existingSecret).name -}}
-    {{- fail "global.deploymentMode=dedicated needs global.platformSecret.existingSecret.name: the Secret DataCore writes holds SERVER_SECRET_KEY" -}}
+    {{- fail "global.deploymentMode=dedicated needs global.platformSecret.existingSecret.name: the Secret that holds SERVER_SECRET_KEY" -}}
   {{- end -}}
   {{- $dRedis := default dict $global.redis -}}
   {{- if or (not (hasKey $dRedis "deploy")) $dRedis.deploy (not $dRedis.host) -}}
     {{- fail "global.deploymentMode=dedicated uses the cluster's Redis: set global.redis.deploy=false and global.redis.host" -}}
   {{- end -}}
   {{- if not (default dict $global.clickstack).endpoint -}}
-    {{- fail "global.deploymentMode=dedicated needs global.clickstack.endpoint, the OTLP/HTTP base URL of the NeuralTrust collector" -}}
+    {{- fail "global.deploymentMode=dedicated needs global.clickstack.endpoint, the OTLP/HTTP base URL of the cluster's collector" -}}
   {{- end -}}
   {{- range $dp := list (dict "product" "trustgate" "root" "agentgateway") (dict "product" "trustguard" "root" "trustguard") -}}
-    {{- if eq (index $dProducts $dp.product | toString) "true" -}}
+    {{- if eq (include "neuraltrust-platform.product.enabled" (dict "ctx" $ "product" $dp.product)) "true" -}}
       {{- $dValues := default dict (index $.Values $dp.root) -}}
       {{- if not (default dict (default dict $dValues.configSync).existingSecret).name -}}
         {{- fail (printf "global.deploymentMode=dedicated needs %s.configSync.existingSecret.name" $dp.root) -}}
       {{- end -}}
       {{- if not (default dict (default dict $dValues.ingress).dataPlane).host -}}
-        {{- fail (printf "global.deploymentMode=dedicated needs %s.ingress.dataPlane.host: the plane's public host, never a shared SaaS one" $dp.root) -}}
+        {{- fail (printf "global.deploymentMode=dedicated needs %s.ingress.dataPlane.host: the plane's own host, never the shared default one" $dp.root) -}}
       {{- end -}}
     {{- end -}}
   {{- end -}}

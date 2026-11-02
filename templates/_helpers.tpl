@@ -102,12 +102,13 @@ saas without external would mean duplicating ~40 conditionals.
 {{- end }}
 
 {{/*
-dedicated: one product data plane that NeuralTrust runs for a single instance,
-in a NeuralTrust cluster, provisioned by DataCore. It is wired like a hybrid data
-plane (config-sync, opt-in products), which is why isHybrid is true for it, minus
-what a NeuralTrust cluster already provides: no DataAgent or egress collector
-(OTLP goes straight to global.clickstack.endpoint), no Postgres (raw telemetry is
-always remote), no data-plane-api, and an external Redis.
+dedicated: one product data plane for a single instance, deployed into a cluster
+that already runs its control plane, Redis and an OTLP collector (one release per
+instance, usually created by a controller). It is wired like a hybrid data plane
+(config-sync, opt-in products), which is why isHybrid is true for it, minus what
+that cluster already provides: no DataAgent or egress collector (OTLP goes
+straight to global.clickstack.endpoint), no Postgres (raw telemetry is always
+remote), no data-plane-api, and an external Redis.
 */}}
 {{- define "neuraltrust-platform.isDedicated" -}}
 {{- $global := default dict .Values.global }}
@@ -3411,12 +3412,7 @@ true
 {{- end }}
 
 {{/*
-Dedicated: OTLP straight to the NeuralTrust collector named by
-global.clickstack.endpoint (an in-cluster Service of the SaaS cluster), the
-same way the shared SaaS data planes export.
-*/}}
-{{/*
-Dedicated: the collector's auth header, from the Secret DataCore writes
+Dedicated: the collector's auth header, from the platform Secret
 (global.platformSecret.existingSecret). Optional, so a collector that takes no
 header needs nothing there.
 */}}
@@ -3429,10 +3425,14 @@ header needs nothing there.
       optional: true
 {{- end }}
 
+{{/*
+Dedicated: OTLP straight to the cluster's collector, global.clickstack.endpoint
+(OTLP/HTTP base URL), the same way the shared data planes of that cluster export.
+*/}}
 {{- define "neuraltrust-platform.clickstack.dedicatedOtlpEnv" -}}
 {{- $endpoint := (default dict (default dict .Values.global).clickstack).endpoint | default "" | toString | trimSuffix "/" -}}
 OTEL_EXPORTER_OTLP_ENDPOINT: {{ printf "%s/v1/logs" $endpoint | quote }}
-OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
+OTEL_EXPORTER_OTLP_PROTOCOL: {{ include "neuraltrust-platform.clickstack.defaultProtocol" . | quote }}
 OTEL_EXPORTER_OTLP_INSECURE: {{ ternary "true" "false" (hasPrefix "http://" $endpoint) | quote }}
 {{- end }}
 
