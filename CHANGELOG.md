@@ -4,6 +4,13 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Dedicated TrustGate planes reach TrustGuard.** In `deploymentMode: dedicated`,
+  `TRUSTGUARD_BASE_URL` is now set from `agentgateway.trustguard.baseURL` (it was
+  only emitted when TrustGuard ran in the same release), and the client
+  credentials come from `global.v2.trustguardClientSecretName`.
+
 ## [v3.14.0] — 2026-11-02
 
 ### Added
