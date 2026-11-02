@@ -1,7 +1,13 @@
 # Hybrid with GPU Firewall workers.
 # Layer over a TrustGuard-enabled base (values-required.yaml or
 # values-trustguard.yaml.example) and replace the registry and scheduling
-# labels. Firewall follows TrustGuard automatically.
+# labels. GPU workers need the in-cluster firewall, so this file pins it on;
+# hybrid will otherwise default to the NeuralTrust-hosted firewall in a coming
+# release. TrustGuard then ignores trustguard.firewall.
+
+global:
+  firewall:
+    deploy: true
 
 firewall:
   firewall:

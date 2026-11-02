@@ -4,6 +4,38 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Added
+
+- **TrustGuard can use the NeuralTrust-hosted firewall with its own client.**
+  Set `global.firewall.deploy: false` and `trustguard.firewall.jwtExistingSecret.name`
+  (a Secret with key `FIREWALL_JWT`) or `trustguard.firewall.jwt`: the
+  per-install `FIREWALL_JWT` the console shows once when it creates a hybrid
+  TrustGuard, or a key NeuralTrust issues for an external install.
+  - The token carries the firewall URL and the client, so TrustGuard and
+    TrustGate get no firewall signing key and no derived URL;
+    `trustguard.firewall.baseURL` still overrides the URL.
+  - It needs a TrustGuard release that reads `FIREWALL_JWT`. The images this
+    chart pins do not yet, so keep the in-cluster firewall until a chart release
+    bumps them.
+  - A firewall you run yourself (`deploy: false` with `baseURL` and
+    `existingSecret`) works as before and outranks a `trustguard.firewall.jwt`
+    set alongside it, as does an in-cluster firewall.
+  - `deploy: false` with neither a TrustGuard JWT nor a `baseURL` now fails the
+    render with a message naming every option.
+- The watchdog's `firewall-health` probe is only switched on when the firewall
+  runs in this release.
+
+### Upcoming change
+
+- **Hybrid will default to the NeuralTrust-hosted firewall** in a coming
+  release, once the TrustGuard and TrustGate images that read `FIREWALL_JWT`
+  ship in this chart. External and saas keep the in-cluster firewall.
+  - **If your hybrid install runs the firewall in-cluster and should keep it,
+    add `global.firewall: {deploy: true}` to your values now.** It changes
+    nothing today and keeps that release's render identical to this one.
+  - Otherwise that release needs the TrustGuard's firewall JWT, and `helm
+    upgrade` without either fails and names both options.
+
 ## [v3.12.0] — 2026-11-02
 
 ### Added

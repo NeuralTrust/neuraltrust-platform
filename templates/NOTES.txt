@@ -55,10 +55,17 @@ Enabled v2 components:
 {{- end }}
 {{- if $trustguardEnabled }}
   - TrustGuard runtime (data plane)
+{{- $tgFw := default dict (default dict .Values.trustguard).firewall }}
+{{- $fwURL := include "neuraltrust-platform.firewall.baseURL" . }}
 {{- if eq (include "neuraltrust-platform.firewall.deploy" .) "true" }}
-  - Firewall
+  - Firewall (in this cluster)
+{{- else if $fwURL }}
+  - Firewall: not deployed here; TrustGuard calls {{ $fwURL }}
 {{- else }}
-  - Firewall: not deployed here; TrustGuard calls {{ include "neuraltrust-platform.firewall.baseURL" . }}
+  - Firewall: NeuralTrust-hosted; TrustGuard calls the URL in its FIREWALL_JWT
+{{- end }}
+{{- if and $fwURL (or $tgFw.jwt (default dict $tgFw.jwtExistingSecret).name) }}
+    trustguard.firewall.jwt is ignored: TrustGuard stays on the firewall you run.
 {{- end }}
 {{- end }}
 {{- if $dataPlaneEnabled }}

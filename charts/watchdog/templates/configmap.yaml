@@ -177,6 +177,11 @@ data:
       {{- end }}
       {{- end }}
       {{- $allChecks := concat (default (list) .Values.checks) (default (list) .Values.extraChecks) }}
+      {{- /* The default firewall probe targets the in-release firewall Service,
+             which the umbrella does not deploy with a hosted firewall. */}}
+      {{- if and $configMap.umbrellaTopologyChecks (ne (include "neuraltrust-platform.firewall.deploy" $) "true") }}
+      {{- $enabledIds = without $enabledIds "firewall-health" }}
+      {{- end }}
       {{- range $allChecks }}
       {{- $c := . }}
       {{- if has $c.id $enabledIds }}
