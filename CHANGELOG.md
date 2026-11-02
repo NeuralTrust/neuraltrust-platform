@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v3.11.0] — 2026-11-02
+
 ### Added
 
 - **Hybrid installs can use the in-cluster secrets generator** with
