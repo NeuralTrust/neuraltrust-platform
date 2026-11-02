@@ -1,0 +1,59 @@
+# Dedicated data plane — one TrustGate data plane for a single gateway instance.
+#
+#   helm upgrade --install <release> . -n <plane-namespace> \
+#     -f values-dedicated.yaml.example
+#
+# One release per instance, into a cluster that already runs the control plane,
+# Redis and an OTLP collector. The release renders only the product's data plane
+# (TrustGate: proxy + MCP); no DataAgent, Postgres, Redis or data-plane-api. For a
+# TrustGuard plane, set products.trustguard instead and move the configSync and
+# ingress blocks under trustguard.
+#
+# Cluster prerequisites (not Helm):
+#   - The Secret <release>-creds in the plane namespace, with SERVER_SECRET_KEY,
+#     the config-sync token and, if the collector wants one,
+#     OTEL_EXPORTER_OTLP_HEADERS.
+#   - A programmed Gateway whose listeners cover the plane's hosts and admit the
+#     plane namespace. A public Gateway exposes the plane on the internet; a
+#     private one (for example behind Private Service Connect) keeps it private.
+#   - The plane's hosts are exact: the gateway's own <slug>.llm.<domain> and
+#     <slug>.mcp.<domain>. An exact-host route wins over a shared
+#     *.llm.<domain> route on the same Gateway, so the gateway keeps its URL.
+global:
+  deploymentMode: dedicated
+  domain: "<domain>"
+  products:
+    trustgate: true
+  platformSecret:
+    existingSecret:
+      name: "<release>-creds"
+  redis:
+    deploy: false
+    host: "<redis-host>"
+  clickstack:
+    endpoint: "http://<collector-service>.<collector-namespace>.svc.cluster.local:4318"
+  secrets:
+    generator:
+      enabled: false
+  ingress:
+    provider: gateway-api
+    gatewayApi:
+      parentRefs:
+        - name: "<gateway-name>"
+          namespace: "<gateway-namespace>"
+    tls:
+      autoGenerate: false
+
+agentgateway:
+  config:
+    # Exact hosts only: no *.llm.<domain> route that would claim every gateway.
+    autoWildcardHosts: false
+  configSync:
+    endpoint: "<control-plane-service>.<control-plane-namespace>.svc.cluster.local:8083"
+    existingSecret:
+      name: "<release>-creds"
+  ingress:
+    dataPlane:
+      host: "<slug>.llm.<domain>"
+    mcp:
+      host: "<slug>.mcp.<domain>"

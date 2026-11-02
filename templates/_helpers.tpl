@@ -98,7 +98,21 @@ saas without external would mean duplicating ~40 conditionals.
 
 {{- define "neuraltrust-platform.isHybrid" -}}
 {{- $global := default dict .Values.global }}
-{{- if eq ($global.deploymentMode | default "hybrid") "hybrid" }}true{{- end }}
+{{- if has ($global.deploymentMode | default "hybrid") (list "hybrid" "dedicated") }}true{{- end }}
+{{- end }}
+
+{{/*
+dedicated: one product data plane for a single instance, deployed into a cluster
+that already runs its control plane, Redis and an OTLP collector (one release per
+instance, usually created by a controller). It is wired like a hybrid data plane
+(config-sync, opt-in products), which is why isHybrid is true for it, minus what
+that cluster already provides: no DataAgent or egress collector (OTLP goes
+straight to global.clickstack.endpoint), no Postgres (raw telemetry is always
+remote), no data-plane-api, and an external Redis.
+*/}}
+{{- define "neuraltrust-platform.isDedicated" -}}
+{{- $global := default dict .Values.global }}
+{{- if eq ($global.deploymentMode | default "hybrid") "dedicated" }}true{{- end }}
 {{- end }}
 
 {{/*
@@ -110,7 +124,7 @@ Where hybrid raw telemetry is stored.
 Non-hybrid modes already ship raw over OTLP, so this reports "remote" there.
 */}}
 {{- define "neuraltrust-platform.telemetry.raw" -}}
-{{- if ne (include "neuraltrust-platform.isHybrid" .) "true" -}}
+{{- if or (ne (include "neuraltrust-platform.isHybrid" .) "true") (eq (include "neuraltrust-platform.isDedicated" .) "true") -}}
 remote
 {{- else -}}
 {{- $raw := ((default dict (default dict .Values.global).telemetry).raw | default "local") | toString | trim | lower -}}
@@ -2056,7 +2070,8 @@ Usage: {{ include "neuraltrust-platform.product.enabled" (dict "ctx" . "product"
 {{- define "neuraltrust-platform.product.enabled" -}}
 {{- $products := default dict (default dict .ctx.Values.global).products -}}
 {{- $flag := index $products .product -}}
-{{- if eq (include "neuraltrust-platform.isExternal" .ctx) "true" -}}
+{{- if and (eq .product "dataPlane") (eq (include "neuraltrust-platform.isDedicated" .ctx) "true") -}}
+{{- else if eq (include "neuraltrust-platform.isExternal" .ctx) "true" -}}
 {{- if not (and (kindIs "bool" $flag) (not $flag)) -}}true{{- end -}}
 {{- else if $flag -}}
 true
@@ -2093,6 +2108,7 @@ True when a hybrid product slice needs a DataAgent (trustgate or trustguard on).
 {{- define "neuraltrust-platform.dataagent.required" -}}
 {{- if and
   (eq (include "neuraltrust-platform.isHybrid" .) "true")
+  (ne (include "neuraltrust-platform.isDedicated" .) "true")
   (or
     (eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustgate")) "true")
     (eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustguard")) "true")
@@ -2206,6 +2222,7 @@ Usage: (dict "ctx" $ "product" "trustgate")
 {{- $root := .ctx -}}
 {{- $product := .product -}}
 {{- if ne (include "neuraltrust-platform.isHybrid" $root) "true" -}}
+{{- else if eq (include "neuraltrust-platform.isDedicated" $root) "true" -}}
 {{- else if ne (include "neuraltrust-platform.product.enabled" (dict "ctx" $root "product" $product)) "true" -}}
 {{- else -}}
   {{- $vals := include "neuraltrust-platform.dataagent.instanceValues" (dict "ctx" $root "product" $product) | fromYaml -}}
@@ -2973,7 +2990,7 @@ true
 
 {{- define "neuraltrust-platform.configSync.enabledFrom" -}}
 {{- $cs := default dict .configSync -}}
-{{- $isHybrid := eq (.mode | default "hybrid") "hybrid" -}}
+{{- $isHybrid := has (.mode | default "hybrid") (list "hybrid" "dedicated") -}}
 {{- if hasKey $cs "enabled" -}}
   {{- if kindIs "bool" $cs.enabled -}}
     {{- if $cs.enabled }}true{{- end -}}
@@ -3389,9 +3406,34 @@ http/protobuf
 Hybrid product OTLP metadata export is always on (no opt-out). EXTERNAL ignores this.
 */}}
 {{- define "neuraltrust-platform.clickstackHybridEnabled" -}}
-{{- if eq (include "neuraltrust-platform.isHybrid" .) "true" -}}
+{{- if and (eq (include "neuraltrust-platform.isHybrid" .) "true") (ne (include "neuraltrust-platform.isDedicated" .) "true") -}}
 true
 {{- end -}}
+{{- end }}
+
+{{/*
+Dedicated: the collector's auth header, from the platform Secret
+(global.platformSecret.existingSecret). Optional, so a collector that takes no
+header needs nothing there.
+*/}}
+{{- define "neuraltrust-platform.clickstack.dedicatedOtlpHeadersEnv" -}}
+- name: OTEL_EXPORTER_OTLP_HEADERS
+  valueFrom:
+    secretKeyRef:
+      name: {{ (default dict (default dict (default dict .Values.global).platformSecret).existingSecret).name | quote }}
+      key: OTEL_EXPORTER_OTLP_HEADERS
+      optional: true
+{{- end }}
+
+{{/*
+Dedicated: OTLP straight to the cluster's collector, global.clickstack.endpoint
+(OTLP/HTTP base URL), the same way the shared data planes of that cluster export.
+*/}}
+{{- define "neuraltrust-platform.clickstack.dedicatedOtlpEnv" -}}
+{{- $endpoint := (default dict (default dict .Values.global).clickstack).endpoint | default "" | toString | trimSuffix "/" -}}
+OTEL_EXPORTER_OTLP_ENDPOINT: {{ printf "%s/v1/logs" $endpoint | quote }}
+OTEL_EXPORTER_OTLP_PROTOCOL: {{ include "neuraltrust-platform.clickstack.defaultProtocol" . | quote }}
+OTEL_EXPORTER_OTLP_INSECURE: {{ ternary "true" "false" (hasPrefix "http://" $endpoint) | quote }}
 {{- end }}
 
 {{/*

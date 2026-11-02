@@ -109,6 +109,9 @@ data:
   {{- if eq (include "neuraltrust-platform.operationalTelemetry.enabled" .) "true" }}
   {{- include "agentgateway.opsTelemetryEnv" (include "neuraltrust-platform.clickstack.externalOtlpHTTPBaseEndpoint" .) | nindent 2 }}
   {{- end }}
+  {{- else if eq (include "neuraltrust-platform.isDedicated" .) "true" }}
+  # Dedicated: OTLP straight to the cluster's collector (global.clickstack.endpoint).
+  {{- include "neuraltrust-platform.clickstack.dedicatedOtlpEnv" . | nindent 2 }}
   {{- else if eq (include "neuraltrust-platform.clickstackHybridEnabled" .) "true" }}
   # Hybrid: plain OTLP to local clickstack-egress-collector (enrolment auth).
   {{- include "neuraltrust-platform.clickstack.otlpEnv" . | nindent 2 }}
