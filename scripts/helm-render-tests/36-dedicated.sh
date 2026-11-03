@@ -92,6 +92,20 @@ assert_contains "$out36" 'name: OTEL_EXPORTER_OTLP_HEADERS'$'\n''          value
   "dedicated: the collector auth header comes from the platform Secret"
 assert_contains "$out36" 'REDIS_DB: "3"' \
   "dedicated: Redis DB follows agentgateway.redis.db"
+assert_contains "$out36" 'REDIS_KEY_SCOPE: "dp-abc"' \
+  "dedicated: Redis keys and channels are scoped to the plane's namespace"
+out36_hybrid="$TMP/scenario-dedicated-hybrid-baseline.yaml"
+render_default "$out36_hybrid" --namespace dp-abc
+assert_contains "$out36_hybrid" 'name: agentgateway-env-vars' \
+  "hybrid baseline: renders the TrustGate env ConfigMap"
+assert_not_contains "$out36_hybrid" 'REDIS_KEY_SCOPE' \
+  "hybrid: Redis keys keep their unscoped names"
+out36_saas="$TMP/scenario-dedicated-saas-baseline.yaml"
+render_default "$out36_saas" --namespace dp-abc --set global.deploymentMode=saas --set global.domain=cp.example.com
+assert_contains "$out36_saas" 'name: agentgateway-env-vars' \
+  "saas baseline: renders the TrustGate env ConfigMap"
+assert_not_contains "$out36_saas" 'REDIS_KEY_SCOPE' \
+  "saas: Redis keys keep their unscoped names"
 assert_contains "$out36" 'TRUSTGUARD_BASE_URL: "http://trustguard-data.trustguard.svc.cluster.local:8081"' \
   "dedicated: the plane calls the TrustGuard the controller names"
 assert_contains "$out36" 'name: TRUSTGUARD_CLIENT_SECRET'$'\n''          valueFrom:'$'\n''            secretKeyRef:'$'\n''              name: trustgate-abc-credentials' \
