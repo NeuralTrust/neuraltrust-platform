@@ -183,6 +183,10 @@ trustguard:
   redis:
     existingSecret:
       name: "external-redis"
+  # The firewall key NeuralTrust issues for this install (key FIREWALL_JWT).
+  firewall:
+    jwtExistingSecret:
+      name: "trustguard-firewall"
 
 # ClickHouse is no longer restated per consumer -- `global.clickhouse` above covers
 # all five. A per-service `clickhouse:` block still overrides it for that service

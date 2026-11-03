@@ -27,7 +27,9 @@ render_default "$out2c_aws" \
 # echo -n aws | base64 -> YXdz
 assert_contains "$out2c_aws" 'POSTGRES_LOGIN: "YXdz"' \
   "hybrid IRSA: POSTGRES_LOGIN stays aws when no Azure identity is configured"
-assert_occurrences "$out2c_aws" 'eks\.amazonaws\.com/role-arn' 6 \
+# Five: the hybrid default calls the NeuralTrust-hosted firewall, so no
+# firewall ServiceAccount renders.
+assert_occurrences "$out2c_aws" 'eks\.amazonaws\.com/role-arn' 5 \
   "hybrid IRSA: every hybrid ServiceAccount carries the role ARN"
 assert_contains "$out2c_aws" 'name: AWS_REGION' \
   "hybrid IRSA: the region the SDK needs reaches the pods"
@@ -63,9 +65,9 @@ render_default "$out2c_az" \
 # echo -n azure | base64 -> YXp1cmU=
 assert_contains "$out2c_az" 'POSTGRES_LOGIN: "YXp1cmU="' \
   "hybrid Entra: the shared Secret selects the Azure token provider"
-assert_occurrences "$out2c_az" 'azure\.workload\.identity/client-id' 6 \
+assert_occurrences "$out2c_az" 'azure\.workload\.identity/client-id' 5 \
   "hybrid Entra: every hybrid ServiceAccount carries the client ID"
-assert_occurrences "$out2c_az" 'azure\.workload\.identity/tenant-id' 6 \
+assert_occurrences "$out2c_az" 'azure\.workload\.identity/tenant-id' 5 \
   "hybrid Entra: every hybrid ServiceAccount carries the tenant ID"
 # proxy, mcp, trustguard data-plane, both DataAgents, data-plane-api. Without the
 # pod label the AKS webhook never fires and nothing is injected, silently.

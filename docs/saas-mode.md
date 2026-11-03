@@ -28,14 +28,25 @@ steps the chart cannot do for you.
 
 ### Central cluster (control plane)
 
-1. **Values** — mode + domain. Everything else is chart default:
+1. **Values** — mode + domain, plus the firewall key. Everything else is chart
+   default:
 
    ```yaml
    global:
      deploymentMode: saas
      domain: platform.example.com   # UI hosts + hybrid dial names
      platform: aws                  # if EKS (ALB + default internal NLBs)
+   trustguard:
+     firewall:
+       jwtExistingSecret:
+         name: trustguard-firewall  # key FIREWALL_JWT
    ```
+
+   TrustGuard calls the NeuralTrust-hosted Firewall by default. Ask NeuralTrust
+   for the firewall key (`FIREWALL_JWT`) before installing; NeuralTrust sends it
+   over a secure channel. Remote TrustGuard data planes need their own key too:
+   your console does not issue firewall keys. To run the Firewall in-cluster
+   instead, set `global.firewall.deploy: true` and drop `trustguard.firewall`.
 
 2. **Install / upgrade** like external (same release name and namespace):
 
@@ -114,6 +125,10 @@ steps the chart cannot do for you.
      -f values-required.yaml \
      -f your-hybrid-values.yaml
    ```
+
+   A remote plane running TrustGuard also needs its firewall key from
+   NeuralTrust under `trustguard.firewall.jwtExistingSecret`, or
+   `global.firewall.deploy: true` to run the Firewall in that cluster.
 
 8. **Verify** from inside the remote cluster that TCP 443 reaches all four
    endpoints (blocked security groups look like a healthy plane serving stale

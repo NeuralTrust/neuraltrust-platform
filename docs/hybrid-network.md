@@ -52,16 +52,17 @@ Allow **TCP 443** from your cluster egress to:
 US rows list DNS only; use hostname rules and ask NeuralTrust support for
 static IPs if your firewall cannot resolve names.
 
-### NeuralTrust-hosted Firewall (optional)
+### NeuralTrust-hosted Firewall
 
-Only when `global.firewall.deploy: false` points TrustGuard at the hosted
-firewall
+The hybrid default whenever TrustGuard is selected (not needed with
+`global.firewall.deploy: true`), and TrustGate smart-routing scoring when it has
+a firewall JWT. The host is the one the console's `FIREWALL_JWT` names
 ([VALUES_SCENARIOS.md](../VALUES_SCENARIOS.md#scenario-neuraltrust-hosted-firewall)):
 
 | Region | Hostname | Purpose |
 |---|---|---|
-| `eu` | `firewall.neuraltrust.ai` | Firewall detector API (HTTPS) |
-| `us` | `firewall.us.neuraltrust.ai` | Firewall detector API (HTTPS) |
+| `eu` | `firewall.neuraltrust.ai` | Firewall detector API and `POST /oauth/token` (HTTPS) |
+| `us` | `firewall.us.neuraltrust.ai` | Firewall detector API and `POST /oauth/token` (HTTPS) |
 
 With Private Service Connect, traffic goes to your PSC endpoint inside the VPC
 instead, and no internet egress rule is needed.

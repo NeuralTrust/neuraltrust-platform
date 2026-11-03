@@ -21,8 +21,12 @@ global:
 # Preferred path: existing Secret names. Keys:
 #   dataagent-enrolment-* → ENROLMENT_TOKEN
 #   *-config-sync → CONFIG_SYNC_TOKEN (see SECRETS.md)
-# The enrolment and config-sync tokens are both issued by the NeuralTrust
-# console. Nothing else here is operator-supplied while
+#   *-firewall → FIREWALL_JWT
+# The enrolment and config-sync tokens and the firewall JWTs are all issued by
+# the NeuralTrust console. TrustGuard calls the NeuralTrust-hosted firewall with
+# its FIREWALL_JWT; to run the firewall in this cluster instead, set
+# global.firewall.deploy: true and drop trustguard.firewall. TrustGate's
+# FIREWALL_JWT is optional (smart-routing complexity scoring). Nothing else here is operator-supplied while
 # global.autoGenerateSecrets is true and global.preserveExistingSecrets is
 # false; the chart generates the rest on first install. Flip either and you own
 # every credential the chart would have generated, CONFIG_SYNC_LKG_KEY included.
@@ -34,6 +38,9 @@ agentgateway:
     enrolment:
       existingSecret:
         name: "dataagent-enrolment-trustgate"
+  # firewall:
+  #   existingSecret:
+  #     name: "agentgateway-firewall"
 
 trustguard:
   configSync:
@@ -43,3 +50,6 @@ trustguard:
     enrolment:
       existingSecret:
         name: "dataagent-enrolment-trustguard"
+  firewall:
+    jwtExistingSecret:
+      name: "trustguard-firewall"

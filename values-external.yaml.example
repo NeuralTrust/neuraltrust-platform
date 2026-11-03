@@ -3,8 +3,11 @@
 # DataAgent never renders here. Every product deploys unless global.products
 # turns it off — see values-external-trustguard-only.yaml.example.
 #
-# Before install, create gcr-secret and (recommended) a bootstrap admin Secret
-# named onprem-superadmin. Walkthrough: README-EXTERNAL.md.
+# Before install, create gcr-secret, the trustguard-firewall Secret (key
+# FIREWALL_JWT, the firewall key NeuralTrust sends you for this install) and
+# (recommended) a bootstrap admin Secret named onprem-superadmin. To run the
+# firewall in this cluster instead, set global.firewall.deploy: true and drop
+# trustguard.firewall. Walkthrough: README-EXTERNAL.md.
 
 global:
   deploymentMode: "external"
@@ -19,3 +22,10 @@ global:
   observability:
     hostedExport:
       enabled: false
+
+# TrustGuard calls the NeuralTrust-hosted firewall with the key NeuralTrust
+# issues for this install.
+trustguard:
+  firewall:
+    jwtExistingSecret:
+      name: "trustguard-firewall"

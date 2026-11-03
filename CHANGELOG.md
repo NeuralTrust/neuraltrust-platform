@@ -4,6 +4,40 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Changed (breaking for every install with TrustGuard)
+
+- **TrustGuard calls the NeuralTrust-hosted Firewall by default, in every
+  deployment mode.** `global.firewall.deploy` unset no longer deploys the
+  firewall subchart in hybrid, external, saas or dedicated. TrustGuard
+  authenticates with its own `FIREWALL_JWT`, a per-install OAuth client that
+  carries the firewall URL, from `trustguard.firewall.jwtExistingSecret.name` (a
+  Secret with key `FIREWALL_JWT`) or `trustguard.firewall.jwt`. No firewall
+  signing key reaches the install.
+  - **Hybrid:** app.neuraltrust.ai shows the firewall JWT once, when it creates
+    the private TrustGuard.
+  - **External and saas:** ask NeuralTrust for the install's firewall key before
+    upgrading; NeuralTrust sends it over a secure channel. Remote hybrid data
+    planes of a saas control plane get theirs from NeuralTrust too.
+  - **Action needed before upgrading an install with TrustGuard.** To keep
+    running the firewall in your cluster, add `global.firewall: {deploy: true}`
+    to your values; the render is then identical to the previous release.
+    Otherwise create the Secret with the firewall JWT. With neither,
+    `helm upgrade` fails and names both options, so the firewall-backed
+    detectors never go dark silently.
+  - The hosted firewall needs egress to `firewall.neuraltrust.ai` (EU) or
+    `firewall.us.neuraltrust.ai` (US) on 443, or Private Service Connect. It is
+    stateless: it scores the text it receives and stores none of it.
+    Disconnected clusters keep `deploy: true`.
+  - A firewall you run yourself (`deploy: false` with `baseURL` and
+    `existingSecret`) works as before.
+  - `values-required.yaml`, `values-external.yaml.example` and
+    `values-managed-datastores.yaml.example` point TrustGuard at a
+    `trustguard-firewall` Secret; `values-dataplane-gpu.yaml.example` sets
+    `deploy: true`.
+  - `docs/sizing.md` lists hosted and in-cluster rows for every mode: with the
+    hosted firewall a hybrid install fits 2 × 8 vCPU / 16 GiB and an external or
+    saas install 3 × 8 vCPU / 16 GiB.
+
 ## [v3.15.0] — 2026-11-03
 
 ### Changed

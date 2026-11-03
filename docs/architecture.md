@@ -28,7 +28,8 @@ customer cluster:
 - TrustGate proxy and MCP (K8s resources remain `agentgateway-*`)
 - TrustGuard data plane
 - PostgreSQL and Redis
-- Firewall whenever TrustGuard is selected
+- Firewall only with `global.firewall.deploy: true`; by default TrustGuard
+  calls the NeuralTrust-hosted Firewall with its `FIREWALL_JWT`
 - DataAgent (enrolment required for hybrid OTLP egress and DataBridge)
 
 Hybrid does **not** deploy an in-cluster ClickHouse: analytics use the hosted
@@ -78,7 +79,8 @@ is one knob (`controlPlane.domain` + optional dial hosts / CA) — see
 
 Firewall / security-group allowlist for **NeuralTrust-hosted** hybrid:
 [hybrid-network.md](./hybrid-network.md). For a **customer saas** control plane,
-allowlist that operator's four endpoints instead.
+allowlist that operator's four endpoints instead, plus the NeuralTrust-hosted
+Firewall host unless the Firewall runs in-cluster.
 
 There is no in-cluster `clickstack-collector` product collector in hybrid — the
 `clickstack-otel-collector` subchart is external-mode only. The hybrid egress
@@ -133,7 +135,7 @@ unless a product is set to `false` (e.g. `trustgate: false` for TrustGuard only)
 | Slice | Flags | DataAgent |
 |---|---|---|
 | TrustGate | `global.products.trustgate: true` | `agentgateway.dataagent` (enrolment) |
-| TrustGuard + Firewall | `global.products.trustguard: true` | `trustguard.dataagent` |
+| TrustGuard (+ Firewall when in-cluster) | `global.products.trustguard: true` | `trustguard.dataagent` |
 | Red teaming | `global.products.dataPlane: true` | none |
 
 Overlay only the products you want — no all-off baseline file. Product
@@ -247,7 +249,7 @@ it. External and saas ignore the flags and deploy the full product stack.
 | ClickStack OTel Collector | no | yes | yes | OTLP to ClickHouse |
 | DataCore | no | yes | yes (`RESIDENCY_BACKEND=hybrid`) | Residency query API |
 | AlertEngine | no | yes | yes | Alert evaluation and SIEM/integration forwarding |
-| Firewall | with TrustGuard | with TrustGuard | with TrustGuard | Prompt and response safety |
+| Firewall | NeuralTrust-hosted by default; with TrustGuard when `global.firewall.deploy: true` | NeuralTrust-hosted by default; with TrustGuard when `global.firewall.deploy: true` | NeuralTrust-hosted by default; with TrustGuard when `global.firewall.deploy: true` | Prompt and response safety |
 | DataBridge | no | no | yes (HA default) | Southbound broker for remote DataAgents |
 | ClickStack ingest gateway | no | no | yes | Authenticated OTLP edge for remote planes |
 | Config-sync public LB | no | no | yes (default) | Remote planes dial `*-configsync.<domain>` |
@@ -255,7 +257,9 @@ it. External and saas ignore the flags and deploy the full product stack.
 ## Cluster sizing
 
 Minimum node pools, with the Firewall on CPU and cluster autoscaling enabled:
-Hybrid (all products) 3 × 8 vCPU / 32 GiB, External or SaaS 4 × 8 vCPU / 32 GiB.
+Hybrid (all products, hosted Firewall) 2 × 8 vCPU / 16 GiB, Hybrid with the
+Firewall in-cluster 3 × 8 vCPU / 32 GiB, External or SaaS 3 × 8 vCPU / 16 GiB
+with the hosted Firewall and 4 × 8 vCPU / 32 GiB with it in-cluster.
 GPU Firewall options and the other scenarios are in [sizing.md](./sizing.md).
 
 ## Datastores
