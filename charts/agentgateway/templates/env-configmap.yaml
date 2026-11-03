@@ -30,6 +30,12 @@ data:
   # A single `neuraltrust` role owns the shared `neuraltrust` database, so no
   # per-service overrides are needed here.
   REDIS_DB: {{ .Values.redis.db | default "0" | quote }}
+  {{- if eq (include "neuraltrust-platform.isDedicated" .) "true" }}
+  # Dedicated planes share one Redis database; the namespace keeps each plane's
+  # plane-wide keys (the traffic-label stream and its consumer group) apart.
+  # Requires TrustGate with REDIS_KEY_SCOPE support; older images ignore it.
+  REDIS_KEY_SCOPE: {{ .Release.Namespace | quote }}
+  {{- end }}
   {{- else }}
   # v2 external: each service points at its own PostgreSQL role/database, but
   # shares the endpoint. Host/port/sslMode fall back to `global.postgresql`, then
