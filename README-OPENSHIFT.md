@@ -201,8 +201,10 @@ firewall:
     hfHome: "/tmp/huggingface"
 ```
 
-Firewall is deployed with TrustGuard and is not separately optional, so settle
-this with the cluster owner rather than at install time. Keep `restricted-v2` for
+In hybrid this applies only with `global.firewall.deploy: true`; by default
+TrustGuard calls the NeuralTrust-hosted Firewall and nothing here needs
+`anyuid`. Where the Firewall runs in-cluster, settle this with the cluster owner
+rather than at install time. Keep `restricted-v2` for
 everything else.
 
 ## Storage and images

@@ -744,7 +744,9 @@ assert_env_value "$out25one" dataagent clickstack-egress-collector SSL_CERT_FILE
 # The DataAgent binary is a different story: it wants an explicit CA file.
 assert_env_value "$out25one" dataagent dataagent SSL_CERT_FILE '/etc/ssl/certs/custom-ca.crt' \
   "one-knob: DataAgent still gets the custom CA via SSL_CERT_FILE"
-assert_contains "$out25one" '^            secretName: "controlplane-ca"$' \
+# Any workload's volume: the firewall, the only one nested this deep, is not
+# deployed under the hosted-firewall default.
+assert_contains "$out25one" '^ +secretName: "controlplane-ca"$' \
   "one-knob: custom-ca-cert volume mounts caSecretName"
 
 # Air-gapped operators may close the trust store to private PKI only.
@@ -942,7 +944,7 @@ pull_secrets_of() {
 # The delegating wrappers must not change what a default render emits; every
 # product workload still pulls with gcr-secret, now from the resolver's default.
 out10c2="$TMP/scenario-pullsecret-default.yaml"
-render_default "$out10c2" --set global.deploymentMode=external \
+render_default "$out10c2" --set global.deploymentMode=external --set global.firewall.deploy=true \
   --set watchdog.enabled=true --set clickhouse.backup.enabled=true
 for _w in "Deployment:datacore" "Deployment:firewall" "Deployment:toxicity-worker" \
           "Deployment:alertengine-api" "Deployment:clickstack-collector" \
@@ -958,7 +960,7 @@ green "ok  - default install still pulls with gcr-secret across every chart fami
 
 # --- 2. a "none" pin suppresses, and leaves no phantom Secret name ---------
 out10c2n="$TMP/scenario-pullsecret-none-pin.yaml"
-render_default "$out10c2n" --set global.deploymentMode=external \
+render_default "$out10c2n" --set global.deploymentMode=external --set global.firewall.deploy=true \
   --set watchdog.enabled=true --set clickhouse.backup.enabled=true \
   --set datacore.imagePullSecrets=none \
   --set firewall.firewall.imagePullSecrets=none \
@@ -994,7 +996,7 @@ green "ok  - the clickhouse backup CronJob honours \"none\" like its StatefulSet
 # unset key falls through to the global list. Both previously rendered
 # `- name: none` from a global opt-out.
 out10c2g="$TMP/scenario-pullsecret-none-global.yaml"
-render_default "$out10c2g" --set global.deploymentMode=external \
+render_default "$out10c2g" --set global.deploymentMode=external --set global.firewall.deploy=true \
   --set 'global.imagePullSecrets={none}'
 for _n in redis control-plane-api control-plane-app control-plane-postgresql; do
   _got=$(pull_secrets_of "$out10c2g" Deployment "$_n")
@@ -1013,7 +1015,7 @@ assert_not_contains "$out10c2g" '^        - name: none$' \
 # into a scalar position. `helm template` parses, but the object is malformed.
 # Rendering through yq is itself the assertion: a broken document fails to parse.
 out10c2m="$TMP/scenario-pullsecret-global-maps.yaml"
-render_default "$out10c2m" --set global.deploymentMode=external \
+render_default "$out10c2m" --set global.deploymentMode=external --set global.firewall.deploy=true \
   --set watchdog.enabled=true \
   --set clickhouse.imagePullSecrets=null \
   --set datacore.imagePullSecrets=null \
@@ -1032,7 +1034,7 @@ green "ok  - a list-of-{name:} global.imagePullSecrets resolves to a valid Secre
 # Both read only their local key before, so an operator setting only the global
 # list got the pinned default silently.
 out10c2f="$TMP/scenario-pullsecret-global-fallback.yaml"
-render_default "$out10c2f" --set global.deploymentMode=external \
+render_default "$out10c2f" --set global.deploymentMode=external --set global.firewall.deploy=true \
   --set watchdog.enabled=true \
   --set firewall.firewall.imagePullSecrets="" \
   --set watchdog.imagePullSecrets=null \
@@ -1052,7 +1054,7 @@ green "ok  - clearing a firewall/watchdog pin lets global.imagePullSecrets win"
 # silently drop it, and nothing else in the suite covers that env var.
 # The env var only renders when k8sJobs is enabled, which is off by default.
 out10c2j="$TMP/scenario-pullsecret-job-name.yaml"
-render_default "$out10c2j" --set global.deploymentMode=external \
+render_default "$out10c2j" --set global.deploymentMode=external --set global.firewall.deploy=true \
   --set data-plane-api.dataPlane.components.api.k8sJobs.enabled=true
 jobsecret=$(yq eval 'select(.kind == "Deployment" and .metadata.name == "data-plane-api")
   | .spec.template.spec.containers[0].env[] | select(.name == "K8S_JOB_IMAGE_PULL_SECRET") | .value' "$out10c2j")
@@ -1065,7 +1067,7 @@ green "ok  - K8S_JOB_IMAGE_PULL_SECRET resolves to the same name the podspec pul
 
 # And it must vanish, not render "none", when the operator opts out.
 out10c2jn="$TMP/scenario-pullsecret-job-none.yaml"
-render_default "$out10c2jn" --set global.deploymentMode=external \
+render_default "$out10c2jn" --set global.deploymentMode=external --set global.firewall.deploy=true \
   --set data-plane-api.dataPlane.components.api.k8sJobs.enabled=true \
   --set data-plane-api.dataPlane.imagePullSecrets=none
 assert_not_contains "$out10c2jn" 'K8S_JOB_IMAGE_PULL_SECRET' \
@@ -1081,7 +1083,7 @@ _PULL_WORKLOADS=("Deployment:datacore" "Deployment:firewall" "Deployment:toxicit
   "Deployment:data-plane-api" "Deployment:control-plane-app" "Deployment:redis"
   "StatefulSet:clickhouse" "StatefulSet:neuraltrust-watchdog")
 out10c2go="$TMP/scenario-pullsecret-global-only.yaml"
-render_default "$out10c2go" --set global.deploymentMode=external \
+render_default "$out10c2go" --set global.deploymentMode=external --set global.firewall.deploy=true \
   --set watchdog.enabled=true \
   --set data-plane-api.dataPlane.components.api.k8sJobs.enabled=true \
   --set 'global.imagePullSecrets={mirror-registry}'
@@ -1105,7 +1107,7 @@ green "ok  - data-plane-api forwards the global pull secret to the Jobs it spawn
 # Before, their gcr-secret pin outranked the global opt-out, so an IAM cluster
 # still referenced a Secret it never created.
 out10c2gn="$TMP/scenario-pullsecret-global-none-products.yaml"
-render_default "$out10c2gn" --set global.deploymentMode=external \
+render_default "$out10c2gn" --set global.deploymentMode=external --set global.firewall.deploy=true \
   --set watchdog.enabled=true --set 'global.imagePullSecrets={none}'
 for _w in "${_PULL_WORKLOADS[@]}"; do
   _got=$(pull_secrets_of "$out10c2gn" "${_w%%:*}" "${_w##*:}")
@@ -1122,7 +1124,7 @@ green "ok  - global [\"none\"] suppresses pull secrets on every chart family"
 # when there is one and otherwise renders nothing. At data-plane-api's component
 # tier "" always meant none outright, and still does even with a global list.
 out10c2e="$TMP/scenario-pullsecret-empty-key.yaml"
-render_default "$out10c2e" --set global.deploymentMode=external \
+render_default "$out10c2e" --set global.deploymentMode=external --set global.firewall.deploy=true \
   --set watchdog.enabled=true \
   --set datacore.imagePullSecrets="" \
   --set firewall.firewall.imagePullSecrets="" \
@@ -1143,7 +1145,7 @@ if [[ "$_got" != "gcr-secret" ]]; then
 fi
 green "ok  - an empty key renders no pull secret while an unset key keeps gcr-secret"
 out10c2eg="$TMP/scenario-pullsecret-empty-key-global.yaml"
-render_default "$out10c2eg" --set global.deploymentMode=external \
+render_default "$out10c2eg" --set global.deploymentMode=external --set global.firewall.deploy=true \
   --set datacore.imagePullSecrets="" \
   --set data-plane-api.dataPlane.imagePullSecrets="" \
   --set 'global.imagePullSecrets={mirror-registry}'

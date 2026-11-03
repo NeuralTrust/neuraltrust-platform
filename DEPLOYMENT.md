@@ -36,7 +36,7 @@ only for Postgres-managed configuration. Full contract:
 Create the config-sync and DataAgent enrolment Secrets **before** installing —
 the chart validates them and fails the render rather than starting a runtime
 that cannot authenticate. Commands:
-[README.md step 3](./README.md#3-create-the-four-operator-supplied-secrets).
+[README.md step 3](./README.md#3-create-the-operator-supplied-secrets).
 
 ```bash
 helm upgrade --install neuraltrust-platform <chart> \
@@ -95,8 +95,9 @@ least two nodes higher to add capacity as load grows.
 
 | Scenario | Firewall on CPU | Firewall on GPU |
 |---|---|---|
-| Hybrid, all products | **3** × 8 vCPU / 32 GiB | **2** × 8 vCPU / 16 GiB + **2** × L4 GPU nodes |
-| Hybrid, TrustGuard only | **3** × 8 vCPU / 16 GiB | **2** × 8 vCPU / 16 GiB + **2** × L4 GPU nodes |
+| Hybrid, all products or TrustGuard only, hosted Firewall (default) | **2** × 8 vCPU / 16 GiB | — (no Firewall here) |
+| Hybrid, all products, in-cluster Firewall | **3** × 8 vCPU / 32 GiB | **2** × 8 vCPU / 16 GiB + **2** × L4 GPU nodes |
+| Hybrid, TrustGuard only, in-cluster Firewall | **3** × 8 vCPU / 16 GiB | **2** × 8 vCPU / 16 GiB + **2** × L4 GPU nodes |
 | Hybrid, TrustGate only | **2** × 8 vCPU / 16 GiB | — |
 | External or SaaS | **4** × 8 vCPU / 32 GiB | **3** × 8 vCPU / 16 GiB + **2** × L4 GPU nodes |
 
@@ -105,8 +106,8 @@ least two nodes higher to add capacity as load grows.
 GCP `c4-highcpu-8`. L4 GPU node (8 vCPU / 32 GiB, one L4, shared by four CUDA
 MPS clients): AWS `g6.2xlarge`, GCP `g2-standard-8`.
 
-Firewall CPU workers are 60 % of Hybrid's memory requests when TrustGuard is on;
-fewer products need less.
+With the Firewall in-cluster, its CPU workers are 60 % of Hybrid's memory
+requests; fewer products need less.
 Details and tuning tips: [`docs/sizing.md`](./docs/sizing.md).
 
 ## 3. Open hybrid network paths
@@ -192,11 +193,21 @@ See [docs/observability.md](./docs/observability.md).
 
 ## 7. TrustGuard Firewall
 
-Firewall deploys whenever TrustGuard is selected. CPU workers use chart
-defaults. GPU workers require a GPU image, resource limit, node selection,
-toleration, and `hostIPC`:
+Every mode calls the NeuralTrust-hosted Firewall by default, and nothing runs in
+your cluster. TrustGuard needs its `FIREWALL_JWT`
+(`trustguard.firewall.jwtExistingSecret`): hybrid takes it from
+app.neuraltrust.ai when it creates the TrustGuard; external and SaaS ask
+NeuralTrust, which sends it over a secure channel. To run the Firewall
+in-cluster, set `global.firewall.deploy: true`; see
+[VALUES_SCENARIOS.md](./VALUES_SCENARIOS.md#scenario-neuraltrust-hosted-firewall).
+
+In-cluster CPU workers use chart defaults. GPU workers require a GPU image,
+resource limit, node selection, toleration, and `hostIPC`:
 
 ```yaml
+global:
+  firewall:
+    deploy: true
 firewall:
   firewall:
     workerDefaults:

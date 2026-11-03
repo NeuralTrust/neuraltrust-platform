@@ -43,8 +43,10 @@ assert_contains "$out11b" 'name: dataagent-trustguard$' \
   "trustguard-only: fixed TrustGuard DataAgent name"
 assert_not_contains "$out11b" 'name: agentgateway-proxy' \
   "trustguard-only: trustgate absent"
-assert_contains "$out11b" 'name: firewall$' \
-  "trustguard-only: Firewall follows TrustGuard"
+assert_not_contains "$out11b" 'name: firewall$' \
+  "trustguard-only: hybrid uses the NeuralTrust-hosted firewall"
+assert_contains "$out11b" 'name: FIREWALL_JWT' \
+  "trustguard-only: TrustGuard reads its firewall JWT"
 assert_contains "$out11b" 'name: clickstack-egress-collector' \
   "trustguard-only: egress Service on primary DataAgent"
 assert_resource_count "$out11b" Service dataagent 0 "trustguard-only: TrustGate health Service absent"
@@ -126,10 +128,10 @@ assert_contains "$out11e" 'name: trustguard-control-plane' \
   "external no-products: TrustGuard control plane renders"
 assert_contains "$out11e" 'name: data-plane-api' \
   "external no-products: data-plane-api renders"
-assert_contains "$out11e" 'name: firewall$' \
-  "external no-products: Firewall renders"
-assert_contains "$out11e" 'name: complexity-worker$' \
-  "external no-products: the TrustGate complexity worker renders"
+assert_not_contains "$out11e" 'name: firewall$' \
+  "external no-products: the Firewall is NeuralTrust-hosted"
+assert_contains "$out11e" 'name: FIREWALL_JWT' \
+  "external no-products: TrustGuard reads its firewall JWT"
 
 blue "==> Scenario 11e2: external TrustGuard-only overlay opts TrustGate out"
 # External is opt-out: unset products are on (11e), an explicit false removes
@@ -145,7 +147,7 @@ for _gone in agentgateway-admin agentgateway-proxy agentgateway-mcp agentgateway
   assert_not_contains "$out11e2" "^  name: \"?${_gone}\"?$" \
     "external trustguard-only: $_gone is not rendered"
 done
-for _kept in trustguard-control-plane trustguard-data-plane firewall toxicity-worker \
+for _kept in trustguard-control-plane trustguard-data-plane \
              control-plane-app control-plane-api data-plane-api datacore alertengine-api clickhouse; do
   assert_contains "$out11e2" "^  name: \"?${_kept}\"?$" \
     "external trustguard-only: $_kept still renders"

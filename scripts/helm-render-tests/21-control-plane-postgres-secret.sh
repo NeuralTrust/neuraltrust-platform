@@ -372,10 +372,10 @@ gen_shapes=(
   "external-trustguard-only|-f $CHART_DIR/values-required.yaml -f $CHART_DIR/values-external.yaml.example -f $CHART_DIR/values-external-trustguard-only.yaml.example"
   "external-managed|-f $CHART_DIR/values-managed-datastores.yaml.example --set global.autoGenerateSecrets=true --set global.preserveExistingSecrets=false"
   "external-observability|-f $CHART_DIR/values-required.yaml -f $CHART_DIR/values-external.yaml.example -f $CHART_DIR/values-observability-self-hosted.yaml.example"
-  "saas|--set global.deploymentMode=saas --set global.domain=cp.example.com"
+  "saas|--set global.deploymentMode=saas --set global.domain=cp.example.com --set trustguard.firewall.jwtExistingSecret.name=trustguard-firewall"
   "saas-managed|-f $CHART_DIR/values-managed-datastores.yaml.example --set global.deploymentMode=saas --set global.domain=cp.example.com --set global.autoGenerateSecrets=true --set global.preserveExistingSecrets=false"
   "managed-bootstrap|-f $CHART_DIR/values-managed-datastores.yaml.example --set global.autoGenerateSecrets=true --set global.preserveExistingSecrets=false --set global.postgresql.passwordSecret.name= --set global.postgresql.managedBootstrap.enabled=true --set global.postgresql.managedBootstrap.adminSecret.name=pg-admin"
-  "saas-telemetry-tls|--set global.deploymentMode=saas --set global.domain=cp.example.com --set clickstack-ingest-gateway.ingress.tls.autoGenerate=true"
+  "saas-telemetry-tls|--set global.deploymentMode=saas --set global.domain=cp.example.com --set trustguard.firewall.jwtExistingSecret.name=trustguard-firewall --set clickstack-ingest-gateway.ingress.tls.autoGenerate=true"
   "hybrid-opt-in|-f $CHART_DIR/values-required.yaml --set global.secrets.generator.enabled=true"
 )
 for shape in "${gen_shapes[@]}"; do

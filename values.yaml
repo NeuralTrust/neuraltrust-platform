@@ -121,12 +121,11 @@ global:
   # trustguard: true
   # dataPlane: true
   # Where TrustGuard (and TrustGate complexity scoring) reach the firewall.
-  # Unset, it runs in this cluster in every mode. A coming release makes hybrid
-  # default to the NeuralTrust-hosted firewall: set deploy: true now to keep the
-  # in-cluster one through that change.
-  # deploy: false plus trustguard.firewall.jwt (the FIREWALL_JWT the console
-  # shows, or a key NeuralTrust issues for external) uses the hosted firewall;
-  # it needs a TrustGuard release that reads FIREWALL_JWT.
+  # Unset, in every mode: the NeuralTrust-hosted firewall. TrustGuard then needs
+  # its FIREWALL_JWT in trustguard.firewall.jwtExistingSecret (or .jwt): hybrid
+  # takes it from app.neuraltrust.ai, external and saas ask NeuralTrust for it.
+  # TrustGate's own token (agentgateway.firewall) is optional.
+  # deploy: true runs the firewall in this cluster instead.
   # deploy: false with baseURL and the firewall's JWT_SECRET (existingSecret or
   # global.platformSecret) points both at a firewall you run yourself.
   # Hosted endpoints, also over Private Service Connect (VALUES_SCENARIOS.md):

@@ -19,3 +19,8 @@ agentgateway:
     enrolment:
       existingSecret:
         name: "dataagent-enrolment-trustgate"
+  # Smart-routing complexity scoring: the FIREWALL_JWT the console showed when
+  # it created this gateway (Secret key FIREWALL_JWT). Optional.
+  # firewall:
+  #   existingSecret:
+  #     name: "agentgateway-firewall"

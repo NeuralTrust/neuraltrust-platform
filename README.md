@@ -6,7 +6,7 @@ Deploy NeuralTrust on Kubernetes with one Helm umbrella chart.
 
 | Mode | Control plane | What runs in your cluster | Start here |
 |---|---|---|---|
-| **`hybrid`** (default) | Hosted by NeuralTrust | The data path: TrustGate, TrustGuard, Firewall, data-plane API, one DataAgent per product | [Quick start](#quick-start-hybrid) below |
+| **`hybrid`** (default) | Hosted by NeuralTrust | The data path: TrustGate, TrustGuard, data-plane API, one DataAgent per product; the Firewall is NeuralTrust-hosted by default | [Quick start](#quick-start-hybrid) below |
 | **`external`** | Yours | Everything, including the console, ClickHouse analytics, DataCore, and AlertEngine | [README-EXTERNAL.md](./README-EXTERNAL.md) |
 | **`saas`** | Yours, and it also serves data planes in other clusters | `external` plus DataBridge and a public telemetry ingest gateway | [docs/saas-mode.md](./docs/saas-mode.md#quick-start) |
 
@@ -56,11 +56,12 @@ set `global.imageRegistry`, keeping the repository names and tags, plus
 with `helm template ... | grep image:`. Full guidance:
 [Container images](https://docs.neuraltrust.ai/neuraltrust/deployment/images).
 
-### 3. Create the four operator-supplied Secrets
+### 3. Create the operator-supplied Secrets
 
 Create TrustGate and TrustGuard in the NeuralTrust console first. Each product
-issues a **config-sync token** and a **DataAgent enrolment JWT**. Full console
-walkthrough:
+issues a **config-sync token** and a **DataAgent enrolment JWT**, plus a
+**firewall JWT** (`FIREWALL_JWT`) for the NeuralTrust-hosted firewall. The
+console shows the firewall JWT only once. Full console walkthrough:
 [Console setup](https://docs.neuraltrust.ai/neuraltrust/deployment/console-setup).
 
 ```bash
@@ -77,7 +78,16 @@ kubectl create secret generic dataagent-enrolment-trustgate -n neuraltrust \
 
 kubectl create secret generic dataagent-enrolment-trustguard -n neuraltrust \
   --from-literal=ENROLMENT_TOKEN='<trustguard-enrolment-jwt>'
+
+# Firewall — TrustGuard's client for the NeuralTrust-hosted firewall
+kubectl create secret generic trustguard-firewall -n neuraltrust \
+  --from-literal=FIREWALL_JWT='<trustguard-firewall-jwt>'
 ```
+
+To run the firewall in your own cluster instead, skip `trustguard-firewall` and
+set `global.firewall.deploy: true` in step 4. TrustGate's firewall JWT is
+optional (smart-routing complexity scoring); store it the same way as
+`agentgateway-firewall` and set `agentgateway.firewall.existingSecret.name`.
 
 The enrolment JWT already carries `tenant_id` and `instance_id` — do not
 duplicate them in values. Every other secret (JWT signing keys, PostgreSQL
@@ -119,12 +129,16 @@ trustguard:
     enrolment:
       existingSecret:
         name: "dataagent-enrolment-trustguard"
+  firewall:
+    jwtExistingSecret:
+      name: "trustguard-firewall"
 ```
 
-> **Upcoming change.** A coming release makes hybrid call the NeuralTrust-hosted
-> Firewall by default. To keep the Firewall in your cluster, add
-> `global.firewall.deploy: true` to your values now; it changes nothing today.
-> See [CHANGELOG.md](./CHANGELOG.md).
+> **Upgrading an install that runs the Firewall in your cluster?** Every mode
+> now calls the NeuralTrust-hosted Firewall by default. To keep yours, add
+> `global.firewall.deploy: true` to your values before upgrading; otherwise
+> supply TrustGuard's firewall JWT as above. With neither, `helm upgrade` fails
+> and says so. See [CHANGELOG.md](./CHANGELOG.md).
 
 Product flags default to **off** and at least one must be `true`. They are keyed
 by product id, which for TrustGate is **not** the same as its values block:
@@ -167,9 +181,9 @@ kubectl get ingress -n neuraltrust
 ```
 
 With all three products on you should see `agentgateway-proxy`,
-`agentgateway-mcp`, `trustguard-data-plane`, `data-plane-api`, `firewall` plus
-its workers, `dataagent`, `dataagent-trustguard`, `control-plane-postgresql`,
-and `redis`.
+`agentgateway-mcp`, `trustguard-data-plane`, `data-plane-api`, `dataagent`,
+`dataagent-trustguard`, `control-plane-postgresql`, and `redis` — plus
+`firewall` and its workers with `global.firewall.deploy: true`.
 
 Default hostnames derive from `global.domain`:
 
@@ -190,6 +204,7 @@ console.
 | `v2 hybrid requires at least one product` | Set at least one `global.products.*` to `true` |
 | `agentgateway config-sync requires CONFIG_SYNC_TOKEN` | Create the Secrets in step 3, or set `configSync.enabled: false` for Postgres-managed configuration |
 | `hybrid trustgate/trustguard requires dataagent enrolment` | Create the enrolment Secrets in step 3 |
+| `TrustGuard uses the NeuralTrust-hosted firewall by default and needs its firewall JWT` | Create `trustguard-firewall` in step 3, or set `global.firewall.deploy: true` to keep the firewall in your cluster |
 | `global.clickstack.enabled is no longer supported` | Hybrid OTLP is mandatory. Use `global.deploymentMode: external` for air-gapped or local-only telemetry |
 
 ---
@@ -200,7 +215,8 @@ Hybrid keeps the control plane hosted and runs the data path in your cluster:
 
 - TrustGate proxy and MCP runtimes (product flag `global.products.trustgate`;
   values key `agentgateway:`; Kubernetes names stay `agentgateway-*`)
-- TrustGuard runtime, with NeuralTrust Firewall following it automatically
+- TrustGuard runtime, calling the NeuralTrust-hosted Firewall by default
+  (`global.firewall.deploy: true` runs it in your cluster)
 - data-plane API, PostgreSQL-backed by default — no ClickHouse in hybrid
 - in-cluster PostgreSQL and Redis by default
 - one DataAgent per enabled product (TrustGate / TrustGuard)
@@ -226,8 +242,8 @@ Full contract: [`docs/architecture.md`](./docs/architecture.md) and
 
 | Mode | Hosted control plane | Workloads in cluster | Analytics path |
 |---|---:|---|---|
-| `hybrid` (default) | Yes | TrustGate / TrustGuard / data-plane-api via positive `global.products` (at least one); Firewall follows TrustGuard; per-product DataAgent when TrustGate/TrustGuard is on | Hosted analytics via enrolment-backed ClickStack OTLP. Raw payloads stay in Postgres for DataAgent. No in-cluster ClickHouse |
-| `external` | No | Full product stack (opt out per product with `global.products.<name>: false`) plus control planes, product API/app, DataCore, AlertEngine | ClickStack OTel Collector writes to ClickHouse; data-plane API reads ClickHouse |
+| `hybrid` (default) | Yes | TrustGate / TrustGuard / data-plane-api via positive `global.products` (at least one); TrustGuard calls the NeuralTrust-hosted Firewall unless `global.firewall.deploy: true`; per-product DataAgent when TrustGate/TrustGuard is on | Hosted analytics via enrolment-backed ClickStack OTLP. Raw payloads stay in Postgres for DataAgent. No in-cluster ClickHouse |
+| `external` | No | Full product stack (opt out per product with `global.products.<name>: false`) plus control planes, product API/app, DataCore, AlertEngine; TrustGuard calls the NeuralTrust-hosted Firewall unless `global.firewall.deploy: true` | ClickStack OTel Collector writes to ClickHouse; data-plane API reads ClickHouse |
 | `saas` | No — this cluster *is* one, for `hybrid` clusters elsewhere | Everything `external` renders, plus DataBridge (HA by default) and the ClickStack ingest gateway | Local ClickHouse for central telemetry; DataCore runs `RESIDENCY_BACKEND=hybrid` and reaches remote data planes through DataBridge. Operator path: [saas-mode quick start](./docs/saas-mode.md#quick-start) |
 
 ## Cluster sizing (defaults)
@@ -239,10 +255,12 @@ load grows — see [`docs/sizing.md`](./docs/sizing.md).
 
 | Scenario | Firewall on CPU | Firewall on GPU |
 |---|---|---|
-| Hybrid, all products | **3** × 8 vCPU / 32 GiB | **2** × 8 vCPU / 16 GiB + **2** × L4 GPU nodes |
-| Hybrid, TrustGuard only | **3** × 8 vCPU / 16 GiB | **2** × 8 vCPU / 16 GiB + **2** × L4 GPU nodes |
+| Hybrid, all products or TrustGuard only, hosted firewall (default) | **2** × 8 vCPU / 16 GiB | — (no Firewall here) |
+| Hybrid, all products, in-cluster firewall | **3** × 8 vCPU / 32 GiB | **2** × 8 vCPU / 16 GiB + **2** × L4 GPU nodes |
+| Hybrid, TrustGuard only, in-cluster firewall | **3** × 8 vCPU / 16 GiB | **2** × 8 vCPU / 16 GiB + **2** × L4 GPU nodes |
 | Hybrid, TrustGate only | **2** × 8 vCPU / 16 GiB | — |
-| External or SaaS | **4** × 8 vCPU / 32 GiB | **3** × 8 vCPU / 16 GiB + **2** × L4 GPU nodes |
+| External or SaaS, hosted firewall (default) | **3** × 8 vCPU / 16 GiB | — (no Firewall here) |
+| External or SaaS, in-cluster firewall | **4** × 8 vCPU / 32 GiB | **3** × 8 vCPU / 16 GiB + **2** × L4 GPU nodes |
 
 8 vCPU / 32 GiB: AWS `m6i.2xlarge`, Azure `Standard_D8s_v5`, GCP
 `e2-standard-8`. 8 vCPU / 16 GiB: AWS `c6i.2xlarge`, Azure `Standard_F8s_v2`,
@@ -333,14 +351,17 @@ per cloud in the public docs:
 - AlertEngine: external-mode alert evaluation and SIEM/integration forwarding
   (`alertengine.enabled: false` to omit it)
 
-**Firewall follows TrustGuard.** It deploys with TrustGuard in both modes —
+**Firewall follows TrustGuard.** Where it runs is `global.firewall.deploy`;
 `firewall.enabled`, `firewall.firewall.enabled`, and `trustguard.firewall.enabled`
-are no-ops. The one way to leave it out is `global.firewall.deploy: false`, which
-points TrustGuard at a firewall you already run, or at the NeuralTrust-hosted one
-over the internet or Private Service Connect (`global.firewall.baseURL` plus its
-`JWT_SECRET`; see [VALUES_SCENARIOS.md](./VALUES_SCENARIOS.md)). Its CPU workers are the largest memory
-consumer in the data path, so size for them whenever TrustGuard is on. Choose
-CPU or GPU workers via
+are no-ops. Unset, every mode calls the NeuralTrust-hosted firewall with
+TrustGuard's `FIREWALL_JWT`: hybrid takes it from app.neuraltrust.ai, external
+and saas ask NeuralTrust, which sends it over a secure channel.
+`deploy: true` runs the firewall in-cluster; `deploy: false` with
+`global.firewall.baseURL` and its `JWT_SECRET` points at a firewall you already
+run. See
+[VALUES_SCENARIOS.md](./VALUES_SCENARIOS.md). In-cluster, its CPU workers are
+the largest memory consumer in the data path, so size for them. Choose CPU or
+GPU workers via
 [`values-dataplane-gpu.yaml.example`](./values-dataplane-gpu.yaml.example).
 
 ## Values examples
@@ -351,7 +372,7 @@ CPU or GPU workers via
 | `values-hybrid-reference.yaml.example` | hybrid | Annotated reference for every hybrid knob |
 | `values-hybrid.yaml.example` | hybrid | Hybrid topology overlay with managed datastores |
 | `values-trustgate.yaml.example` | hybrid | TrustGate-only slice |
-| `values-trustguard.yaml.example` | hybrid | TrustGuard + Firewall slice |
+| `values-trustguard.yaml.example` | hybrid | TrustGuard slice (hosted Firewall) |
 | `values-red-teaming.yaml.example` | hybrid | data-plane-API-only slice |
 | `values-dataplane-gpu.yaml.example` | hybrid | GPU Firewall workers |
 | `values-openshift.yaml` | hybrid | OpenShift Routes |

@@ -10,7 +10,7 @@ suite_full || exit 0
 blue "==> Scenario 4: unprefixed value roots (control-plane-api / control-plane-app / data-plane-api / firewall / watchdog)"
 out4="$TMP/scenario-unprefixed-roots.yaml"
 render_default "$out4" \
-  --set global.deploymentMode=external \
+  --set global.deploymentMode=external --set global.firewall.deploy=true \
   --set watchdog.enabled=true
 
 assert_contains "$out4" 'kind: Deployment' \

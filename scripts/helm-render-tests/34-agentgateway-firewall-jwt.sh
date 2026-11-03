@@ -73,13 +73,12 @@ out34e="$TMP/scenario-fwjwt-unset.yaml"
 render_default "$out34e"
 assert_ag_secret "$out34e" absent \
   "unset: no FIREWALL_JWT"
-assert_contains "$out34e" 'name: FIREWALL_SECRET_KEY' \
-  "unset: shared firewall signing key wiring unchanged"
-out34f="$TMP/scenario-fwjwt-unset-hosted.yaml"
-render_default "$out34f" --set global.firewall.deploy=false \
-  --set trustguard.firewall.jwtExistingSecret.name=trustguard-firewall
-assert_not_contains "$out34f" 'name: FIREWALL_SECRET_KEY' \
-  "unset, hosted firewall: no shared firewall signing key"
+assert_not_contains "$out34e" 'name: FIREWALL_SECRET_KEY' \
+  "unset, hosted firewall (default): no shared firewall signing key"
+out34f="$TMP/scenario-fwjwt-unset-incluster.yaml"
+render_default "$out34f" --set global.firewall.deploy=true
+assert_contains "$out34f" 'name: FIREWALL_SECRET_KEY' \
+  "unset, in-cluster firewall: shared firewall signing key wiring unchanged"
 
 assert_render_fails_with "set jwt or existingSecret.name, not both" \
   "jwt and existingSecret together fail the render" \

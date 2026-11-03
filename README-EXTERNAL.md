@@ -26,9 +26,10 @@ your environment. For the default hosted-control-plane path, see the
 ## Prerequisites
 
 - A Kubernetes cluster with an ingress controller, and Helm 3.8+ for OCI installs
-- **4 nodes of 8 vCPU / 32 GiB** (`m6i.2xlarge`, `Standard_D8s_v5`,
-`e2-standard-8`), or with the Firewall on GPU 3 × 8 vCPU / 16 GiB plus 2 L4 GPU
-nodes, with cluster autoscaling on. External adds the control plane, ClickHouse, ClickStack
+- **3 nodes of 8 vCPU / 16 GiB** (`c6i.2xlarge`, `Standard_F8s_v2`,
+`c4-highcpu-8`) with the NeuralTrust-hosted Firewall, the default. With the
+Firewall in-cluster, 4 × 8 vCPU / 32 GiB, or 3 × 8 vCPU / 16 GiB plus 2 L4 GPU
+nodes on GPU. Turn cluster autoscaling on. External adds the control plane, ClickHouse, ClickStack
 collector, DataCore, and AlertEngine on top of the data path. See
 [docs/sizing.md](./docs/sizing.md)
 - A base domain you can point at the cluster ingress, plus TLS certificates for
@@ -72,6 +73,20 @@ admin off entirely.
 Unlike hybrid, external needs **no** config-sync tokens and **no** DataAgent
 enrolment JWTs. Every other credential is generated on first install and reused
 on upgrade while `global.autoGenerateSecrets: true` — see [SECRETS.md](./SECRETS.md).
+
+#### The firewall key
+
+TrustGuard calls the NeuralTrust-hosted Firewall by default. Ask NeuralTrust for
+this install's firewall key (`FIREWALL_JWT`) before installing; NeuralTrust sends
+it over a secure channel. Store it as:
+
+```bash
+kubectl create secret generic trustguard-firewall -n neuraltrust \
+  --from-literal=FIREWALL_JWT='<firewall-key-from-neuraltrust>'
+```
+
+To run the Firewall in your cluster instead, skip this and set
+`global.firewall.deploy: true` in step 3.
 
 #### Why two `*-configsync-tls` Secrets appear anyway
 
@@ -120,13 +135,19 @@ global:
   observability:
     hostedExport:
       enabled: false
+
+trustguard:
+  firewall:
+    jwtExistingSecret:
+      name: "trustguard-firewall"
 ```
 
 `global.products` flags are not needed — external deploys every product unless
 one is set to `false`. For a TrustGuard-only install, layer
 [`values-external-trustguard-only.yaml.example`](./values-external-trustguard-only.yaml.example)
 on top: it sets `global.products.trustgate: false`, which removes TrustGate, the
-firewall complexity worker and the MCP OAuth / Admin API machine-credential keys.
+in-cluster firewall's complexity worker and the MCP OAuth / Admin API
+machine-credential keys.
 Keep `dataPlane` on — the console reads runtime activity from data-plane-api.
 The audit trail does not depend on it: audit events leave the console as OTLP
 log records and are read back through DataCore in Telemetry → Logs (see
@@ -194,8 +215,12 @@ contains:
 | ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
 | `trustguard-control-plane`                                                                                                   | Policy and admin API                                        |
 | `trustguard-data-plane`                                                                                                      | `/v1/guard` evaluation runtime                              |
-| `firewall`                                                                                                                   | NeuralTrust Firewall model server, deployed with TrustGuard |
-| `prompt-jailbreak-worker`, `toxicity-worker`, `indirect-prompt-injections-worker`, `topic-guard-worker`, `complexity-worker` | Per-detector Firewall workers                               |
+| `firewall`                                                                                                                   | NeuralTrust Firewall model server, only with `global.firewall.deploy: true` |
+| `prompt-jailbreak-worker`, `toxicity-worker`, `indirect-prompt-injections-worker`, `topic-guard-worker`, `complexity-worker` | Per-detector Firewall workers, only with `global.firewall.deploy: true` |
+
+By default TrustGuard calls the NeuralTrust-hosted Firewall over outbound HTTPS
+(`firewall.neuraltrust.ai` or `firewall.us.neuraltrust.ai`, or Private Service
+Connect), which scores the text it receives and stores none of it.
 
 
 **Platform control plane**
@@ -371,10 +396,15 @@ Size the volume for your retention window before first install.
 global:
   deploymentMode: "external"
   imageRegistry: "<registry>/neuraltrust"
+  firewall:
+    deploy: true   # no path to the NeuralTrust-hosted Firewall
   observability:
     hostedExport:
       enabled: false
 ```
+
+A disconnected cluster cannot reach the NeuralTrust-hosted Firewall, so it runs
+the Firewall in-cluster; mirror the `firewall-cpu` (or `firewall-gpu`) image too.
 
 Mirror **every** required image, including the ClickHouse and ClickStack
 collector images. With hosted export and observability off, `imageRegistry`
@@ -389,8 +419,10 @@ to that list before the default. The umbrella collector keeps collecting locally
 writing to your ClickHouse, and AlertEngine keeps forwarding to destinations
 reachable from the cluster.
 
-The hybrid network allowlist in `[docs/hybrid-network.md](./docs/hybrid-network.md)`  
-does **not** apply — external needs no outbound path to NeuralTrust.
+The hybrid network allowlist in `[docs/hybrid-network.md](./docs/hybrid-network.md)`
+does **not** apply. With the Firewall in-cluster, external needs no outbound
+path to NeuralTrust; with the hosted Firewall, the default, it needs only the
+Firewall host on 443.
 
 ## Platform and ingress
 
@@ -416,10 +448,12 @@ ClickStack
 - AlertEngine: set `alertengine.enabled: false` to omit rule evaluation and SIEM
 forwarding
 
-**Firewall follows TrustGuard** in external — it deploys with it unless
-`global.firewall.deploy: false` points TrustGuard at a firewall you already run
-(`global.firewall.baseURL` plus its `JWT_SECRET`). Deployed here, the choice is CPU
-workers (default) or GPU via
+**Firewall follows TrustGuard.** By default TrustGuard calls the
+NeuralTrust-hosted Firewall with the key NeuralTrust issues for the install
+(`trustguard.firewall.jwtExistingSecret`). `global.firewall.deploy: true` runs
+it in this cluster instead; `deploy: false` with `global.firewall.baseURL` and
+its `JWT_SECRET` points at a firewall you already run. In-cluster, the choice
+is CPU workers (default) or GPU via
 `[values-dataplane-gpu.yaml.example](./values-dataplane-gpu.yaml.example)`.
 
 ## Validate before rollout
@@ -434,6 +468,12 @@ helm template neuraltrust-platform <chart> \
 Add `--api-versions route.openshift.io/v1` when rendering for OpenShift.
 
 ## Upgrades
+
+> **The Firewall is now NeuralTrust-hosted by default.** An install that runs it
+> in-cluster and should keep it must add `global.firewall.deploy: true` before
+> upgrading. Otherwise ask NeuralTrust for the firewall key and create
+> `trustguard-firewall` first. With neither, `helm upgrade` fails and names both
+> options.
 
 Generated secrets are reused through Helm `lookup`. Deployment engines that
 cannot use `lookup` should pre-create secrets and set

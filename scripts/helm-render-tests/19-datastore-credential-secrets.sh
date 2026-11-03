@@ -104,7 +104,7 @@ assert_not_contains "$out18iam" 'name: "ag-db"' \
 # may hold none). Before, TrustGate and TrustGuard got no password at all.
 blue "==> Scenario 18b: global.redis.existingSecret reaches every Redis consumer"
 o="$TMP/redis-global-ref.yaml"
-render_default "$o" --set global.deploymentMode=external --set global.redis.deploy=false \
+render_default "$o" --set global.deploymentMode=external --set global.firewall.deploy=true --set global.redis.deploy=false \
   --set global.redis.host=cache.example.com --set global.redis.existingSecret.name=external-redis
 for d in "agentgateway-proxy proxy" "agentgateway-admin admin" "trustguard-control-plane control-plane" "trustguard-data-plane data-plane" "firewall gateway"; do
   read -r dep ctr <<< "$d"
@@ -129,7 +129,7 @@ if ! ruby -ryaml -e '
 fi
 green "ok  - global Redis Secret: optional everywhere, no copies in the gateway Secrets"
 o="$TMP/redis-own-ref.yaml"
-render_default "$o" --set global.deploymentMode=external --set global.redis.deploy=false \
+render_default "$o" --set global.deploymentMode=external --set global.firewall.deploy=true --set global.redis.deploy=false \
   --set global.redis.host=cache.example.com --set global.redis.existingSecret.name=external-redis \
   --set trustguard.redis.existingSecret.name=tg-cache
 assert_env_value "$o" trustguard-data-plane data-plane REDIS_PASSWORD secretKeyRef:tg-cache/REDIS_PASSWORD \
