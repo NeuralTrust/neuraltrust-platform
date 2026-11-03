@@ -9,6 +9,11 @@
 # TrustGuard plane, set products.trustguard instead and move the configSync and
 # ingress blocks under trustguard.
 #
+# Planes can share one Redis database: TrustGate scopes its plane-wide keys
+# (traffic-label stream, consumer group, quota keys) to the release namespace
+# through REDIS_KEY_SCOPE. Give each plane its own namespace, or two planes
+# share those keys.
+#
 # Cluster prerequisites (not Helm):
 #   - The Secret <release>-creds in the plane namespace, with SERVER_SECRET_KEY,
 #     the config-sync token and, if the collector wants one,
