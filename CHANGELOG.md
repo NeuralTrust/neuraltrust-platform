@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v3.15.0] — 2026-11-03
+
 ### Changed
 
 - **Dedicated TrustGate planes scope their Redis keys.** In `deploymentMode: dedicated`,
