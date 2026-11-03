@@ -4,6 +4,16 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Changed
+
+- **Dedicated TrustGate planes scope their Redis keys.** In `deploymentMode: dedicated`,
+  the TrustGate env ConfigMap sets `REDIS_KEY_SCOPE` to the release namespace, so
+  planes that share one Redis database no longer share the traffic-label stream,
+  its consumer group or its per-gateway quota keys. TrustGate also scopes its other
+  plane-wide Redis names with it. Needs a TrustGate image that reads
+  `REDIS_KEY_SCOPE`; older images ignore it. On upgrade, entries still queued in
+  the unscoped `{trafficlabels}:stream` are no longer read.
+
 ## [v3.14.1] — 2026-11-02
 
 ### Fixed
