@@ -5,7 +5,7 @@ firewall:
     replicas: 2
     image:
       repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-      tag: v2.46.0
+      tag: v2.47.0
       pullPolicy: IfNotPresent
     resources:
       limits:
@@ -39,7 +39,7 @@ firewall:
     image:
       repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
       # Keep in lockstep with gateway.image.tag.
-      tag: v2.46.0
+      tag: v2.47.0
       pullPolicy: IfNotPresent
     replicas: 1
     # CPU-worker default: one HF transformer (~86M-class) per pod via ONNX.
@@ -164,9 +164,9 @@ firewall:
     #          policy on the cache.
     # IAM logins always use TLS.
     login: ""
-    iamUser: ""       # aws: the ElastiCache IAM user ID (REDIS_USERNAME)
-    iamCacheName: ""  # aws: the replication group ID (REDIS_CACHE_NAME)
-    iamRegion: ""     # aws: AWS_REGION; IRSA usually sets it
+    iamUser: "" # aws: the ElastiCache IAM user ID (REDIS_USERNAME)
+    iamCacheName: "" # aws: the replication group ID (REDIS_CACHE_NAME)
+    iamRegion: "" # aws: AWS_REGION; IRSA usually sets it
   # --- ServiceAccount ---
   serviceAccount:
     create: true
