@@ -4,6 +4,11 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Changed
+
+- **TrustGate image `v0.77.0`.** Includes `REDIS_KEY_SCOPE`, so dedicated TrustGate
+  planes now scope their Redis keys as described under v3.15.0.
+
 ## [v3.15.0] — 2026-11-03
 
 ### Changed
