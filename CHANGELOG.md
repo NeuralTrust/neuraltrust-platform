@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v4.0.0] — 2026-11-05
+
 ### Changed (breaking for every install with TrustGuard)
 
 - **TrustGuard calls the NeuralTrust-hosted Firewall by default, in every
