@@ -3613,7 +3613,7 @@ default registry keep doing so. A repository the operator changed always wins.
 {{- define "neuraltrust-platform.collectorImage" -}}
 {{- $default := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/opentelemetry-collector-contrib" -}}
 {{- $repo := .repository | default $default -}}
-{{- $tag := .tag | default "0.163.1" -}}
+{{- $tag := .tag | default "0.164.0" -}}
 {{- $global := default dict .global -}}
 {{- if and (eq $repo $default) (eq (toString $global.imageRegistryScope) "all") -}}
 {{- include "neuraltrust-platform.image" (dict "repository" $repo "tag" $tag "global" $global) -}}

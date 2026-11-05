@@ -16,21 +16,21 @@ dependencies:
       - infrastructure
   # Analytics / evaluation API. Gated by global.products.dataPlane in hybrid.
   - name: data-plane-api
-    version: 1.7.17
+    version: 1.7.18
     repository: file://./charts/data-plane-api
     tags:
       - neuraltrust
       - v2
   # Control-plane API — external only (templates gated by isExternal).
   - name: control-plane-api
-    version: 0.1.18
+    version: 0.1.19
     repository: file://./charts/control-plane-api
     tags:
       - neuraltrust
       - v2
   # Control-plane App/UI — external only.
   - name: control-plane-app
-    version: 0.1.73
+    version: 0.1.74
     repository: file://./charts/control-plane-app
     tags:
       - neuraltrust
@@ -38,14 +38,14 @@ dependencies:
   # TrustGate (values: agentgateway; K8s: agentgateway-*). Hybrid gated by
   # global.products.trustgate.
   - name: agentgateway
-    version: 0.1.87
+    version: 0.1.88
     repository: file://./charts/agentgateway
     tags:
       - neuraltrust
       - v2
   # TrustGuard. Hybrid gated by global.products.trustguard.
   - name: trustguard
-    version: 0.1.72
+    version: 0.1.73
     repository: file://./charts/trustguard
     tags:
       - neuraltrust
@@ -59,7 +59,7 @@ dependencies:
       - v2
   # DataCore — v2 external only.
   - name: datacore
-    version: 0.1.35
+    version: 0.1.36
     repository: file://./charts/datacore
     tags:
       - neuraltrust
@@ -81,14 +81,14 @@ dependencies:
       - v2
   # ClickStack OTel collector — v2 external only.
   - name: clickstack-otel-collector
-    version: 0.1.10
+    version: 0.1.11
     repository: file://./charts/clickstack-otel-collector
     tags:
       - neuraltrust
       - v2
   # AlertEngine — v2 external only.
   - name: alertengine
-    version: 0.1.21
+    version: 0.1.22
     repository: file://./charts/alertengine
     tags:
       - neuraltrust
@@ -96,7 +96,7 @@ dependencies:
   # Firewall is part of TrustGuard. Templates follow the TrustGuard product
   # gate in both modes (opt-in in hybrid, opt-out in external).
   - name: firewall
-    version: 2.1.36
+    version: 2.1.37
     repository: file://./charts/firewall
     tags:
       - neuraltrust
