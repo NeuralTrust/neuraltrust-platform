@@ -1466,9 +1466,9 @@ scoring), reached one of three ways:
   external    a firewall the operator runs, at global.firewall.baseURL, signed
               with the JWT_SECRET it holds.
 
-global.firewall.deploy unset deploys the firewall in every mode; the hosted one
-is opt-in with deploy=false. Hosted and external are both "not deployed"; which
-one a product uses depends on whether it has a FIREWALL_JWT, and
+global.firewall.deploy unset means the hosted firewall in every mode;
+deploy=true runs it in-cluster. Hosted and external are both "not deployed";
+which one a product uses depends on whether it has a FIREWALL_JWT, and
 validate-values.yaml rejects a TrustGuard with neither.
 
 Under `global` because the firewall, TrustGuard and agentgateway are sibling
@@ -1482,7 +1482,7 @@ subcharts: none of them can read a value under another's root.
 {{- define "neuraltrust-platform.firewall.deploy" -}}
 {{- if eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustguard")) "true" -}}
 {{- $fw := default dict (default dict .Values.global).firewall -}}
-{{- $deploy := true -}}
+{{- $deploy := false -}}
 {{- if and (hasKey $fw "deploy") (not (kindIs "invalid" $fw.deploy)) -}}{{- $deploy = $fw.deploy -}}{{- end -}}
 {{- if $deploy -}}true{{- end -}}
 {{- end -}}

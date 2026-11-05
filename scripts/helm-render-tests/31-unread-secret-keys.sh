@@ -81,7 +81,7 @@ render_default "$o" --set global.deploymentMode=hybrid "${EXTERNAL_FIREWALL[@]}"
 assert_platform_key "$o" absent JWT_SECRET \
   "external firewall, hybrid: platform-secrets carries no JWT_SECRET"
 o="$TMP/unread-fw-deployed-gen.yaml"
-render_default "$o" --set global.deploymentMode=external "${GEN[@]}"
+render_default "$o" --set global.deploymentMode=external --set global.firewall.deploy=true "${GEN[@]}"
 assert_spec_entry "$o" present "platform JWT_SECRET" \
   "firewall deployed, generator: JWT_SECRET is generated"
 o="$TMP/unread-fw-deployed-hybrid.yaml"

@@ -11,10 +11,12 @@ nodes as load grows.
 
 | Scenario | Firewall on CPU | Firewall on GPU |
 |---|---|---|
-| Hybrid, all products | **3** × 8 vCPU / 32 GiB | **2** × 8 vCPU / 16 GiB + **2** × L4 GPU nodes |
-| Hybrid, TrustGuard only | **3** × 8 vCPU / 16 GiB | **2** × 8 vCPU / 16 GiB + **2** × L4 GPU nodes |
+| Hybrid, all products or TrustGuard only, hosted Firewall (default) | **2** × 8 vCPU / 16 GiB | — (no Firewall here) |
+| Hybrid, all products, in-cluster Firewall | **3** × 8 vCPU / 32 GiB | **2** × 8 vCPU / 16 GiB + **2** × L4 GPU nodes |
+| Hybrid, TrustGuard only, in-cluster Firewall | **3** × 8 vCPU / 16 GiB | **2** × 8 vCPU / 16 GiB + **2** × L4 GPU nodes |
 | Hybrid, TrustGate only | **2** × 8 vCPU / 16 GiB | — (no Firewall) |
-| External or SaaS | **4** × 8 vCPU / 32 GiB | **3** × 8 vCPU / 16 GiB + **2** × L4 GPU nodes |
+| External or SaaS, hosted Firewall (default) | **3** × 8 vCPU / 16 GiB | — (no Firewall here) |
+| External or SaaS, in-cluster Firewall | **4** × 8 vCPU / 32 GiB | **3** × 8 vCPU / 16 GiB + **2** × L4 GPU nodes |
 
 | Node | AWS | Azure | GCP |
 |---|---|---|---|
@@ -36,8 +38,9 @@ provisioned in advance.
 
 ## Firewall on GPU
 
-Start from [`values-dataplane-gpu.yaml.example`](../values-dataplane-gpu.yaml.example).
-With it, each Firewall worker requests 1 vCPU, 4 GiB, and one GPU, and is
+Start from [`values-dataplane-gpu.yaml.example`](../values-dataplane-gpu.yaml.example),
+which also runs the Firewall in-cluster (`global.firewall.deploy: true`; every
+mode otherwise uses the NeuralTrust-hosted one). With it, each Firewall worker requests 1 vCPU, 4 GiB, and one GPU, and is
 scheduled onto the GPU pool; the Firewall gateway and every other component stay
 on the CPU pool. The GPU pool needs:
 
@@ -58,11 +61,15 @@ the cluster. Values are rounded up to whole vCPU and GiB.
 
 | Scenario | Firewall on CPU | Firewall on GPU: CPU pool | Firewall on GPU: GPU pool |
 |---|---|---|---|
-| Hybrid, all products (`values-required.yaml`) | 13 vCPU / 36 GiB | 6 vCPU / 15 GiB | 7 vCPU / 28 GiB, 7 GPU shares |
-| Hybrid, TrustGuard only | 9 vCPU / 24 GiB | 3 vCPU / 6 GiB | 6 vCPU / 24 GiB, 6 GPU shares |
+| Hybrid, all products, hosted Firewall (`values-required.yaml`) | 6 vCPU / 14 GiB | — | — |
+| Hybrid, all products, in-cluster Firewall | 13 vCPU / 36 GiB | 6 vCPU / 15 GiB | 7 vCPU / 28 GiB, 7 GPU shares |
+| Hybrid, TrustGuard only, hosted Firewall | 2 vCPU / 5 GiB | — | — |
+| Hybrid, TrustGuard only, in-cluster Firewall | 9 vCPU / 24 GiB | 3 vCPU / 6 GiB | 6 vCPU / 24 GiB, 6 GPU shares |
 | Hybrid, TrustGate only | 3 vCPU / 6 GiB | — | — |
-| External (`values-external.yaml.example`) | 18 vCPU / 45 GiB | 11 vCPU / 24 GiB | 7 vCPU / 28 GiB, 7 GPU shares |
-| SaaS (central control plane) | 19 vCPU / 46 GiB | 12 vCPU / 25 GiB | 7 vCPU / 28 GiB, 7 GPU shares |
+| External, hosted Firewall (`values-external.yaml.example`) | 11 vCPU / 23 GiB | — | — |
+| External, in-cluster Firewall | 18 vCPU / 45 GiB | 11 vCPU / 24 GiB | 7 vCPU / 28 GiB, 7 GPU shares |
+| SaaS, hosted Firewall (central control plane) | 11 vCPU / 24 GiB | — | — |
+| SaaS, in-cluster Firewall | 19 vCPU / 46 GiB | 12 vCPU / 25 GiB | 7 vCPU / 28 GiB, 7 GPU shares |
 
 - **Managed PostgreSQL and Redis** lower memory requests by 2 GiB.
 - **SaaS** is External plus two DataBridge and two ingest-gateway replicas.
@@ -78,7 +85,7 @@ installation sustains. Measure under your own traffic before tuning.
 
 | Area | Default request / limit | Notes |
 |---|---|---|
-| Firewall CPU workers | 1 vCPU / 3 GiB each; limit 2 vCPU / 4 GiB | Five Deployments and seven pods with all products (`topic-guard` and `prompt-jailbreak` run two replicas each); four and six with TrustGuard only, which drops `complexity`. `topic-guard` is limited at 5 GiB |
+| Firewall CPU workers (in-cluster Firewall only) | 1 vCPU / 3 GiB each; limit 2 vCPU / 4 GiB | Five Deployments and seven pods with all products (`topic-guard` and `prompt-jailbreak` run two replicas each); four and six with TrustGuard only, which drops `complexity`. `topic-guard` is limited at 5 GiB |
 | `data-plane-api` | 1 vCPU / 3 GiB per replica, two replicas; limit 2 vCPU / 6 GiB | Runs evaluations in-process unless `k8sJobs` is on |
 | ClickHouse (External, SaaS) | 1 vCPU / 4 GiB; limit 4 vCPU / 8 GiB | 50 GiB volume; keep headroom for analytics queries |
 | In-cluster PostgreSQL | 500m / 2 GiB | Prefer managed stores in production |

@@ -116,11 +116,11 @@ blue "==> Scenario 44b: a Secret with nothing to hold is not rendered"
 # the firewall subchart renders firewall-secrets from a pinned value, never one
 # it invents, which under Argo changed on every sync.
 o="$TMP/shape-firewall-operator.yaml"
-render_default "$o" --set global.deploymentMode=external --set global.autoGenerateSecrets=false
+render_default "$o" --set global.deploymentMode=external --set global.firewall.deploy=true --set global.autoGenerateSecrets=false
 assert_resource_count "$o" Secret firewall-secrets 0 \
   "autoGenerateSecrets=false: no invented firewall JWT_SECRET"
 o="$TMP/shape-firewall-pinned.yaml"
-render_default "$o" --set global.deploymentMode=external --set global.autoGenerateSecrets=false \
+render_default "$o" --set global.deploymentMode=external --set global.firewall.deploy=true --set global.autoGenerateSecrets=false \
   --set firewall.firewall.secrets.jwtSecret=pinned-jwt
 assert_contains "$o" "JWT_SECRET: $(printf pinned-jwt | base64)\$" \
   "autoGenerateSecrets=false: firewall-secrets carries the pinned JWT_SECRET"

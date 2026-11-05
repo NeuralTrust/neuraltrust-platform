@@ -1,5 +1,7 @@
-# Positive TrustGuard hybrid slice (TrustGuard + Firewall + its DataAgent).
-# Firewall follows TrustGuard; to use one you already run instead, uncomment the
+# Positive TrustGuard hybrid slice (TrustGuard + its DataAgent).
+# TrustGuard calls the NeuralTrust-hosted firewall with the FIREWALL_JWT the
+# console showed when it created this TrustGuard (Secret key FIREWALL_JWT).
+# To run the firewall in this cluster, or use one you already run, see the
 # global.firewall block below.
 # Use a distinct DataAgent enrolment Secret from the TrustGate slice.
 #
@@ -12,12 +14,13 @@ global:
   products:
     trustguard: true
   # firewall:
+  #   # In this cluster (drop trustguard.firewall below):
+  #   deploy: true
+  #   # Or a firewall you already run:
   #   deploy: false
-  #   # In-cluster, or https://firewall.neuraltrust.ai (https://firewall.us.neuraltrust.ai
-  #   # for saasRegion: us) for the NeuralTrust-hosted firewall.
   #   baseURL: "http://firewall.<namespace>.svc.cluster.local"
   #   existingSecret:
-  #     name: "<secret holding the external firewall JWT_SECRET>"
+  #     name: "<secret holding that firewall's JWT_SECRET>"
   #     key: "JWT_SECRET"
 
 trustguard:
@@ -28,3 +31,6 @@ trustguard:
     enrolment:
       existingSecret:
         name: "dataagent-enrolment-trustguard"
+  firewall:
+    jwtExistingSecret:
+      name: "trustguard-firewall"

@@ -160,9 +160,10 @@ platform:
   # the in-cluster Service URL. Stamped as the `aud` on issued platform tokens.
   baseURL: ""
 # Firewall client (prompt_guard / toxicity / prompt_moderation plugins).
-# With the NeuralTrust-hosted firewall (global.firewall.deploy=false) TrustGuard
-# reads FIREWALL_JWT: the per-install client the console shows once when it
-# creates a hybrid TrustGuard, which carries the firewall URL. Set jwt, or
+# With the NeuralTrust-hosted firewall (the default) TrustGuard reads
+# FIREWALL_JWT: the per-install client that carries the firewall URL. Hybrid
+# takes it from app.neuraltrust.ai when it creates the TrustGuard; external and
+# saas get it from NeuralTrust. Set jwt, or
 # jwtExistingSecret.name for a Secret you manage — not both. jwt is stored in
 # trustguard-secrets, so it needs chart Secret generation. Ignored while you run
 # the firewall yourself (global.firewall.deploy=true, or global.firewall.baseURL).

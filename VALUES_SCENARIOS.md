@@ -37,7 +37,7 @@ renders an error until you layer it over one marked "yes".
 | [`values-required.yaml`](./values-required.yaml) | hybrid | yes | Full-hybrid preset (all three products on) + enrolment / config-sync Secrets |
 | [`values-hybrid.yaml.example`](./values-hybrid.yaml.example) | hybrid | yes | Hybrid topology with managed datastores |
 | [`values-trustgate.yaml.example`](./values-trustgate.yaml.example) | hybrid | yes | Positive TrustGate + DataAgent slice |
-| [`values-trustguard.yaml.example`](./values-trustguard.yaml.example) | hybrid | yes | Positive TrustGuard + Firewall + DataAgent slice |
+| [`values-trustguard.yaml.example`](./values-trustguard.yaml.example) | hybrid | yes | Positive TrustGuard + DataAgent slice (NeuralTrust-hosted firewall) |
 | [`values-red-teaming.yaml.example`](./values-red-teaming.yaml.example) | hybrid | yes | Positive data-plane-api-only slice |
 | [`values-hybrid-reference.yaml.example`](./values-hybrid-reference.yaml.example) | hybrid | no | Annotated reference for every hybrid knob — selects no products |
 | [`values-external.yaml.example`](./values-external.yaml.example) | external | yes | Minimal self-hosted topology |
@@ -177,7 +177,68 @@ of Routes.
 
 Layer `values-dataplane-gpu.yaml.example` over `values-required.yaml`. Replace
 the generic image registry and scheduling labels with values for the GPU pool.
-The gateway remains CPU-only; workers request GPUs.
+The example sets `global.firewall.deploy: true`, because every mode otherwise
+uses the NeuralTrust-hosted firewall. The gateway remains CPU-only; workers request
+GPUs.
+
+## Scenario: NeuralTrust-hosted Firewall
+
+The default in every mode. TrustGuard calls the firewall NeuralTrust hosts, so
+no firewall models run in your cluster. It authenticates with its own
+`FIREWALL_JWT`: a per-install client that carries the firewall URL.
+
+- **Hybrid:** app.neuraltrust.ai shows it once, next to the other tokens, when
+  it creates a private TrustGuard.
+- **External and saas:** ask NeuralTrust for this install's firewall key before
+  installing; NeuralTrust sends it to you over a secure channel.
+
+Store it in a Secret in the release namespace (key `FIREWALL_JWT`), then:
+
+```yaml
+trustguard:
+  firewall:
+    jwtExistingSecret:
+      name: "trustguard-firewall"
+```
+
+`trustguard.firewall.jwt: "<token>"` stores it inline instead, which needs chart
+Secret generation. TrustGate's smart-routing complexity scoring takes its own
+token the same way, under `agentgateway.firewall`; it is optional.
+
+An install with TrustGuard and neither a token nor
+`global.firewall.deploy: true` fails the render, naming both options.
+
+The EU endpoint is `https://firewall.neuraltrust.ai`, the US one
+`https://firewall.us.neuraltrust.ai`; the token names the one that issued it.
+`trustguard.firewall.baseURL` overrides it, for example to reach the same
+hostname over Private Service Connect with a different DNS name.
+
+Allow outbound TCP 443 to that hostname
+([docs/hybrid-network.md](./docs/hybrid-network.md)), or reach it privately:
+
+- **Over the internet**, the hostname is served through NeuralTrust's edge,
+  protected by Cloudflare. Nothing else to configure.
+- **Over Google Cloud Private Service Connect**, create a PSC endpoint to the
+  service attachment NeuralTrust shares with you. Then add a private DNS zone in
+  your VPC for that one hostname (for example `firewall.neuraltrust.ai.`), with
+  an `A` record pointing at the endpoint IP. The URL in the token stays as it
+  is: TLS and routing depend on the hostname, so it never changes between
+  internet and PSC. Create a zone for the hostname only, never for the parent
+  domain, or other NeuralTrust names stop resolving inside your VPC.
+
+## Scenario: in-cluster Firewall
+
+To keep running the firewall models in your own cluster, as every mode did
+before the hosted firewall became the default:
+
+```yaml
+global:
+  firewall:
+    deploy: true
+```
+
+The render is then the same as before, and `trustguard.firewall.jwt` is
+ignored. Size the firewall workers with [docs/sizing.md](./docs/sizing.md).
 
 ## Scenario: external Firewall
 
@@ -195,50 +256,10 @@ global:
 ```
 
 TrustGuard and TrustGate complexity scoring call `baseURL` and sign with that
-key. No firewall gateway, workers, `firewall-config` or `firewall-secrets` render.
-The Secret lives in the release namespace and must carry the same `JWT_SECRET`
-the external firewall verifies with; see [SECRETS.md](./SECRETS.md#firewall).
-
-## Scenario: NeuralTrust-hosted Firewall
-
-To skip running the firewall models yourself, point TrustGuard at the firewall
-NeuralTrust hosts. It works in every deployment mode (`hybrid`, `external`,
-`saas`). Store the firewall key that NeuralTrust issues you in a Secret in the
-release namespace, then:
-
-```yaml
-global:
-  firewall:
-    deploy: false
-    baseURL: "https://firewall.neuraltrust.ai"   # https://firewall.us.neuraltrust.ai for the US region
-    existingSecret:
-      name: "neuraltrust-firewall"
-      key: "JWT_SECRET"
-```
-
-The chart does not fill in `baseURL` for you, even in hybrid. Leaving it unset
-fails the render, so prompts are never sent to a hosted firewall unless you
-asked for it in writing.
-
-With a TrustGuard release that reads `FIREWALL_JWT`, the per-install client
-replaces the shared key: keep `deploy: false`, drop `baseURL` and
-`existingSecret`, and set `trustguard.firewall.jwtExistingSecret.name` to a
-Secret holding the `FIREWALL_JWT` the console showed (key `FIREWALL_JWT`). The
-token carries the URL. A coming release makes this the hybrid default; set
-`global.firewall.deploy: true` now to keep the in-cluster firewall through it.
-
-Allow outbound TCP 443 to that hostname
-([docs/hybrid-network.md](./docs/hybrid-network.md)), or reach it privately:
-
-- **Over the internet**, the hostname is served through NeuralTrust's edge,
-  protected by Cloudflare. Nothing else to configure.
-- **Over Google Cloud Private Service Connect**, create a PSC endpoint to the
-  service attachment NeuralTrust shares with you. Then add a private DNS zone in
-  your VPC for that one hostname (for example `firewall.neuraltrust.ai.`), with
-  an `A` record pointing at the endpoint IP. Keep `baseURL` exactly as above:
-  TLS and routing depend on the hostname, so the URL never changes between
-  internet and PSC. Create a zone for the hostname only, never for the parent
-  domain, or other NeuralTrust names stop resolving inside your VPC.
+key, and `trustguard.firewall.jwt` is ignored. No firewall gateway, workers,
+`firewall-config` or `firewall-secrets` render. The Secret lives in the release
+namespace and must carry the same `JWT_SECRET` the external firewall verifies
+with; see [SECRETS.md](./SECRETS.md#firewall).
 
 ## Scenario: no hosted telemetry egress
 

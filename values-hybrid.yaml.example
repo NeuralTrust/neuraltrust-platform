@@ -69,6 +69,10 @@ global:
 
 # TrustGate (commercial name; image/repo still agentgateway; K8s names
 # agentgateway-*). Nested dataagent so product overlays mix via -f.
+# Each product's firewall JWT (key FIREWALL_JWT) is the one the console showed
+# when it created that gateway / TrustGuard. TrustGuard needs it for the
+# NeuralTrust-hosted firewall, the hybrid default; TrustGate uses it only for
+# smart-routing complexity scoring.
 agentgateway:
   configSync:
     existingSecret:
@@ -77,6 +81,9 @@ agentgateway:
     enrolment:
       existingSecret:
         name: "dataagent-enrolment-trustgate"
+  firewall:
+    existingSecret:
+      name: "agentgateway-firewall"
 
 trustguard:
   configSync:
@@ -86,3 +93,6 @@ trustguard:
     enrolment:
       existingSecret:
         name: "dataagent-enrolment-trustguard"
+  firewall:
+    jwtExistingSecret:
+      name: "trustguard-firewall"

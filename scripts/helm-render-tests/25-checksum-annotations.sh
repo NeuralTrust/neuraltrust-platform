@@ -33,9 +33,9 @@ render_default "$out24c" --set agentgateway.config.logLevel=debug
 out24d="$TMP/scenario-aut403-redis-host.yaml"
 render_default "$out24d" --set global.redis.host=cache.example.com
 out24e="$TMP/scenario-aut403-external.yaml"
-render_default "$out24e" --set global.deploymentMode=external
+render_default "$out24e" --set global.deploymentMode=external --set global.firewall.deploy=true
 out24f="$TMP/scenario-aut403-external-fw.yaml"
-render_default "$out24f" --set global.deploymentMode=external \
+render_default "$out24f" --set global.deploymentMode=external --set global.firewall.deploy=true \
   --set firewall.firewall.config.otelEnvironment=aut403-test
 
 # Every envFrom v2 workload must carry at least the env ConfigMap checksum.
