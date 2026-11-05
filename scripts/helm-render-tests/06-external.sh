@@ -36,10 +36,12 @@ assert_contains "$out3" 'name: agentgateway-admin' \
   "external: agentgateway admin control plane renders"
 assert_contains "$out3" 'name: trustguard-control-plane' \
   "external: trustguard control plane renders"
-assert_contains "$out3" 'NEURAL_TRUST_FIREWALL_BASE_URL: "http://firewall.default.svc.cluster.local"' \
-  "external: TrustGuard wires in-cluster Firewall base URL"
-assert_contains "$out3" 'name: NEURAL_TRUST_FIREWALL_SECRET_KEY'$'\n''          valueFrom:'$'\n''            secretKeyRef:'$'\n''              name: "firewall-secrets"' \
-  "external: TrustGuard mounts firewall-secrets JWT_SECRET"
+assert_not_contains "$out3" 'name: firewall$' \
+  "external: the Firewall is NeuralTrust-hosted by default"
+assert_contains "$out3" 'name: FIREWALL_JWT' \
+  "external: TrustGuard reads its firewall JWT"
+assert_not_contains "$out3" 'NEURAL_TRUST_FIREWALL_SECRET_KEY|NEURAL_TRUST_FIREWALL_BASE_URL' \
+  "external: no firewall signing key or derived URL reaches TrustGuard"
 assert_contains "$out3" 'TELEMETRY_EXPORTERS_METADATA: .*name.*metadata-otlp.*type.*otlp' \
   "external: metadata exporter is a named otlp list"
 assert_contains "$out3" 'TELEMETRY_EXPORTERS_RAW: .*name.*raw-otlp.*type.*otlp' \

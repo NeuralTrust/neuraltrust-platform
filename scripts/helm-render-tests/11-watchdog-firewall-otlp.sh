@@ -539,7 +539,7 @@ blue "==> Scenario 10g: platform OTLP endpoint derivation"
 CLICKSTACK_IN_RELEASE='http://clickstack-collector.default.svc.cluster.local:4318'
 
 out10g="$TMP/scenario-otel-derived.yaml"
-render_default "$out10g" --set global.deploymentMode=external
+render_default "$out10g" --set global.deploymentMode=external --set global.firewall.deploy=true
 
 for cm in control-plane-app-otel control-plane-api-otel data-plane-api-otel; do
   document_named "$out10g" "$cm" "$TMP/$cm.yaml"
@@ -583,7 +583,7 @@ assert_env_value "$out10g_ov" control-plane-app app OTEL_EXPORTER_OTLP_HEADERS A
 # autoDiscover=false is the opt-out. An empty endpoint cannot carry that
 # meaning, because empty is the shipped default.
 out10g_off="$TMP/scenario-otel-optout.yaml"
-render_default "$out10g_off" --set global.deploymentMode=external \
+render_default "$out10g_off" --set global.deploymentMode=external --set global.firewall.deploy=true \
   --set global.observability.collector.autoDiscover=false
 assert_not_contains "$out10g_off" 'name: control-plane-app-otel' \
   "otel opt-out: autoDiscover=false suppresses the OTel ConfigMap"

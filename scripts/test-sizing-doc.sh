@@ -133,15 +133,23 @@ check_row() {
 
 blue "==> docs/sizing.md request totals match the render"
 
-check_row "Hybrid, all products" gpu render_default
-check_row "Hybrid, TrustGuard only" gpu render_product_slice \
+check_row "Hybrid, all products, hosted Firewall" nogpu render_default
+check_row "Hybrid, all products, in-cluster Firewall" gpu render_default \
+  --set global.firewall.deploy=true
+check_row "Hybrid, TrustGuard only, hosted Firewall" nogpu render_product_slice \
   -f "$CHART_DIR/values-trustguard.yaml.example"
+check_row "Hybrid, TrustGuard only, in-cluster Firewall" gpu render_product_slice \
+  -f "$CHART_DIR/values-trustguard.yaml.example" --set global.firewall.deploy=true
 check_row "Hybrid, TrustGate only" nogpu render_product_slice \
   -f "$CHART_DIR/values-trustgate.yaml.example"
-check_row "External" gpu render_default \
+check_row "External, hosted Firewall" nogpu render_default \
   -f "$CHART_DIR/values-external.yaml.example"
-check_row "SaaS" gpu render_default \
+check_row "External, in-cluster Firewall" gpu render_default \
+  -f "$CHART_DIR/values-external.yaml.example" --set global.firewall.deploy=true
+check_row "SaaS, hosted Firewall" nogpu render_default \
   --set global.deploymentMode=saas --set global.domain=cp.example.com
+check_row "SaaS, in-cluster Firewall" gpu render_default \
+  --set global.deploymentMode=saas --set global.domain=cp.example.com --set global.firewall.deploy=true
 
 if (( ${#DRIFT[@]} )); then
   red "FAIL: docs/sizing.md \"What the chart requests\" no longer matches the render."

@@ -21,14 +21,19 @@ The chart never generates these. Create them in the release namespace **before**
 | `trustguard-config-sync` | `CONFIG_SYNC_TOKEN` (plus `CONFIG_SYNC_LKG_KEY` only when the chart generates no Secrets — see below) | `global.products.trustguard: true` |
 | `dataagent-enrolment-trustgate` | `ENROLMENT_TOKEN` | `global.products.trustgate: true` |
 | `dataagent-enrolment-trustguard` | `ENROLMENT_TOKEN` | `global.products.trustguard: true` |
+| `trustguard-firewall` | `FIREWALL_JWT` | `global.products.trustguard: true`, unless `global.firewall.deploy: true` runs the firewall in-cluster |
+| `agentgateway-firewall` | `FIREWALL_JWT` | Optional: TrustGate smart-routing complexity scoring, via `agentgateway.firewall.existingSecret.name` |
 
 Config-sync tokens and DataAgent enrolment JWTs are issued by the NeuralTrust
-console, one pair per product. A hybrid running only `global.products.dataPlane`
+console, one pair per product. The console also shows a `FIREWALL_JWT` once when
+it creates a hybrid TrustGuard or gateway: the product's own client for the
+NeuralTrust-hosted firewall, which hybrid uses by default (see
+[Firewall](#firewall)). A hybrid running only `global.products.dataPlane`
 needs neither — red teaming deploys no DataAgent and no config-sync.
 
 The names above are the ones [`values-required.yaml`](./values-required.yaml)
 already points at. Copy-pasteable `kubectl create secret` commands are in
-[README.md step 3](./README.md#3-create-the-four-operator-supplied-secrets).
+[README.md step 3](./README.md#3-create-the-operator-supplied-secrets).
 
 ### External
 
@@ -36,10 +41,12 @@ already points at. Copy-pasteable `kubectl create secret` commands are in
 |---|---|---|
 | `gcr-secret` | docker-registry credentials | Same as hybrid |
 | `onprem-superadmin` | `ONPREM_SUPERADMIN_EMAIL`, `ONPREM_SUPERADMIN_PASSWORD` | You want a bootstrap console administrator (recommended — there is no hosted console to log in from) |
+| `trustguard-firewall` | `FIREWALL_JWT` | TrustGuard is on, unless `global.firewall.deploy: true` runs the firewall in-cluster. NeuralTrust issues this install's key on request and sends it over a secure channel |
 | your own name | one key per managed datastore role | You would rather not write datastore passwords into a values file — see [Datastore credentials without values](#datastore-credentials-without-values) |
 
 External needs no config-sync tokens and no enrolment JWTs; it runs its own
-control planes and never deploys DataAgent. Before going live, read
+control planes and never deploys DataAgent. Ask NeuralTrust for the firewall
+key before installing. Before going live, read
 [`NEXT_PUBLIC_*` cannot be configured at runtime](#next_public_-cannot-be-configured-at-runtime)
 — it affects the SCIM URLs a self-hosted console advertises to IdPs, and the fix
 requires a recent app image.
@@ -96,7 +103,7 @@ Which group a credential falls in decides what, if anything, you do with it:
 |---|---|---|
 | **A. Generated in the cluster** | Nothing, with any deploy tool: Helm, ArgoCD, Flux, ntctl | External and saas installs, and hybrid installs that set `global.secrets.generator.enabled: true`: every service-to-service signing key, the encryption keys (`AUTH_SECRET_KEY`, `APP_ENCRYPTION_KEY`, `ADMIN_JWT_SECRET`, `SERVER_SECRET_KEY`), the PostgreSQL control-plane and service-role passwords the chart creates (its own instance, or `managedBootstrap` on yours), the in-cluster ClickHouse password, the collector token, the TrustGuard platform client secret, the TrustGate STS key, the config-sync CA and keypair, the self-signed ingress certificate, and in saas the certificates other clusters dial: the published config-sync listeners, the DataBridge southbound listener and the telemetry ingress. The AgentGateway machine-credential pair and the MCP OAuth signing key, in every mode |
 | **B. Generated while rendering** | Nothing with `helm install` / `helm upgrade`. With ArgoCD, set `global.secrets.generator.enabled: true` (below), or pre-create them (`create-secrets.sh`) | Hybrid installs that leave the generator off, its default there |
-| **C. Yours** | Create them before installing | The console administrator, the NeuralTrust firewall key, console-issued tokens, the passwords of a database you manage, a certificate from your own CA, the image pull Secret (see [Secrets you must create](#secrets-you-must-create)) |
+| **C. Yours** | Create them before installing | The console administrator, the NeuralTrust firewall key or console-issued firewall JWT, console-issued tokens, the passwords of a database you manage, a certificate from your own CA, the image pull Secret (see [Secrets you must create](#secrets-you-must-create)) |
 
 **How group A works.** A `pre-install,pre-upgrade` hook Job (ArgoCD runs it as
 PreSync on every sync) creates the values in the cluster, in `platform-secrets`
@@ -576,9 +583,17 @@ Created only when explicitly enabled. None are auto-generated — operators brin
 
 ### Firewall
 
-Created when this release deploys the firewall: TrustGuard is selected
-(`global.products.trustguard: true` in hybrid; always in external) and
-`global.firewall.deploy` is left at `true`:
+**NeuralTrust-hosted firewall** (the default in every mode). TrustGuard reads `FIREWALL_JWT`, a per-install
+OAuth client that carries the firewall URL, from
+`trustguard.firewall.jwtExistingSecret.{name,key}` or the inline
+`trustguard.firewall.jwt` (stored in `trustguard-secrets`). No firewall signing
+key reaches the install and no `firewall-secrets` is created. TrustGate takes its
+own token the same way under `agentgateway.firewall`. In hybrid
+app.neuraltrust.ai issues both; for external and saas, NeuralTrust issues the
+key before the install and sends it over a secure channel.
+
+**In-cluster firewall.** Created when this release deploys the firewall:
+TrustGuard is selected and `global.firewall.deploy: true`:
 
 | Kubernetes Secret | Key | Required | Description |
 |---|---|---|---|
@@ -597,8 +612,8 @@ generates a key. TrustGuard (`NEURAL_TRUST_FIREWALL_SECRET_KEY`) and TrustGate
 (`FIREWALL_SECRET_KEY`) sign with the external firewall's `JWT_SECRET`, read from
 `global.firewall.existingSecret.{name,key}` — a Secret you create in the release
 namespace — or, when that is unset, from `global.platformSecret.existingSecret`.
-The render fails if neither is set. For the NeuralTrust-hosted firewall, that key
-is the one NeuralTrust issues you, not a value you generate.
+The render fails if neither is set. A `trustguard.firewall.jwt` set alongside is
+ignored, so prompts stay on the firewall you run.
 
 ### Docker registry
 
@@ -679,7 +694,7 @@ nothing reads them any more, and explicit `env` entries outrank whatever an old
 | TrustGuard admin JWT | `trustguard-secrets` | `ADMIN_JWT_SECRET` | auto-generated |
 | TrustGuard token signing | `trustguard-secrets` | `TRUSTGUARD_TOKEN_SIGNING_SECRET` | auto-generated |
 | TrustGuard Redis events | `trustguard-secrets` | `REDIS_EVENTS_SECRET` | auto-generated; authenticates cache pub/sub events |
-| TrustGuard Firewall client | `firewall-secrets` (mounted as env) | `JWT_SECRET` → `NEURAL_TRUST_FIREWALL_SECRET_KEY` | Present when TrustGuard is on (hybrid product flag or external full stack). Base URL is ConfigMap `NEURAL_TRUST_FIREWALL_BASE_URL` → in-cluster `http://firewall.<ns>.svc.cluster.local`. |
+| TrustGuard Firewall client | `firewall-secrets` (mounted as env) | `JWT_SECRET` → `NEURAL_TRUST_FIREWALL_SECRET_KEY` | With the in-cluster firewall. Base URL is ConfigMap `NEURAL_TRUST_FIREWALL_BASE_URL` → in-cluster `http://firewall.<ns>.svc.cluster.local`. With the hosted firewall, `FIREWALL_JWT` from `trustguard.firewall.jwtExistingSecret` (or `trustguard-secrets`) instead, and no base URL. |
 | TrustGuard DB password | `trustguard-secrets` | `DB_PASSWORD` | **External only** — auto-generated; **omitted when `trustguard.database.iamAuth=true`**. In **hybrid** the password comes from the shared `postgresql-secrets`. |
 | TrustGuard raw-telemetry Postgres | `postgresql-secrets` → `DB_*` env | (discrete parts) | Hybrid only, same as AgentGateway (RUN-1086). |
 | Shared hybrid Postgres credential | `postgresql-secrets` | `POSTGRES_*` — see [One canonical name per fact](#one-canonical-name-per-fact) | **Hybrid only** — the umbrella renders one shared Secret from `global.postgresql.*` (default `user`/`database` = `neuraltrust`), and every hybrid workload connects as that one role. Containers receive `DB_*` / `POSTGRES_*` names through explicit `env` mappings; those are **not** keys in the Secret. Set `global.postgresql.existingSecret.name` to supply your own instead — but then the chart injects it with `envFrom` and cannot rename anything, so **your keys must be `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` / `DB_SSL_MODE`** (gateways) or the canonical `POSTGRES_*` family (DataAgent). |

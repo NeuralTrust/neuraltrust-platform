@@ -27,23 +27,23 @@ assert_fw_redis() {
   green "ok  - $msg"
 }
 out22="$TMP/scenario-firewall-redis.yaml"
-render_default "$out22" --set global.deploymentMode=external
+render_default "$out22" --set global.firewall.deploy=true --set global.deploymentMode=external
 assert_fw_redis "$out22" "FIREWALL_CACHE_REDIS=true REDIS_DB=0 REDIS_HOST=redis REDIS_PORT=6379" \
   "firewall-config points the cache at the in-cluster Redis"
 # firewall-config's exact key set above already excludes REDIS_URL.
 assert_env_value "$out22" firewall gateway REDIS_URL ABSENT \
   "firewall no longer ships the retired REDIS_URL"
 out22off="$TMP/scenario-firewall-redis-off.yaml"
-render_default "$out22off" --set global.deploymentMode=external --set firewall.firewall.redis.enabled=false
+render_default "$out22off" --set global.firewall.deploy=true --set global.deploymentMode=external --set firewall.firewall.redis.enabled=false
 assert_fw_redis "$out22off" "" "firewall.redis.enabled=false opts out of the cache"
 out22none="$TMP/scenario-firewall-redis-none.yaml"
-render_default "$out22none" --set global.deploymentMode=external --set global.redis.deploy=false
+render_default "$out22none" --set global.firewall.deploy=true --set global.deploymentMode=external --set global.redis.deploy=false
 assert_fw_redis "$out22none" "" "no Redis deployed and no host: firewall runs without the cache"
 # A password must land in the Secret, not the ConfigMap. validate-values rejects
 # a password against the chart's own Redis, so point at a managed host the same
 # way operators do.
 out22pw="$TMP/scenario-firewall-redis-pw.yaml"
-render_default "$out22pw" --set global.deploymentMode=external \
+render_default "$out22pw" --set global.firewall.deploy=true --set global.deploymentMode=external \
   --set global.redis.deploy=false \
   --set global.redis.host=cache.example.com \
   --set global.redis.username=fw \
@@ -74,7 +74,7 @@ assert_env_value "$out22" firewall gateway REDIS_PASSWORD ABSENT \
 # other consumer. Without it the cache turns on with no password and every
 # firewall pod exits at startup.
 out22es="$TMP/scenario-firewall-redis-existing-secret.yaml"
-render_default "$out22es" --set global.deploymentMode=saas \
+render_default "$out22es" --set global.firewall.deploy=true --set global.deploymentMode=saas \
   --set global.redis.deploy=false \
   --set global.redis.host=cache.example.com \
   --set-string global.redis.tls=true \
@@ -94,13 +94,13 @@ if ! ruby -ryaml -e '
 fi
 green "ok  - firewall-secrets holds no Redis password when global.redis.existingSecret does"
 out22gcp="$TMP/scenario-firewall-redis-gcp.yaml"
-render_default "$out22gcp" "${gcp_args[@]}" --set global.redis.deploy=false \
+render_default "$out22gcp" --set global.firewall.deploy=true "${gcp_args[@]}" --set global.redis.deploy=false \
   --set global.redis.host=10.0.0.6 --set global.redis.tls=true --set global.redis.authMode=iam
 assert_fw_redis "$out22gcp" \
   "FIREWALL_CACHE_REDIS=true REDIS_DB=0 REDIS_HOST=10.0.0.6 REDIS_LOGIN=gcp REDIS_PORT=6379 REDIS_TLS=true REDIS_TLS_INSECURE_SKIP_VERIFY=true" \
   "firewall redis: Memorystore IAM logs in with a GCP token"
 out22cluster="$TMP/scenario-firewall-redis-cluster.yaml"
-render_default "$out22cluster" "${gcp_args[@]}" "${redis_args[@]}"
+render_default "$out22cluster" --set global.firewall.deploy=true "${gcp_args[@]}" "${redis_args[@]}"
 assert_fw_redis "$out22cluster" "" "firewall redis: a Redis Cluster is skipped (client is not cluster-aware)"
 fw_managed_redis=(
   --set global.deploymentMode=external
@@ -109,7 +109,7 @@ fw_managed_redis=(
   --set-string global.redis.tls=true
 )
 out22aws="$TMP/scenario-firewall-redis-aws.yaml"
-render_default "$out22aws" "${fw_managed_redis[@]}" --set global.redis.password=unused \
+render_default "$out22aws" --set global.firewall.deploy=true "${fw_managed_redis[@]}" --set global.redis.password=unused \
   --set firewall.firewall.redis.login=aws \
   --set firewall.firewall.redis.iamUser=fw-user \
   --set firewall.firewall.redis.iamCacheName=my-cache \
@@ -122,7 +122,7 @@ assert_contains "$out22aws" '^  AWS_REGION: "eu-west-1"$' \
 assert_env_value "$out22aws" firewall gateway REDIS_PASSWORD ABSENT \
   "firewall redis: no password with the ElastiCache IAM login"
 out22az="$TMP/scenario-firewall-redis-azure.yaml"
-render_default "$out22az" "${fw_managed_redis[@]}" \
+render_default "$out22az" --set global.firewall.deploy=true "${fw_managed_redis[@]}" \
   --set firewall.firewall.redis.login=azure \
   --set global.azureIdentity.method=service-principal \
   --set global.azureIdentity.clientId=cid \
@@ -138,10 +138,10 @@ for w in "firewall:gateway" "topic-guard-worker:worker"; do
 done
 assert_render_fails_with 'redis.login=aws needs firewall.firewall.redis.iamUser' \
   "firewall redis guard: aws login needs the IAM user and cache name" \
-  "${fw_managed_redis[@]}" --set firewall.firewall.redis.login=aws
+  --set global.firewall.deploy=true "${fw_managed_redis[@]}" --set firewall.firewall.redis.login=aws
 assert_render_fails_with 'redis.login=azure needs global.azureIdentity.method' \
   "firewall redis guard: azure login needs an Azure identity" \
-  "${fw_managed_redis[@]}" --set firewall.firewall.redis.login=azure
+  --set global.firewall.deploy=true "${fw_managed_redis[@]}" --set firewall.firewall.redis.login=azure
 assert_render_fails_with 'redis.login=aws describes a managed Redis' \
   "firewall redis guard: a token login against the chart's own Redis is refused" \
-  --set global.deploymentMode=external --set firewall.firewall.redis.login=aws
+  --set global.firewall.deploy=true --set global.deploymentMode=external --set firewall.firewall.redis.login=aws

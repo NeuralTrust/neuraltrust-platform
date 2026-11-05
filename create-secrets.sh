@@ -38,7 +38,7 @@
 #   -h, --help               Show this help.
 #
 # Values only you can supply (the console administrator, the NeuralTrust firewall
-# key, console-issued tokens, Cloud SQL passwords) are printed as REPLACE_ME, and
+# key or FIREWALL_JWT, console-issued tokens, Cloud SQL passwords) are printed as REPLACE_ME, and
 # apply leaves them out. Pass them with --secret, or create them yourself.
 #
 # Needs: bash 3.2+, helm 3.8+, yq v4 (github.com/mikefarah/yq), openssl;

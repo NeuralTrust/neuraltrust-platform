@@ -641,7 +641,11 @@ Secret produces a pod that cannot start. Fail at render instead.
     {{- fail "global.firewall.baseURL points at a firewall you run, which needs its JWT_SECRET: set global.firewall.existingSecret.name (a Secret in this namespace, key global.firewall.existingSecret.key) or global.platformSecret.existingSecret.name carrying JWT_SECRET. A chart-generated key would not match that firewall and every firewall call would fail authentication." -}}
   {{- end -}}
 {{- else if and $fwExternal (not $tgFwJwt) -}}
-  {{- fail "global.firewall.deploy=false leaves TrustGuard without a firewall. For the NeuralTrust-hosted firewall, set trustguard.firewall.jwt (or trustguard.firewall.jwtExistingSecret.name) to its FIREWALL_JWT: the console shows it when it creates a hybrid TrustGuard, and NeuralTrust issues one for external installs. For a firewall you run, set global.firewall.baseURL and global.firewall.existingSecret.name. To run it in this cluster, set global.firewall.deploy: true." -}}
+  {{- if eq (include "neuraltrust-platform.isExternal" .) "true" -}}
+    {{- fail "TrustGuard uses the NeuralTrust-hosted firewall by default and needs its firewall JWT: ask NeuralTrust for this install's FIREWALL_JWT, store it in a Secret (key FIREWALL_JWT) and set trustguard.firewall.jwtExistingSecret.name. To run the firewall in this cluster instead, set global.firewall.deploy: true. For a firewall you run elsewhere, set global.firewall.baseURL and global.firewall.existingSecret.name." -}}
+  {{- else -}}
+    {{- fail "TrustGuard uses the NeuralTrust-hosted firewall by default and needs its firewall JWT: store the FIREWALL_JWT that app.neuraltrust.ai showed when it created this TrustGuard (with your own central control plane, ask NeuralTrust for it) in a Secret (key FIREWALL_JWT) and set trustguard.firewall.jwtExistingSecret.name. To run the firewall in this cluster instead, set global.firewall.deploy: true." -}}
+  {{- end -}}
 {{- else if and (or $gFw.baseURL $gFwSecretName) (eq (include "neuraltrust-platform.firewall.deploy" .) "true") -}}
   {{- fail "global.firewall.baseURL / global.firewall.existingSecret only apply with global.firewall.deploy=false; this release deploys its own firewall and would ignore them. Remove them, or set global.firewall.deploy=false to use the external firewall." -}}
 {{- end -}}
