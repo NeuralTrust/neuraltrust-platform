@@ -16,14 +16,14 @@ dependencies:
       - infrastructure
   # Analytics / evaluation API. Gated by global.products.dataPlane in hybrid.
   - name: data-plane-api
-    version: 1.7.18
+    version: 1.7.19
     repository: file://./charts/data-plane-api
     tags:
       - neuraltrust
       - v2
   # Control-plane API — external only (templates gated by isExternal).
   - name: control-plane-api
-    version: 0.1.19
+    version: 0.1.20
     repository: file://./charts/control-plane-api
     tags:
       - neuraltrust
@@ -45,14 +45,14 @@ dependencies:
       - v2
   # TrustGuard. Hybrid gated by global.products.trustguard.
   - name: trustguard
-    version: 0.1.74
+    version: 0.1.75
     repository: file://./charts/trustguard
     tags:
       - neuraltrust
       - v2
   # DataAgent (hybrid; agentgateway.dataagent / trustguard.dataagent).
   - name: dataagent
-    version: 0.1.23
+    version: 0.1.24
     repository: file://./charts/dataagent
     tags:
       - neuraltrust
@@ -66,7 +66,7 @@ dependencies:
       - v2
   # DataBridge — saas only. Brokers data planes running outside this cluster.
   - name: databridge
-    version: 0.1.4
+    version: 0.1.5
     repository: file://./charts/databridge
     tags:
       - neuraltrust
@@ -88,7 +88,7 @@ dependencies:
       - v2
   # AlertEngine — v2 external only.
   - name: alertengine
-    version: 0.1.22
+    version: 0.1.23
     repository: file://./charts/alertengine
     tags:
       - neuraltrust
