@@ -1933,6 +1933,31 @@ v2 Redis connection scalars.
 {{- end }}
 
 {{/*
+Whether the chart-managed `redis-secrets` may keep a password only the live
+Secret holds, read back through `lookup`. Not while the secrets generator runs:
+that is the GitOps path, where `helm template` cannot `lookup`, so the render
+would carry an empty password, a sync would blank the live one, and the
+Application would never settle. There the password comes from
+global.redis.password or an operator Secret (global.redis.existingSecret), and
+the generator Job stops an upgrade that would blank one only the cluster held.
+*/}}
+{{- define "neuraltrust-platform.v2.hybridRedis.adoptLivePassword" -}}
+{{- if ne (include "neuraltrust-platform.secretsGenerator.active" .) "true" -}}true{{- end -}}
+{{- end }}
+
+{{/*
+`redis-secrets`, when the generator Job must check that the live Secret holds
+no password the render would drop: a hybrid, chart-managed Secret, the
+generator on, and no global.redis.password. Empty otherwise.
+*/}}
+{{- define "neuraltrust-platform.v2.hybridRedis.passwordGuard" -}}
+{{- $r := default dict (default dict .Values.global).redis -}}
+{{- if and (eq (include "neuraltrust-platform.isHybrid" .) "true") (eq (include "neuraltrust-platform.v2.hybridRedis.chartManagedSecret" .) "true") (ne (include "neuraltrust-platform.v2.hybridRedis.adoptLivePassword" .) "true") (eq ($r.password | default "" | toString) "") -}}
+redis-secrets
+{{- end -}}
+{{- end }}
+
+{{/*
 Fingerprint of the chart-managed `redis-secrets` payload for AUT-403 checksums.
 
 Subchart Deployments envFrom `redis-secrets`, but `$.Template.BasePath` points at
@@ -1953,7 +1978,7 @@ rollouts.
 {{- $password := "" -}}
 {{- if and $r.password (ne ($r.password | toString) "") -}}
   {{- $password = $r.password | toString -}}
-{{- else -}}
+{{- else if eq (include "neuraltrust-platform.v2.hybridRedis.adoptLivePassword" .) "true" -}}
   {{- $existing := lookup "v1" "Secret" .Release.Namespace "redis-secrets" -}}
   {{- if and $existing (kindIs "map" $existing) (index $existing "data") (hasKey $existing.data "REDIS_PASSWORD") -}}
     {{- $password = index $existing.data "REDIS_PASSWORD" | b64dec -}}
@@ -2175,39 +2200,29 @@ Credential readiness for a merged instance cfg (dict "ctx" $ "cfg" $merged).
 {{- $cfg := .cfg -}}
 {{- $token := include "neuraltrust-platform.dataagent.cfg.enrolment.token" (dict "cfg" $cfg) -}}
 {{- $existingName := include "neuraltrust-platform.dataagent.cfg.enrolment.existingSecretName" (dict "cfg" $cfg) -}}
-{{- $secretName := "" -}}
-{{- if (default dict $cfg.existingSecret).name -}}
-  {{- $secretName = $cfg.existingSecret.name -}}
-{{- else if $cfg.fullnameOverride -}}
-  {{- $secretName = printf "%s-secrets" $cfg.fullnameOverride -}}
-{{- else -}}
-  {{- $secretName = "dataagent-secrets" -}}
-{{- end -}}
-{{- $managedSecret := lookup "v1" "Secret" $root.Release.Namespace $secretName -}}
-{{- $managedData := dict -}}
-{{- if and $managedSecret (kindIs "map" $managedSecret) $managedSecret.data -}}
-  {{- $managedData = $managedSecret.data -}}
-{{- end -}}
-{{- $hasManagedToken := and (hasKey $managedData "ENROLMENT_TOKEN") (ne (index $managedData "ENROLMENT_TOKEN") "") -}}
+{{- /* Decided from values alone, never from the live cluster: `helm template`
+       (Argo CD, Flux) cannot `lookup`, so a gate that read live Secrets rendered
+       the DataAgent under Helm and dropped it under GitOps, from the same values.
+       Where the chart creates no Secrets (preserveExistingSecrets, or
+       autoGenerateSecrets off), the operator supplies them, as create-secrets.sh
+       does from these same values; the gate then trusts that they exist instead
+       of checking. */}}
 {{- $dataSecretName := (default dict $cfg.existingSecret).name | default "" -}}
-{{- $hasManagedDatabase := and (hasKey $managedData "DATABASE_URL") (ne (index $managedData "DATABASE_URL") "") -}}
 {{- $globalPg := default dict (default dict $root.Values.global).postgresql -}}
 {{- $globalPgExisting := default dict $globalPg.existingSecret -}}
-{{- $sharedPgSecretName := $globalPgExisting.name | default "postgresql-secrets" -}}
-{{- $sharedPgSecret := lookup "v1" "Secret" $root.Release.Namespace $sharedPgSecretName -}}
-{{- $sharedPgData := dict -}}
-{{- if and $sharedPgSecret (kindIs "map" $sharedPgSecret) $sharedPgSecret.data -}}
-  {{- $sharedPgData = $sharedPgSecret.data -}}
-{{- end -}}
-{{- /* POSTGRES_HOST is the readiness signal now that SENSIBLE_PG_DSN is gone
-       (RUN-1086 / RUN-1093). existingSecret.name still wins without a lookup. */}}
-{{- $sharedPgReady := or ($globalPgExisting.name | default "") (and (hasKey $sharedPgData "POSTGRES_HOST") (ne (index $sharedPgData "POSTGRES_HOST") "")) -}}
 {{- $preserve := dig "preserveExistingSecrets" false ($root.Values.global | default dict) -}}
 {{- $autoGenerate := eq (include "neuraltrust-platform.autoGenerateSecrets" $root) "true" -}}
 {{- $chartGeneratesDatabase := and $autoGenerate (not $preserve) -}}
+{{- $operatorSupplies := not $chartGeneratesDatabase -}}
+{{- /* existingSecret.name names the operator's shared PostgreSQL Secret; with
+       the chart creating no Secrets, the operator supplies postgresql-secrets. */}}
+{{- $sharedPgReady := or ($globalPgExisting.name | default "") $operatorSupplies -}}
 {{- $pgIam := eq (include "neuraltrust-platform.postgresql.iam" $root) "true" -}}
 {{- $fallbackSharedPgReady := and (not $autoGenerate) (not $preserve) (not ($globalPgExisting.name | default "")) (or ($globalPg.password | default "") $pgIam) -}}
-{{- $tokenReady := or $existingName $hasManagedToken (and $token $chartGeneratesDatabase) -}}
+{{- /* The enrolment token is in values (the chart renders it, or the operator's
+       Secret carries it under the chart's name) or in a Secret the values name. */}}
+{{- $tokenReady := or $existingName $token -}}
+{{- $hasManagedDatabase := false -}}
 {{- $storeBackend := (default dict $cfg.store).backend | default "" | toString | lower -}}
 {{- $storeLess := or (eq $storeBackend "none") (eq $storeBackend "memory") -}}
 {{/* tenant_id / instance_id live in the enrolment JWT — not Helm values. */}}
