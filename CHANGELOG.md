@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v4.0.3] — 2026-11-11
+
 ### Fixed
 
 - **Global scheduling keys reach every pod the chart renders.**
