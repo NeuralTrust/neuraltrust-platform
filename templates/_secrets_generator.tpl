@@ -343,6 +343,9 @@ const PREVIOUS_TLS = JSON.parse(process.env.PREVIOUS_TLS || '{}')
 const MARKER = process.env.MARKER
 // Secrets the operator supplies under a name the generator would write.
 const OPERATOR = (process.env.OPERATOR_SECRETS || '').split(' ').filter(Boolean)
+// A chart-rendered Secret whose REDIS_PASSWORD now comes only from values: one
+// the live Secret holds alone would be blanked by this upgrade.
+const PASSWORD_GUARD = process.env.PASSWORD_GUARD || ''
 
 // Untracked on purpose: no app.kubernetes.io/instance label and no owner, so no
 // release manages, overwrites or prunes these. The Argo annotations are a second
@@ -575,7 +578,21 @@ function missing(entries, values) {
   return entries.filter((e) => e.type !== 'adopt' && !((e.type === 'alias' || e.type === 'public-key') && !values[e.source]) && !values[e.key]).map((e) => e.key)
 }
 
+// The upgrade renders the Secret's REDIS_PASSWORD from values only. A password
+// only the live Secret holds would be replaced by an empty one, and Redis auth
+// would break; stop before anything changes, naming the fix.
+async function checkPasswordGuard() {
+  if (!PASSWORD_GUARD) return
+  const live = await get('secrets', PASSWORD_GUARD)
+  if (live && decode(live).REDIS_PASSWORD) {
+    throw new Error(PASSWORD_GUARD + ' holds a REDIS_PASSWORD that is not in the values, and this upgrade would replace it with an empty one. ' +
+      'Put the password in a Secret you manage and set global.redis.existingSecret.name to it (keys REDIS_HOST, REDIS_PORT, REDIS_USERNAME, REDIS_PASSWORD, REDIS_TLS), ' +
+      'or set global.redis.password. Nothing was changed.')
+  }
+}
+
 async function main() {
+  await checkPasswordGuard()
   const specs = []
   const pins = {}
   for (const c of COMPONENTS) {

@@ -4,6 +4,26 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Fixed
+
+- **A hybrid install with the secrets generator renders from values alone, so
+  ArgoCD and Flux settle.** Two `helm template` renders of the same values are
+  now identical.
+  - `redis-secrets` and the `checksum/redis-secrets` annotation on the
+    workloads that read it no longer read the live Secret. Before, `helm
+    template` saw no live Secret, rendered an empty `REDIS_PASSWORD` and a
+    different checksum, so the Application never showed `Synced`, and a sync
+    replaced a password held only in the live Secret with an empty one.
+  - The password now comes from `global.redis.password` or
+    `global.redis.existingSecret`. If the live `redis-secrets` holds a password
+    the values don't, the generator Job stops the upgrade before anything
+    changes and names the fix.
+  - The DataAgent gate no longer reads live Secrets. With
+    `preserveExistingSecrets`, an enrolment token in values now renders the
+    DataAgent under `helm template` too.
+  - Helm installs without the generator are unchanged: `helm upgrade` still
+    keeps a password only the live `redis-secrets` holds.
+
 ## [v4.0.3] — 2026-11-11
 
 ### Fixed

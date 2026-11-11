@@ -152,6 +152,22 @@ keys, `DATA_PLANE_JWT_SECRET`, the config-sync cache keys). Helm itself reuses
 the live values through `lookup`, so `helm upgrade` installs are safe either way.
 The first sync with it on adopts the values in use, so nothing rotates.
 
+With it on, the hybrid render reads nothing from the cluster, so two renders of
+the same values are identical and an ArgoCD Application settles `Synced`:
+
+- **`redis-secrets` takes `REDIS_PASSWORD` from `global.redis.password` only.**
+  A password only the live Secret holds (set by hand, or kept from an earlier
+  render) is no longer read back. Move it to a Secret you manage and name it in
+  `global.redis.existingSecret.name`, or set `global.redis.password`. The
+  generator Job checks for one before the upgrade and stops, naming this fix,
+  rather than let the render replace it with an empty one. The passwordless
+  in-cluster Redis, the default, needs nothing.
+- **The DataAgent renders from values.** An enrolment token in values, or a
+  Secret named in `enrolment.existingSecret.name`, is enough. With
+  `preserveExistingSecrets` the chart trusts that you created the Secrets it
+  names (as `create-secrets.sh` does) instead of looking them up, so `helm
+  template` no longer drops the DataAgent there.
+
 **A `platform-secrets` you supply** is never written: one with ownerReferences
 (External Secrets), one annotated `neuraltrust.ai/secrets-generator: external`,
 or one named in `global.platformSecret.existingSecret.name`. The Job only checks
@@ -698,7 +714,7 @@ nothing reads them any more, and explicit `env` entries outrank whatever an old
 | TrustGuard DB password | `trustguard-secrets` | `DB_PASSWORD` | **External only** — auto-generated; **omitted when `trustguard.database.iamAuth=true`**. In **hybrid** the password comes from the shared `postgresql-secrets`. |
 | TrustGuard raw-telemetry Postgres | `postgresql-secrets` → `DB_*` env | (discrete parts) | Hybrid only, same as AgentGateway (RUN-1086). |
 | Shared hybrid Postgres credential | `postgresql-secrets` | `POSTGRES_*` — see [One canonical name per fact](#one-canonical-name-per-fact) | **Hybrid only** — the umbrella renders one shared Secret from `global.postgresql.*` (default `user`/`database` = `neuraltrust`), and every hybrid workload connects as that one role. Containers receive `DB_*` / `POSTGRES_*` names through explicit `env` mappings; those are **not** keys in the Secret. Set `global.postgresql.existingSecret.name` to supply your own instead — but then the chart injects it with `envFrom` and cannot rename anything, so **your keys must be `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` / `DB_SSL_MODE`** (gateways) or the canonical `POSTGRES_*` family (DataAgent). |
-| Shared hybrid Redis credential | `redis-secrets` | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` / `REDIS_USERNAME` / `REDIS_TLS` | **Hybrid only** — taken wholesale with `envFrom`, and rendered from `global.redis.*`. Empty `REDIS_PASSWORD` for the passwordless in-cluster default. Set `global.redis.existingSecret.name` to reuse a pre-created Secret. TLS is stored once as `REDIS_TLS`, which is the name TrustGuard reads; AgentGateway reads `REDIS_TLS_ENABLED` and is given that name through an explicit `env` mapping, so a supplied Secret only needs `REDIS_TLS`. |
+| Shared hybrid Redis credential | `redis-secrets` | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` / `REDIS_USERNAME` / `REDIS_TLS` | **Hybrid only** — taken wholesale with `envFrom`, and rendered from `global.redis.*`. Empty `REDIS_PASSWORD` for the passwordless in-cluster default. Set `global.redis.existingSecret.name` to reuse a pre-created Secret. Without the secrets generator, `helm upgrade` keeps a password only the live Secret holds (`lookup`); with it, the password comes from values or that Secret only (see "Hybrid installs" above). TLS is stored once as `REDIS_TLS`, which is the name TrustGuard reads; AgentGateway reads `REDIS_TLS_ENABLED` and is given that name through an explicit `env` mapping, so a supplied Secret only needs `REDIS_TLS`. |
 | Shared TrustGuard client creds | `trustguard-client-credentials` | `CLIENT_ID` / `CLIENT_SECRET` | Only when TrustGate and TrustGuard are both enabled: TrustGate is the only client. Under the in-cluster generator the secret comes from `platform-secrets/TRUSTGUARD_CLIENT_SECRET`, the id is a plain value on both Deployments, and this Secret is not rendered. id defaults to `agentgateway-platform`; secret auto-generated (or `global.v2.trustguardClientSecret`). Injected into both AgentGateway (`TRUSTGUARD_CLIENT_ID`/`_SECRET`) and TrustGuard (`TRUSTGUARD_PLATFORM_CLIENT_ID`/`_SECRET`) so the pair matches. Setting `global.v2.trustguardClientSecret` or `trustguardClientSecretName` keeps the pair with either product alone, for a client or server outside this release. The prerelease `v2-trustguard-client-secret` values are copied during upgrade. |
 | DataAgent Postgres | `postgresql-secrets` (shared) | `POSTGRES_HOST` / `PORT` / `USER` / `PASSWORD` / `DB` / `SSLMODE` | **Hybrid** — DataAgent builds a libpq keyword connection string from these parts when `DATABASE_URL` is unset (RUN-1093). It connects as `global.postgresql.user` (default `neuraltrust`). |
 | DataAgent enrolment token | operator Secret (e.g. `dataagent-enrolment-trustgate`), or `dataagent-secrets` / `dataagent-trustguard-secrets` when supplied inline | `ENROLMENT_TOKEN` (configurable key) | **Never** auto-generated — from `agentgateway.dataagent.enrolment` / `trustguard.dataagent.enrolment`. With the preferred `existingSecret.name` path the chart-managed `dataagent-*-secrets` render empty and the token is read straight from your Secret. **Scoped to the control plane you dial:** NeuralTrust hosted → issue in the same `global.saasRegion`; customer `saas` → issue from *that* console (`global.controlPlane.domain`). |
