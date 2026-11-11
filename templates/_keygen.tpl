@@ -148,6 +148,9 @@ spec:
       restartPolicy: Never
       serviceAccountName: {{ $saName }}
       {{- include "neuraltrust-platform.controlPlane.imagePullSecrets" (dict "root" $cpApp "global" ($ctx.Values.global | default dict)) | nindent 6 }}
+      {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" $ctx) | nindent 6 }}
+      {{- include "neuraltrust-platform.tolerations" (dict "ctx" $ctx) | nindent 6 }}
+      {{- include "neuraltrust-platform.affinity" (dict "ctx" $ctx) | nindent 6 }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 1001

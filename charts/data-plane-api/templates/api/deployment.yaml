@@ -28,7 +28,7 @@
 {{- $api := default dict .Values.dataPlane.components.api }}
 {{- $apiImage := default dict $api.image }}
 {{- $apiRepo := $apiImage.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api" }}
-{{- $apiTag := $apiImage.tag | default "v1.59.0" }}
+{{- $apiTag := $apiImage.tag | default "v1.59.1" }}
 {{- $apiPull := $apiImage.pullPolicy | default "IfNotPresent" }}
 {{- /* The ClickHouse DDL ships inside the data-plane-api image, so it always matches
        the application version that reads it. Setting clickhouse.configmap.name opts
@@ -654,5 +654,6 @@ spec:
       {{- end }}
       {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" .) | nindent 6 }}
       {{- include "neuraltrust-platform.tolerations" (dict "ctx" .) | nindent 6 }}
+      {{- include "neuraltrust-platform.affinity" (dict "ctx" .) | nindent 6 }}
 
 {{- end }}

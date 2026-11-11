@@ -110,6 +110,10 @@ owns, has passwords and owners re-aligned.
     (include "neuraltrust-platform.image" (dict "repository" $img.repository "tag" $img.tag "global" .Values.global))
     (include "neuraltrust-platform.isOpenshift" .))
 }}
+{{- /* Hashed only when set, so installs without global.affinity keep their Job name. */}}
+{{- with include "neuraltrust-platform.affinity" (dict "ctx" .) }}
+  {{- $_ := set $inputs "affinity" . }}
+{{- end }}
 {{- $jobName = printf "%s-%s" $jobName (toJson $inputs | sha256sum | trunc 10) }}
 apiVersion: batch/v1
 kind: Job
@@ -490,4 +494,5 @@ spec:
           emptyDir: {}
       {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" .) | nindent 6 }}
       {{- include "neuraltrust-platform.tolerations" (dict "ctx" .) | nindent 6 }}
+      {{- include "neuraltrust-platform.affinity" (dict "ctx" .) | nindent 6 }}
 {{- end }}

@@ -4,6 +4,32 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Global scheduling keys reach every pod the chart renders.**
+  - The pre-install / pre-upgrade hook Jobs (the secrets generator and the
+    TrustGate key-generation Jobs) now apply `global.nodeSelector`,
+    `global.tolerations` and `global.affinity`. Before, they rendered with none,
+    so on a cluster where every other node pool is tainted they stayed Pending
+    and blocked `helm upgrade` or an Argo CD sync.
+  - `global.affinity` is now merged under the component's own affinity on every
+    workload, as `values.yaml` documents. Before, only TrustGate and TrustGuard
+    applied it. Firewall workers AND it with their own node selection, and on a
+    label key both set, the worker's selection wins, so a GPU pool keeps
+    overriding a global CPU pool.
+  - Installs that don't set `global.affinity` render exactly as before. Installs
+    that do will see it on more workloads after the upgrade, and those pods may
+    reschedule to match it.
+  - The PostgreSQL bootstrap Job also takes `global.affinity` into its name hash
+    when one is set, so changing it replaces the Job instead of failing on an
+    immutable pod template.
+
+### Security
+
+- Dependency and OS-package patch releases: control-plane-api `v1.31.1`,
+  data-plane-api `v1.59.1` (`oauthlib`), TrustGuard `v0.62.1`, AlertEngine
+  `v0.16.1`, DataAgent `v0.9.1`, DataBridge `v0.4.7`.
+
 ## [v4.0.0] — 2026-11-05
 
 ### Changed (breaking for every install with TrustGuard)

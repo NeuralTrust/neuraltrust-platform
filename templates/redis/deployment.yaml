@@ -96,6 +96,7 @@ spec:
           {{- end }}
       {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" . "local" $redis.nodeSelector) | nindent 6 }}
       {{- include "neuraltrust-platform.tolerations" (dict "ctx" . "local" $redis.tolerations) | nindent 6 }}
+      {{- include "neuraltrust-platform.affinity" (dict "ctx" . "local" $redis.affinity) | nindent 6 }}
 {{- if $persist.enabled }}
 ---
 apiVersion: v1
