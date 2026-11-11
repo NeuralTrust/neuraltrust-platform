@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v4.0.4] — 2026-11-11
+
 ### Fixed
 
 - **A hybrid install with the secrets generator renders from values alone, so
