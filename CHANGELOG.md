@@ -26,8 +26,9 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ### Security
 
-- control-plane-api `v1.31.1` and data-plane-api `v1.59.1`: patched OS packages
-  and `oauthlib`.
+- Dependency and OS-package patch releases: control-plane-api `v1.31.1`,
+  data-plane-api `v1.59.1` (`oauthlib`), TrustGuard `v0.62.1`, AlertEngine
+  `v0.16.1`, DataAgent `v0.9.1`, DataBridge `v0.4.7`.
 
 ## [v4.0.0] — 2026-11-05
 
