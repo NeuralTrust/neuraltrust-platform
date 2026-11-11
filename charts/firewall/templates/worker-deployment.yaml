@@ -69,7 +69,45 @@ spec:
         {{- end }}
         {{- $_ := set $mergedSelector $key $list }}
       {{- end }}
-      {{- if $mergedSelector }}
+      {{- /* global.affinity: its required nodeSelectorTerms OR, so the selector
+             above is ANDed into every term. A global expression on a key the
+             per-worker selector sets is dropped there, so the GPU pool still wins
+             over a global CPU pool. Everything else in global.affinity (preferred
+             node terms, pod affinity / anti-affinity) is applied as given. */}}
+      {{- $globalAffinity := default dict (default dict $.Values.global).affinity }}
+      {{- if $globalAffinity }}
+        {{- $selectorExprs := list }}
+        {{- range $key, $values := $mergedSelector }}
+          {{- $selectorExprs = append $selectorExprs (dict "key" $key "operator" "In" "values" $values) }}
+        {{- end }}
+        {{- $affinity := deepCopy $globalAffinity }}
+        {{- $nodeAffinity := default dict $affinity.nodeAffinity }}
+        {{- $required := default dict $nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution }}
+        {{- $terms := list }}
+        {{- range $term := default list $required.nodeSelectorTerms }}
+          {{- $exprs := list }}
+          {{- range default list $term.matchExpressions }}
+            {{- if not (hasKey $workerSelector .key) }}
+              {{- $exprs = append $exprs . }}
+            {{- end }}
+          {{- end }}
+          {{- $merged := omit $term "matchExpressions" }}
+          {{- with concat $exprs $selectorExprs }}
+            {{- $_ := set $merged "matchExpressions" . }}
+          {{- end }}
+          {{- $terms = append $terms $merged }}
+        {{- end }}
+        {{- if and (not $terms) $selectorExprs }}
+          {{- $terms = list (dict "matchExpressions" $selectorExprs) }}
+        {{- end }}
+        {{- if $terms }}
+          {{- $_ := set $required "nodeSelectorTerms" $terms }}
+          {{- $_ := set $nodeAffinity "requiredDuringSchedulingIgnoredDuringExecution" $required }}
+          {{- $_ := set $affinity "nodeAffinity" $nodeAffinity }}
+        {{- end }}
+      affinity:
+        {{- toYaml $affinity | nindent 8 }}
+      {{- else if $mergedSelector }}
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:

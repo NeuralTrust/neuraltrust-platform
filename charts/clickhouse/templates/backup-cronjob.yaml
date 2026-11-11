@@ -33,10 +33,7 @@ spec:
           {{- include "neuraltrust-platform.subchart.imagePullSecrets" (dict "local" .Values.imagePullSecrets "global" .Values.global) | nindent 10 }}
           {{- include "neuraltrust-platform.nodeSelector" (dict "ctx" . "local" .Values.backup.nodeSelector) | nindent 10 }}
           {{- include "neuraltrust-platform.tolerations" (dict "ctx" . "local" .Values.backup.tolerations) | nindent 10 }}
-          {{- if .Values.backup.affinity }}
-          affinity:
-            {{- toYaml .Values.backup.affinity | nindent 12 }}
-          {{- end }}
+          {{- include "neuraltrust-platform.affinity" (dict "ctx" . "local" .Values.backup.affinity) | nindent 10 }}
           securityContext:
             {{- if ne (.Values.global.platform | default "kubernetes") "openshift" }}
             fsGroup: 101
