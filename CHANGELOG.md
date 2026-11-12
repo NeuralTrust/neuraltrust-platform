@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v4.1.0] — 2026-11-12
+
 ### Fixed
 
 - **data-plane-api logs in to AWS RDS with IAM.** With
