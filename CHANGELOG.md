@@ -4,6 +4,18 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Fixed
+
+- **GPU firewall workers no longer fail every inference under
+  `securityHardening`.** torch can hand some CUDA ops to Triton, which compiles
+  and caches small C extensions in `~/.triton`. With the read-only root
+  filesystem that write failed (`OSError: [Errno 30] Read-only file system:
+  '/root/.triton'`) and the request returned 500 while `/health` stayed green.
+  `firewall-config` now sets `TRITON_CACHE_DIR` to `/root/.cache/triton`, on the
+  writable `/root/.cache` mount (`firewall.config.tritonCacheDir`). Firewall
+  v2.49.0 and later no longer hit this path with the current models; this keeps
+  a later torch or transformers bump from bringing it back.
+
 ## [v4.1.0] — 2026-11-12
 
 ### Fixed
