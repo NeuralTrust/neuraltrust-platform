@@ -4,6 +4,34 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Fixed
+
+- **data-plane-api logs in to AWS RDS with IAM.** With
+  `global.postgresql.authMode: iam` on AWS, data-plane-api was handed the empty
+  password an IAM install carries and never connected, while every other
+  service logged in with IAM.
+  - data-plane-api and its `postgres-migrations` initContainer now receive
+    `POSTGRES_LOGIN=aws` and `AWS_REGION` (from `global.postgresql.awsRegion`),
+    and no `POSTGRES_PASSWORD` reference. The evaluation Jobs inherit both and
+    run under the same `data-plane` ServiceAccount, which takes the IRSA role
+    through `global.irsa` or its own annotations. The role needs
+    `rds-db:connect` on the database user; see `SECRETS.md`.
+  - data-plane-api's sslMode now defaults to `global.postgresql.sslMode` while
+    it reads the shared credential (`require` under IAM when unset), instead
+    of always `prefer`. A `verify-ca` / `verify-full` setting reaches the token
+    login rather than being lowered to `require`. Set
+    `data-plane-api.dataPlane.components.api.database.postgresql.sslMode` to
+    keep the previous value.
+  - An `api.database.postgresql.existingSecret` of your own keeps
+    data-plane-api on that Secret's password, so a separate password user set
+    up for data-plane-api keeps working after the upgrade.
+  - Password, Entra ID and GCP IAM installs log in as before. Under Entra ID
+    and GCP IAM only `PGSSLMODE` changes, which those logins do not read.
+
+### Changed
+
+- data-plane-api v1.60.0, the first image with the RDS IAM login.
+
 ## [v4.0.4] — 2026-11-11
 
 ### Fixed
