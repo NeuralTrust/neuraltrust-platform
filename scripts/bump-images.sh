@@ -296,6 +296,8 @@ set_fallback templates/redis/_helpers.tpl tag "$REDIS" || true
 set_tag '.global.postgresql.image.tag' "$POSTGRES" "postgres (in-cluster)" || true
 set_fallback templates/postgresql/deployment.yaml tag "$POSTGRES" || true
 set_fallback charts/control-plane-api/templates/api/deployment.yaml pgWaitImageTag "$POSTGRES" && touch_dir control-plane-api
+# wait-for-postgresql (agentgateway, alertengine). Parent template: no subchart to bump.
+set_fallback templates/_helpers.tpl pgWaitTag "$POSTGRES" || true
 set_fallback charts/data-plane-api/templates/api/deployment.yaml    chMigrationTag "$CLICKHOUSE" && touch_dir data-plane-api
 # wait-for-clickhouse (datacore, alertengine, collector). Parent template: no subchart to bump.
 set_fallback templates/_helpers.tpl chWaitTag "$CLICKHOUSE" || true

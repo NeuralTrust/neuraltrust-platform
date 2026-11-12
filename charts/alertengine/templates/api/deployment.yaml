@@ -39,9 +39,14 @@ spec:
              (AUT-409), resolved through the shared helper (AUT-636) so the wait
              follows a managed endpoint rather than the in-cluster Service. */}}
       {{- $ch := include "neuraltrust-platform.clickhouse.resolve" (dict "ctx" $ "local" .Values.clickhouse "global" .Values.global) | fromYaml }}
-      {{- with (include "neuraltrust-platform.clickhouse.waitInit" (dict "host" $ch.host "port" $ch.nativePort "global" .Values.global)) }}
+      {{- $chWait := include "neuraltrust-platform.clickhouse.waitInit" (dict "host" $ch.host "port" $ch.nativePort "global" .Values.global) }}
+      {{- /* And for the chart's own PostgreSQL, for the same reason (rendered only
+             when this release runs it and AlertEngine points at it). */}}
+      {{- $pgWait := include "neuraltrust-platform.postgresql.waitInit" (dict "ctx" $ "host" (default dict .Values.database).host) }}
+      {{- if or $chWait $pgWait }}
       initContainers:
-      {{- . | nindent 6 }}
+      {{- with $chWait }}{{ . | nindent 6 }}{{- end }}
+      {{- with $pgWait }}{{ . | nindent 6 }}{{- end }}
       {{- end }}
       containers:
       - name: alertengine
