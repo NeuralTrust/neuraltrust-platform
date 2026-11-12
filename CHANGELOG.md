@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v4.1.1] — 2026-11-12
+
 ### Fixed
 
 - **GPU firewall workers no longer fail every inference under
