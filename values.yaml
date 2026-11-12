@@ -1,8 +1,12 @@
 # NeuralTrust Platform (v2 only). For v1 clusters pin --version ~1.14.0.
 
 global:
-  # Cloud / Kubernetes flavour: "aws" | "gcp" | "azure" | "openshift" | "kubernetes"
-  platform: "gcp"
+  # Cloud / Kubernetes flavour: "aws" | "gcp" | "azure" | "openshift" | "kubernetes".
+  # Empty detects it: "gcp" when the cluster serves GKE's BackendConfig API
+  # (helm install/upgrade, Argo CD and Flux pass the cluster's APIs), otherwise
+  # "kubernetes". An offline `helm template` sees no cluster, so set "gcp"
+  # explicitly when rendering for GKE that way.
+  platform: ""
   # "hybrid" (default) → data planes in-cluster; control planes hosted.
   # "external" → control + data planes + in-cluster analytics (no DataAgent).
   # "saas" → everything external renders, plus DataBridge, the ClickStack ingest
@@ -1275,7 +1279,9 @@ data-plane-api:
             database: ""
             schema: "public"
             # Empty inherits global.postgresql.sslMode while this reads the
-            # shared credential (the existingSecret below), else "prefer".
+            # shared credential (the existingSecret below), else "prefer". An
+            # inherited verify-ca/verify-full becomes "require" unless
+            # global.customCaCert mounts the server's CA (see SECRETS.md).
             sslMode: ""
             existingSecret:
               name: "postgresql-secrets"

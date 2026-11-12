@@ -2432,25 +2432,37 @@ alone for it.
 {{- end }}
 
 {{/*
-"aws" when data-plane-api logs in to RDS with an IAM token, else "".
+data-plane-api's token login: "aws" (RDS IAM), "azure" (Entra ID) or "gcp"
+(Cloud SQL / AlloyDB IAM), else "" for a password login.
 
-global.postgresql.authMode=iam against a managed Postgres, AWS as the token
-provider (no Azure or GCP identity configured), and the shared credential. The
-Azure and GCP logins keep their own branches in dataPlaneApi.postgresEnv.
-Image floor: data-plane-api v1.60.0; older images reject POSTGRES_LOGIN=aws at boot.
+global.postgresql.authMode=iam against a managed Postgres, and only while
+data-plane-api reads the shared credential: a Secret of the operator's own in
+`api.database.postgresql.existingSecret` is a separate password login, so the
+global switch is left alone for it. The provider follows
+postgres.tokenProvider (the Azure / GCP identity block, else AWS).
+Image floors: data-plane-api v1.60.0 for aws; azure and gcp predate it.
 */}}
 {{- define "neuraltrust-platform.dataPlaneApi.postgresLogin" -}}
 {{- if and
-  (eq (include "neuraltrust-platform.postgres.tokenProvider" .) "aws")
   (eq (include "neuraltrust-platform.postgres.iamAuth" (dict "ctx" . "database" dict)) "true")
   (eq (include "neuraltrust-platform.dataPlaneApi.postgresShared" .) "true")
--}}aws{{- end -}}
+-}}
+{{- include "neuraltrust-platform.postgres.tokenProvider" . -}}
+{{- end -}}
 {{- end }}
 
 {{/*
-data-plane-api's sslMode: its own `api.database.postgresql.sslMode` when set;
-otherwise global.postgresql.sslMode when it reads the shared credential, with
-the same IAM default (`require`) the shared Secret uses; otherwise `prefer`.
+data-plane-api's sslMode: its own `api.database.postgresql.sslMode` when set,
+verbatim; otherwise global.postgresql.sslMode when it reads the shared
+credential, with the same IAM default (`require`) the shared Secret uses;
+otherwise `prefer`.
+
+An inherited verify-ca / verify-full is capped at `require` unless a CA bundle
+is mounted (global.customCaCert, which sets PGSSLROOTCERT). asyncpg verifies
+only against PGSSLROOTCERT or ~/.postgresql/root.crt and, unlike the Go
+clients, never falls back to the system store: without one it refuses to
+connect at all. `require` keeps the connection encrypted; mount the server's
+CA through global.customCaCert to have data-plane-api verify it too.
 */}}
 {{- define "neuraltrust-platform.dataPlaneApi.postgresSslMode" -}}
 {{- $pg := include "neuraltrust-platform.dataPlaneApi.postgresConfig" . | fromYaml }}
@@ -2459,7 +2471,12 @@ the same IAM default (`require`) the shared Secret uses; otherwise `prefer`.
 {{- if $pg.sslMode -}}
 {{- $pg.sslMode -}}
 {{- else if eq (include "neuraltrust-platform.dataPlaneApi.postgresShared" .) "true" -}}
-{{- $globalPg.sslMode | default (ternary "require" "prefer" $iam) -}}
+{{- $mode := $globalPg.sslMode | default (ternary "require" "prefer" $iam) | toString -}}
+{{- if and (has $mode (list "verify-ca" "verify-full")) (ne (include "neuraltrust-platform.customCaCert.enabled" .) "true") -}}
+require
+{{- else -}}
+{{- $mode -}}
+{{- end -}}
 {{- else -}}
 prefer
 {{- end -}}
@@ -2491,6 +2508,13 @@ Usage: {{ include "neuraltrust-platform.dataPlaneApi.awsRegionEnv" (dict "ctx" .
 {{- $pg := include "neuraltrust-platform.dataPlaneApi.postgresConfig" . | fromYaml }}
 {{- $es := default dict $pg.existingSecret }}
 {{- $secretName := $es.name | default "postgresql-secrets" }}
+{{- /* global.postgresql.existingSecret replaces postgresql-secrets, which the chart
+       then never renders. Follow it, as DataAgent does: that Secret carries the
+       canonical POSTGRES_* family, so the keys below still resolve and a missing
+       one stops the pod by name instead of pointing at a Secret nobody creates. */}}
+{{- if eq $secretName "postgresql-secrets" }}
+{{- $secretName = include "neuraltrust-platform.v2.hybridPg.secretName" . }}
+{{- end }}
 {{- $keys := default dict $es.keys }}
 {{- $hostKey := $keys.host | default "POSTGRES_HOST" }}
 {{- $portKey := $keys.port | default "POSTGRES_PORT" }}
@@ -2543,9 +2567,9 @@ Usage: {{ include "neuraltrust-platform.dataPlaneApi.awsRegionEnv" (dict "ctx" .
        renamed key is the operator's own wiring and is left alone. Both default to
        the chart's own names here rather than to empty, so they have to be compared
        rather than just tested.
-       An RDS IAM login reads no password, and an IAM install's shared Secret
+       A token login reads no password, and an IAM install's shared Secret
        carries an empty one, so no reference is emitted at all. */}}
-{{- if eq $login "aws" }}
+{{- if $login }}
 {{- else if or (ne $secretName "postgresql-secrets") (ne $passwordKey "POSTGRES_PASSWORD") }}
 - name: POSTGRES_PASSWORD
   valueFrom:
@@ -2559,38 +2583,26 @@ Usage: {{ include "neuraltrust-platform.dataPlaneApi.awsRegionEnv" (dict "ctx" .
   value: {{ include "neuraltrust-platform.dataPlaneApi.postgresSchema" . | quote }}
 - name: PGSSLMODE
   value: {{ $sslMode | quote }}
-{{- /* Entra ID token auth. This is a literal, NOT the postgresql-secrets key of
-       the same name: that key carries "iam"/"password" for the Next.js app,
-       while this service's enum is "azure_ad"/"password" and it raises at boot
-       on anything else. Same variable name, two different vocabularies — wiring
-       the Secret key here would stop the pod.
-       The scope and the credential env come from postgres.cloudAuthEnv, which
-       the api and postgres-migrations containers include next to this helper.
-       POSTGRES_SSL is left unset on purpose — the client defaults it to
-       "require" under azure_ad, which is what this path demands anyway. */}}
-{{- if eq (include "neuraltrust-platform.postgres.tokenProvider" .) "azure" }}
-{{- if eq (include "neuraltrust-platform.postgres.iamAuth" (dict "ctx" . "database" dict)) "true" }}
+{{- /* Token logins. A token login passes its own TLS mode to the driver, so
+       PGSSLMODE is not consulted and the client falls back to "require":
+       POSTGRES_SSL carries the resolved mode through, and is what the
+       evaluation Jobs inherit. A mode weaker than require is left out.
+       Entra ID uses POSTGRES_AUTH_MODE=azure_ad, a literal and NOT the
+       postgresql-secrets key of the same name: that key carries
+       "iam"/"password" for the Next.js app, while this service's enum is
+       "azure_ad"/"password" and it raises at boot on anything else. The scope
+       and the credential env come from postgres.cloudAuthEnv, which the api and
+       postgres-migrations containers include next to this helper. */}}
+{{- if eq $login "azure" }}
 - name: POSTGRES_AUTH_MODE
   value: "azure_ad"
-{{- end }}
-{{- else if eq (include "neuraltrust-platform.postgres.tokenProvider" .) "gcp" }}
-{{- /* GCP IAM: POSTGRES_LOGIN outranks POSTGRES_AUTH_MODE, and the client
-       defaults POSTGRES_SSL to "require" under it, as it does for azure_ad. */}}
-{{- if eq (include "neuraltrust-platform.postgres.iamAuth" (dict "ctx" . "database" dict)) "true" }}
+{{- else if $login }}
 - name: POSTGRES_LOGIN
-  value: "gcp"
+  value: {{ $login | quote }}
 {{- end }}
-{{- else if eq $login "aws" }}
-{{- /* RDS IAM. A token login passes its own TLS mode to the driver, so PGSSLMODE
-       is not consulted and the client falls back to "require": POSTGRES_SSL
-       carries a verify-ca / verify-full choice through, and is what the
-       evaluation Jobs inherit. A weaker mode is left out, keeping "require". */}}
-- name: POSTGRES_LOGIN
-  value: "aws"
-{{- if has $sslMode (list "require" "verify-ca" "verify-full") }}
+{{- if and $login (has $sslMode (list "require" "verify-ca" "verify-full")) }}
 - name: POSTGRES_SSL
   value: {{ $sslMode | quote }}
-{{- end }}
 {{- end }}
 {{- end -}}
 
@@ -2619,10 +2631,37 @@ Ingress helpers.
 {{- end }}
 {{- end }}
 
+{{/*
+The platform the chart renders for: global.platform when set, otherwise detected.
+
+Empty (the default) means auto: "gcp" when the cluster serves GKE's
+BackendConfig API, else "kubernetes" (portable Ingress, no cloud objects). A
+live `helm install` / `helm upgrade`, Argo CD and Flux all pass the cluster's
+API versions, so a GKE install that never set platform keeps its BackendConfig,
+NEG annotations and gce Ingress, while any other cluster stops failing on the
+missing CRD. An offline `helm template` sees no GKE API and renders
+"kubernetes"; set global.platform: gcp there.
+
+`ctx` is the root (or subchart) context, for .Capabilities. Helpers that are
+handed only `global` pass it through as `ctx`; without one, auto resolves to
+"kubernetes".
+Usage: {{ include "neuraltrust-platform.platform" (dict "global" .Values.global "ctx" $) }}
+*/}}
+{{- define "neuraltrust-platform.platform" -}}
+{{- $explicit := (default dict .global).platform | default "" | toString | trim -}}
+{{- if $explicit -}}
+{{- $explicit -}}
+{{- else if and .ctx (.ctx.Capabilities.APIVersions.Has "cloud.google.com/v1/BackendConfig") -}}
+gcp
+{{- else -}}
+kubernetes
+{{- end -}}
+{{- end }}
+
 {{- define "neuraltrust-platform.ingress.provider" -}}
 {{- $global := default dict .Values.global }}
 {{- $globalIngress := default dict $global.ingress }}
-{{- $platform := $global.platform | default "kubernetes" }}
+{{- $platform := include "neuraltrust-platform.platform" (dict "global" $global "ctx" .) }}
 {{- if $globalIngress.provider }}
   {{- $globalIngress.provider }}
 {{- else if eq $platform "aws" }}
@@ -2642,7 +2681,7 @@ Ingress helpers.
 {{- $local := .local }}
 {{- $globalIngress := default dict (default dict .global).ingress }}
 {{- $global := default dict .global }}
-{{- $platform := $global.platform | default "kubernetes" }}
+{{- $platform := include "neuraltrust-platform.platform" (dict "global" $global "ctx" .ctx) }}
 {{- $provider := $globalIngress.provider | default "" }}
 {{- if not $provider }}
   {{- if eq $platform "aws" }}{{ $provider = "aws" }}
@@ -2669,7 +2708,7 @@ Ingress helpers.
 {{- $merged := dict }}
 {{- $globalIngress := default dict (default dict .global).ingress }}
 {{- $global := default dict .global }}
-{{- $platform := $global.platform | default "kubernetes" }}
+{{- $platform := include "neuraltrust-platform.platform" (dict "global" $global "ctx" .ctx) }}
 {{- $provider := $globalIngress.provider | default "" }}
 {{- if not $provider }}
   {{- if eq $platform "aws" }}{{ $provider = "aws" }}
@@ -2859,7 +2898,7 @@ insecureEdgeTerminationPolicy: {{ $tls.insecureEdgeTerminationPolicy | default "
 {{- define "neuraltrust-platform.ingress.renderTLS" -}}
 {{- $globalIngress := default dict (default dict .global).ingress }}
 {{- $global := default dict .global }}
-{{- $platform := $global.platform | default "kubernetes" }}
+{{- $platform := include "neuraltrust-platform.platform" (dict "global" $global "ctx" .ctx) }}
 {{- $provider := $globalIngress.provider | default "" }}
 {{- if not $provider }}
   {{- if eq $platform "aws" }}{{ $provider = "aws" }}
@@ -2896,7 +2935,7 @@ Call with the subchart context.
 {{- $tls := default dict .Values.ingress.tls }}
 {{- $enabled := or $tls.secretName (not (include "neuraltrust-platform.ingress.autoGenerateTLSSecret" (dict "global" .Values.global))) }}
 {{- if not (kindIs "invalid" $tls.enabled) }}{{ $enabled = $tls.enabled }}{{- end }}
-{{- include "neuraltrust-platform.ingress.renderTLS" (dict "global" .Values.global "tlsEnabled" $enabled) }}
+{{- include "neuraltrust-platform.ingress.renderTLS" (dict "global" .Values.global "ctx" . "tlsEnabled" $enabled) }}
 {{- end }}
 
 {{/*
@@ -3000,7 +3039,7 @@ spec:
 {{- define "neuraltrust-platform.service.negAnnotations" -}}
 {{- $global := default dict .global }}
 {{- $globalIngress := default dict $global.ingress }}
-{{- $platform := $global.platform | default "kubernetes" }}
+{{- $platform := include "neuraltrust-platform.platform" (dict "global" $global "ctx" .ctx) }}
 {{- $provider := $globalIngress.provider | default "" }}
 {{- if not $provider }}
   {{- if eq $platform "gcp" }}{{ $provider = "gcp" }}{{- end }}
@@ -3026,7 +3065,7 @@ cloud.google.com/neg: '{"ingress": true}'
   {{- end }}
 {{- end }}
 {{- if eq $provider "gcp" }}
-  {{- $backendConfigName := include "neuraltrust-platform.service.gkeBackendConfigName" (dict "global" $global "localName" (.backendConfigName | default "")) }}
+  {{- $backendConfigName := include "neuraltrust-platform.service.gkeBackendConfigName" (dict "global" $global "ctx" .ctx "localName" (.backendConfigName | default "")) }}
   {{- if $backendConfigName }}
 cloud.google.com/backend-config: {{ printf "{\"default\":\"%s\"}" $backendConfigName | squote }}
   {{- end }}
@@ -3036,7 +3075,7 @@ cloud.google.com/backend-config: {{ printf "{\"default\":\"%s\"}" $backendConfig
 {{- define "neuraltrust-platform.service.gkeBackendConfigName" -}}
 {{- $global := default dict .global }}
 {{- $globalIngress := default dict $global.ingress }}
-{{- $platform := $global.platform | default "kubernetes" }}
+{{- $platform := include "neuraltrust-platform.platform" (dict "global" $global "ctx" .ctx) }}
 {{- $provider := $globalIngress.provider | default "" }}
 {{- if not $provider }}
   {{- if eq $platform "gcp" }}{{ $provider = "gcp" }}{{- end }}
@@ -3270,7 +3309,7 @@ Usage: {{ include "neuraltrust-platform.controlPlane.l4Annotations" (dict "ctx" 
 {{- $ctx := .ctx -}}
 {{- $local := default dict .local -}}
 {{- $merged := dict -}}
-{{- $platform := (default dict $ctx.Values.global).platform | default "kubernetes" | toString | trim | lower -}}
+{{- $platform := include "neuraltrust-platform.platform" (dict "global" $ctx.Values.global "ctx" $ctx) | lower -}}
 {{- $scheme := include "neuraltrust-platform.controlPlane.loadBalancerScheme" $ctx -}}
 {{- if eq $platform "aws" -}}
 {{- $_ := set $merged "service.beta.kubernetes.io/aws-load-balancer-type" "nlb" -}}
@@ -5134,6 +5173,72 @@ Usage:
 {{- end -}}
 
 {{/*
+Init container that waits for the chart's own PostgreSQL before a Postgres client
+starts. On a fresh install the clients otherwise race it: TrustGate's startup probe
+allows 150 s, and when PostgreSQL lands on a node the autoscaler is still adding,
+the kubelet restarts them several times before the database accepts connections.
+
+Renders only when this release runs PostgreSQL itself
+(neuraltrust-platform.postgresql.deploy) and the client points at it: no
+global.postgresql.host, and no per-service host other than the in-cluster Service.
+A managed database renders nothing, so those installs are unchanged.
+
+Same image as the PostgreSQL it waits for (global.postgresql.image, visible from
+every subchart), so a registry mirror needs nothing extra and IfNotPresent makes the
+pull free. pg_isready needs no credentials, so it works under every auth mode.
+Bounded at ~5 minutes so a PostgreSQL that never comes up fails with a readable
+message instead of hanging the rollout. pgWaitTag is the fallback when values carry
+no tag; scripts/bump-images.sh and the bump-images workflow rewrite it with the
+in-cluster postgres tag.
+
+  ctx   the subchart context
+  host  the client's own database host override, if it has one
+
+Usage:
+  {{- include "neuraltrust-platform.postgresql.waitInit" (dict "ctx" . "host" .Values.database.host) | nindent 6 }}
+*/}}
+{{- define "neuraltrust-platform.postgresql.waitInit" -}}
+{{- $ctx := .ctx -}}
+{{- $pg := default dict (default dict $ctx.Values.global).postgresql -}}
+{{- $localHost := .host | default "" | toString | trim -}}
+{{- $service := "control-plane-postgresql" -}}
+{{- if and
+  (eq (include "neuraltrust-platform.postgresql.deploy" $ctx) "true")
+  (not ($pg.host | default "" | toString | trim))
+  (or (not $localHost) (eq $localHost $service))
+-}}
+{{- $img := default dict $pg.image -}}
+{{- $pgWaitTag := "17.11-alpine" -}}
+- name: wait-for-postgresql
+  image: {{ include "neuraltrust-platform.image" (dict "repository" ($img.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/postgres") "tag" ($img.tag | default $pgWaitTag) "global" $ctx.Values.global) | quote }}
+  imagePullPolicy: {{ $img.pullPolicy | default "IfNotPresent" }}
+  command:
+    - /bin/sh
+    - -c
+    - |
+      HOST={{ $service | quote }}
+      PORT={{ $pg.port | default 5432 | toString | quote }}
+      ATTEMPTS=60
+      i=0
+      until pg_isready -h "$HOST" -p "$PORT" -t 2 >/dev/null 2>&1; do
+        i=$((i+1))
+        if [ "$i" -ge "$ATTEMPTS" ]; then
+          echo "PostgreSQL at ${HOST}:${PORT} still not ready after $((ATTEMPTS*5))s; giving up so the failure is visible rather than hanging." >&2
+          exit 1
+        fi
+        echo "waiting for PostgreSQL at ${HOST}:${PORT} (${i}/${ATTEMPTS})"
+        sleep 5
+      done
+      echo "PostgreSQL at ${HOST}:${PORT} is accepting connections"
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+{{- end -}}
+{{- end -}}
+
+{{/*
 Whether the in-cluster secrets generator issues the shared self-signed ingress
 certificate (templates/ingress-tls-secret.yaml would otherwise render it).
 */}}
@@ -5141,7 +5246,7 @@ certificate (templates/ingress-tls-secret.yaml would otherwise render it).
 {{- if and
   (eq (include "neuraltrust-platform.secretsGenerator.active" .ctx) "true")
   (eq (include "neuraltrust-platform.ingress.autoGenerateTLSSecret" (dict "global" .global)) "true")
-  (eq (include "neuraltrust-platform.ingress.sharedTLSUsed" (dict "global" .global)) "true") -}}true{{- end -}}
+  (eq (include "neuraltrust-platform.ingress.sharedTLSUsed" (dict "global" .global "ctx" .ctx)) "true") -}}true{{- end -}}
 {{- end }}
 
 {{/*
@@ -5155,5 +5260,5 @@ Args: dict "global" .Values.global
 {{- define "neuraltrust-platform.ingress.sharedTLSUsed" -}}
 {{- if and
   (ne (include "neuraltrust-platform.ingress.gatewayApi" (dict "global" .global)) "true")
-  (include "neuraltrust-platform.ingress.renderTLS" (dict "global" .global "tlsEnabled" true)) -}}true{{- end -}}
+  (include "neuraltrust-platform.ingress.renderTLS" (dict "global" .global "ctx" .ctx "tlsEnabled" true)) -}}true{{- end -}}
 {{- end }}
