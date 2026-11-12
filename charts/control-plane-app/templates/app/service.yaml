@@ -1,6 +1,6 @@
 {{- if eq (include "control-plane-app.enabled" .) "true" }}
 
-{{- $gkeBackendConfigName := include "neuraltrust-platform.service.gkeBackendConfigName" (dict "global" .Values.global "localName" "control-plane-app-backendconfig") }}
+{{- $gkeBackendConfigName := include "neuraltrust-platform.service.gkeBackendConfigName" (dict "ctx" $ "global" .Values.global "localName" "control-plane-app-backendconfig") }}
 {{- $gcp := default dict (default dict .Values.global.ingress).gcp }}
 {{- if and .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.ingress .Values.controlPlane.components.app.ingress.enabled $gkeBackendConfigName (not $gcp.backendConfig) }}
 apiVersion: cloud.google.com/v1
@@ -17,7 +17,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: control-plane-app-service
-  {{- $negAnnotations := include "neuraltrust-platform.service.negAnnotations" (dict "global" .Values.global "backendConfigName" "control-plane-app-backendconfig" "pscServiceKey" "control-plane-app") }}
+  {{- $negAnnotations := include "neuraltrust-platform.service.negAnnotations" (dict "ctx" $ "global" .Values.global "backendConfigName" "control-plane-app-backendconfig" "pscServiceKey" "control-plane-app") }}
   {{- if $negAnnotations }}
   annotations:
     {{- $negAnnotations | nindent 4 }}
@@ -67,17 +67,17 @@ kind: Ingress
 metadata:
   name: "control-plane-app-ingress"
   {{- $resolvedAppHost := include "neuraltrust-platform.ingress.host" (dict "host" .Values.controlPlane.components.app.host "prefix" .Values.controlPlane.components.app.hostPrefix "global" .Values.global) }}
-  {{- $annotations := include "neuraltrust-platform.ingress.annotations" (dict "global" .Values.global "local" .Values.controlPlane.components.app.ingress.annotations) }}
+  {{- $annotations := include "neuraltrust-platform.ingress.annotations" (dict "ctx" $ "global" .Values.global "local" .Values.controlPlane.components.app.ingress.annotations) }}
   {{- if $annotations }}
   annotations:
     {{- $annotations | nindent 4 }}
   {{- end }}
 spec:
-  {{- $className := include "neuraltrust-platform.ingress.className" (dict "global" .Values.global "local" .Values.controlPlane.components.app.ingress.className) }}
+  {{- $className := include "neuraltrust-platform.ingress.className" (dict "ctx" $ "global" .Values.global "local" .Values.controlPlane.components.app.ingress.className) }}
   {{- if $className }}
   ingressClassName: {{ $className }}
   {{- end }}
-  {{- if and .Values.controlPlane.components.app.ingress.tls.enabled (include "neuraltrust-platform.ingress.renderTLS" (dict "global" .Values.global "tlsEnabled" .Values.controlPlane.components.app.ingress.tls.enabled)) }}
+  {{- if and .Values.controlPlane.components.app.ingress.tls.enabled (include "neuraltrust-platform.ingress.renderTLS" (dict "ctx" $ "global" .Values.global "tlsEnabled" .Values.controlPlane.components.app.ingress.tls.enabled)) }}
   tls:
     - {{- if or $resolvedAppHost .Values.controlPlane.components.app.secondaryHost }}
       hosts:
