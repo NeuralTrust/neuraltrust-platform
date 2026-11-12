@@ -2414,6 +2414,79 @@ token login) it is configuration and the Deployment sets it as a plain value.
 {{- $schema }}
 {{- end }}
 
+{{/*
+Whether data-plane-api connects with the install's shared Postgres credential:
+the chart's own `postgresql-secrets` (or the Secret `global.postgresql.existingSecret`
+names in its place) under the default password key. An operator who points
+`api.database.postgresql.existingSecret` at a Secret of their own has given
+data-plane-api a separate login, so the global IAM and sslMode settings are left
+alone for it.
+*/}}
+{{- define "neuraltrust-platform.dataPlaneApi.postgresShared" -}}
+{{- $pg := include "neuraltrust-platform.dataPlaneApi.postgresConfig" . | fromYaml }}
+{{- $es := default dict $pg.existingSecret }}
+{{- $secretName := $es.name | default "postgresql-secrets" }}
+{{- $passwordKey := (default dict $es.keys).password | default "POSTGRES_PASSWORD" }}
+{{- $sharedNames := list "postgresql-secrets" (include "neuraltrust-platform.v2.hybridPg.secretName" .) }}
+{{- if and (has $secretName $sharedNames) (eq $passwordKey "POSTGRES_PASSWORD") -}}true{{- end -}}
+{{- end }}
+
+{{/*
+"aws" when data-plane-api logs in to RDS with an IAM token, else "".
+
+global.postgresql.authMode=iam against a managed Postgres, AWS as the token
+provider (no Azure or GCP identity configured), and the shared credential. The
+Azure and GCP logins keep their own branches in dataPlaneApi.postgresEnv.
+Image floor: data-plane-api v1.60.0; older images reject POSTGRES_LOGIN=aws at boot.
+*/}}
+{{- define "neuraltrust-platform.dataPlaneApi.postgresLogin" -}}
+{{- if and
+  (eq (include "neuraltrust-platform.postgres.tokenProvider" .) "aws")
+  (eq (include "neuraltrust-platform.postgres.iamAuth" (dict "ctx" . "database" dict)) "true")
+  (eq (include "neuraltrust-platform.dataPlaneApi.postgresShared" .) "true")
+-}}aws{{- end -}}
+{{- end }}
+
+{{/*
+data-plane-api's sslMode: its own `api.database.postgresql.sslMode` when set;
+otherwise global.postgresql.sslMode when it reads the shared credential, with
+the same IAM default (`require`) the shared Secret uses; otherwise `prefer`.
+*/}}
+{{- define "neuraltrust-platform.dataPlaneApi.postgresSslMode" -}}
+{{- $pg := include "neuraltrust-platform.dataPlaneApi.postgresConfig" . | fromYaml }}
+{{- $globalPg := default dict (default dict .Values.global).postgresql }}
+{{- $iam := eq (include "neuraltrust-platform.postgres.iamAuth" (dict "ctx" . "database" dict)) "true" }}
+{{- if $pg.sslMode -}}
+{{- $pg.sslMode -}}
+{{- else if eq (include "neuraltrust-platform.dataPlaneApi.postgresShared" .) "true" -}}
+{{- $globalPg.sslMode | default (ternary "require" "prefer" $iam) -}}
+{{- else -}}
+prefer
+{{- end -}}
+{{- end }}
+
+{{/*
+AWS_REGION for the RDS IAM login, from global.postgresql.awsRegion. The client
+signs the token for an explicit region and refuses to start without one, and
+IRSA supplies a role but no region. data-plane-api has no env ConfigMap, so this
+is emitted in every mode, not only in hybrid as postgres.cloudAuthEnv is. `skip`
+takes the container's extraEnv, so an operator-set AWS_REGION is never duplicated.
+Usage: {{ include "neuraltrust-platform.dataPlaneApi.awsRegionEnv" (dict "ctx" . "skip" $api.extraEnv) }}
+*/}}
+{{- define "neuraltrust-platform.dataPlaneApi.awsRegionEnv" -}}
+{{- if eq (include "neuraltrust-platform.dataPlaneApi.postgresLogin" .ctx) "aws" -}}
+{{- $skip := list -}}
+{{- range $e := (default list .skip) -}}{{- $skip = append $skip $e.name -}}{{- end -}}
+{{- $globalPg := default dict (default dict .ctx.Values.global).postgresql -}}
+{{- with $globalPg.awsRegion | default "" | toString | trim }}
+{{- if not (has "AWS_REGION" $skip) }}
+- name: AWS_REGION
+  value: {{ . | quote }}
+{{- end }}
+{{- end }}
+{{- end -}}
+{{- end }}
+
 {{- define "neuraltrust-platform.dataPlaneApi.postgresEnv" -}}
 {{- $pg := include "neuraltrust-platform.dataPlaneApi.postgresConfig" . | fromYaml }}
 {{- $es := default dict $pg.existingSecret }}
@@ -2424,6 +2497,8 @@ token login) it is configuration and the Deployment sets it as a plain value.
 {{- $userKey := $keys.user | default "POSTGRES_USER" }}
 {{- $passwordKey := $keys.password | default "POSTGRES_PASSWORD" }}
 {{- $databaseKey := $keys.database | default "POSTGRES_DB" }}
+{{- $login := include "neuraltrust-platform.dataPlaneApi.postgresLogin" . }}
+{{- $sslMode := include "neuraltrust-platform.dataPlaneApi.postgresSslMode" . }}
 - name: SQL_DATABASE
   value: "postgres"
 - name: POSTGRES_HOST
@@ -2467,8 +2542,11 @@ token login) it is configuration and the Deployment sets it as a plain value.
        password lives (global.postgresql.passwordSecret). A redirected Secret or a
        renamed key is the operator's own wiring and is left alone. Both default to
        the chart's own names here rather than to empty, so they have to be compared
-       rather than just tested. */}}
-{{- if or (ne $secretName "postgresql-secrets") (ne $passwordKey "POSTGRES_PASSWORD") }}
+       rather than just tested.
+       An RDS IAM login reads no password, and an IAM install's shared Secret
+       carries an empty one, so no reference is emitted at all. */}}
+{{- if eq $login "aws" }}
+{{- else if or (ne $secretName "postgresql-secrets") (ne $passwordKey "POSTGRES_PASSWORD") }}
 - name: POSTGRES_PASSWORD
   valueFrom:
     secretKeyRef:
@@ -2480,7 +2558,7 @@ token login) it is configuration and the Deployment sets it as a plain value.
 - name: POSTGRES_SCHEMA
   value: {{ include "neuraltrust-platform.dataPlaneApi.postgresSchema" . | quote }}
 - name: PGSSLMODE
-  value: {{ $pg.sslMode | default "prefer" | quote }}
+  value: {{ $sslMode | quote }}
 {{- /* Entra ID token auth. This is a literal, NOT the postgresql-secrets key of
        the same name: that key carries "iam"/"password" for the Next.js app,
        while this service's enum is "azure_ad"/"password" and it raises at boot
@@ -2501,6 +2579,17 @@ token login) it is configuration and the Deployment sets it as a plain value.
 {{- if eq (include "neuraltrust-platform.postgres.iamAuth" (dict "ctx" . "database" dict)) "true" }}
 - name: POSTGRES_LOGIN
   value: "gcp"
+{{- end }}
+{{- else if eq $login "aws" }}
+{{- /* RDS IAM. A token login passes its own TLS mode to the driver, so PGSSLMODE
+       is not consulted and the client falls back to "require": POSTGRES_SSL
+       carries a verify-ca / verify-full choice through, and is what the
+       evaluation Jobs inherit. A weaker mode is left out, keeping "require". */}}
+- name: POSTGRES_LOGIN
+  value: "aws"
+{{- if has $sslMode (list "require" "verify-ca" "verify-full") }}
+- name: POSTGRES_SSL
+  value: {{ $sslMode | quote }}
 {{- end }}
 {{- end }}
 {{- end -}}

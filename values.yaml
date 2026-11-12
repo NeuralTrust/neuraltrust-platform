@@ -348,8 +348,9 @@ global:
     connectionLimit: 15
     # authMode: password | iam (external Postgres only; ignored when deploy=true).
     # awsRegion is required for IAM token minting on control-plane api/app, and
-    # in hybrid reaches the gateways and DataAgents as AWS_REGION. Hybrid IAM
-    # needs sslMode require/verify-ca/verify-full; DataAgent floor v0.8.0.
+    # in hybrid reaches the gateways, DataAgents and data-plane-api as AWS_REGION.
+    # Hybrid IAM needs sslMode require/verify-ca/verify-full; DataAgent floor
+    # v0.8.0, data-plane-api floor v1.60.0.
     authMode: "password"
     awsRegion: ""
     # Entra ID scope requested for the Postgres token, when the token provider is
@@ -1037,7 +1038,7 @@ control-plane-app:
 # stays agentgateway for now; K8s names stay agentgateway-*.
 agentgateway:
   image:
-    tag: "v0.82.0"
+    tag: "v0.82.1"
   # Empty host/port/sslMode/username/tls inherit from global.postgresql /
   # global.redis, then fall back to the in-cluster Services. Set them here only
   # to point this one service somewhere else.
@@ -1273,7 +1274,9 @@ data-plane-api:
             user: ""
             database: ""
             schema: "public"
-            sslMode: "prefer"
+            # Empty inherits global.postgresql.sslMode while this reads the
+            # shared credential (the existingSecret below), else "prefer".
+            sslMode: ""
             existingSecret:
               name: "postgresql-secrets"
               keys:
@@ -1295,7 +1298,7 @@ data-plane-api:
               resources: {}
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.59.1
+          tag: v1.60.0
           pullPolicy: IfNotPresent
         accessMode: ReadWriteOnce
         storage: 10Gi
@@ -1374,7 +1377,7 @@ firewall:
       replicas: 2
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-        tag: "v2.49.1"
+        tag: "v2.51.0"
         pullPolicy: IfNotPresent
       resources:
         requests:
@@ -1400,7 +1403,7 @@ firewall:
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
         # Keep in lockstep with gateway.image.tag.
-        tag: "v2.49.1"
+        tag: "v2.51.0"
         pullPolicy: IfNotPresent
       replicas: 1
       resources:

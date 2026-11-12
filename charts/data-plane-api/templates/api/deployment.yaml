@@ -28,7 +28,7 @@
 {{- $api := default dict .Values.dataPlane.components.api }}
 {{- $apiImage := default dict $api.image }}
 {{- $apiRepo := $apiImage.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api" }}
-{{- $apiTag := $apiImage.tag | default "v1.59.1" }}
+{{- $apiTag := $apiImage.tag | default "v1.60.0" }}
 {{- $apiPull := $apiImage.pullPolicy | default "IfNotPresent" }}
 {{- /* The ClickHouse DDL ships inside the data-plane-api image, so it always matches
        the application version that reads it. Setting clickhouse.configmap.name opts
@@ -355,6 +355,9 @@ spec:
           {{- . | nindent 10 }}
           {{- end }}
           {{- end }}
+          {{- with include "neuraltrust-platform.dataPlaneApi.awsRegionEnv" (dict "ctx" . "skip" $api.extraEnv) | trim }}
+          {{- . | nindent 10 }}
+          {{- end }}
           {{- with $api.extraEnv }}
           {{- toYaml . | nindent 10 }}
           {{- end }}
@@ -502,6 +505,9 @@ spec:
           {{- with include "neuraltrust-platform.postgres.cloudAuthEnv" (dict "ctx" . "skip" $api.extraEnv "scopeVar" "POSTGRES_AZURE_SCOPE") | trim }}
           {{- . | nindent 10 }}
           {{- end }}
+          {{- end }}
+          {{- with include "neuraltrust-platform.dataPlaneApi.awsRegionEnv" (dict "ctx" . "skip" $api.extraEnv) | trim }}
+          {{- . | nindent 10 }}
           {{- end }}
           {{- else }}
           # App defaults SQL_DATABASE to postgres when unset; must be explicit for ClickHouse.

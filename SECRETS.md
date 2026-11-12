@@ -546,7 +546,7 @@ helper, so the manifest shows which variables a pod actually reads:
 |---|---|---|
 | `POSTGRES_HOST` / `_PORT` / `_USER` / `_PASSWORD` | `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` | TrustGate, TrustGuard |
 | `POSTGRES_DB` | `DB_NAME` | TrustGate, TrustGuard |
-| `POSTGRES_DB` | `POSTGRES_DATABASE` | control-plane-app, control-plane-api, DataCore |
+| `POSTGRES_DB` | `POSTGRES_DATABASE` | control-plane-app, control-plane-api, DataCore, data-plane-api |
 | `POSTGRES_SSLMODE` | `DB_SSL_MODE` | TrustGate, TrustGuard |
 | `POSTGRES_HOST` / `_PORT` / `_USER` / `_PASSWORD` / `_DB` / `_SSLMODE` | (same names) | DataAgent (`lib/pq`) — hybrid; builds its own keyword DSN (RUN-1093) |
 | `POSTGRES_PRISMA_URL` | `DATABASE_URL` | control-plane-app (Prisma) — external only |
@@ -578,6 +578,27 @@ are removed on the next upgrade that rewrites the Secret.
 >   `scripts/postgres-iam-url.mjs` for Prisma migrate in the init container).
 > Until those images are in use, leave `authMode: password` (default). IAM is
 > ignored for the bundled in-cluster PostgreSQL — it always uses a password.
+
+> **data-plane-api under RDS IAM.** With `global.postgresql.authMode: iam` on AWS
+> (no `global.azureIdentity` or `global.gcpIdentity`), data-plane-api and its
+> `postgres-migrations` initContainer log in with an RDS IAM token:
+> `POSTGRES_LOGIN=aws`, `AWS_REGION` from `global.postgresql.awsRegion`, and no
+> `POSTGRES_PASSWORD` reference. Its TLS mode follows `global.postgresql.sslMode`
+> (`require` when unset) unless
+> `data-plane-api.dataPlane.components.api.database.postgresql.sslMode` is set.
+> Requirements:
+> - data-plane-api image **v1.60.0+**; older images reject `POSTGRES_LOGIN=aws` at boot.
+> - The `data-plane` ServiceAccount takes its IAM role from `global.irsa`
+>   (`roleArn` with `applyGlobally: true`) or from
+>   `data-plane-api.dataPlane.serviceAccount.annotations`
+>   (`eks.amazonaws.com/role-arn`). The role needs `rds-db:connect` on
+>   `arn:aws:rds-db:<region>:<account-id>:dbuser:<db-resource-id>/<db-user>`,
+>   where `<db-user>` is `global.postgresql.user` and has been granted `rds_iam`.
+> - Evaluation Jobs, when `k8sJobs` is enabled, run under the same `data-plane`
+>   ServiceAccount and inherit the login and region, so they need nothing more.
+>
+> Pointing `api.database.postgresql.existingSecret` at a Secret of your own keeps
+> data-plane-api on that Secret's password, whatever `authMode` says.
 
 ### Infrastructure
 
