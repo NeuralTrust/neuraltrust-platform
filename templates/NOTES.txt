@@ -12,7 +12,7 @@ Secrets have been auto-generated for this deployment.
 {{- $trustgateEnabled := eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustgate")) "true" }}
 {{- $trustguardEnabled := eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustguard")) "true" }}
 {{- $dataPlaneEnabled := eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "dataPlane")) "true" }}
-{{- $platform := .Values.global.platform | default "gcp" }}
+{{- $platform := include "neuraltrust-platform.platform" (dict "global" .Values.global "ctx" $) }}
 {{- $ipField := "ip" }}
 {{- if eq $platform "aws" }}
   {{- $ipField = "hostname" }}

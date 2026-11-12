@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Render scenarios 2c. Run through scripts/test-helm-render.sh.
+# Render scenarios 2c, 2c-dp. Run through scripts/test-helm-render.sh.
 
 source "$(dirname "$0")/lib.sh"
 suite_full || exit 0
@@ -382,3 +382,63 @@ assert_not_contains "$out2c_none" 'azure\.workload\.identity' \
   "no cloud identity: nothing Azure renders by default"
 assert_not_contains "$out2c_none" 'name: AZURE_' \
   "no cloud identity: no Azure env renders by default"
+
+# ---------------------------------------------------------------------------
+# 2c-dp. data-plane-api under Entra ID and GCP IAM follows the same three rules
+# as its RDS IAM login: the token login only on the shared credential (a Secret
+# of the operator's own keeps that Secret's password), no password reference
+# under a token login, and POSTGRES_SSL carrying the TLS mode, since a token
+# login ignores PGSSLMODE.
+# ---------------------------------------------------------------------------
+blue "==> Scenario 2c-dp: data-plane-api Entra ID / GCP IAM logins"
+DP_AZ_ARGS=(
+  --set global.products.dataPlane=true
+  --set global.postgresql.deploy=false
+  --set global.postgresql.host=pg.postgres.database.azure.com
+  --set global.postgresql.authMode=iam
+  --set global.postgresql.user=nt-umi
+  --set global.azureIdentity.method=workload-identity
+  --set global.azureIdentity.clientId=00000000-0000-0000-0000-000000000000
+  --set global.azureIdentity.applyGlobally=true
+)
+DP_GCP_ARGS=(
+  --set global.products.dataPlane=true
+  --set global.postgresql.deploy=false
+  --set global.postgresql.host=10.0.0.5
+  --set global.postgresql.authMode=iam
+  --set global.postgresql.user=dp@example-project.iam
+  --set global.gcpIdentity.method=workload-identity
+  --set global.gcpIdentity.serviceAccount=dp@example-project.iam.gserviceaccount.com
+  --set global.gcpIdentity.applyGlobally=true
+)
+DP_OWN_ARGS=(
+  --set data-plane-api.dataPlane.components.api.database.postgresql.existingSecret.name=dp-own
+  --set data-plane-api.dataPlane.components.api.database.postgresql.existingSecret.keys.password=password
+)
+DP_CA_ARGS=(--set global.customCaCert.enabled=true --set global.customCaCert.secretName=pg-ca)
+
+for cloud in az gcp; do
+  if [[ "$cloud" == az ]]; then args=("${DP_AZ_ARGS[@]}"); switch=POSTGRES_AUTH_MODE; want=azure_ad
+  else args=("${DP_GCP_ARGS[@]}"); switch=POSTGRES_LOGIN; want=gcp; fi
+
+  shared="$TMP/dp-$cloud-shared.yaml"
+  render_default "$shared" "${args[@]}" --set global.postgresql.sslMode=require
+  own="$TMP/dp-$cloud-own.yaml"
+  render_default "$own" "${args[@]}" --set global.postgresql.sslMode=require "${DP_OWN_ARGS[@]}"
+  vf="$TMP/dp-$cloud-verify-full.yaml"
+  render_default "$vf" "${args[@]}" --set global.postgresql.sslMode=verify-full "${DP_CA_ARGS[@]}"
+  for c in api postgres-migrations; do
+    assert_env_value "$shared" data-plane-api "$c" "$switch" "$want" \
+      "$cloud shared: data-plane-api/$c takes the token login"
+    assert_env_value "$shared" data-plane-api "$c" POSTGRES_PASSWORD ABSENT \
+      "$cloud shared: data-plane-api/$c references no password"
+    assert_env_value "$shared" data-plane-api "$c" POSTGRES_SSL require \
+      "$cloud shared: data-plane-api/$c passes the TLS mode to the token login"
+    assert_env_value "$own" data-plane-api "$c" "$switch" ABSENT \
+      "$cloud own Secret: data-plane-api/$c stays on that Secret's password"
+    assert_env_value "$own" data-plane-api "$c" POSTGRES_PASSWORD secretKeyRef:dp-own/password \
+      "$cloud own Secret: data-plane-api/$c reads the operator's password"
+    assert_env_value "$vf" data-plane-api "$c" POSTGRES_SSL verify-full \
+      "$cloud verify-full with a CA: data-plane-api/$c verifies the server"
+  done
+done

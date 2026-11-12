@@ -16,6 +16,60 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
   v2.49.0 and later no longer hit this path with the current models; this keeps
   a later torch or transformers bump from bringing it back.
 
+- **A plain `helm install` works on any cluster.** `global.platform` defaulted
+  to `gcp`, so an install that didn't set it failed off GKE on the missing
+  `BackendConfig` CRD, and its `gce` Ingress class left Ingresses unserved. The
+  default is now empty, meaning detect: `gcp` when the cluster serves GKE's
+  `cloud.google.com/v1` `BackendConfig` API, otherwise `kubernetes`. An explicit
+  value always wins.
+  - GKE installs that never set `platform` are unchanged under `helm upgrade`,
+    Argo CD and Flux, which all pass the cluster's API versions to the render.
+  - **Upgrade note:** if you render offline with `helm template` (no cluster
+    access, no `--api-versions`) for GKE and never set `platform`, set
+    `global.platform: gcp`, or the render drops the `BackendConfig`, NEG
+    annotations and `gce` Ingress class.
+
+- **data-plane-api starts with `global.postgresql.existingSecret`.** That
+  setting replaces `postgresql-secrets`, which the chart then never renders, but
+  data-plane-api still read `postgresql-secrets` and stopped at
+  `CreateContainerConfigError`. It now reads your Secret, by the canonical
+  `POSTGRES_HOST` / `POSTGRES_PORT` / `POSTGRES_USER` / `POSTGRES_PASSWORD` /
+  `POSTGRES_DB` keys DataAgent already reads from it.
+
+- **data-plane-api's Entra ID and GCP IAM logins follow the same rules as its
+  RDS IAM login.**
+  - A Secret of your own in `api.database.postgresql.existingSecret` keeps
+    data-plane-api on that Secret's password. Before, a global
+    `authMode: iam` switched it to a token login for that password user, and
+    the login failed.
+  - A token login no longer references `POSTGRES_PASSWORD`, which it never
+    reads, so a Secret without that key no longer stops the pod.
+  - `POSTGRES_SSL` now carries the TLS mode, which a token login reads instead
+    of `PGSSLMODE`, and which the evaluation Jobs inherit.
+- **data-plane-api no longer refuses to connect when it inherits
+  `verify-ca` / `verify-full` without a CA.** v4.1.0 started inheriting
+  `global.postgresql.sslMode`, but data-plane-api's client verifies only against
+  a mounted CA bundle, never the system store, so an inherited `verify-full`
+  with no `global.customCaCert` refused every connection where the gateways
+  connected. data-plane-api now uses `require` (encrypted) in that case, and
+  verifies when `global.customCaCert` mounts the server's CA.
+
+- **TrustGate and AlertEngine wait for the chart's own PostgreSQL on a fresh
+  install.** They raced it, used up their startup probes and restarted several
+  times when PostgreSQL landed on a node still being added. agentgateway (admin,
+  proxy, mcp) and alertengine (api, worker) now carry a bounded
+  `wait-for-postgresql` init container (`pg_isready`, same image as the
+  in-cluster PostgreSQL, gives up after ~5 minutes) whenever this release runs
+  PostgreSQL and the service points at it. Installs on a managed database
+  render unchanged. On upgrade, installs with in-cluster PostgreSQL roll these
+  Deployments once.
+
+- **The rendered manifests parse under strict YAML parsers.** The TrustGate env
+  ConfigMap glued a comment onto the previous value
+  (`OTEL_EXPORTER_OTLP_INSECURE: "true"# In-cluster …`). Helm accepted it, but
+  yq 4.5x, kubeconform and other strict parsers rejected the whole render, which
+  broke pipelines that post-process `helm template` output. No value changes.
+
 ## [v4.1.0] — 2026-11-12
 
 ### Fixed

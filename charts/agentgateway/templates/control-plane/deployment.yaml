@@ -52,6 +52,10 @@ spec:
       {{- end }}
       {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 6 }}
       {{- include "neuraltrust-platform.redis.caVolume" . | nindent 6 }}
+      {{- with include "neuraltrust-platform.postgresql.waitInit" (dict "ctx" . "host" (default dict .Values.database).host) }}
+      initContainers:
+      {{- . | nindent 6 }}
+      {{- end }}
       containers:
       - name: admin
         image: {{ $img | quote }}
@@ -167,7 +171,7 @@ metadata:
   labels:
     {{- include "agentgateway.labels" . | nindent 4 }}
     app.kubernetes.io/component: control-plane
-  {{- $negAnnotations := include "neuraltrust-platform.service.negAnnotations" (dict "global" .Values.global "pscServiceKey" "agentgateway-admin") }}
+  {{- $negAnnotations := include "neuraltrust-platform.service.negAnnotations" (dict "ctx" $ "global" .Values.global "pscServiceKey" "agentgateway-admin") }}
   {{- with $negAnnotations }}
   annotations:
     {{- . | nindent 4 }}

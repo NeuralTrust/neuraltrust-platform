@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Render scenarios 39, 39b, 39c, 39d. Run through scripts/test-helm-render.sh.
+# Render scenarios 39, 39b, 39c, 39d, 39f. Run through scripts/test-helm-render.sh.
 
 source "$(dirname "$0")/lib.sh"
 suite_full || exit 0
@@ -53,14 +53,33 @@ ruby -ryaml -e '
 green "ok  - RDS IAM: the data-plane ServiceAccount carries the global IRSA role"
 
 # 39b. An unset sslMode takes the require default the shared Secret uses under
-# IAM; verify-full reaches the token login instead of being lowered to require.
+# IAM. verify-full reaches the token login when a CA bundle is mounted
+# (global.customCaCert sets PGSSLROOTCERT). Without one it is capped at require:
+# asyncpg never falls back to the system store, so verify-full with no root
+# certificate refuses every connection.
 blue "==> Scenario 39b: data-plane-api RDS IAM TLS mode"
 out39b="$TMP/scenario-dp-rds-iam-verify.yaml"
-render_default "$out39b" "${AWS_IAM_ARGS[@]}" --set global.postgresql.sslMode=verify-full
+render_default "$out39b" "${AWS_IAM_ARGS[@]}" --set global.postgresql.sslMode=verify-full \
+  --set global.customCaCert.enabled=true --set global.customCaCert.secretName=rds-ca
 for c in api postgres-migrations; do
   assert_env_value "$out39b" data-plane-api "$c" POSTGRES_SSL verify-full \
-    "RDS IAM: data-plane-api/$c keeps verify-full"
+    "RDS IAM with a CA: data-plane-api/$c keeps verify-full"
 done
+out39b_noca="$TMP/scenario-dp-rds-iam-verify-noca.yaml"
+render_default "$out39b_noca" "${AWS_IAM_ARGS[@]}" --set global.postgresql.sslMode=verify-full
+for c in api postgres-migrations; do
+  assert_env_value "$out39b_noca" data-plane-api "$c" POSTGRES_SSL require \
+    "RDS IAM without a CA: data-plane-api/$c caps verify-full at require instead of refusing to connect"
+  assert_env_value "$out39b_noca" data-plane-api "$c" PGSSLMODE require \
+    "RDS IAM without a CA: data-plane-api/$c PGSSLMODE capped too"
+done
+# The same cap protects a password install that inherits a global verify-full.
+out39b_pw="$TMP/scenario-dp-password-verify-noca.yaml"
+render_default "$out39b_pw" --set global.products.dataPlane=true \
+  --set global.postgresql.deploy=false --set global.postgresql.host=pg.example.com \
+  --set global.postgresql.sslMode=verify-full
+assert_env_value "$out39b_pw" data-plane-api api PGSSLMODE require \
+  "password install without a CA: an inherited verify-full is capped at require"
 out39b2="$TMP/scenario-dp-rds-iam-ssl-unset.yaml"
 render_default "$out39b2" "${AWS_IAM_ARGS[@]}" --set global.postgresql.sslMode=
 assert_env_value "$out39b2" data-plane-api api PGSSLMODE require \
@@ -120,3 +139,23 @@ assert_env_value "$out39e" data-plane-api api POSTGRES_PASSWORD \
   "password install: data-plane-api reads the shared password"
 assert_env_value "$out39e" data-plane-api api PGSSLMODE prefer \
   "password install: data-plane-api keeps sslMode prefer"
+
+# 39f. global.postgresql.existingSecret replaces postgresql-secrets, which the
+# chart then never renders. data-plane-api read postgresql-secrets regardless and
+# stopped at CreateContainerConfigError; it follows the operator's Secret now,
+# by the canonical POSTGRES_* keys DataAgent also reads from it.
+blue "==> Scenario 39f: data-plane-api follows global.postgresql.existingSecret"
+out39f="$TMP/scenario-dp-global-existing-secret.yaml"
+render_default "$out39f" --set global.products.dataPlane=true \
+  --set global.postgresql.deploy=false --set global.postgresql.host=pg.example.com \
+  --set global.postgresql.existingSecret.name=my-pg
+for c in api postgres-migrations; do
+  assert_env_value "$out39f" data-plane-api "$c" POSTGRES_HOST secretKeyRef:my-pg/POSTGRES_HOST \
+    "operator Secret: data-plane-api/$c reads the host from it"
+  assert_env_value "$out39f" data-plane-api "$c" POSTGRES_DATABASE secretKeyRef:my-pg/POSTGRES_DB \
+    "operator Secret: data-plane-api/$c renames POSTGRES_DB to the name it reads"
+  assert_env_value "$out39f" data-plane-api "$c" POSTGRES_PASSWORD secretKeyRef:my-pg/POSTGRES_PASSWORD \
+    "operator Secret: data-plane-api/$c reads the password from it"
+done
+assert_not_contains "$out39f" 'name: "postgresql-secrets"' \
+  "operator Secret: nothing references the postgresql-secrets the chart did not render"
