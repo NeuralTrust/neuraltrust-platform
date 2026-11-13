@@ -5,7 +5,7 @@ firewall:
     replicas: 2
     image:
       repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-      tag: v2.51.0
+      tag: v2.52.0
       pullPolicy: IfNotPresent
     resources:
       limits:
@@ -24,6 +24,29 @@ firewall:
       targetMemoryUtilizationPercentage: 90
     podDisruptionBudget:
       maxUnavailable: 1
+    # Hosted decision backend for /v1/decision and optional detector double checks.
+    # Umbrella path: firewall.firewall.gateway.decision. See docs/firewall-decision.md.
+    # These settings and the API key are injected into the gateway only.
+    decision:
+      enabled: false
+      doubleCheck: false
+      # System One: typesafe | liquid | cloudflare | openai | microsoft | google
+      # General LLM: azure_foundry | vertex | gemini | openai_chat | anthropic
+      provider: typesafe
+      model: "" # Provider default for System One; required deployment/model for LLMs.
+      url: "" # Provider default; required resource endpoint for azure_foundry.
+      auth: api_key # api_key | entra (microsoft and azure_foundry only)
+      apiKeyExistingSecret:
+        name: "" # Required for API-key auth, except vertex which uses Google credentials.
+        key: DECISION_SERVICE_API_KEY
+      cloudflareAccountId: "" # Required for cloudflare unless url is supplied.
+      entraScope: "https://cognitiveservices.azure.com/.default" # azure_foundry only
+      project: "" # Required GCP project for vertex.
+      location: global # vertex region, or global
+      timeoutSeconds: 5
+      maxRetries: 1
+      retryBackoffSeconds: 0.25
+      healthCacheSeconds: 30
     # Extra env vars appended to the gateway container (list of EnvVar).
     extraEnv: []
     # Extra envFrom sources appended to the gateway container (list of EnvFromSource: configMapRef/secretRef).
@@ -39,7 +62,7 @@ firewall:
     image:
       repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
       # Keep in lockstep with gateway.image.tag.
-      tag: v2.51.0
+      tag: v2.52.0
       pullPolicy: IfNotPresent
     replicas: 1
     # CPU-worker default: one HF transformer (~86M-class) per pod via ONNX.

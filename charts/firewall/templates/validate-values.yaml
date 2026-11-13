@@ -1,0 +1,45 @@
+{{- if eq (include "firewall.enabled" .) "true" -}}
+{{- $d := default dict .Values.firewall.gateway.decision -}}
+{{- $path := "firewall.firewall.gateway.decision" -}}
+{{- if and $d.doubleCheck (not $d.enabled) -}}
+  {{- fail (printf "%s.doubleCheck=true requires decision.enabled=true" $path) -}}
+{{- end -}}
+{{- if $d.enabled -}}
+{{- $providers := list "typesafe" "liquid" "cloudflare" "openai" "microsoft" "google" "azure_foundry" "vertex" "gemini" "openai_chat" "anthropic" -}}
+{{- if not (has $d.provider $providers) -}}
+  {{- fail (printf "%s.provider must be one of: %s" $path (join ", " $providers)) -}}
+{{- end -}}
+{{- if not (has $d.auth (list "api_key" "entra")) -}}
+  {{- fail (printf "%s.auth must be api_key or entra" $path) -}}
+{{- end -}}
+{{- if and (eq $d.auth "entra") (not (has $d.provider (list "microsoft" "azure_foundry"))) -}}
+  {{- fail (printf "%s.auth=entra requires provider=microsoft or azure_foundry" $path) -}}
+{{- end -}}
+{{- $secret := default dict $d.apiKeyExistingSecret -}}
+{{- $keyAuth := and (ne $d.provider "vertex") (ne $d.auth "entra") -}}
+{{- if and $keyAuth (not $secret.name) -}}
+  {{- fail (printf "%s.apiKeyExistingSecret.name is required for API-key authentication" $path) -}}
+{{- end -}}
+{{- if and (not $keyAuth) $secret.name -}}
+  {{- fail (printf "%s.apiKeyExistingSecret.name is unused with Entra ID or Vertex AI; remove it" $path) -}}
+{{- end -}}
+{{- if and (has $d.provider (list "azure_foundry" "vertex" "gemini" "openai_chat" "anthropic")) (not $d.model) -}}
+  {{- fail (printf "%s.model is required for provider=%s" $path $d.provider) -}}
+{{- end -}}
+{{- if and (eq $d.provider "azure_foundry") (not $d.url) -}}
+  {{- fail (printf "%s.url is required for provider=azure_foundry" $path) -}}
+{{- end -}}
+{{- if and (eq $d.provider "vertex") (not $d.project) -}}
+  {{- fail (printf "%s.project is required for provider=vertex" $path) -}}
+{{- end -}}
+{{- if and (eq $d.provider "cloudflare") (not $d.url) (not $d.cloudflareAccountId) -}}
+  {{- fail (printf "%s.cloudflareAccountId is required for provider=cloudflare unless url is set" $path) -}}
+{{- end -}}
+{{- /* Explicit env duplicates break strategic merge on upgrades. Keep one owner. */ -}}
+{{- range .Values.firewall.gateway.extraEnv -}}
+  {{- if hasPrefix "DECISION_SERVICE_" .name -}}
+    {{- fail (printf "%s.enabled=true manages DECISION_SERVICE_*; remove %s from gateway.extraEnv" $path .name) -}}
+  {{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}

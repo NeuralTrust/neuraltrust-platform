@@ -1380,10 +1380,32 @@ firewall:
   securityHardening: true
   firewall:
     gateway:
+      # Hosted decision model or general LLM; gateway only. See docs/firewall-decision.md.
+      # Requires global.firewall.deploy=true and the TrustGuard product enabled.
+      decision:
+        enabled: false
+        doubleCheck: false # Re-check texts flagged by jailbreak, toxicity, IPI, topic guard.
+        # System One: typesafe | liquid | cloudflare | openai | microsoft | google
+        # General LLM: azure_foundry | vertex | gemini | openai_chat | anthropic
+        provider: typesafe
+        model: "" # Provider default for System One; required deployment/model for LLMs.
+        url: "" # Provider default; required resource endpoint for azure_foundry.
+        auth: api_key # api_key | entra (microsoft and azure_foundry only)
+        apiKeyExistingSecret:
+          name: "" # Secret in the release namespace; required for API-key auth except vertex.
+          key: DECISION_SERVICE_API_KEY
+        cloudflareAccountId: "" # cloudflare requires this unless url is set.
+        entraScope: "https://cognitiveservices.azure.com/.default" # azure_foundry only
+        project: "" # Required for vertex, which uses the pod's Google credentials.
+        location: global
+        timeoutSeconds: 5 # Increase for general LLMs.
+        maxRetries: 1
+        retryBackoffSeconds: 0.25
+        healthCacheSeconds: 30
       replicas: 2
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-        tag: "v2.51.0"
+        tag: "v2.52.0"
         pullPolicy: IfNotPresent
       resources:
         requests:
@@ -1409,7 +1431,7 @@ firewall:
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
         # Keep in lockstep with gateway.image.tag.
-        tag: "v2.51.0"
+        tag: "v2.52.0"
         pullPolicy: IfNotPresent
       replicas: 1
       resources:

@@ -4,6 +4,19 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Added
+
+- Firewall gateway decision-backend configuration under
+  `firewall.firewall.gateway.decision`, including hosted System One models,
+  general LLMs, and optional double checks of locally flagged texts. API keys
+  use an existing Kubernetes Secret; Entra ID and Vertex AI can use pod
+  identities. See [configuration and examples](docs/firewall-decision.md).
+
+### Changed
+
+- Firewall gateway and worker images now use v2.52.0, including the Google
+  Gemini Decision provider and decision error handling documented above.
+
 ## [v4.1.1] — 2026-11-12
 
 ### Fixed

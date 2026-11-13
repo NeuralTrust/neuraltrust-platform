@@ -1,4 +1,6 @@
 {{- if eq (include "firewall.enabled" .) "true" }}
+{{- $decision := default dict .Values.firewall.gateway.decision }}
+{{- $decisionEntra := and $decision.enabled (eq $decision.auth "entra") }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -22,18 +24,17 @@ spec:
     metadata:
       labels:
         {{- include "firewall.gateway.labels" . | nindent 8 }}
-        {{- /* Pod-only: the Azure Workload Identity marker. The firewall uses
-               an Azure identity only for REDIS_LOGIN=azure. */}}
-        {{- if eq (include "neuraltrust-platform.firewall.redis.login" (dict "ctx" . "fw" .Values.firewall)) "azure" }}
+        {{- /* Both Redis and decision backends can use Azure Workload Identity. */}}
+        {{- if or $decisionEntra (eq (include "neuraltrust-platform.firewall.redis.login" (dict "ctx" . "fw" .Values.firewall)) "azure") }}
         {{- with include "neuraltrust-platform.podLabels" (dict "ctx" .) }}
         {{- . | nindent 8 }}
         {{- end }}
         {{- end }}
       annotations:
-        {{- /* AUT-403: envFrom is ConfigMap-only; JWT/REDIS_PASSWORD use secretKeyRef. */}}
+        {{- /* AUT-403: envFrom is ConfigMap-only; credentials use secretKeyRef. */}}
         {{- include "neuraltrust-platform.checksumAnnotations" (dict "context" . "files" (list "/configmap.yaml")) | nindent 8 }}
     spec:
-      {{- if .Values.firewall.serviceAccount.create }}
+      {{- if or .Values.firewall.serviceAccount.create .Values.firewall.serviceAccount.name }}
       serviceAccountName: {{ .Values.firewall.serviceAccount.name | default "firewall" }}
       {{- end }}
       terminationGracePeriodSeconds: 75
@@ -63,7 +64,7 @@ spec:
       containers:
         - name: gateway
           {{- $gwRepo := .Values.firewall.gateway.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu" }}
-          {{- $gwTag := .Values.firewall.gateway.image.tag | default "v2.51.0" }}
+          {{- $gwTag := .Values.firewall.gateway.image.tag | default "v2.52.0" }}
           image: {{ include "firewall.image" (dict "repository" $gwRepo "tag" $gwTag "global" .Values.global) | quote }}
           imagePullPolicy: {{ .Values.firewall.gateway.image.pullPolicy | default "IfNotPresent" }}
           {{- /* No args override: the firewall image CMD (`python -m src.serve`)
@@ -80,6 +81,7 @@ spec:
             {{- toYaml . | nindent 12 }}
             {{- end }}
           env:
+            {{- include "firewall.decision.env" . | nindent 12 }}
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
@@ -92,7 +94,7 @@ spec:
             {{- with include "neuraltrust-platform.firewall.redis.passwordEnv" (dict "ctx" . "fw" .Values.firewall) }}
             {{- . | nindent 12 }}
             {{- end }}
-            {{- if eq (include "neuraltrust-platform.firewall.redis.login" (dict "ctx" . "fw" .Values.firewall)) "azure" }}
+            {{- if or $decisionEntra (eq (include "neuraltrust-platform.firewall.redis.login" (dict "ctx" . "fw" .Values.firewall)) "azure") }}
             {{- with include "neuraltrust-platform.azureIdentity.env" (dict "ctx" . "skip" .Values.firewall.gateway.extraEnv) | trim }}
             {{- . | nindent 12 }}
             {{- end }}
