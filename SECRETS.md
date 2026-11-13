@@ -620,6 +620,12 @@ Created only when explicitly enabled. None are auto-generated — operators brin
 
 ### Firewall
 
+For an in-cluster decision backend using an API key, create a separate Secret
+and set `firewall.firewall.gateway.decision.apiKeyExistingSecret.name`. Its key
+defaults to `DECISION_SERVICE_API_KEY`. Only the gateway reads it. Entra ID and
+Vertex AI use pod credentials instead. See [decision models and double checks](docs/firewall-decision.md)
+for examples and identity setup.
+
 **NeuralTrust-hosted firewall** (the default in every mode). TrustGuard reads `FIREWALL_JWT`, a per-install
 OAuth client that carries the firewall URL, from
 `trustguard.firewall.jwtExistingSecret.{name,key}` or the inline

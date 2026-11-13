@@ -397,6 +397,7 @@ In this repo:
 - [Cluster sizing](./docs/sizing.md)
 - [Hybrid network allowlist](./docs/hybrid-network.md)
 - [Observability and self-healing](./docs/observability.md)
+- [Firewall decision models and LLM double checks](./docs/firewall-decision.md)
 
 Public documentation at [docs.neuraltrust.ai](https://docs.neuraltrust.ai/neuraltrust/deployment/overview):
 
