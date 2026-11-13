@@ -15,12 +15,18 @@ out41_hybrid="$TMP/strict-hybrid.yaml"
 out41_external="$TMP/strict-external.yaml"
 out41_saas="$TMP/strict-saas.yaml"
 out41_dedicated="$TMP/strict-dedicated.yaml"
+out41_dedicated_guard="$TMP/strict-dedicated-guard.yaml"
 render_default "$out41_hybrid"
 render_default "$out41_external" --set global.deploymentMode=external
 render_default "$out41_saas" --set global.deploymentMode=saas --set global.domain=cp.example.com
 helm template x "$CHART_DIR" --namespace dp-x -f "$CHART_DIR/values-dedicated.yaml.example" > "$out41_dedicated"
+# The dedicated plane's own TrustGuard URL renders through a separate branch of
+# the env ConfigMap, so it needs its own shape.
+helm template x "$CHART_DIR" --namespace dp-x -f "$CHART_DIR/values-dedicated.yaml.example" \
+  --set agentgateway.trustguard.baseURL=http://trustguard-data.trustguard.svc.cluster.local:8081 \
+  > "$out41_dedicated_guard"
 
-for shape in hybrid external saas dedicated; do
+for shape in hybrid external saas dedicated dedicated-guard; do
   file="$TMP/strict-$shape.yaml"
   # Toolchain-independent: a quoted scalar immediately followed by a comment.
   assert_not_contains "$file" '"#' \
