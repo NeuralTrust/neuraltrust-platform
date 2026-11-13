@@ -127,7 +127,7 @@ data:
   {{- end }}
   {{- /* TrustGuard URL when Guard is on (hybrid positive select / external full). */ -}}
   {{- $tg := default dict .Values.trustguard -}}
-  {{- if eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustguard")) "true" -}}
+  {{- if eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustguard")) "true" }}
   # In-cluster TrustGuard data-plane URL. Derived from the stable Service name +
   # release namespace (Service listens on port 80), so it never needs setting in
   # a single-umbrella deploy. Override .Values.trustguard.baseURL only when

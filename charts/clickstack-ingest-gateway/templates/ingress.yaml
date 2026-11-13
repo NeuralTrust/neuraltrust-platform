@@ -3,13 +3,13 @@
 {{- /* Same L7 Ingress shape as control-plane-app / datacore: inherit
        global.ingress (className, ALB group, ACM certificateArn, …). OTLP/HTTP
        only — gRPC stays on the ClusterIP Service. */}}
-{{- $className := include "neuraltrust-platform.ingress.className" (dict "global" .Values.global "local" .Values.ingress.className) }}
-{{- $annotations := include "neuraltrust-platform.ingress.annotations" (dict "global" .Values.global "local" .Values.ingress.annotations) }}
+{{- $className := include "neuraltrust-platform.ingress.className" (dict "ctx" $ "global" .Values.global "local" .Values.ingress.className) }}
+{{- $annotations := include "neuraltrust-platform.ingress.annotations" (dict "ctx" $ "global" .Values.global "local" .Values.ingress.annotations) }}
 {{- $tlsEnabled := true }}
 {{- if and .Values.ingress.tls (hasKey .Values.ingress.tls "enabled") }}
   {{- $tlsEnabled = .Values.ingress.tls.enabled }}
 {{- end }}
-{{- $renderTLS := and $tlsEnabled (include "neuraltrust-platform.ingress.renderTLS" (dict "global" .Values.global "tlsEnabled" $tlsEnabled)) }}
+{{- $renderTLS := and $tlsEnabled (include "neuraltrust-platform.ingress.renderTLS" (dict "ctx" $ "global" .Values.global "tlsEnabled" $tlsEnabled)) }}
 {{- /* Prefer operator secret / chart autoGenerate; else shared neuraltrust-ingress-tls
        (same as app/api). When ACM/managed cert is on global.ingress, renderTLS is
        empty and the controller terminates TLS from annotations. */}}

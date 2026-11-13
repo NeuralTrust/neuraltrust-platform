@@ -1,7 +1,7 @@
 {{- if eq (include "agentgateway.enabled" .) "true" }}
 {{- if and .Values.ingress.enabled (eq (include "agentgateway.ingress.useIngress" .) "true") }}
-{{- $className := include "neuraltrust-platform.ingress.className" (dict "global" .Values.global "local" .Values.ingress.className) }}
-{{- $annotations := include "neuraltrust-platform.ingress.annotations" (dict "global" .Values.global "local" .Values.ingress.annotations) }}
+{{- $className := include "neuraltrust-platform.ingress.className" (dict "ctx" $ "global" .Values.global "local" .Values.ingress.className) }}
+{{- $annotations := include "neuraltrust-platform.ingress.annotations" (dict "ctx" $ "global" .Values.global "local" .Values.ingress.annotations) }}
 {{- $renderTLS := include "neuraltrust-platform.ingress.productTLS" . }}
 {{- $tlsSecret := include "neuraltrust-platform.ingress.effectiveTLSSecretName" (dict "ctx" $ "global" .Values.global "localSecretName" .Values.ingress.tls.secretName) }}
 {{- $dpHost := include "neuraltrust-platform.ingress.host" (dict "host" .Values.ingress.dataPlane.host "prefix" .Values.ingress.dataPlane.hostPrefix "global" .Values.global) }}

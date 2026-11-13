@@ -10,6 +10,11 @@ data:
   PYTHONDONTWRITEBYTECODE: {{ .Values.firewall.config.pythonDontWriteBytecode | quote }}
   PYTHONPATH: {{ .Values.firewall.config.pythonPath | quote }}
   HF_HOME: {{ .Values.firewall.config.hfHome | quote }}
+  {{- /* torch on CUDA can hand ops to Triton, which compiles and caches C
+         extensions under ~/.triton. securityHardening makes the root
+         filesystem read-only, so point the cache at the writable /root/.cache
+         emptyDir instead. Without it every inference on that path fails. */}}
+  TRITON_CACHE_DIR: {{ .Values.firewall.config.tritonCacheDir | quote }}
   {{- if and .Values.firewall.config.cudaMpsActiveThreadPercentage .Values.firewall.config.cudaMpsPinnedDeviceMemLimit }}
   CUDA_MPS_ACTIVE_THREAD_PERCENTAGE: {{ .Values.firewall.config.cudaMpsActiveThreadPercentage | quote }}
   CUDA_MPS_PINNED_DEVICE_MEM_LIMIT: {{ .Values.firewall.config.cudaMpsPinnedDeviceMemLimit | quote }}

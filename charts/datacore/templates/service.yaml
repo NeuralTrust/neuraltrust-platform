@@ -6,7 +6,7 @@ metadata:
   labels:
     {{- include "datacore.labels" . | nindent 4 }}
     app.kubernetes.io/component: data-plane
-  {{- $negAnnotations := include "neuraltrust-platform.service.negAnnotations" (dict "global" .Values.global "pscServiceKey" "datacore") }}
+  {{- $negAnnotations := include "neuraltrust-platform.service.negAnnotations" (dict "ctx" $ "global" .Values.global "pscServiceKey" "datacore") }}
   {{- with $negAnnotations }}
   annotations:
     {{- . | nindent 4 }}

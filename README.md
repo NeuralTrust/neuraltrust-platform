@@ -316,15 +316,18 @@ control-plane `postgresql-secrets` for control-plane-api/app. See
 
 ## Platform and ingress
 
-`global.platform` selects provider-specific ingress and security behavior:
+`global.platform` selects provider-specific ingress and security behavior. Left
+empty (the default), the chart detects it: `gcp` when the cluster serves GKE's
+`BackendConfig` API, otherwise `kubernetes`. An offline `helm template` cannot
+see the cluster, so set `gcp` explicitly when rendering for GKE that way.
 
 | Value | Target |
 |---|---|
-| `gcp` (default) | GKE / GCE Ingress |
+| `gcp` | GKE / GCE Ingress |
 | `aws` | EKS / AWS Load Balancer Controller |
 | `azure` | AKS / Application Gateway |
 | `openshift` | OpenShift Routes or Ingress |
-| `kubernetes` | Generic Kubernetes |
+| `kubernetes` | Generic Kubernetes (detected default off GKE) |
 
 Set `global.domain` to derive service hostnames. Set `global.imageRegistry` to
 mirror all images into a private registry.
