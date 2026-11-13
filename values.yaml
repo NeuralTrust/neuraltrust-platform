@@ -179,7 +179,7 @@ global:
       tlsIncludeSystemCaCerts: true
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/opentelemetry-collector-contrib
-        tag: "0.164.0"
+        tag: "0.165.0"
         pullPolicy: IfNotPresent
       resources: {}
   # Base domain used for URL generation (<hostPrefix>.<domain>).
@@ -687,7 +687,7 @@ global:
       listenHost: "::"
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/opentelemetry-collector-contrib
-        tag: "0.164.0"
+        tag: "0.165.0"
         pullPolicy: IfNotPresent
       imagePullSecret: "gcr-secret"
       replicas: 1
@@ -796,7 +796,7 @@ clickhouse:
   replicas: 1
   image:
     repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickhouse-server
-    tag: "26.9"
+    tag: "26.10.3"
     pullPolicy: IfNotPresent
   global:
     imagePullSecrets: []
@@ -905,7 +905,7 @@ control-plane-api:
         replicas: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api"
-          tag: "v1.31.1"
+          tag: "v1.31.3"
           pullPolicy: IfNotPresent
         config:
           controlPlaneApiUrl: ""
@@ -965,7 +965,7 @@ control-plane-app:
         replicas: 2
         image:
           repository: "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app"
-          tag: "v2.29.5"
+          tag: "v2.36.0"
           pullPolicy: IfNotPresent
         config:
           nodeEnv: production
@@ -1042,7 +1042,7 @@ control-plane-app:
 # stays agentgateway for now; K8s names stay agentgateway-*.
 agentgateway:
   image:
-    tag: "v0.82.1"
+    tag: "v0.87.0"
   # Empty host/port/sslMode/username/tls inherit from global.postgresql /
   # global.redis, then fall back to the in-cluster Services. Set them here only
   # to point this one service somewhere else.
@@ -1104,7 +1104,7 @@ dataagent:
 # `global.postgresql` block.
 datacore:
   image:
-    tag: "v0.35.3"
+    tag: "v0.38.0"
   database:
     # Empty inherits global.postgresql, then control-plane-postgresql:5432.
     # name/user stay per-service: external gives each service its own role+DB.
@@ -1161,7 +1161,7 @@ clickstack-ingest-gateway:
   # global.clickstack.egress, served from the NeuralTrust mirror. Bump all three
   # together.
   image:
-    tag: "0.164.0"
+    tag: "0.165.0"
   # Exposed at telemetry.<global.controlPlane.domain> — same host hybrid egress
   # sidecars dial. Ingress is ON by default (product path). Inherits
   # global.ingress like app/api (shared ALB + ACM). Disable only if you must
@@ -1180,7 +1180,7 @@ clickstack-ingest-gateway:
 # ClickStack OTel collector (v2 external only): OTLP-to-ClickHouse pipeline.
 clickstack-otel-collector:
   image:
-    tag: "2.43.1"
+    tag: "2.44.0"
     repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickstack-otel-collector
   # Empty endpoint is composed from global.clickhouse (scheme follows
   # global.clickhouse.tls), then http://clickhouse:8123 (AUT-636). Set it
@@ -1304,7 +1304,7 @@ data-plane-api:
               resources: {}
         image:
           repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api
-          tag: v1.60.0
+          tag: v1.60.4
           pullPolicy: IfNotPresent
         accessMode: ReadWriteOnce
         storage: 10Gi
@@ -1383,7 +1383,7 @@ firewall:
       replicas: 2
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
-        tag: "v2.51.0"
+        tag: "v2.52.0"
         pullPolicy: IfNotPresent
       resources:
         requests:
@@ -1409,7 +1409,7 @@ firewall:
       image:
         repository: europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu
         # Keep in lockstep with gateway.image.tag.
-        tag: "v2.51.0"
+        tag: "v2.52.0"
         pullPolicy: IfNotPresent
       replicas: 1
       resources:
