@@ -204,6 +204,9 @@ firewall:
     pythonDontWriteBytecode: "1"
     pythonPath: "/app"
     hfHome: "/root/.cache/huggingface"
+    # Must sit under the writable /root/.cache mount (read-only root with
+    # securityHardening).
+    tritonCacheDir: "/root/.cache/triton"
     cudaMpsActiveThreadPercentage: "20"
     cudaMpsPinnedDeviceMemLimit: "3500M"
     applicationVersion: ""

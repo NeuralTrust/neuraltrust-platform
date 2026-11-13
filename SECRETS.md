@@ -597,8 +597,20 @@ are removed on the next upgrade that rewrites the Secret.
 > - Evaluation Jobs, when `k8sJobs` is enabled, run under the same `data-plane`
 >   ServiceAccount and inherit the login and region, so they need nothing more.
 >
+> Under Entra ID (`global.azureIdentity`) and GCP IAM (`global.gcpIdentity`)
+> data-plane-api follows the same rules, with `POSTGRES_AUTH_MODE=azure_ad` or
+> `POSTGRES_LOGIN=gcp` as the switch.
+>
 > Pointing `api.database.postgresql.existingSecret` at a Secret of your own keeps
 > data-plane-api on that Secret's password, whatever `authMode` says.
+>
+> **Certificate verification.** data-plane-api's PostgreSQL client (asyncpg)
+> verifies a server only against a mounted CA bundle, never the system store, and
+> refuses to connect when `verify-ca` / `verify-full` has no CA to check against.
+> An inherited `verify-ca` / `verify-full` is therefore lowered to `require`
+> (encrypted, not verified) for data-plane-api unless `global.customCaCert`
+> mounts the server's CA, which the chart passes as `PGSSLROOTCERT`. An explicit
+> `api.database.postgresql.sslMode` is used as written.
 
 ### Infrastructure
 
@@ -693,6 +705,31 @@ data-plane-api:
 > this document recommended that form; it never applied to the shared Secret and
 > the one template that honoured it has been removed.
 
+## Secrets per install shape
+
+What a fresh install of each documented values example ends up with, using the
+chart's defaults: the Secrets Helm renders, plus the ones the in-cluster secrets
+generator creates on external and saas installs (`platform-secrets` and the TLS
+keypairs). Operator-created Secrets (pull secret, enrolment and config-sync
+tokens, your own datastore Secrets) are not in this list. The render suite pins
+it (`scripts/helm-render-tests/44-fresh-install-secret-list.sh`), so a change
+here is deliberate.
+
+| Shape (values files) | Secrets |
+|---|---|
+| Hybrid (`values-required.yaml`) | `agentgateway-secrets`, `data-plane-jwt-secret`, `neuraltrust-ingress-tls`, `platform-secrets`, `postgresql-secrets`, `redis-secrets`, `trustguard-client-credentials`, `trustguard-secrets` |
+| Hybrid, managed datastores (`values-hybrid.yaml.example`) | as Hybrid, without `redis-secrets` |
+| Hybrid, TrustGate only (`values-trustgate.yaml.example`) | `agentgateway-secrets`, `neuraltrust-ingress-tls`, `platform-secrets`, `postgresql-secrets`, `redis-secrets` |
+| Hybrid, TrustGuard only (`values-trustguard.yaml.example`) | `neuraltrust-ingress-tls`, `platform-secrets`, `postgresql-secrets`, `redis-secrets`, `trustguard-secrets` |
+| Hybrid, red teaming (`values-red-teaming.yaml.example`) | `data-plane-jwt-secret`, `neuraltrust-ingress-tls`, `platform-secrets`, `postgresql-secrets`, `redis-secrets` |
+| Hybrid with in-cluster GPU firewall (`values-required.yaml` + `values-dataplane-gpu.yaml.example`) | as Hybrid, plus `firewall-secrets` |
+| External (`values-external.yaml.example`) | `agentgateway-configsync-tls`, `neuraltrust-ingress-tls`, `platform-secrets`, `postgresql-secrets`, `trustguard-configsync-tls` |
+| External, TrustGuard only (+ `values-external-trustguard-only.yaml.example`) | `neuraltrust-ingress-tls`, `platform-secrets`, `postgresql-secrets`, `trustguard-configsync-tls` |
+| External, self-hosted observability (+ `values-observability-self-hosted.yaml.example`) | as External |
+| External, managed datastores (`values-managed-datastores.yaml.example`) | none: that example sets `autoGenerateSecrets: false`, so you create them |
+| Central control plane (`deploymentMode: saas`) | `agentgateway-configsync-tls`, `databridge-southbound-tls`, `neuraltrust-ingress-tls`, `platform-secrets`, `postgresql-secrets`, `trustguard-configsync-tls` |
+| Dedicated TrustGate (`values-dedicated.yaml.example`) | `agentgateway-secrets`, `redis-secrets` |
+
 ## Full secret catalog
 
 Every Secret and key the chart knows about, in one table. All of them follow the
@@ -740,7 +777,7 @@ nothing reads them any more, and explicit `env` entries outrank whatever an old
 | TrustGuard Firewall client | `firewall-secrets` (mounted as env) | `JWT_SECRET` → `NEURAL_TRUST_FIREWALL_SECRET_KEY` | With the in-cluster firewall. Base URL is ConfigMap `NEURAL_TRUST_FIREWALL_BASE_URL` → in-cluster `http://firewall.<ns>.svc.cluster.local`. With the hosted firewall, `FIREWALL_JWT` from `trustguard.firewall.jwtExistingSecret` (or `trustguard-secrets`) instead, and no base URL. |
 | TrustGuard DB password | `trustguard-secrets` | `DB_PASSWORD` | **External only** — auto-generated; **omitted when `trustguard.database.iamAuth=true`**. In **hybrid** the password comes from the shared `postgresql-secrets`. |
 | TrustGuard raw-telemetry Postgres | `postgresql-secrets` → `DB_*` env | (discrete parts) | Hybrid only, same as AgentGateway (RUN-1086). |
-| Shared hybrid Postgres credential | `postgresql-secrets` | `POSTGRES_*` — see [One canonical name per fact](#one-canonical-name-per-fact) | **Hybrid only** — the umbrella renders one shared Secret from `global.postgresql.*` (default `user`/`database` = `neuraltrust`), and every hybrid workload connects as that one role. Containers receive `DB_*` / `POSTGRES_*` names through explicit `env` mappings; those are **not** keys in the Secret. Set `global.postgresql.existingSecret.name` to supply your own instead — but then the chart injects it with `envFrom` and cannot rename anything, so **your keys must be `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` / `DB_SSL_MODE`** (gateways) or the canonical `POSTGRES_*` family (DataAgent). |
+| Shared hybrid Postgres credential | `postgresql-secrets` | `POSTGRES_*` — see [One canonical name per fact](#one-canonical-name-per-fact) | **Hybrid only** — the umbrella renders one shared Secret from `global.postgresql.*` (default `user`/`database` = `neuraltrust`), and every hybrid workload connects as that one role. Containers receive `DB_*` / `POSTGRES_*` names through explicit `env` mappings; those are **not** keys in the Secret. Set `global.postgresql.existingSecret.name` to supply your own instead — but then the chart injects it with `envFrom` and cannot rename anything, so **your keys must be `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` / `DB_SSL_MODE`** (gateways) and the canonical `POSTGRES_HOST` / `POSTGRES_PORT` / `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` family (DataAgent, and data-plane-api, which reads them by reference and takes `POSTGRES_DB` as `POSTGRES_DATABASE`). Under a token login data-plane-api reads no `POSTGRES_PASSWORD`. |
 | Shared hybrid Redis credential | `redis-secrets` | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` / `REDIS_USERNAME` / `REDIS_TLS` | **Hybrid only** — taken wholesale with `envFrom`, and rendered from `global.redis.*`. Empty `REDIS_PASSWORD` for the passwordless in-cluster default. Set `global.redis.existingSecret.name` to reuse a pre-created Secret. Without the secrets generator, `helm upgrade` keeps a password only the live Secret holds (`lookup`); with it, the password comes from values or that Secret only (see "Hybrid installs" above). TLS is stored once as `REDIS_TLS`, which is the name TrustGuard reads; AgentGateway reads `REDIS_TLS_ENABLED` and is given that name through an explicit `env` mapping, so a supplied Secret only needs `REDIS_TLS`. |
 | Shared TrustGuard client creds | `trustguard-client-credentials` | `CLIENT_ID` / `CLIENT_SECRET` | Only when TrustGate and TrustGuard are both enabled: TrustGate is the only client. Under the in-cluster generator the secret comes from `platform-secrets/TRUSTGUARD_CLIENT_SECRET`, the id is a plain value on both Deployments, and this Secret is not rendered. id defaults to `agentgateway-platform`; secret auto-generated (or `global.v2.trustguardClientSecret`). Injected into both AgentGateway (`TRUSTGUARD_CLIENT_ID`/`_SECRET`) and TrustGuard (`TRUSTGUARD_PLATFORM_CLIENT_ID`/`_SECRET`) so the pair matches. Setting `global.v2.trustguardClientSecret` or `trustguardClientSecretName` keeps the pair with either product alone, for a client or server outside this release. The prerelease `v2-trustguard-client-secret` values are copied during upgrade. |
 | DataAgent Postgres | `postgresql-secrets` (shared) | `POSTGRES_HOST` / `PORT` / `USER` / `PASSWORD` / `DB` / `SSLMODE` | **Hybrid** — DataAgent builds a libpq keyword connection string from these parts when `DATABASE_URL` is unset (RUN-1093). It connects as `global.postgresql.user` (default `neuraltrust`). |

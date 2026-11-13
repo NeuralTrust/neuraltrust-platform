@@ -188,7 +188,7 @@ metadata:
   labels:
     {{- include "trustguard.labels" . | nindent 4 }}
     app.kubernetes.io/component: control-plane
-  {{- $negAnnotations := include "neuraltrust-platform.service.negAnnotations" (dict "global" .Values.global "pscServiceKey" "trustguard-control-plane") }}
+  {{- $negAnnotations := include "neuraltrust-platform.service.negAnnotations" (dict "ctx" $ "global" .Values.global "pscServiceKey" "trustguard-control-plane") }}
   {{- with $negAnnotations }}
   annotations:
     {{- . | nindent 4 }}

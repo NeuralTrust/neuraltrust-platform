@@ -3,7 +3,7 @@
 source "$(dirname "$0")/lib.sh"
 suite_full || exit 0
 
-blue "==> Scenario 40: gateway decision backends and detector double checks"
+blue "==> Scenario 45: gateway decision backends and detector double checks"
 FW_ARGS=(--set global.firewall.deploy=true)
 DECISION_ARGS=("${FW_ARGS[@]}" --set firewall.firewall.gateway.decision.enabled=true)
 KEY_ARGS=(--set firewall.firewall.gateway.decision.apiKeyExistingSecret.name=decision-key)
@@ -106,7 +106,7 @@ assert_env_value "$out" firewall gateway DECISION_SERVICE_API_KEY ABSENT "Vertex
 document_named_kind "$out" Deployment firewall "$TMP/gateway.yaml"
 assert_contains "$TMP/gateway.yaml" 'serviceAccountName: existing-firewall' "gateway selects the pre-created identity ServiceAccount"
 
-blue "==> Scenario 40b: invalid decision configuration fails at render time"
+blue "==> Scenario 45b: invalid decision configuration fails at render time"
 assert_render_fails_with 'doubleCheck=true requires decision.enabled=true' "double check needs an enabled backend" \
   "${FW_ARGS[@]}" --set firewall.firewall.gateway.decision.doubleCheck=true
 assert_render_fails_with 'apiKeyExistingSecret.name is required' "API-key auth needs a Secret" "${DECISION_ARGS[@]}"
