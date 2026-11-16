@@ -224,6 +224,10 @@ spec:
               name: {{ $pgSecretName }}
               optional: true
         {{- end }}
+        {{- /* postgres-iam-url.mjs fetches a cloud IAM token (STS / GCP IAM). */}}
+        {{- with include "neuraltrust-platform.proxy-env" . | trim }}
+        {{- . | nindent 8 }}
+        {{- end }}
         {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "node" "ctx" .) | nindent 8 }}
         {{- if include "neuraltrust-platform.customCaCert.enabled" . }}
         volumeMounts:
@@ -768,8 +772,8 @@ spec:
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.extraEnv }}
         {{- toYaml .Values.controlPlane.components.app.extraEnv | nindent 8 }}
         {{- end }}
-        {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
-        {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "node" "ctx" .) | nindent 8 }}
+        {{- include "neuraltrust-platform.proxy-env" (dict "ctx" . "skip" (((.Values.controlPlane).components).app).extraEnv) | nindent 8 }}
+        {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "node" "ctx" . "skip" (((.Values.controlPlane).components).app).extraEnv) | nindent 8 }}
         {{- include "neuraltrust-platform.appVersionEnv" (dict "tag" $appImageTag) | nindent 8 }}
         {{- if or (include "neuraltrust-platform.customCaCert.enabled" .) (and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.extraVolumeMounts) }}
         volumeMounts:
