@@ -38,7 +38,7 @@ dependencies:
   # TrustGate (values: agentgateway; K8s: agentgateway-*). Hybrid gated by
   # global.products.trustgate.
   - name: agentgateway
-    version: 0.1.92
+    version: 0.1.93
     repository: file://./charts/agentgateway
     tags:
       - neuraltrust
