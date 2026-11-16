@@ -203,6 +203,64 @@ trustguard:
   # client. These fields are ignored; kept for backward compatibility.
   clientId: ""
   clientSecret: ""
+# Secret stores: credential fields (LLM keys, MCP upstream tokens, OAuth client
+# secrets...) may hold a reference such as secret://corp-vault/ai/openai#api_key
+# instead of the value. The planes this chart runs resolve them against the
+# stores declared here; the console only references them. Empty stores (the
+# default) renders nothing. Requires an agentgateway image v0.88.0 or later.
+#
+# Where they load: hybrid → proxy + mcp; external and saas → admin + proxy + mcp.
+# Refused under deploymentMode=dedicated (NeuralTrust-hosted planes).
+#
+# Credentials never go in values. The plane authenticates with its own identity:
+# workload identity through serviceAccount.annotations (IRSA, GKE Workload
+# Identity, Azure Workload Identity) or the pod's ServiceAccount token (Vault
+# Kubernetes auth), or with a Kubernetes Secret named by a *Secret field, which
+# the chart mounts read-only and writes into the store file as its *_file path.
+# Before the first enable on an external or saas install, run
+#   kubectl exec deploy/agentgateway-admin -- trustgate secret-refs-scan
+# Exit 3 lists stored values that already look like references; fix those first.
+secretStores:
+  # Which gateways may hold references: "hybrid" or "all".
+  # Empty ⇒ hybrid in hybrid mode, all in external and saas.
+  gateways: ""
+  # Optional overrides of the binary defaults (2s, 15s, 60s).
+  fetchTimeout: ""
+  refreshInterval: ""
+  probeInterval: ""
+  # One entry per store. Common keys: name (lowercase, used in references),
+  # type, allowedPaths (required path prefixes), allowedDestinations (optional
+  # upstream hosts; omit to allow any), gateways (optional gateway id
+  # allowlist), cache {ttl, maxStale, negativeTtl}, and one block named after
+  # the type:
+  #   hashicorp_vault     → hashicorpVault {address, namespace, mount, kvVersion,
+  #                          caCertSecret, auth {method: kubernetes|jwt|approle|token,
+  #                          mount, role, roleId, secretIdSecret, tokenSecret, jwtFile}}
+  #   aws_secrets_manager → awsSecretsManager {region, endpoint, assumeRoleArn}
+  #   gcp_secret_manager  → gcpSecretManager {projectId}
+  #   azure_key_vault     → azureKeyVault {vaultUrl, clientId}
+  #   cyberark_conjur     → cyberarkConjur {url, account, caCertSecret,
+  #                          auth {method: jwt|api_key, serviceId, jwtFile, login, apiKeySecret}}
+  #   file                → file {existingSecret} (each Secret key is a flat file:
+  #                          secret://<store>/<key>) or {root} (a directory you mount)
+  #   env                 → env {prefix}
+  # A *Secret field is {name: <Secret>, key: <key>}; key defaults to ca.crt,
+  # secret-id, token or api-key. Plain *File paths work for files you mount yourself.
+  stores: []
+  # - name: corp-vault
+  #   type: hashicorp_vault
+  #   allowedPaths: ["ai/"]
+  #   allowedDestinations: ["api.openai.com"]
+  #   hashicorpVault:
+  #     address: https://vault.corp.example:8200
+  #     mount: secret
+  #     kvVersion: 2
+  #     caCertSecret: {name: vault-ca}
+  #     auth: {method: kubernetes, role: trustgate}
+  # - name: aws
+  #   type: aws_secrets_manager
+  #   allowedPaths: ["prod/ai/"]
+  #   awsSecretsManager: {region: eu-west-1}
 # Admin JWT + credential encryption key.
 serverSecretKey: "" # Auto-generated if empty
 # DEPRECATED inline input: Helm cannot cryptographically validate private keys.

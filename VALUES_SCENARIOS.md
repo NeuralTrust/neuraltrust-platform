@@ -270,6 +270,67 @@ when CRDs are available.
 In external mode, the ClickStack collector still writes product telemetry to
 the selected ClickHouse instance; it does not export to the hosted telemetry path.
 
+## Scenario: TrustGate secret stores
+
+Credential fields in TrustGate (LLM API keys, MCP upstream tokens, OAuth client
+secrets) can hold a reference such as `secret://corp-vault/ai/openai#api_key`
+instead of the value. The planes this release runs read the value from your
+store; it never reaches NeuralTrust. Declare the stores under
+`agentgateway.secretStores.stores`. Needs an agentgateway image v0.88.0 or later.
+
+```yaml
+agentgateway:
+  serviceAccount:
+    annotations:
+      eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/trustgate-secrets
+  secretStores:
+    stores:
+      - name: corp-vault
+        type: hashicorp_vault
+        allowedPaths: ["ai/"]
+        allowedDestinations: ["api.openai.com", "*.openai.azure.com"]
+        hashicorpVault:
+          address: https://vault.corp.example:8200
+          mount: secret
+          kvVersion: 2
+          caCertSecret: {name: vault-ca}
+          auth: {method: kubernetes, role: trustgate}
+      - name: aws
+        type: aws_secrets_manager
+        allowedPaths: ["prod/ai/"]
+        awsSecretsManager: {region: eu-west-1}
+```
+
+| Mode | Workloads that load the store file | `SECRET_STORES_GATEWAYS` default |
+|---|---|---|
+| `hybrid` | proxy, mcp | `hybrid` |
+| `external` | admin, proxy, mcp | `all` |
+| `saas` (customer central control plane) | admin, proxy, mcp | `all` |
+| `dedicated` | refused at render | — |
+
+- The plane authenticates to the store with its own identity: workload identity
+  through `agentgateway.serviceAccount.annotations`, the pod's ServiceAccount
+  token for Vault Kubernetes auth, or a Kubernetes Secret named by a `*Secret`
+  field (`caCertSecret`, `secretIdSecret`, `tokenSecret`, `apiKeySecret`,
+  `file.existingSecret`). The chart mounts those read-only under
+  `/etc/trustgate/secret-store-credentials/<store>/` and writes the paths into
+  the store file. A credential written inline fails the render.
+- `allowedPaths` is required: references outside those prefixes are refused.
+  `allowedDestinations` limits the upstream hosts a resolved value may be sent
+  to.
+- The store file is a ConfigMap mounted as a directory. TrustGate reloads it on
+  change, so editing stores does not roll the pods.
+- Remote data planes of a `saas` install resolve with the stores in their own
+  hybrid release, not the central one.
+- **First enable on `external` or `saas`:** before the upgrade, run
+  `kubectl exec deploy/agentgateway-admin -- trustgate secret-refs-scan`. Exit
+  code 3 lists stored credential values that already start with `secret://`;
+  once stores are on, TrustGate treats them as references, so fix them first.
+  Hybrid installs have nothing to scan locally: their credentials live in
+  NeuralTrust's control plane.
+- **Rollback:** a chart rolled back below this version stops resolving
+  references. Replace them with values before rolling back.
+
 ---
 
 <sup>**Looking for v1?** The legacy TrustGate/Kafka line ended at [v1.14.16](https://github.com/NeuralTrust/neuraltrust-platform/releases?page=3#release-v1.14.16) — install it with `--version ~1.14.0`.</sup>
