@@ -528,9 +528,13 @@ global:
     podDisruptionBudget:
       enabled: false
       maxUnavailable: 1
+  # Corporate egress proxy for every workload that calls out (SSO, LLM
+  # providers, NeuralTrust SaaS). noProxy is added to the chart's own
+  # in-cluster hosts, never replaces them; Node workloads are switched to the
+  # proxy automatically. For a TLS-inspecting proxy, also set customCaCert.
   proxy:
     enabled: false
-    httpProxy: ""
+    httpProxy: "" # e.g. http://proxy.corp.example:8080
     httpsProxy: ""
     noProxy: "localhost,127.0.0.1,::1,.cluster.local,.svc"
   customCaCert:

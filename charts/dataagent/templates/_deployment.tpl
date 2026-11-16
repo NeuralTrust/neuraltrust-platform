@@ -187,8 +187,8 @@ spec:
         {{- with .Values.extraEnv }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-        {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
-        {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "go" "ctx" .) | nindent 8 }}
+        {{- include "neuraltrust-platform.proxy-env" (dict "ctx" . "skip" .Values.extraEnv) | nindent 8 }}
+        {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "go" "ctx" . "skip" .Values.extraEnv) | nindent 8 }}
         {{- include "neuraltrust-platform.appVersionEnv" (dict "tag" .Values.image.tag) | nindent 8 }}
         {{- if .Values.securityHardening }}
         securityContext:
@@ -237,6 +237,14 @@ spec:
                anchor declaratively via exporter tls.ca_file instead, so a chart
                CA and a publicly-terminated telemetry endpoint can both be
                trusted at once. */}}
+        {{- /* The exporter ships to NeuralTrust SaaS, so it needs the egress
+               proxy like every other outbound workload. Its ca_file already
+               falls back to global.customCaCert, which covers TLS-inspecting
+               proxies. */}}
+        {{- with include "neuraltrust-platform.proxy-env" . | trim }}
+        env:
+          {{- . | nindent 10 }}
+        {{- end }}
         ports:
           - name: otlp-grpc
             containerPort: 4317
