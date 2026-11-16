@@ -3091,22 +3091,83 @@ cloud.google.com/backend-config: {{ printf "{\"default\":\"%s\"}" $backendConfig
 {{- end }}
 
 {{/*
-HTTP proxy environment variables.
+Effective NO_PROXY when global.proxy.enabled.
+
+global.proxy.noProxy is additive: the operator's entries come first, then the
+in-cluster base, then every fixed Service name this chart creates. In-cluster
+URLs use short Service names (http://datacore, http://control-plane-api-service:80),
+which `.svc`, `.cluster.local` and CIDR entries do not match — NO_PROXY is
+compared against the hostname before DNS — so they are listed explicitly.
+$(KUBERNETES_SERVICE_HOST) is a dependent env var the kubelet expands; it keeps
+clients that dial the API server by ClusterIP (client-go) off the proxy.
+
+Every name below is hardcoded or pinned by fullnameOverride. Names the
+operator can change are resolved through their helpers (they read only
+.Values.global, so they work from any subchart). Firewall worker Services are
+`<key>-worker`; the five shipped keys are listed, and any extra key is added
+when rendering inside the firewall subchart.
+*/}}
+{{- define "neuraltrust-platform.proxy.noProxy" -}}
+{{- $p := default dict (default dict .Values.global).proxy -}}
+{{- $entries := list -}}
+{{- range (splitList "," (toString (default "" $p.noProxy))) -}}
+{{- $e := trim . -}}
+{{- if $e }}{{- $entries = append $entries $e -}}{{- end -}}
+{{- end -}}
+{{- $entries = concat $entries (list "localhost" "127.0.0.1" "::1" ".cluster.local" ".svc" "$(KUBERNETES_SERVICE_HOST)") -}}
+{{- /* Cloud metadata / workload-identity endpoints are link-local: a proxy can
+       never reach them, and the GCP, AWS and Azure SDKs fetch tokens there. */ -}}
+{{- $entries = concat $entries (list "169.254.169.254" "metadata.google.internal" "169.254.170.23" "fd00:ec2::254" "fd00:ec2::23") -}}
+{{- $entries = concat $entries (list
+  "control-plane-api-service" "control-plane-app-service" "data-plane-api-service"
+  "control-plane-postgresql" "redis" "clickhouse"
+  "datacore" "databridge-northbound" "alertengine-api"
+  "agentgateway-admin" "agentgateway-proxy" "agentgateway-mcp"
+  "trustguard-control-plane" "trustguard-data-plane"
+  "dataagent" "dataagent-trustguard"
+  "clickstack-collector" "firewall" "neuraltrust-watchdog"
+  "toxicity-worker" "indirect-prompt-injections-worker" "prompt-jailbreak-worker"
+  "complexity-worker" "topic-guard-worker") -}}
+{{- $entries = append $entries (include "neuraltrust-platform.otelCollector.fullname" .) -}}
+{{- $entries = append $entries (include "neuraltrust-platform.clickstackEgress.fullname" .) -}}
+{{- $fw := .Values.firewall -}}
+{{- if and (kindIs "map" $fw) (kindIs "map" $fw.workers) -}}
+{{- range $name, $_ := $fw.workers -}}
+{{- $entries = append $entries (printf "%s-worker" $name) -}}
+{{- end -}}
+{{- end -}}
+{{- join "," (uniq $entries) -}}
+{{- end }}
+
+{{/*
+HTTP proxy environment variables, rendered only when global.proxy.enabled.
+NODE_USE_ENV_PROXY makes Node's fetch and http(s) agents honour HTTP(S)_PROXY
+(they ignore them otherwise); Go and Python ignore it. It ships together with
+the additive NO_PROXY above so Node never sends in-cluster calls to the proxy.
 */}}
 {{- define "neuraltrust-platform.proxy-env" -}}
-{{- if and .Values.global .Values.global.proxy .Values.global.proxy.enabled }}
-- name: HTTP_PROXY
-  value: {{ .Values.global.proxy.httpProxy | quote }}
-- name: HTTPS_PROXY
-  value: {{ .Values.global.proxy.httpsProxy | quote }}
-- name: NO_PROXY
-  value: {{ .Values.global.proxy.noProxy | quote }}
-- name: http_proxy
-  value: {{ .Values.global.proxy.httpProxy | quote }}
-- name: https_proxy
-  value: {{ .Values.global.proxy.httpsProxy | quote }}
-- name: no_proxy
-  value: {{ .Values.global.proxy.noProxy | quote }}
+{{- /* Takes the root context, or (dict "ctx" . "skip" <extraEnv list>): a name
+       the operator already sets in the container's extraEnv is skipped, since a
+       duplicate `name:` in one env list fails `helm upgrade`. */ -}}
+{{- $ctx := . -}}
+{{- $skip := list -}}
+{{- if and (kindIs "map" .) (hasKey . "ctx") -}}
+{{- $ctx = .ctx -}}
+{{- range (default list .skip) }}{{- if .name }}{{- $skip = append $skip .name }}{{- end }}{{- end -}}
+{{- end -}}
+{{- $p := default dict (default dict $ctx.Values.global).proxy -}}
+{{- if $p.enabled }}
+{{- $noProxy := include "neuraltrust-platform.proxy.noProxy" $ctx }}
+{{- $env := list
+  (list "HTTP_PROXY" $p.httpProxy) (list "HTTPS_PROXY" $p.httpsProxy) (list "NO_PROXY" $noProxy)
+  (list "http_proxy" $p.httpProxy) (list "https_proxy" $p.httpsProxy) (list "no_proxy" $noProxy)
+  (list "NODE_USE_ENV_PROXY" "1") }}
+{{- range $env }}
+{{- if not (has (index . 0) $skip) }}
+- name: {{ index . 0 }}
+  value: {{ index . 1 | default "" | toString | quote }}
+{{- end }}
+{{- end }}
 {{- end }}
 {{- end }}
 
@@ -3908,22 +3969,25 @@ Custom corporate CA certificate trust helpers.
 {{- end }}
 {{- end }}
 
+{{- /* Usage: (dict "runtime" "go|python|node" "ctx" . ["skip" <extraEnv list>]).
+       A name the operator already sets in the container's extraEnv is skipped:
+       a duplicate `name:` in one env list fails `helm upgrade`. */ -}}
 {{- define "neuraltrust-platform.customCaCert.env" -}}
 {{- $ctx := .ctx -}}
+{{- $skip := list -}}
+{{- range (default list .skip) }}{{- if .name }}{{- $skip = append $skip .name }}{{- end }}{{- end -}}
 {{- if ne (include "neuraltrust-platform.controlPlane.caSecretName" $ctx) "" }}
 {{- $path := include "neuraltrust-platform.customCaCert.path" $ctx }}
 {{- $runtime := .runtime | default "go" }}
-{{- if eq $runtime "node" }}
-- name: NODE_EXTRA_CA_CERTS
+{{- $names := list "SSL_CERT_FILE" }}
+{{- if eq $runtime "node" }}{{- $names = list "NODE_EXTRA_CA_CERTS" }}
+{{- else if eq $runtime "python" }}{{- $names = list "REQUESTS_CA_BUNDLE" "SSL_CERT_FILE" }}
+{{- end }}
+{{- range $names }}
+{{- if not (has . $skip) }}
+- name: {{ . }}
   value: {{ $path | quote }}
-{{- else if eq $runtime "python" }}
-- name: REQUESTS_CA_BUNDLE
-  value: {{ $path | quote }}
-- name: SSL_CERT_FILE
-  value: {{ $path | quote }}
-{{- else }}
-- name: SSL_CERT_FILE
-  value: {{ $path | quote }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- end }}
