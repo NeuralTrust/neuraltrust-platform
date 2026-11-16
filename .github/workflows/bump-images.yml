@@ -518,6 +518,9 @@ jobs:
               if update_values_tag '.image.tag' "$TAG" "opentelemetry-collector-contrib (ingest gateway subchart default)" "charts/clickstack-ingest-gateway/values.yaml"; then
                 :
               fi
+              # The deployment falls back to appVersion when image.tag is empty,
+              # and appVersion is the app.kubernetes.io/version label.
+              yq eval -i ".appVersion = \"${TAG}\"" charts/clickstack-ingest-gateway/Chart.yaml
             fi
             # deployment.yaml uses inline default "X.Y.Z" (not $var :=).
             if grep -q 'opentelemetry-collector-contrib' templates/otel-collector/deployment.yaml 2>/dev/null; then
@@ -677,6 +680,7 @@ jobs:
             charts/databridge/values.yaml \
             charts/databridge/Chart.yaml \
             charts/clickstack-ingest-gateway/values.yaml \
+            charts/clickstack-ingest-gateway/Chart.yaml \
             charts/clickstack-otel-collector/values.yaml \
             charts/clickstack-otel-collector/Chart.yaml \
             charts/alertengine/values.yaml \
