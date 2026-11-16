@@ -361,8 +361,8 @@ spec:
           {{- with $api.extraEnv }}
           {{- toYaml . | nindent 10 }}
           {{- end }}
-          {{- include "neuraltrust-platform.proxy-env" . | nindent 10 }}
-          {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "python" "ctx" .) | nindent 10 }}
+          {{- include "neuraltrust-platform.proxy-env" (dict "ctx" . "skip" $api.extraEnv) | nindent 10 }}
+          {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "python" "ctx" . "skip" $api.extraEnv) | nindent 10 }}
           resources:
             {{- $pgInitResources := $pgMigration.resources | default $api.initContainerResources }}
             {{- if $pgInitResources }}
@@ -578,8 +578,8 @@ spec:
           {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.extraEnv }}
           {{- toYaml .Values.dataPlane.components.api.extraEnv | nindent 10 }}
           {{- end }}
-          {{- include "neuraltrust-platform.proxy-env" . | nindent 10 }}
-          {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "python" "ctx" .) | nindent 10 }}
+          {{- include "neuraltrust-platform.proxy-env" (dict "ctx" . "skip" (((.Values.dataPlane).components).api).extraEnv) | nindent 10 }}
+          {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "python" "ctx" . "skip" (((.Values.dataPlane).components).api).extraEnv) | nindent 10 }}
           {{- include "neuraltrust-platform.redis.cloudEnv" (dict "ctx" . "skip" $api.extraEnv "jobs" true) | nindent 10 }}
           {{- include "neuraltrust-platform.appVersionEnv" (dict "tag" (dig "components" "api" "image" "tag" "" (.Values.dataPlane | default dict))) | nindent 10 }}
         volumeMounts:

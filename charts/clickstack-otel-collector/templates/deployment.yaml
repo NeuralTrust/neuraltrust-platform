@@ -96,7 +96,7 @@ spec:
         {{- with .Values.extraEnv }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-        {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
+        {{- include "neuraltrust-platform.proxy-env" (dict "ctx" . "skip" .Values.extraEnv) | nindent 8 }}
         {{- if .Values.securityHardening }}
         securityContext:
           allowPrivilegeEscalation: false

@@ -4,6 +4,50 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Fixed
+
+- **`global.proxy` now covers the console's SSO and keeps in-cluster traffic
+  off the proxy.** Three gaps made the proxy setting unusable on clusters whose
+  only egress is a corporate proxy.
+  - **Node ignored the proxy.** Node's `fetch` reads `HTTP(S)_PROXY` only when
+    `NODE_USE_ENV_PROXY=1` is set, so the console's calls to the identity
+    provider (for example Microsoft Entra ID) always went direct. The chart now
+    sets it with the proxy variables. Go and Python ignore it.
+  - **`noProxy` didn't cover the chart's own hosts.** Services call each other
+    by short names (`datacore`, `control-plane-api-service`, the firewall
+    `*-worker`s, …). Those don't match `.svc` or `.cluster.local`, and IP
+    ranges don't help because `NO_PROXY` is matched on the hostname before DNS.
+    Proxy-aware clients therefore sent internal calls to the proxy. `noProxy`
+    is now **additive**: your entries come first, followed by
+    `localhost,127.0.0.1,::1,.cluster.local,.svc`, the API-server address, the
+    cloud metadata endpoints (`169.254.169.254`, `metadata.google.internal`,
+    EKS Pod Identity) that workload identity fetches tokens from, and every
+    in-cluster Service name the chart creates. A custom `noProxy` can no longer
+    drop the in-cluster defaults. Node's `fetch` ignores CIDR entries, so list
+    internal destinations by domain suffix (`.corp.example`).
+  - **Variables you set in a container's `extraEnv` are no longer emitted a
+    second time.** If a proxy or CA variable (`HTTPS_PROXY`,
+    `NODE_USE_ENV_PROXY`, `SSL_CERT_FILE`, …) was set by hand in `extraEnv`,
+    the chart used to emit the same name again, and a duplicate `name:` in one
+    env list fails `helm upgrade`. Your value now wins, and the chart skips
+    that name.
+  - **Two containers skipped the proxy.** The hybrid
+    `clickstack-egress-collector` sidecar, which ships telemetry to NeuralTrust,
+    and the console's `init-db` init container, which fetches cloud IAM tokens,
+    now get the proxy variables.
+  - **`global.customCaCert` now reaches control-plane-api.** It runs Python,
+    but the chart gave it only `NODE_EXTRA_CA_CERTS`, which Python ignores, so
+    its outbound HTTPS never trusted the corporate CA. It now gets
+    `REQUESTS_CA_BUNDLE` and `SSL_CERT_FILE`, like data-plane-api. These
+    replace Python's trust store, so the Secret must hold a full bundle (public
+    roots plus your CA). Any of these names you already set in its `extraEnv`
+    is kept as yours.
+  - **Upgrade note:** installs with neither `global.proxy` nor
+    `global.customCaCert` enabled render unchanged. With the proxy on, pods roll
+    once to pick up the new environment. With `customCaCert` on,
+    control-plane-api rolls once, and its bundle must be a full one. For a
+    TLS-inspecting proxy, set both.
+
 ## [v4.1.1] — 2026-11-12
 
 ### Fixed
