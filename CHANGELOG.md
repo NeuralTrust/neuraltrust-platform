@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v4.1.4] — 2026-11-16
+
 ### Fixed
 
 - **`global.proxy` now covers the console's SSO and keeps in-cluster traffic
