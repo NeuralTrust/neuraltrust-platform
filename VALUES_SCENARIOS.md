@@ -312,22 +312,30 @@ agentgateway:
   through `agentgateway.serviceAccount.annotations`, the pod's ServiceAccount
   token for Vault Kubernetes auth, or a Kubernetes Secret named by a `*Secret`
   field (`caCertSecret`, `secretIdSecret`, `tokenSecret`, `apiKeySecret`,
-  `file.existingSecret`). The chart mounts those read-only under
-  `/etc/trustgate/secret-store-credentials/<store>/` and writes the paths into
-  the store file. A credential written inline fails the render.
+  `jwtSecret`, `file.existingSecret`). The chart mounts those read-only under
+  `/etc/trustgate/secret-store-credentials/<store>/` and writes the matching
+  `*_file` paths into the store file. A credential written inline fails the
+  render.
 - `allowedPaths` is required: references outside those prefixes are refused.
   `allowedDestinations` limits the upstream hosts a resolved value may be sent
   to.
+- The chart writes the stores with keys in snake_case and leaves validation to
+  TrustGate, which reads the file strictly. A pod refuses to start on an invalid
+  store file, so a bad upgrade stalls the rollout while the old pods keep
+  serving.
 - The store file is a ConfigMap mounted as a directory. TrustGate reloads it on
-  change, so editing stores does not roll the pods.
+  change, so editing stores does not roll the pods. A running pod that finds the
+  edited file invalid keeps its previous stores and reports the error in the
+  console's store health, and its next restart fails. **Check store health after
+  editing stores.**
 - Remote data planes of a `saas` install resolve with the stores in their own
   hybrid release, not the central one.
-- **First enable on `external` or `saas`:** before the upgrade, run
-  `kubectl exec deploy/agentgateway-admin -- trustgate secret-refs-scan`. Exit
-  code 3 lists stored credential values that already start with `secret://`;
-  once stores are on, TrustGate treats them as references, so fix them first.
-  Hybrid installs have nothing to scan locally: their credentials live in
-  NeuralTrust's control plane.
+- **Optional check on `external` or `saas`:** from agentgateway v0.88, a stored
+  credential that is a whole `secret://…` string is treated as a reference,
+  whether or not stores are configured.
+  `kubectl exec deploy/agentgateway-admin -- trustgate secret-refs-scan` lists
+  such values (exit code 3) so you can replace them. Hybrid installs have nothing
+  to scan locally: their credentials live in NeuralTrust's control plane.
 - **Rollback:** a chart rolled back below this version stops resolving
   references. Replace them with values before rolling back.
 

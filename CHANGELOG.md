@@ -16,12 +16,13 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
     `saas`. `SECRET_STORES_GATEWAYS` defaults to `hybrid` and `all`
     respectively. `dedicated` refuses stores.
   - Store credentials come from workload identity or from Kubernetes Secrets
-    named by `*Secret` fields, mounted read-only. Inline credentials, unknown
-    keys, a missing `allowedPaths` and an empty `allowedDestinations` fail the
-    render.
+    named by `*Secret` fields, mounted read-only. Inline credentials and an
+    invalid or duplicate store name fail the render. Every other setting is
+    written in snake_case and validated by TrustGate when it loads the file.
   - Without stores the render is unchanged.
-  - Needs agentgateway v0.88.0 or later. On `external` and `saas`, run
-    `trustgate secret-refs-scan` in the admin before the first enable.
+  - Needs agentgateway v0.88.0 or later. Optionally, on `external` and `saas`,
+    `trustgate secret-refs-scan` in the admin lists stored credentials that
+    start with `secret://`, which TrustGate treats as references.
 
 ## [v4.1.4] — 2026-11-16
 

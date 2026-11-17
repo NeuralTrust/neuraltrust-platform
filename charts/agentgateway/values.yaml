@@ -217,9 +217,17 @@ trustguard:
 # Identity, Azure Workload Identity) or the pod's ServiceAccount token (Vault
 # Kubernetes auth), or with a Kubernetes Secret named by a *Secret field, which
 # the chart mounts read-only and writes into the store file as its *_file path.
-# Before the first enable on an external or saas install, run
+#
+# The chart writes the stores into TrustGate's store file with keys in
+# snake_case (kvVersion → kv_version). TrustGate validates the file: a pod
+# refuses to start on an invalid one, and a running pod keeps its previous
+# stores and reports the error in the console's store health. Check store
+# health after editing stores, since an edit alone does not restart the pods.
+#
+# Optional, on external and saas: on agentgateway v0.88+, a stored credential
+# that is a whole secret://… string is treated as a reference.
 #   kubectl exec deploy/agentgateway-admin -- trustgate secret-refs-scan
-# Exit 3 lists stored values that already look like references; fix those first.
+# lists them (exit 3) so you can replace them.
 secretStores:
   # Which gateways may hold references: "hybrid" or "all".
   # Empty ⇒ hybrid in hybrid mode, all in external and saas.
@@ -235,17 +243,20 @@ secretStores:
   # the type:
   #   hashicorp_vault     → hashicorpVault {address, namespace, mount, kvVersion,
   #                          caCertSecret, auth {method: kubernetes|jwt|approle|token,
-  #                          mount, role, roleId, secretIdSecret, tokenSecret, jwtFile}}
+  #                          mount, role, roleId, secretIdSecret, tokenSecret}}
   #   aws_secrets_manager → awsSecretsManager {region, endpoint, assumeRoleArn}
   #   gcp_secret_manager  → gcpSecretManager {projectId}
   #   azure_key_vault     → azureKeyVault {vaultUrl, clientId}
   #   cyberark_conjur     → cyberarkConjur {url, account, caCertSecret,
-  #                          auth {method: jwt|api_key, serviceId, jwtFile, login, apiKeySecret}}
+  #                          auth {method: jwt|api_key, serviceId, login, apiKeySecret}}
   #   file                → file {existingSecret} (each Secret key is a flat file:
-  #                          secret://<store>/<key>) or {root} (a directory you mount)
+  #                          secret://<store>/<key>)
   #   env                 → env {prefix}
-  # A *Secret field is {name: <Secret>, key: <key>}; key defaults to ca.crt,
-  # secret-id, token or api-key. Plain *File paths work for files you mount yourself.
+  # A *Secret field is {name: <Secret>, key: <key>}: the chart mounts that key
+  # and writes the matching *_file path (caCertSecret → ca_cert_file). key
+  # defaults to ca.crt for caCertSecret and to secret-id, token, api-key or jwt
+  # otherwise. Vault kubernetes/jwt and Conjur jwt read the pod's ServiceAccount
+  # token by default; jwtSecret overrides it.
   stores: []
   # - name: corp-vault
   #   type: hashicorp_vault
