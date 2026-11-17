@@ -5,9 +5,9 @@ LLM. Configure it under `firewall.firewall.gateway.decision` in umbrella values.
 The first `firewall` selects the subchart. Settings and credentials go only to
 the gateway, not to the local model workers.
 
-The chart pins Firewall v2.52.0. Keep the gateway and worker image versions
-aligned when overriding them. The `google` decision provider requires v2.52.0
-or later.
+Keep the gateway and worker image versions aligned when overriding them. The
+`google` decision provider needs Firewall v2.52.0 or later; the image the chart
+pins includes it.
 
 This requires `global.firewall.deploy: true` and the TrustGuard product enabled.
 These values cannot configure the NeuralTrust-hosted Firewall or a Firewall
@@ -64,6 +64,18 @@ endpoint. The local workers still need to run.
 Set `doubleCheck: false` to use the decision routes without changing detector
 behavior. Helm rejects double checks with `enabled: false` and incomplete
 provider credentials or required settings.
+
+### Before enabling double check
+
+- Flagged text leaves the cluster for the provider you select. Text the local
+  models allow is never sent.
+- The provider's verdict replaces the local one, so it can clear a local flag.
+  A refusal keeps the flag.
+- A provider timeout or error fails the detector request for that flagged text,
+  within `doubleCheckTimeoutSeconds`. Keep that budget below the caller's own
+  timeout; TrustGuard waits 30 seconds for the Firewall.
+- Known open issues: ENG-3272 (how a failed double check surfaces to callers)
+  and ENG-2833 (no log or metric when a remote verdict overrides a local block).
 
 ## Choose a provider
 
@@ -195,6 +207,7 @@ All paths below are relative to `firewall.firewall.gateway.decision`.
 | `maxRetries` | `1` | `DECISION_SERVICE_MAX_RETRIES` |
 | `retryBackoffSeconds` | `0.25` | `DECISION_SERVICE_RETRY_BACKOFF_S` |
 | `healthCacheSeconds` | `30` | `DECISION_SERVICE_HEALTH_CACHE_S` |
+| `doubleCheckTimeoutSeconds` | `10` | `DECISION_SERVICE_DOUBLE_CHECK_TIMEOUT_S` |
 
 Zero retries and zero backoff are preserved. Health checks to
 `/v1/decision/health` call the provider and can incur charges; the gateway caches
@@ -206,7 +219,8 @@ example `kubectl rollout restart deployment/firewall -n neuraltrust`.
 
 Existing `gateway.extraEnv`, `gateway.extraEnvFrom`, and `config.extraEnv`
 configuration continues to work with `decision.enabled: false`. When enabling
-this block, remove the old `DECISION_SERVICE_*` settings from those locations
-so this block owns the decision configuration. Helm rejects duplicate decision
-variables in `gateway.extraEnv`. Do not put API keys in `config.extraEnv`, which
-is a shared ConfigMap.
+this block, remove from those locations the `DECISION_SERVICE_*` settings it
+manages (every variable in the table above), so the block owns them. Helm
+rejects those names in `gateway.extraEnv`. Settings the block does not cover,
+such as `DECISION_SERVICE_TRUNCATE_CHARS`, stay in `gateway.extraEnv`. Do not
+put API keys in `config.extraEnv`, which is a shared ConfigMap.

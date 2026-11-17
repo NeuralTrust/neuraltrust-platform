@@ -67,7 +67,7 @@ spec:
       initContainers:
       - name: init-db
         {{- $initImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
-        {{- $initImageTag := "v2.29.5" }}
+        {{- $initImageTag := "v2.40.0" }}
         {{- $initPullPolicy := "IfNotPresent" }}
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.image }}
           {{- if .Values.controlPlane.components.app.image.repository }}{{- $initImageRepo = .Values.controlPlane.components.app.image.repository }}{{- end }}
@@ -224,6 +224,10 @@ spec:
               name: {{ $pgSecretName }}
               optional: true
         {{- end }}
+        {{- /* postgres-iam-url.mjs fetches a cloud IAM token (STS / GCP IAM). */}}
+        {{- with include "neuraltrust-platform.proxy-env" . | trim }}
+        {{- . | nindent 8 }}
+        {{- end }}
         {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "node" "ctx" .) | nindent 8 }}
         {{- if include "neuraltrust-platform.customCaCert.enabled" . }}
         volumeMounts:
@@ -250,7 +254,7 @@ spec:
       containers:
       - name: app
         {{- $appImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
-        {{- $appImageTag := "v2.29.5" }}
+        {{- $appImageTag := "v2.40.0" }}
         {{- $appPullPolicy := "IfNotPresent" }}
         {{- $appPort := 3000 }}
         {{- $nodeEnv := "production" }}
@@ -768,8 +772,8 @@ spec:
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.extraEnv }}
         {{- toYaml .Values.controlPlane.components.app.extraEnv | nindent 8 }}
         {{- end }}
-        {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
-        {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "node" "ctx" .) | nindent 8 }}
+        {{- include "neuraltrust-platform.proxy-env" (dict "ctx" . "skip" (((.Values.controlPlane).components).app).extraEnv) | nindent 8 }}
+        {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "node" "ctx" . "skip" (((.Values.controlPlane).components).app).extraEnv) | nindent 8 }}
         {{- include "neuraltrust-platform.appVersionEnv" (dict "tag" $appImageTag) | nindent 8 }}
         {{- if or (include "neuraltrust-platform.customCaCert.enabled" .) (and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.extraVolumeMounts) }}
         volumeMounts:

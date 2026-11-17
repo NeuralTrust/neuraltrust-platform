@@ -15,7 +15,8 @@
   "MAX_RETRIES" $d.maxRetries
   "RETRY_BACKOFF_S" $d.retryBackoffSeconds
   "HEALTH_CACHE_S" $d.healthCacheSeconds
-  "DOUBLE_CHECK" $d.doubleCheck -}}
+  "DOUBLE_CHECK" $d.doubleCheck
+  "DOUBLE_CHECK_TIMEOUT_S" $d.doubleCheckTimeoutSeconds -}}
 {{- range $name, $value := $settings -}}
 {{- /* toString preserves false and zero; empty optional fields use app defaults. */ -}}
 {{- if and (ne $value nil) (ne (toString $value) "") }}
@@ -32,4 +33,10 @@
       key: {{ $secret.key | default "DECISION_SERVICE_API_KEY" | quote }}
 {{- end -}}
 {{- end -}}
+{{- end -}}
+
+{{/* DECISION_SERVICE_* names the decision block owns. Others (for example
+     TRUNCATE_CHARS) stay settable through gateway.extraEnv. */}}
+{{- define "firewall.decision.managedEnv" -}}
+PROVIDER MODEL URL AUTH CLOUDFLARE_ACCOUNT_ID ENTRA_SCOPE PROJECT LOCATION TIMEOUT_S MAX_RETRIES RETRY_BACKOFF_S HEALTH_CACHE_S DOUBLE_CHECK DOUBLE_CHECK_TIMEOUT_S API_KEY
 {{- end -}}

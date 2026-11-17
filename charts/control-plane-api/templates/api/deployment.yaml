@@ -145,7 +145,7 @@ spec:
       containers:
       - name: control-plane-api
         {{- $apiImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/control-plane-api" }}
-        {{- $apiImageTag := "v1.31.1" }}
+        {{- $apiImageTag := "v1.31.3" }}
         {{- $apiPullPolicy := "IfNotPresent" }}
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.api .Values.controlPlane.components.api.image }}
           {{- if .Values.controlPlane.components.api.image.repository }}{{- $apiImageRepo = .Values.controlPlane.components.api.image.repository }}{{- end }}
@@ -288,8 +288,8 @@ spec:
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.api .Values.controlPlane.components.api.extraEnv }}
         {{- toYaml .Values.controlPlane.components.api.extraEnv | nindent 8 }}
         {{- end }}
-        {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
-        {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "node" "ctx" .) | nindent 8 }}
+        {{- include "neuraltrust-platform.proxy-env" (dict "ctx" . "skip" (((.Values.controlPlane).components).api).extraEnv) | nindent 8 }}
+        {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "python" "ctx" . "skip" (((.Values.controlPlane).components).api).extraEnv) | nindent 8 }}
         {{- include "neuraltrust-platform.appVersionEnv" (dict "tag" $apiImageTag) | nindent 8 }}
         {{- if or (include "neuraltrust-platform.customCaCert.enabled" .) (and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.api .Values.controlPlane.components.api.extraVolumeMounts) }}
         volumeMounts:

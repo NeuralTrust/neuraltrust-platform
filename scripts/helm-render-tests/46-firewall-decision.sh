@@ -3,7 +3,7 @@
 source "$(dirname "$0")/lib.sh"
 suite_full || exit 0
 
-blue "==> Scenario 45: gateway decision backends and detector double checks"
+blue "==> Scenario 46: gateway decision backends and detector double checks"
 FW_ARGS=(--set global.firewall.deploy=true)
 DECISION_ARGS=("${FW_ARGS[@]}" --set firewall.firewall.gateway.decision.enabled=true)
 KEY_ARGS=(--set firewall.firewall.gateway.decision.apiKeyExistingSecret.name=decision-key)
@@ -22,10 +22,11 @@ render_default "$out" "${DECISION_ARGS[@]}" "${KEY_ARGS[@]}" \
   --set firewall.firewall.gateway.decision.timeoutSeconds=20 \
   --set firewall.firewall.gateway.decision.maxRetries=0 \
   --set firewall.firewall.gateway.decision.retryBackoffSeconds=0 \
-  --set firewall.firewall.gateway.decision.healthCacheSeconds=0
+  --set firewall.firewall.gateway.decision.healthCacheSeconds=0 \
+  --set firewall.firewall.gateway.decision.doubleCheckTimeoutSeconds=8
 for pair in PROVIDER=liquid MODEL=d1-ultra DOUBLE_CHECK=true AUTH=api_key \
     URL=https://decision.example.test/systemone TIMEOUT_S=20 MAX_RETRIES=0 \
-    RETRY_BACKOFF_S=0 HEALTH_CACHE_S=0 API_KEY=secretKeyRef:decision-key/token; do
+    RETRY_BACKOFF_S=0 HEALTH_CACHE_S=0 DOUBLE_CHECK_TIMEOUT_S=8 API_KEY=secretKeyRef:decision-key/token; do
   assert_env_value "$out" firewall gateway "DECISION_SERVICE_${pair%%=*}" "${pair#*=}" \
     "gateway decision setting $pair"
 done
@@ -106,7 +107,7 @@ assert_env_value "$out" firewall gateway DECISION_SERVICE_API_KEY ABSENT "Vertex
 document_named_kind "$out" Deployment firewall "$TMP/gateway.yaml"
 assert_contains "$TMP/gateway.yaml" 'serviceAccountName: existing-firewall' "gateway selects the pre-created identity ServiceAccount"
 
-blue "==> Scenario 45b: invalid decision configuration fails at render time"
+blue "==> Scenario 46b: invalid decision configuration fails at render time"
 assert_render_fails_with 'doubleCheck=true requires decision.enabled=true' "double check needs an enabled backend" \
   "${FW_ARGS[@]}" --set firewall.firewall.gateway.decision.doubleCheck=true
 assert_render_fails_with 'apiKeyExistingSecret.name is required' "API-key auth needs a Secret" "${DECISION_ARGS[@]}"
@@ -131,6 +132,16 @@ assert_render_fails_with 'remove DECISION_SERVICE_MODEL from gateway.extraEnv' "
   "${DECISION_ARGS[@]}" "${KEY_ARGS[@]}" \
   --set 'firewall.firewall.gateway.extraEnv[0].name=DECISION_SERVICE_MODEL' \
   --set 'firewall.firewall.gateway.extraEnv[0].value=custom-model'
+
+# A DECISION_SERVICE_* setting the block does not manage stays in extraEnv.
+out="$TMP/unmanaged.yaml"
+render_default "$out" "${DECISION_ARGS[@]}" "${KEY_ARGS[@]}" \
+  --set 'firewall.firewall.gateway.extraEnv[0].name=DECISION_SERVICE_TRUNCATE_CHARS' \
+  --set 'firewall.firewall.gateway.extraEnv[0].value=4000'
+assert_env_value "$out" firewall gateway DECISION_SERVICE_TRUNCATE_CHARS 4000 \
+  "an unmanaged decision setting is accepted in gateway.extraEnv with the block on"
+assert_env_value "$out" firewall gateway DECISION_SERVICE_DOUBLE_CHECK_TIMEOUT_S 10 \
+  "the double-check budget defaults to the Firewall's 10 s"
 
 # Legacy env remains usable with the first-class block off.
 out="$TMP/legacy.yaml"

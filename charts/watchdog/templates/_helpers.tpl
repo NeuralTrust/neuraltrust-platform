@@ -182,18 +182,5 @@ Optional egress proxy environment variables, only when umbrella
 global.proxy.enabled is true.
 */}}
 {{- define "neuraltrust-watchdog.proxyEnv" -}}
-{{- if and .Values.global .Values.global.proxy .Values.global.proxy.enabled }}
-- name: HTTP_PROXY
-  value: {{ .Values.global.proxy.httpProxy | quote }}
-- name: HTTPS_PROXY
-  value: {{ .Values.global.proxy.httpsProxy | quote }}
-- name: NO_PROXY
-  value: {{ .Values.global.proxy.noProxy | quote }}
-- name: http_proxy
-  value: {{ .Values.global.proxy.httpProxy | quote }}
-- name: https_proxy
-  value: {{ .Values.global.proxy.httpsProxy | quote }}
-- name: no_proxy
-  value: {{ .Values.global.proxy.noProxy | quote }}
-{{- end }}
+{{- include "neuraltrust-platform.proxy-env" . }}
 {{- end }}

@@ -35,10 +35,12 @@
 {{- if and (eq $d.provider "cloudflare") (not $d.url) (not $d.cloudflareAccountId) -}}
   {{- fail (printf "%s.cloudflareAccountId is required for provider=cloudflare unless url is set" $path) -}}
 {{- end -}}
-{{- /* Explicit env duplicates break strategic merge on upgrades. Keep one owner. */ -}}
+{{- /* Explicit env duplicates break strategic merge on upgrades. Keep one owner
+       for each name the block emits; other DECISION_SERVICE_* stay in extraEnv. */ -}}
+{{- $managed := splitList " " (include "firewall.decision.managedEnv" .) -}}
 {{- range .Values.firewall.gateway.extraEnv -}}
-  {{- if hasPrefix "DECISION_SERVICE_" .name -}}
-    {{- fail (printf "%s.enabled=true manages DECISION_SERVICE_*; remove %s from gateway.extraEnv" $path .name) -}}
+  {{- if and (hasPrefix "DECISION_SERVICE_" .name) (has (trimPrefix "DECISION_SERVICE_" .name) $managed) -}}
+    {{- fail (printf "%s.enabled=true manages %s; remove %s from gateway.extraEnv" $path .name .name) -}}
   {{- end -}}
 {{- end -}}
 {{- end -}}
