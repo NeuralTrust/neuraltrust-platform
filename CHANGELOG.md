@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v4.2.0] — 2026-11-17
+
 ### Added
 
 - **TrustGate secret stores (`agentgateway.secretStores`).** Credential fields
