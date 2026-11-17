@@ -452,34 +452,21 @@ control plane, all where the customer runs every plane (external, saas).
 {{- end }}
 
 {{/*
-Validates secretStores.stores and returns YAML with "file" (the store file
-document) and "mounts" (the credential Secrets to mount). Unknown keys fail
-the render, since the binary decodes the file strictly.
+Builds the store file from secretStores.stores and returns YAML with "file"
+(the store file document) and "mounts" (the credential Secrets to mount).
+The chart checks only what it generates itself: the store name (it becomes a
+mount path), inline credentials (they would land in a ConfigMap) and the
+*Secret translation. Every other setting passes through in snake_case and is
+validated by TrustGate, which decodes the file strictly and refuses to start
+on an invalid one, so new TrustGate settings need no chart change.
 */}}
 {{- define "agentgateway.secretStores.compiled" -}}
 {{- if eq (include "neuraltrust-platform.isDedicated" .) "true" }}
 {{- fail "agentgateway.secretStores is not available with global.deploymentMode=dedicated: dedicated planes run on NeuralTrust infrastructure and never load a store file" }}
 {{- end }}
 {{- $credDir := include "agentgateway.secretStores.credentialsDir" . }}
-{{- $blocks := dict "hashicorp_vault" "hashicorpVault" "aws_secrets_manager" "awsSecretsManager" "gcp_secret_manager" "gcpSecretManager" "azure_key_vault" "azureKeyVault" "cyberark_conjur" "cyberarkConjur" "file" "file" "env" "env" }}
-{{- $allowed := dict
-  "hashicorpVault" (list "address" "namespace" "mount" "kvVersion" "caCertFile" "caCertSecret" "auth")
-  "hashicorpVault.auth" (list "method" "mount" "role" "roleId" "secretIdFile" "secretIdSecret" "tokenFile" "tokenSecret" "jwtFile")
-  "awsSecretsManager" (list "region" "endpoint" "assumeRoleArn")
-  "gcpSecretManager" (list "projectId")
-  "azureKeyVault" (list "vaultUrl" "clientId")
-  "cyberarkConjur" (list "url" "account" "caCertFile" "caCertSecret" "auth")
-  "cyberarkConjur.auth" (list "method" "serviceId" "jwtFile" "login" "apiKeyFile" "apiKeySecret")
-  "file" (list "root" "existingSecret")
-  "env" (list "prefix") }}
-{{- $snake := dict "kvVersion" "kv_version" "caCertFile" "ca_cert_file" "roleId" "role_id" "secretIdFile" "secret_id_file" "tokenFile" "token_file" "jwtFile" "jwt_file" "assumeRoleArn" "assume_role_arn" "projectId" "project_id" "vaultUrl" "vault_url" "clientId" "client_id" "serviceId" "service_id" "apiKeyFile" "api_key_file" }}
-{{- /* field → (store file key, mount directory, default Secret key) */}}
-{{- $secretRefs := dict "caCertSecret" (list "ca_cert_file" "ca-cert" "ca.crt") "secretIdSecret" (list "secret_id_file" "secret-id" "secret-id") "tokenSecret" (list "token_file" "token" "token") "apiKeySecret" (list "api_key_file" "api-key" "api-key") }}
-{{- $inline := list "token" "secretId" "jwt" "password" "apiKey" "clientSecret" }}
-{{- $storeKeys := list "name" "type" "allowedPaths" "allowedDestinations" "gateways" "cache" }}
-{{- $cacheKeys := dict "ttl" "ttl" "maxStale" "max_stale" "negativeTtl" "negative_ttl" }}
 {{- $stores := list }}
-{{- $mounts := list }}
+{{- $acc := dict "mounts" list }}
 {{- $names := dict }}
 {{- range $i, $s := (default list (default dict .Values.secretStores).stores) }}
 {{- if not (kindIs "map" $s) }}
@@ -493,93 +480,57 @@ the render, since the binary decodes the file strictly.
 {{- fail (printf "agentgateway.secretStores.stores: store %q is declared twice" $name) }}
 {{- end }}
 {{- $_ := set $names $name true }}
-{{- $type := toString (default "" $s.type) }}
-{{- if not (hasKey $blocks $type) }}
-{{- fail (printf "agentgateway.secretStores.stores[%s].type %q must be one of %s" $name $type (keys $blocks | sortAlpha | join ", ")) }}
+{{- $o := dict }}
+{{- $_ := include "agentgateway.secretStores.walk" (dict "src" $s "dst" $o "acc" $acc "index" $i "dir" (printf "%s/%s" $credDir $name) "where" (printf "agentgateway.secretStores.stores[%s]" $name)) }}
+{{- $stores = append $stores $o }}
 {{- end }}
-{{- $blockKey := get $blocks $type }}
-{{- range $k, $_ := $s }}
-{{- if not (has $k (append $storeKeys $blockKey)) }}
-{{- fail (printf "agentgateway.secretStores.stores[%s]: unknown key %q (a %s store takes its settings under %s)" $name $k $type $blockKey) }}
+{{- toYaml (dict "file" (dict "version" 1 "stores" $stores) "mounts" $acc.mounts) }}
 {{- end }}
+
+{{/*
+Copies one level of a store into the store file, recursing into maps. Keys
+become snake_case. <x>Secret: {name, key} mounts that Secret key read-only
+and writes <x>_file (caCertSecret → ca_cert_file, tokenSecret → token_file,
+...); the key defaults to ca.crt for caCert and to the kebab-case name
+otherwise. existingSecret mounts a whole Secret and writes root (file stores).
+*/}}
+{{- define "agentgateway.secretStores.walk" -}}
+{{- $a := . }}
+{{- range $k, $v := $a.src }}
+{{- $where := printf "%s.%s" $a.where $k }}
+{{- if has (snakecase $k) (list "token" "secret_id" "jwt" "password" "api_key" "client_secret") }}
+{{- fail (printf "%s must not be written inline: name a Kubernetes Secret with the matching *Secret field (tokenSecret, secretIdSecret, apiKeySecret, jwtSecret) or use workload identity" $where) }}
+{{- else if eq $k "existingSecret" }}
+{{- if hasKey $a.src "root" }}
+{{- fail (printf "%s and root are mutually exclusive" $where) }}
 {{- end }}
-{{- $block := dict }}
-{{- if and (hasKey $s $blockKey) (not (kindIs "invalid" (get $s $blockKey))) }}{{- $block = get $s $blockKey }}{{- end }}
-{{- if not (kindIs "map" $block) }}
-{{- fail (printf "agentgateway.secretStores.stores[%s].%s must be a map" $name $blockKey) }}
+{{- if not (and (kindIs "string" $v) $v) }}
+{{- fail (printf "%s must name a Kubernetes Secret" $where) }}
 {{- end }}
-{{- $paths := default list $s.allowedPaths }}
-{{- if eq (len $paths) 0 }}
-{{- fail (printf "agentgateway.secretStores.stores[%s].allowedPaths must list at least one path prefix" $name) }}
-{{- end }}
-{{- $o := dict "name" $name "type" $type "allowed_paths" $paths }}
-{{- if not (kindIs "invalid" $s.allowedDestinations) }}
-{{- if eq (len $s.allowedDestinations) 0 }}
-{{- fail (printf "agentgateway.secretStores.stores[%s].allowedDestinations is empty, which would refuse every destination; remove the key to allow any" $name) }}
-{{- end }}
-{{- $_ := set $o "allowed_destinations" $s.allowedDestinations }}
-{{- end }}
-{{- with $s.gateways }}{{- $_ := set $o "gateways" . }}{{- end }}
-{{- with $s.cache }}
-{{- $cache := dict }}
-{{- range $k, $v := . }}
-{{- if not (hasKey $cacheKeys $k) }}
-{{- fail (printf "agentgateway.secretStores.stores[%s].cache: unknown key %q (ttl, maxStale, negativeTtl)" $name $k) }}
-{{- end }}
-{{- $_ := set $cache (get $cacheKeys $k) $v }}
-{{- end }}
-{{- $_ := set $o "cache" $cache }}
-{{- end }}
-{{- $out := dict }}
-{{- $levels := list (dict "src" $block "dst" $out "allowed" $blockKey "label" $blockKey) }}
-{{- if hasKey $block "auth" }}
-{{- if not (kindIs "map" $block.auth) }}
-{{- fail (printf "agentgateway.secretStores.stores[%s].%s.auth must be a map" $name $blockKey) }}
-{{- end }}
-{{- $authOut := dict }}
-{{- $_ := set $out "auth" $authOut }}
-{{- $levels = append $levels (dict "src" $block.auth "dst" $authOut "allowed" (printf "%s.auth" $blockKey) "label" (printf "%s.auth" $blockKey)) }}
-{{- end }}
-{{- range $lvl := $levels }}
-{{- $permitted := default list (get $allowed $lvl.allowed) }}
-{{- range $k, $v := $lvl.src }}
-{{- if not (and (eq $lvl.label $blockKey) (eq $k "auth")) }}
-{{- $where := printf "agentgateway.secretStores.stores[%s].%s.%s" $name $lvl.label $k }}
-{{- if has $k $inline }}
-{{- fail (printf "%s must not be written inline: name a Kubernetes Secret with %sSecret, or mount a file and use %sFile" $where $k $k) }}
-{{- end }}
-{{- if not (has $k $permitted) }}
-{{- fail (printf "%s is not a known setting (%s)" $where (join ", " $permitted)) }}
-{{- end }}
-{{- if hasKey $secretRefs $k }}
-{{- if hasKey $lvl.src (replace "Secret" "File" $k) }}
-{{- fail (printf "%s and %s are mutually exclusive" $where (replace "Secret" "File" $k)) }}
+{{- $dir := printf "%s/files" $a.dir }}
+{{- $_ := set $a.dst "root" $dir }}
+{{- $_ := set $a.acc "mounts" (append $a.acc.mounts (dict "volume" (printf "secret-store-%d-files" (int $a.index)) "secretName" $v "mountPath" $dir)) }}
+{{- else if hasSuffix "Secret" $k }}
+{{- $field := trimSuffix "Secret" $k }}
+{{- if hasKey $a.src (printf "%sFile" $field) }}
+{{- fail (printf "%s and %sFile are mutually exclusive" $where $field) }}
 {{- end }}
 {{- if or (not (kindIs "map" $v)) (not $v.name) }}
 {{- fail (printf "%s needs the name of a Kubernetes Secret: {name: <secret>, key: <key>}" $where) }}
 {{- end }}
-{{- $spec := get $secretRefs $k }}
-{{- $key := toString (default (index $spec 2) $v.key) }}
-{{- $dir := printf "%s/%s/%s" $credDir $name (index $spec 1) }}
-{{- $_ := set $lvl.dst (index $spec 0) (printf "%s/%s" $dir $key) }}
-{{- $mounts = append $mounts (dict "volume" (printf "secret-store-%d-%s" $i (index $spec 1)) "secretName" $v.name "key" $key "mountPath" $dir) }}
-{{- else if eq $k "existingSecret" }}
-{{- if hasKey $lvl.src "root" }}
-{{- fail (printf "%s and root are mutually exclusive" $where) }}
-{{- end }}
-{{- $dir := printf "%s/%s/files" $credDir $name }}
-{{- $_ := set $lvl.dst "root" $dir }}
-{{- $mounts = append $mounts (dict "volume" (printf "secret-store-%d-files" $i) "secretName" (toString $v) "mountPath" $dir) }}
+{{- $sub := kebabcase $field }}
+{{- $key := toString (default (ternary "ca.crt" $sub (eq $field "caCert")) $v.key) }}
+{{- $dir := printf "%s/%s" $a.dir $sub }}
+{{- $_ := set $a.dst (printf "%s_file" (snakecase $field)) (printf "%s/%s" $dir $key) }}
+{{- $_ := set $a.acc "mounts" (append $a.acc.mounts (dict "volume" (printf "secret-store-%d-%s" (int $a.index) $sub) "secretName" $v.name "key" $key "mountPath" $dir)) }}
+{{- else if kindIs "map" $v }}
+{{- $child := dict }}
+{{- $_ := set $a.dst (snakecase $k) $child }}
+{{- $_ := include "agentgateway.secretStores.walk" (dict "src" $v "dst" $child "acc" $a.acc "index" $a.index "dir" $a.dir "where" $where) }}
 {{- else }}
-{{- $_ := set $lvl.dst (default $k (get $snake $k)) $v }}
+{{- $_ := set $a.dst (snakecase $k) $v }}
 {{- end }}
 {{- end }}
-{{- end }}
-{{- end }}
-{{- $_ := set $o $type $out }}
-{{- $stores = append $stores $o }}
-{{- end }}
-{{- toYaml (dict "file" (dict "version" 1 "stores" $stores) "mounts" $mounts) }}
 {{- end }}
 
 {{/* Env for a workload that loads the store file; empty without stores. */}}

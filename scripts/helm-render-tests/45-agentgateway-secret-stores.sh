@@ -75,6 +75,19 @@ assert_contains "$cm45" 'root: /etc/trustgate/secret-store-credentials/local/fil
 assert_not_contains "$cm45" 'Secret:|existingSecret|allowedPaths|hashicorpVault' \
   "secret stores: no values-only key reaches the store file"
 
+# Settings the chart does not know pass through in snake_case: TrustGate owns
+# the schema and validates the file, so a new TrustGate setting needs no chart
+# change. Any *Secret field becomes the matching mounted *_file.
+out45p="$TMP/secret-stores-passthrough.yaml"
+render_default "$out45p" -f "$STORES_FILE" \
+  --set 'agentgateway.secretStores.stores[1].awsSecretsManager.someNewSetting=x' \
+  --set 'agentgateway.secretStores.stores[0].hashicorpVault.auth.jwtSecret.name=vault-jwt'
+cm45p="$TMP/secret-stores-passthrough-cm.yaml"
+document_named_kind "$out45p" ConfigMap agentgateway-secret-stores "$cm45p"
+assert_contains "$cm45p" 'some_new_setting: x' "secret stores: an unknown setting passes through in snake_case"
+assert_contains "$cm45p" 'jwt_file: /etc/trustgate/secret-store-credentials/corp-vault/jwt/jwt' \
+  "secret stores: jwtSecret becomes the mounted jwt_file"
+
 for wl in "agentgateway-proxy proxy" "agentgateway-mcp mcp"; do
   set -- $wl
   assert_env_value "$out45h" "$1" "$2" SECRET_STORES_FILE "$STORE_FILE_PATH" "secret stores (hybrid): $1 loads the store file"
@@ -116,16 +129,8 @@ assert_render_fails_with 'not available with global.deploymentMode=dedicated' \
   --set global.redis.host=10.0.0.5 -f "$STORES_FILE"
 assert_render_fails_with 'must not be written inline' "secret stores: an inline Vault token is refused" \
   -f "$STORES_FILE" --set 'agentgateway.secretStores.stores[0].hashicorpVault.auth.token=s.abc'
-assert_render_fails_with 'is not a known setting' "secret stores: an unknown block key is refused" \
-  -f "$STORES_FILE" --set 'agentgateway.secretStores.stores[1].awsSecretsManager.regoin=eu-west-1'
-assert_render_fails_with 'unknown key "gcpSecretManager"' "secret stores: a block that does not match the type is refused" \
-  -f "$STORES_FILE" --set 'agentgateway.secretStores.stores[1].gcpSecretManager.projectId=p'
-assert_render_fails_with 'allowedPaths must list at least one' "secret stores: allowedPaths is required" \
-  --set 'agentgateway.secretStores.stores[0].name=a' --set 'agentgateway.secretStores.stores[0].type=env'
-assert_render_fails_with 'allowedDestinations is empty' "secret stores: an empty allowedDestinations is refused" \
-  -f "$STORES_FILE" --set-json 'agentgateway.secretStores.stores[1].allowedDestinations=[]'
-assert_render_fails_with 'must be one of' "secret stores: an unknown type is refused" \
-  -f "$STORES_FILE" --set 'agentgateway.secretStores.stores[1].type=keepass'
+assert_render_fails_with 'must not be written inline' "secret stores: an inline credential in snake_case is refused too" \
+  -f "$STORES_FILE" --set 'agentgateway.secretStores.stores[1].awsSecretsManager.client_secret=x'
 assert_render_fails_with 'declared twice' "secret stores: duplicate names are refused" \
   -f "$STORES_FILE" --set 'agentgateway.secretStores.stores[1].name=corp-vault'
 assert_render_fails_with 'must be 1-63 characters' "secret stores: names must be lowercase" \
