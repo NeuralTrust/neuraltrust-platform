@@ -4,6 +4,26 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Added
+
+- **TrustGate secret stores (`agentgateway.secretStores`).** Credential fields
+  can reference a secret in the customer's store
+  (`secret://<store>/<path>#<key>`) instead of holding the value. Stores are
+  declared in values (HashiCorp Vault, AWS Secrets Manager, GCP Secret Manager,
+  Azure Key Vault, CyberArk Conjur, file, env) and rendered into the TrustGate
+  store file, a ConfigMap mounted as a directory so edits hot-reload.
+  - Loaded by proxy and mcp in `hybrid`, and also by the admin in `external` and
+    `saas`. `SECRET_STORES_GATEWAYS` defaults to `hybrid` and `all`
+    respectively. `dedicated` refuses stores.
+  - Store credentials come from workload identity or from Kubernetes Secrets
+    named by `*Secret` fields, mounted read-only. Inline credentials and an
+    invalid or duplicate store name fail the render. Every other setting is
+    written in snake_case and validated by TrustGate when it loads the file.
+  - Without stores the render is unchanged.
+  - Needs agentgateway v0.88.0 or later. Optionally, on `external` and `saas`,
+    `trustgate secret-refs-scan` in the admin lists stored credentials that
+    start with `secret://`, which TrustGate treats as references.
+
 ## [v4.1.4] — 2026-11-16
 
 ### Fixed

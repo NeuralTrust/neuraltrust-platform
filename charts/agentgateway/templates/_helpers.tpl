@@ -418,3 +418,167 @@ one on every render and every MCP session token stopped verifying.
 {{- define "agentgateway.stsSigningKey.generated" -}}
 {{- if eq (include "neuraltrust-platform.secretsGenerator.active" .) "true" -}}true{{- end -}}
 {{- end }}
+
+{{/*
+Secret stores (secretStores.*). The stores are rendered into the TrustGate
+store file, mounted as a directory so the binary's watcher sees ConfigMap
+updates without a pod roll. Credentials never go in values: each *Secret
+field names a Kubernetes Secret, mounted read-only and written into the store
+file as the matching *_file path. NeuralTrust-hosted dedicated planes never
+load a store file.
+*/}}
+{{- define "agentgateway.secretStores.enabled" -}}
+{{- if gt (len (default list (default dict .Values.secretStores).stores)) 0 }}true{{- end }}
+{{- end }}
+
+{{- define "agentgateway.secretStores.configMapName" -}}agentgateway-secret-stores{{- end }}
+{{- define "agentgateway.secretStores.fileDir" -}}/etc/trustgate/secret-stores{{- end }}
+{{- define "agentgateway.secretStores.credentialsDir" -}}/etc/trustgate/secret-store-credentials{{- end }}
+
+{{/*
+Which gateways may hold secret references: hybrid where NeuralTrust runs the
+control plane, all where the customer runs every plane (external, saas).
+*/}}
+{{- define "agentgateway.secretStores.gateways" -}}
+{{- $v := toString (default "" (default dict .Values.secretStores).gateways) }}
+{{- if $v }}
+{{- if not (has $v (list "hybrid" "all")) }}
+{{- fail (printf "agentgateway.secretStores.gateways must be \"hybrid\" or \"all\" (got %q)" $v) }}
+{{- end }}
+{{- $v }}
+{{- else if eq (include "neuraltrust-platform.isExternal" .) "true" }}all
+{{- else }}hybrid
+{{- end }}
+{{- end }}
+
+{{/*
+Builds the store file from secretStores.stores and returns YAML with "file"
+(the store file document) and "mounts" (the credential Secrets to mount).
+The chart checks only what it generates itself: the store name (it becomes a
+mount path), inline credentials (they would land in a ConfigMap) and the
+*Secret translation. Every other setting passes through in snake_case and is
+validated by TrustGate, which decodes the file strictly and refuses to start
+on an invalid one, so new TrustGate settings need no chart change.
+*/}}
+{{- define "agentgateway.secretStores.compiled" -}}
+{{- if eq (include "neuraltrust-platform.isDedicated" .) "true" }}
+{{- fail "agentgateway.secretStores is not available with global.deploymentMode=dedicated: dedicated planes run on NeuralTrust infrastructure and never load a store file" }}
+{{- end }}
+{{- $credDir := include "agentgateway.secretStores.credentialsDir" . }}
+{{- $stores := list }}
+{{- $acc := dict "mounts" list }}
+{{- $names := dict }}
+{{- range $i, $s := (default list (default dict .Values.secretStores).stores) }}
+{{- if not (kindIs "map" $s) }}
+{{- fail (printf "agentgateway.secretStores.stores[%d] must be a map" $i) }}
+{{- end }}
+{{- $name := toString (default "" $s.name) }}
+{{- if not (regexMatch "^[a-z0-9][a-z0-9_-]{0,62}$" $name) }}
+{{- fail (printf "agentgateway.secretStores.stores[%d].name %q must be 1-63 characters of [a-z0-9_-] starting with a letter or digit" $i $name) }}
+{{- end }}
+{{- if hasKey $names $name }}
+{{- fail (printf "agentgateway.secretStores.stores: store %q is declared twice" $name) }}
+{{- end }}
+{{- $_ := set $names $name true }}
+{{- $o := dict }}
+{{- $_ := include "agentgateway.secretStores.walk" (dict "src" $s "dst" $o "acc" $acc "index" $i "dir" (printf "%s/%s" $credDir $name) "where" (printf "agentgateway.secretStores.stores[%s]" $name)) }}
+{{- $stores = append $stores $o }}
+{{- end }}
+{{- toYaml (dict "file" (dict "version" 1 "stores" $stores) "mounts" $acc.mounts) }}
+{{- end }}
+
+{{/*
+Copies one level of a store into the store file, recursing into maps. Keys
+become snake_case. <x>Secret: {name, key} mounts that Secret key read-only
+and writes <x>_file (caCertSecret → ca_cert_file, tokenSecret → token_file,
+...); the key defaults to ca.crt for caCert and to the kebab-case name
+otherwise. existingSecret mounts a whole Secret and writes root (file stores).
+*/}}
+{{- define "agentgateway.secretStores.walk" -}}
+{{- $a := . }}
+{{- range $k, $v := $a.src }}
+{{- $where := printf "%s.%s" $a.where $k }}
+{{- if has (snakecase $k) (list "token" "secret_id" "jwt" "password" "api_key" "client_secret") }}
+{{- fail (printf "%s must not be written inline: name a Kubernetes Secret with the matching *Secret field (tokenSecret, secretIdSecret, apiKeySecret, jwtSecret) or use workload identity" $where) }}
+{{- else if eq $k "existingSecret" }}
+{{- if hasKey $a.src "root" }}
+{{- fail (printf "%s and root are mutually exclusive" $where) }}
+{{- end }}
+{{- if not (and (kindIs "string" $v) $v) }}
+{{- fail (printf "%s must name a Kubernetes Secret" $where) }}
+{{- end }}
+{{- $dir := printf "%s/files" $a.dir }}
+{{- $_ := set $a.dst "root" $dir }}
+{{- $_ := set $a.acc "mounts" (append $a.acc.mounts (dict "volume" (printf "secret-store-%d-files" (int $a.index)) "secretName" $v "mountPath" $dir)) }}
+{{- else if hasSuffix "Secret" $k }}
+{{- $field := trimSuffix "Secret" $k }}
+{{- if hasKey $a.src (printf "%sFile" $field) }}
+{{- fail (printf "%s and %sFile are mutually exclusive" $where $field) }}
+{{- end }}
+{{- if or (not (kindIs "map" $v)) (not $v.name) }}
+{{- fail (printf "%s needs the name of a Kubernetes Secret: {name: <secret>, key: <key>}" $where) }}
+{{- end }}
+{{- $sub := kebabcase $field }}
+{{- $key := toString (default (ternary "ca.crt" $sub (eq $field "caCert")) $v.key) }}
+{{- $dir := printf "%s/%s" $a.dir $sub }}
+{{- $_ := set $a.dst (printf "%s_file" (snakecase $field)) (printf "%s/%s" $dir $key) }}
+{{- $_ := set $a.acc "mounts" (append $a.acc.mounts (dict "volume" (printf "secret-store-%d-%s" (int $a.index) $sub) "secretName" $v.name "key" $key "mountPath" $dir)) }}
+{{- else if kindIs "map" $v }}
+{{- $child := dict }}
+{{- $_ := set $a.dst (snakecase $k) $child }}
+{{- $_ := include "agentgateway.secretStores.walk" (dict "src" $v "dst" $child "acc" $a.acc "index" $a.index "dir" $a.dir "where" $where) }}
+{{- else }}
+{{- $_ := set $a.dst (snakecase $k) $v }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/* Env for a workload that loads the store file; empty without stores. */}}
+{{- define "agentgateway.secretStores.env" -}}
+{{- if eq (include "agentgateway.secretStores.enabled" .) "true" }}
+{{- $cfg := .Values.secretStores }}
+- name: SECRET_STORES_FILE
+  value: {{ printf "%s/stores.yaml" (include "agentgateway.secretStores.fileDir" .) | quote }}
+- name: SECRET_STORES_GATEWAYS
+  value: {{ include "agentgateway.secretStores.gateways" . | quote }}
+{{- range $k, $env := dict "fetchTimeout" "SECRET_STORES_FETCH_TIMEOUT" "refreshInterval" "SECRET_STORES_REFRESH_INTERVAL" "probeInterval" "SECRET_STORES_PROBE_INTERVAL" }}
+{{- with get $cfg $k }}
+- name: {{ $env }}
+  value: {{ . | toString | quote }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- define "agentgateway.secretStores.volumes" -}}
+{{- if eq (include "agentgateway.secretStores.enabled" .) "true" }}
+{{- $c := include "agentgateway.secretStores.compiled" . | fromYaml }}
+- name: secret-stores
+  configMap:
+    name: {{ include "agentgateway.secretStores.configMapName" . }}
+{{- range $c.mounts }}
+- name: {{ .volume }}
+  secret:
+    secretName: {{ .secretName | quote }}
+    {{- with .key }}
+    items:
+    - key: {{ . | quote }}
+      path: {{ . | quote }}
+    {{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- define "agentgateway.secretStores.volumeMounts" -}}
+{{- if eq (include "agentgateway.secretStores.enabled" .) "true" }}
+{{- $c := include "agentgateway.secretStores.compiled" . | fromYaml }}
+- name: secret-stores
+  mountPath: {{ include "agentgateway.secretStores.fileDir" . | quote }}
+  readOnly: true
+{{- range $c.mounts }}
+- name: {{ .volume }}
+  mountPath: {{ .mountPath | quote }}
+  readOnly: true
+{{- end }}
+{{- end }}
+{{- end }}
