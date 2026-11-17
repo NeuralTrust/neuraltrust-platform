@@ -37,9 +37,9 @@ dependencies:
   version: 0.1.23
 - name: firewall
   repository: file://./charts/firewall
-  version: 2.1.42
+  version: 2.2.0
 - name: watchdog
   repository: file://./charts/watchdog
   version: 0.3.32
-digest: sha256:8177fcc6f09128ab1d868a09722c46f66393dd5dfa3b3f8a4684e5f9d46a8b0b
-generated: "2026-11-17T07:04:57.347346+01:00"
+digest: sha256:1625e5df0773ab905c28d71f2465e49d47a9374daabca2914c0a9c0c9b01197a
+generated: "2026-11-17T11:35:36.75406+01:00"
