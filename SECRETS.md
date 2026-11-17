@@ -1370,6 +1370,16 @@ spec:
         key: neuraltrust/data-plane/jwt-secret
 ```
 
+### Secret references in TrustGate
+
+That example manages the platform's own Secrets. To keep TrustGate's
+credentials (LLM keys, MCP tokens) in your own store, use
+`agentgateway.secretStores`: the gateway reads them at request time from
+HashiCorp Vault, AWS Secrets Manager, GCP Secret Manager, Azure Key Vault,
+CyberArk Conjur, mounted files or env vars. Store access uses the pod's identity
+or a Kubernetes Secret you name; values never carry a credential. See
+[VALUES_SCENARIOS.md](VALUES_SCENARIOS.md#scenario-trustgate-secret-stores).
+
 ## Comparison: auto-generated vs pre-generated
 
 | Feature | Auto-generated | Pre-generated |

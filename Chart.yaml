@@ -2,35 +2,35 @@ apiVersion: v2
 name: neuraltrust-platform
 description: NeuralTrust platform Helm chart (v2 hybrid + external)
 type: application
-version: 4.1.1
+version: 4.2.0
 appVersion: "2.0.0"
 icon: https://neuraltrust.ai/favicon.ico
 # For v1 clusters pin --version ~1.14.0.
 dependencies:
   # In-cluster analytics store (external mode).
   - name: clickhouse
-    version: 1.0.7
+    version: 1.0.8
     repository: file://./charts/clickhouse
     condition: infrastructure.clickhouse.deploy
     tags:
       - infrastructure
   # Analytics / evaluation API. Gated by global.products.dataPlane in hybrid.
   - name: data-plane-api
-    version: 1.7.20
+    version: 1.7.21
     repository: file://./charts/data-plane-api
     tags:
       - neuraltrust
       - v2
   # Control-plane API — external only (templates gated by isExternal).
   - name: control-plane-api
-    version: 0.1.20
+    version: 0.1.21
     repository: file://./charts/control-plane-api
     tags:
       - neuraltrust
       - v2
   # Control-plane App/UI — external only.
   - name: control-plane-app
-    version: 0.1.75
+    version: 0.1.78
     repository: file://./charts/control-plane-app
     tags:
       - neuraltrust
@@ -38,14 +38,14 @@ dependencies:
   # TrustGate (values: agentgateway; K8s: agentgateway-*). Hybrid gated by
   # global.products.trustgate.
   - name: agentgateway
-    version: 0.1.90
+    version: 0.1.94
     repository: file://./charts/agentgateway
     tags:
       - neuraltrust
       - v2
   # TrustGuard. Hybrid gated by global.products.trustguard.
   - name: trustguard
-    version: 0.1.75
+    version: 0.1.76
     repository: file://./charts/trustguard
     tags:
       - neuraltrust
@@ -59,7 +59,7 @@ dependencies:
       - v2
   # DataCore — v2 external only.
   - name: datacore
-    version: 0.1.37
+    version: 0.1.39
     repository: file://./charts/datacore
     tags:
       - neuraltrust
@@ -81,7 +81,7 @@ dependencies:
       - v2
   # ClickStack OTel collector — v2 external only.
   - name: clickstack-otel-collector
-    version: 0.1.11
+    version: 0.1.12
     repository: file://./charts/clickstack-otel-collector
     tags:
       - neuraltrust
@@ -102,7 +102,7 @@ dependencies:
       - neuraltrust
   # Watchdog — optional self-monitoring/self-healing.
   - name: watchdog
-    version: 0.3.31
+    version: 0.3.32
     repository: file://./charts/watchdog
     condition: watchdog.enabled
     tags:

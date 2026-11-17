@@ -21,6 +21,13 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # Pinned so a runner image update cannot change the strict-YAML check
+  # (scenario 41) under an unchanged chart. Bump both values together; the
+  # checksum is the yq_linux_amd64 SHA-256 from the release's checksums file.
+  YQ_VERSION: v4.54.3
+  YQ_SHA256: 129534601871538efe0ba4c5e62a34fb1d5f469bcb975c4fddeb467d82974973
+
 jobs:
   render:
     name: helm template (${{ matrix.helm_version }}, ${{ matrix.suite }})
@@ -40,6 +47,14 @@ jobs:
       - uses: azure/setup-helm@v4
         with:
           version: ${{ matrix.helm_version }}
+      - name: Install yq
+        run: |
+          set -euo pipefail
+          curl -sSfL -o "$RUNNER_TEMP/yq" \
+            "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+          echo "${YQ_SHA256}  $RUNNER_TEMP/yq" | sha256sum -c -
+          sudo install -m 0755 "$RUNNER_TEMP/yq" /usr/local/bin/yq
+          yq --version
       - name: Run scenarios
         run: |
           helm version

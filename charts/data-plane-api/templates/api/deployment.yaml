@@ -28,7 +28,7 @@
 {{- $api := default dict .Values.dataPlane.components.api }}
 {{- $apiImage := default dict $api.image }}
 {{- $apiRepo := $apiImage.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/data-plane-api" }}
-{{- $apiTag := $apiImage.tag | default "v1.60.0" }}
+{{- $apiTag := $apiImage.tag | default "v1.60.4" }}
 {{- $apiPull := $apiImage.pullPolicy | default "IfNotPresent" }}
 {{- /* The ClickHouse DDL ships inside the data-plane-api image, so it always matches
        the application version that reads it. Setting clickhouse.configmap.name opts
@@ -116,7 +116,7 @@ spec:
         {{- if $renderChInit }}
         - name: clickhouse-migrations
           {{- $chMigrationRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/clickhouse-server" }}
-          {{- $chMigrationTag := "26.9" }}
+          {{- $chMigrationTag := "26.10.3" }}
           {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.clickhouse .Values.dataPlane.components.clickhouse.image }}
             {{- if .Values.dataPlane.components.clickhouse.image.repository }}{{- $chMigrationRepo = .Values.dataPlane.components.clickhouse.image.repository }}{{- end }}
             {{- if .Values.dataPlane.components.clickhouse.image.tag }}{{- $chMigrationTag = .Values.dataPlane.components.clickhouse.image.tag }}{{- end }}
@@ -361,8 +361,8 @@ spec:
           {{- with $api.extraEnv }}
           {{- toYaml . | nindent 10 }}
           {{- end }}
-          {{- include "neuraltrust-platform.proxy-env" . | nindent 10 }}
-          {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "python" "ctx" .) | nindent 10 }}
+          {{- include "neuraltrust-platform.proxy-env" (dict "ctx" . "skip" $api.extraEnv) | nindent 10 }}
+          {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "python" "ctx" . "skip" $api.extraEnv) | nindent 10 }}
           resources:
             {{- $pgInitResources := $pgMigration.resources | default $api.initContainerResources }}
             {{- if $pgInitResources }}
@@ -578,8 +578,8 @@ spec:
           {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api .Values.dataPlane.components.api.extraEnv }}
           {{- toYaml .Values.dataPlane.components.api.extraEnv | nindent 10 }}
           {{- end }}
-          {{- include "neuraltrust-platform.proxy-env" . | nindent 10 }}
-          {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "python" "ctx" .) | nindent 10 }}
+          {{- include "neuraltrust-platform.proxy-env" (dict "ctx" . "skip" (((.Values.dataPlane).components).api).extraEnv) | nindent 10 }}
+          {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "python" "ctx" . "skip" (((.Values.dataPlane).components).api).extraEnv) | nindent 10 }}
           {{- include "neuraltrust-platform.redis.cloudEnv" (dict "ctx" . "skip" $api.extraEnv "jobs" true) | nindent 10 }}
           {{- include "neuraltrust-platform.appVersionEnv" (dict "tag" (dig "components" "api" "image" "tag" "" (.Values.dataPlane | default dict))) | nindent 10 }}
         volumeMounts:

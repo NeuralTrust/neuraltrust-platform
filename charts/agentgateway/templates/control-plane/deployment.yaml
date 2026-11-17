@@ -52,6 +52,9 @@ spec:
       {{- end }}
       {{- include "neuraltrust-platform.customCaCert.volume" . | nindent 6 }}
       {{- include "neuraltrust-platform.redis.caVolume" . | nindent 6 }}
+      {{- with include "agentgateway.secretStores.volumes" . }}
+      {{- . | nindent 6 }}
+      {{- end }}
       {{- with include "neuraltrust-platform.postgresql.waitInit" (dict "ctx" . "host" (default dict .Values.database).host) }}
       initContainers:
       {{- . | nindent 6 }}
@@ -84,6 +87,9 @@ spec:
         {{- . | nindent 8 }}
         {{- end }}
         {{- include "neuraltrust-platform.agentgatewayM2m.adminEnv" (dict "ctx" . "skip" .Values.controlPlane.extraEnv) | nindent 8 }}
+        {{- with include "agentgateway.secretStores.env" . }}
+        {{- . | nindent 8 }}
+        {{- end }}
         {{- with .Values.controlPlane.extraEnv }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -107,8 +113,8 @@ spec:
           value: {{ printf "%s/tls.key" (include "agentgateway.configSyncTls.mountPath" .) | quote }}
         {{- end }}
         {{- include "neuraltrust-platform.trustguardClientEnv" (dict "ctx" . "idVar" "TRUSTGUARD_CLIENT_ID" "secretVar" "TRUSTGUARD_CLIENT_SECRET") | nindent 8 }}
-        {{- include "neuraltrust-platform.proxy-env" . | nindent 8 }}
-        {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "go" "ctx" .) | nindent 8 }}
+        {{- include "neuraltrust-platform.proxy-env" (dict "ctx" . "skip" .Values.controlPlane.extraEnv) | nindent 8 }}
+        {{- include "neuraltrust-platform.customCaCert.env" (dict "runtime" "go" "ctx" . "skip" .Values.controlPlane.extraEnv) | nindent 8 }}
         {{- include "neuraltrust-platform.redis.cloudEnv" (dict "ctx" . "skip" .Values.controlPlane.extraEnv) | nindent 8 }}
         {{- include "neuraltrust-platform.configSyncTokenEnv" . | nindent 8 }}
         {{- include "neuraltrust-platform.appVersionEnv" (dict "tag" .Values.image.tag) | nindent 8 }}
@@ -139,6 +145,9 @@ spec:
         {{- end }}
         {{- include "neuraltrust-platform.customCaCert.volumeMount" . | nindent 8 }}
         {{- include "neuraltrust-platform.redis.caVolumeMount" . | nindent 8 }}
+        {{- with include "agentgateway.secretStores.volumeMounts" . }}
+        {{- . | nindent 8 }}
+        {{- end }}
         resources:
           {{- toYaml .Values.controlPlane.resources | nindent 10 }}
         startupProbe:
