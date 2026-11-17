@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v4.3.0] — 2026-11-17
+
 ### Added
 
 - Firewall gateway decision-backend configuration under
