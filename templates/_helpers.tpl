@@ -1731,28 +1731,131 @@ Usage: {{ include "neuraltrust-platform.postgres.cloudAuthEnv" (dict "ctx" . "sk
 {{- end -}}
 
 {{/*
-Pod labels a workload needs beyond its chart labels.
+Operator pod labels and annotations.
 
-Only the Azure Workload Identity marker today. The AKS mutating webhook keys off
-this label on the POD plus the client-id annotation on the ServiceAccount; with
-the label missing it never fires and nothing is injected, silently.
+Every pod template the chart renders takes the same layers, later winning:
 
-Not gated on `applyGlobally`: the label and the annotation are independent halves
-of one mechanism, so an operator wiring per-service identities by hand would
-otherwise get annotated ServiceAccounts and no label. A label on a pod whose
-ServiceAccount carries no annotation is a harmless no-op.
+  1. global.podLabels / global.podAnnotations
+  2. the component's own map (`local`): `<subchart>.podLabels` for a subchart,
+     `global.postgresql.*`, `global.redis.*`, `global.observability.collector.*`
+  3. global.jobs.podLabels / global.jobs.podAnnotations, on Job and CronJob pods
+     only (`job: true`) — e.g. `sidecar.istio.io/inject: "false"`, so a Job a
+     sidecar would keep running can still complete
+  4. keys the chart sets itself, which always win
 
-Deliberately not an operator-supplied map. Pod labels are appended below
-`spec.template.metadata.labels`, and an arbitrary key under `app.kubernetes.io/`
-would stop the template matching the immutable selector — the API server then
-rejects the Deployment outright.
+They land on `spec.template.metadata` only, never on a selector, so setting or
+changing them rolls the pods and never touches the immutable `spec.selector`.
+Keys a selector or the chart owns are refused by
+neuraltrust-platform.podMetadata.validate and dropped here as well, so a path the
+validator does not list still cannot break a selector.
 
-Usage: {{- include "neuraltrust-platform.podLabels" (dict "ctx" .) | nindent 8 }}
+Values are rendered as strings: a label or annotation value is always a string,
+and an unquoted `true` or `8080` would otherwise be rejected by the API server.
+*/}}
+{{- define "neuraltrust-platform.podMetadata.reservedLabel" -}}
+{{- $k := . | toString -}}
+{{- if or (hasPrefix "app.kubernetes.io/" $k) (hasPrefix "helm.sh/" $k) (has $k (list "app" "plane" "azure.workload.identity/use")) -}}true{{- end -}}
+{{- end -}}
+
+{{- define "neuraltrust-platform.podMetadata.reservedAnnotation" -}}
+{{- if hasPrefix "checksum/" (. | toString) -}}true{{- end -}}
+{{- end -}}
+
+{{- /* Merged operator map for one pod, as `key: "value"` lines. Args: ctx, key
+       ("podLabels" | "podAnnotations"), local, job, managed (keys to drop). */ -}}
+{{- define "neuraltrust-platform.podMetadata.render" -}}
+{{- $global := default dict .ctx.Values.global -}}
+{{- $jobs := default dict $global.jobs -}}
+{{- $out := deepCopy (default dict (index $global .key)) -}}
+{{- $out = mergeOverwrite $out (deepCopy (default dict .local)) -}}
+{{- if .job -}}
+{{- $out = mergeOverwrite $out (deepCopy (default dict (index $jobs .key))) -}}
+{{- end -}}
+{{- $reserved := ternary "neuraltrust-platform.podMetadata.reservedLabel" "neuraltrust-platform.podMetadata.reservedAnnotation" (eq .key "podLabels") -}}
+{{- $lines := list -}}
+{{- range $k, $v := $out -}}
+{{- if and (not (include $reserved $k)) (not (has $k (default list $.managed))) -}}
+{{- $lines = append $lines (printf "%s: %s" ($k | quote) ($v | toString | quote)) -}}
+{{- end -}}
+{{- end -}}
+{{- join "\n" $lines -}}
+{{- end -}}
+
+{{/*
+Pod labels a workload carries beyond its chart labels: the operator layers above,
+then the Azure Workload Identity marker.
+
+The AKS mutating webhook keys off that marker on the POD plus the client-id
+annotation on the ServiceAccount; with the label missing it never fires and
+nothing is injected, silently. Not gated on `applyGlobally`: the label and the
+annotation are independent halves of one mechanism, so an operator wiring
+per-service identities by hand would otherwise get annotated ServiceAccounts and
+no label. A label on a pod whose ServiceAccount carries no annotation is a
+harmless no-op. `identity: false` leaves the marker out, for a workload that
+uses an Azure identity only under its own condition.
+
+Usage: {{- with include "neuraltrust-platform.podLabels" (dict "ctx" . "local" .Values.podLabels) }}
+         {{- . | nindent 8 }}
+       {{- end }}
 */}}
 {{- define "neuraltrust-platform.podLabels" -}}
+{{- $lines := list -}}
+{{- with include "neuraltrust-platform.podMetadata.render" (dict "ctx" .ctx "key" "podLabels" "local" .local "job" .job) -}}
+{{- $lines = append $lines . -}}
+{{- end -}}
+{{- $identity := true -}}
+{{- if hasKey . "identity" -}}{{- $identity = .identity -}}{{- end -}}
 {{- $azure := default dict (default dict .ctx.Values.global).azureIdentity -}}
-{{- if eq ($azure.method | default "" | toString | trim) "workload-identity" -}}
-azure.workload.identity/use: "true"
+{{- if and $identity (eq ($azure.method | default "" | toString | trim) "workload-identity") -}}
+{{- $lines = append $lines "azure.workload.identity/use: \"true\"" -}}
+{{- end -}}
+{{- join "\n" $lines -}}
+{{- end -}}
+
+{{/*
+Operator pod annotations (layers above). `managed` lists annotation keys the
+template emits itself, so the chart's value wins and no key appears twice.
+
+Usage: {{- with include "neuraltrust-platform.podAnnotations" (dict "ctx" . "local" .Values.podAnnotations) }}
+         {{- . | nindent 8 }}
+       {{- end }}
+*/}}
+{{- define "neuraltrust-platform.podAnnotations" -}}
+{{- include "neuraltrust-platform.podMetadata.render" (dict "ctx" .ctx "key" "podAnnotations" "local" .local "job" .job "managed" .managed) -}}
+{{- end -}}
+
+{{/*
+Fail the render on an operator pod label or annotation the chart owns, naming the
+values path. Called from validate-values.yaml over every map the chart reads.
+*/}}
+{{- define "neuraltrust-platform.podMetadata.validate" -}}
+{{- $ctx := . -}}
+{{- $global := default dict $ctx.Values.global -}}
+{{- $maps := list
+  (list "global" $global)
+  (list "global.jobs" (default dict $global.jobs))
+  (list "global.postgresql" (default dict $global.postgresql))
+  (list "global.redis" (default dict $global.redis))
+  (list "global.observability.collector" (default dict (default dict $global.observability).collector)) -}}
+{{- range $sub := list "agentgateway" "trustguard" "alertengine" "datacore" "dataagent" "databridge" "firewall" "clickhouse" "clickstack-ingest-gateway" "clickstack-otel-collector" "control-plane-api" "control-plane-app" "data-plane-api" "watchdog" -}}
+{{- $maps = append $maps (list $sub (default dict (index $ctx.Values $sub))) -}}
+{{- end -}}
+{{- range $root := list "agentgateway" "trustguard" -}}
+{{- $maps = append $maps (list (printf "%s.dataagent" $root) (default dict (default dict (index $ctx.Values $root)).dataagent)) -}}
+{{- end -}}
+{{- range $m := $maps -}}
+{{- $path := index $m 0 -}}
+{{- $node := index $m 1 -}}
+{{- range $k, $_ := (default dict $node.podLabels) -}}
+{{- if include "neuraltrust-platform.podMetadata.reservedLabel" $k -}}
+{{- fail (printf "%s.podLabels: %q is set by the chart (app.kubernetes.io/*, helm.sh/*, app, plane and azure.workload.identity/use are reserved; some are immutable selectors). Use another key." $path $k) -}}
+{{- end -}}
+{{- end -}}
+{{- range $k, $_ := (default dict $node.podAnnotations) -}}
+{{- if include "neuraltrust-platform.podMetadata.reservedAnnotation" $k -}}
+{{- fail (printf "%s.podAnnotations: %q is reserved: checksum/* annotations are set by the chart to roll pods on config changes. Use another key." $path $k) -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 

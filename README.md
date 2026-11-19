@@ -399,6 +399,7 @@ In this repo:
 - [Architecture and topology contract](./docs/architecture.md)
 - [Cluster sizing](./docs/sizing.md)
 - [Hybrid network allowlist](./docs/hybrid-network.md)
+- [Pod labels and annotations](./docs/pod-metadata.md) — NetworkPolicy group labels, mesh annotations, Job opt-outs
 - [Observability and self-healing](./docs/observability.md)
 - [Firewall decision models and LLM double checks](./docs/firewall-decision.md)
 

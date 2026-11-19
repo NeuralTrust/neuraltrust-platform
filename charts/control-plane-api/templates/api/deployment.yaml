@@ -24,11 +24,21 @@ spec:
       labels:
         app: control-plane-api
         plane: control
+        {{- with include "neuraltrust-platform.podLabels" (dict "ctx" . "local" .Values.podLabels "identity" false) }}
+        {{- . | nindent 8 }}
+        {{- end }}
       {{- /* AUT-403: otel ConfigMap is the only chart-owned envFrom source.
              extraEnvFrom may point at operator Secrets — those are not checksummed. */}}
-      {{- if include "control-plane.otelEndpoint" (dict "component" "api" "context" .) }}
+      {{- $otelChecksum := include "control-plane.otelEndpoint" (dict "component" "api" "context" .) }}
+      {{- $podAnnotations := include "neuraltrust-platform.podAnnotations" (dict "ctx" . "local" .Values.podAnnotations) }}
+      {{- if or $otelChecksum $podAnnotations }}
       annotations:
+        {{- if $otelChecksum }}
         {{- include "neuraltrust-platform.checksumAnnotations" (dict "context" . "files" (list "/api/otel-configmap.yaml")) | nindent 8 }}
+        {{- end }}
+        {{- with $podAnnotations }}
+        {{- . | nindent 8 }}
+        {{- end }}
       {{- end }}
     spec:
       serviceAccountName: {{ include "control-plane.serviceAccountName" . }}

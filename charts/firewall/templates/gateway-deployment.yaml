@@ -25,14 +25,16 @@ spec:
       labels:
         {{- include "firewall.gateway.labels" . | nindent 8 }}
         {{- /* Both Redis and decision backends can use Azure Workload Identity. */}}
-        {{- if or $decisionEntra (eq (include "neuraltrust-platform.firewall.redis.login" (dict "ctx" . "fw" .Values.firewall)) "azure") }}
-        {{- with include "neuraltrust-platform.podLabels" (dict "ctx" .) }}
+        {{- $azureIdentity := or $decisionEntra (eq (include "neuraltrust-platform.firewall.redis.login" (dict "ctx" . "fw" .Values.firewall)) "azure") }}
+        {{- with include "neuraltrust-platform.podLabels" (dict "ctx" . "local" .Values.podLabels "identity" $azureIdentity) }}
         {{- . | nindent 8 }}
-        {{- end }}
         {{- end }}
       annotations:
         {{- /* AUT-403: envFrom is ConfigMap-only; credentials use secretKeyRef. */}}
         {{- include "neuraltrust-platform.checksumAnnotations" (dict "context" . "files" (list "/configmap.yaml")) | nindent 8 }}
+        {{- with include "neuraltrust-platform.podAnnotations" (dict "ctx" . "local" .Values.podAnnotations) }}
+        {{- . | nindent 8 }}
+        {{- end }}
     spec:
       {{- if or .Values.firewall.serviceAccount.create .Values.firewall.serviceAccount.name }}
       serviceAccountName: {{ .Values.firewall.serviceAccount.name | default "firewall" }}
@@ -64,7 +66,7 @@ spec:
       containers:
         - name: gateway
           {{- $gwRepo := .Values.firewall.gateway.image.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/firewall-cpu" }}
-          {{- $gwTag := .Values.firewall.gateway.image.tag | default "v2.53.1" }}
+          {{- $gwTag := .Values.firewall.gateway.image.tag | default "v2.53.2" }}
           image: {{ include "firewall.image" (dict "repository" $gwRepo "tag" $gwTag "global" .Values.global) | quote }}
           imagePullPolicy: {{ .Values.firewall.gateway.image.pullPolicy | default "IfNotPresent" }}
           {{- /* No args override: the firewall image CMD (`python -m src.serve`)

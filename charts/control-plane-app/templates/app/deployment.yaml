@@ -27,11 +27,21 @@ spec:
     metadata:
       labels:
         app: control-plane-app
+        {{- with include "neuraltrust-platform.podLabels" (dict "ctx" . "local" .Values.podLabels "identity" false) }}
+        {{- . | nindent 8 }}
+        {{- end }}
       {{- /* AUT-403: otel ConfigMap is the only chart-owned envFrom source.
              extraEnvFrom may point at operator Secrets — those are not checksummed. */}}
-      {{- if include "control-plane.otelEndpoint" (dict "component" "app" "context" .) }}
+      {{- $otelChecksum := include "control-plane.otelEndpoint" (dict "component" "app" "context" .) }}
+      {{- $podAnnotations := include "neuraltrust-platform.podAnnotations" (dict "ctx" . "local" .Values.podAnnotations) }}
+      {{- if or $otelChecksum $podAnnotations }}
       annotations:
+        {{- if $otelChecksum }}
         {{- include "neuraltrust-platform.checksumAnnotations" (dict "context" . "files" (list "/app/otel-configmap.yaml")) | nindent 8 }}
+        {{- end }}
+        {{- with $podAnnotations }}
+        {{- . | nindent 8 }}
+        {{- end }}
       {{- end }}
     spec:
       serviceAccountName: {{ include "control-plane.serviceAccountName" . }}
@@ -67,7 +77,7 @@ spec:
       initContainers:
       - name: init-db
         {{- $initImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
-        {{- $initImageTag := "v2.40.0" }}
+        {{- $initImageTag := "v2.49.0" }}
         {{- $initPullPolicy := "IfNotPresent" }}
         {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.image }}
           {{- if .Values.controlPlane.components.app.image.repository }}{{- $initImageRepo = .Values.controlPlane.components.app.image.repository }}{{- end }}
@@ -254,7 +264,7 @@ spec:
       containers:
       - name: app
         {{- $appImageRepo := "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
-        {{- $appImageTag := "v2.40.0" }}
+        {{- $appImageTag := "v2.49.0" }}
         {{- $appPullPolicy := "IfNotPresent" }}
         {{- $appPort := 3000 }}
         {{- $nodeEnv := "production" }}
