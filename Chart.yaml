@@ -30,7 +30,7 @@ dependencies:
       - v2
   # Control-plane App/UI — external only.
   - name: control-plane-app
-    version: 0.1.78
+    version: 0.1.79
     repository: file://./charts/control-plane-app
     tags:
       - neuraltrust
@@ -38,14 +38,14 @@ dependencies:
   # TrustGate (values: agentgateway; K8s: agentgateway-*). Hybrid gated by
   # global.products.trustgate.
   - name: agentgateway
-    version: 0.1.94
+    version: 0.1.95
     repository: file://./charts/agentgateway
     tags:
       - neuraltrust
       - v2
   # TrustGuard. Hybrid gated by global.products.trustguard.
   - name: trustguard
-    version: 0.1.76
+    version: 0.1.77
     repository: file://./charts/trustguard
     tags:
       - neuraltrust
@@ -88,7 +88,7 @@ dependencies:
       - v2
   # AlertEngine — v2 external only.
   - name: alertengine
-    version: 0.1.23
+    version: 0.1.24
     repository: file://./charts/alertengine
     tags:
       - neuraltrust
@@ -96,13 +96,13 @@ dependencies:
   # Firewall is part of TrustGuard. Templates follow the TrustGuard product
   # gate in both modes (opt-in in hybrid, opt-out in external).
   - name: firewall
-    version: 2.2.0
+    version: 2.2.1
     repository: file://./charts/firewall
     tags:
       - neuraltrust
   # Watchdog — optional self-monitoring/self-healing.
   - name: watchdog
-    version: 0.3.32
+    version: 0.3.33
     repository: file://./charts/watchdog
     condition: watchdog.enabled
     tags:
