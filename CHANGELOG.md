@@ -4,6 +4,51 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Added
+
+- **Pod labels and annotations from values.** `global.podLabels` and
+  `global.podAnnotations` reach every pod the chart renders, including hook
+  Jobs and CronJobs. They never touch a selector. A component's own
+  `podLabels` / `podAnnotations` override them key by key, and
+  `global.jobs.podLabels` / `global.jobs.podAnnotations` apply on top to Job
+  pods only, for example a sidecar-injection opt-out. Keys a selector or the
+  chart owns (`app.kubernetes.io/*`, `helm.sh/*`, `app`, `plane`,
+  `checksum/*`, …) fail the render. With the maps empty the render is
+  unchanged. See [docs/pod-metadata.md](docs/pod-metadata.md).
+  - The existing `watchdog.podLabels` / `podAnnotations`,
+    `global.observability.collector.podLabels` / `podAnnotations`,
+    `databridge.podAnnotations` and `clickstack-ingest-gateway.podAnnotations`
+    keep working as their component's layer.
+
+### Changed
+
+- **TrustGate (agentgateway) v0.92.2.**
+  - Applications entered with identity-provider tokens can require or
+    forbid claims, for example to refuse tokens issued to people.
+  - Rate limits and LLM budgets can count per caller identity, per token
+    claim or per header.
+  - The `http access` log line names the application, credential, subject,
+    client and both trace ids.
+  - A stream the provider cuts mid-way now ends with an error event instead
+    of looking complete, and `data: [DONE]` is a whole SSE event.
+  - The admin API takes `SERVER_ADMIN_HOST`, `SERVER_ADMIN_TLS_CERT_FILE` and
+    `SERVER_ADMIN_TLS_KEY_FILE`. The chart sets none of them: in Kubernetes
+    the admin listens on the pod address behind its Service and ingress, as
+    before.
+  - Registry entries can forward chosen client headers (such as
+    `traceparent`). `anthropic-beta` reaches Azure Foundry's Anthropic
+    surface. An Anthropic entry takes a base URL.
+- **Provider retries now default to 0 (was 2).** One client request is one
+  provider call, and a call that timed out is never retried on the same
+  backend. To keep the old behaviour, set `PROVIDER_MAX_RETRIES` in
+  `agentgateway.dataPlane.extraEnv` (and `agentgateway.mcp.extraEnv` if
+  needed).
+- **TrustGuard v1.0.0.** Removes the v2 inventory API. The console in this
+  release (app v2.49.0) no longer calls it; keep the two in step if you pin
+  images.
+- Console (app) v2.49.0, AlertEngine v0.16.3, Firewall v2.53.2, watchdog
+  v0.45.1.
+
 ## [v4.3.0] — 2026-11-17
 
 ### Added

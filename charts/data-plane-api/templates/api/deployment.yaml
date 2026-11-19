@@ -59,14 +59,21 @@ spec:
         {{- /* Pod-only, like `plane: data` above — the selector is `app: api`
                alone. Carries the workload-identity marker, which the AKS webhook
                honours for the postgres-migrations initContainer as well. */}}
-        {{- with include "neuraltrust-platform.podLabels" (dict "ctx" .) }}
+        {{- with include "neuraltrust-platform.podLabels" (dict "ctx" . "local" .Values.podLabels) }}
         {{- . | nindent 8 }}
         {{- end }}
       {{- /* AUT-403: otel ConfigMap is the only chart-owned envFrom source.
              extraEnvFrom may point at operator Secrets — those are not checksummed. */}}
-      {{- if include "data-plane.otelEndpoint" (dict "component" "api" "context" .) }}
+      {{- $otelChecksum := include "data-plane.otelEndpoint" (dict "component" "api" "context" .) }}
+      {{- $podAnnotations := include "neuraltrust-platform.podAnnotations" (dict "ctx" . "local" .Values.podAnnotations) }}
+      {{- if or $otelChecksum $podAnnotations }}
       annotations:
+        {{- if $otelChecksum }}
         {{- include "neuraltrust-platform.checksumAnnotations" (dict "context" . "files" (list "/api/otel-configmap.yaml")) | nindent 8 }}
+        {{- end }}
+        {{- with $podAnnotations }}
+        {{- . | nindent 8 }}
+        {{- end }}
       {{- end }}
     spec:
       {{- include "data-plane.imagePullSecrets" . | nindent 6 }}

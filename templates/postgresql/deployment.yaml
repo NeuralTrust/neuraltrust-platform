@@ -27,6 +27,13 @@ spec:
     metadata:
       labels:
         app: control-plane-postgresql
+        {{- with include "neuraltrust-platform.podLabels" (dict "ctx" . "local" (default dict .Values.global.postgresql).podLabels "identity" false) }}
+        {{- . | nindent 8 }}
+        {{- end }}
+      {{- with include "neuraltrust-platform.podAnnotations" (dict "ctx" . "local" (default dict .Values.global.postgresql).podAnnotations) }}
+      annotations:
+        {{- . | nindent 8 }}
+      {{- end }}
     spec:
       {{- if not (include "neuraltrust-platform.isOpenshift" .) }}
       securityContext:

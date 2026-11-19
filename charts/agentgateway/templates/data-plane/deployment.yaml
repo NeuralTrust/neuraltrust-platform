@@ -22,7 +22,7 @@ spec:
         app.kubernetes.io/component: data-plane
         {{- /* Pod-only: spec.selector.matchLabels above is immutable and uses the
                strictly smaller agentgateway.selectorLabels. */}}
-        {{- with include "neuraltrust-platform.podLabels" (dict "ctx" .) }}
+        {{- with include "neuraltrust-platform.podLabels" (dict "ctx" . "local" .Values.podLabels) }}
         {{- . | nindent 8 }}
         {{- end }}
       annotations:
@@ -32,6 +32,9 @@ spec:
                Operator existingSecret is intentionally omitted (no chart content). */}}
         {{- if and (eq (include "neuraltrust-platform.isHybrid" .) "true") (eq (include "neuraltrust-platform.v2.hybridRedis.chartManagedSecret" .) "true") }}
         checksum/redis-secrets: {{ include "neuraltrust-platform.v2.hybridRedis.secretChecksum" . | sha256sum }}
+        {{- end }}
+        {{- with include "neuraltrust-platform.podAnnotations" (dict "ctx" . "local" .Values.podAnnotations) }}
+        {{- . | nindent 8 }}
         {{- end }}
     spec:
       serviceAccountName: {{ include "agentgateway.serviceAccountName" . }}

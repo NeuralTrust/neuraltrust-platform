@@ -33,6 +33,9 @@ spec:
       labels:
         {{- include "databridge.labels" . | nindent 8 }}
         app.kubernetes.io/component: broker
+        {{- with include "neuraltrust-platform.podLabels" (dict "ctx" . "local" .Values.podLabels "identity" false) }}
+        {{- . | nindent 8 }}
+        {{- end }}
       annotations:
         {{- /* Roll the pod when its configuration changes; otherwise an
                `envFrom` ConfigMap edit applies only on the next unrelated
@@ -45,8 +48,8 @@ spec:
                exact name the reissue exists to cover. */}}
         checksum/southbound-tls: {{ include (print $.Template.BasePath "/southbound-tls-secret.yaml") . | sha256sum }}
         {{- end }}
-        {{- with .Values.podAnnotations }}
-        {{- toYaml . | nindent 8 }}
+        {{- with include "neuraltrust-platform.podAnnotations" (dict "ctx" . "local" .Values.podAnnotations) }}
+        {{- . | nindent 8 }}
         {{- end }}
     spec:
       {{- with .Values.priorityClassName }}

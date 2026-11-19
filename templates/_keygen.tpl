@@ -54,7 +54,7 @@ is stored as the raw PEM, which is what its consumer expects.
 {{- $cp := default dict $cpApp.controlPlane }}
 {{- $appImage := default dict (default dict (default dict $cp.components).app).image }}
 {{- $repo := $appImage.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
-{{- $appTag := $appImage.tag | default "v2.40.0" }}
+{{- $appTag := $appImage.tag | default "v2.49.0" }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -144,6 +144,13 @@ spec:
         app.kubernetes.io/name: {{ include "neuraltrust-platform.name" $ctx }}
         app.kubernetes.io/instance: {{ $ctx.Release.Name }}
         app.kubernetes.io/component: {{ $component }}
+        {{- with include "neuraltrust-platform.podLabels" (dict "ctx" $ctx "job" true "identity" false) }}
+        {{- . | nindent 8 }}
+        {{- end }}
+      {{- with include "neuraltrust-platform.podAnnotations" (dict "ctx" $ctx "job" true) }}
+      annotations:
+        {{- . | nindent 8 }}
+      {{- end }}
     spec:
       restartPolicy: Never
       serviceAccountName: {{ $saName }}
