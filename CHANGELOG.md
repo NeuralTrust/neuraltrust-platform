@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v4.5.1] — 2026-11-19
+
 ### Changed
 
 - **data-plane-api is opt-in in every deployment mode.** It renders only with
