@@ -67,7 +67,7 @@ spec:
   {{- if $className }}
   ingressClassName: {{ $className }}
   {{- end }}
-  {{- if and .ingress.tls.enabled (include "neuraltrust-platform.ingress.renderTLS" (dict "ctx" $ "global" $.Values.global "tlsEnabled" .ingress.tls.enabled)) }}
+  {{- if and .ingress.tls.enabled (include "neuraltrust-platform.ingress.renderTLS" (dict "ctx" $ "global" $.Values.global "tlsEnabled" .ingress.tls.enabled "localSecretName" (.ingress.tls.secretName | default ""))) }}
   tls:
     - {{- if $resolvedHost }}
       hosts:

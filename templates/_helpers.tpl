@@ -2998,6 +2998,16 @@ destinationCACertificate: {{ $tls.destinationCACertificate | quote }}
 insecureEdgeTerminationPolicy: {{ $tls.insecureEdgeTerminationPolicy | default "Redirect" }}
 {{- end }}
 
+{{/*
+Whether an Ingress renders its tls block. Empty when TLS is off, when a
+cloud-managed certificate (ACM, GCP managed certificates, Azure) terminates it,
+or on the OpenShift router with no certificate supplied: the router turns the
+Ingress into an edge Route that serves its own trusted default certificate, and
+a tls block naming the chart's self-signed placeholder would replace it.
+Args: dict "global" .Values.global "ctx" $ "tlsEnabled" bool
+      optional "localSecretName" (the component's own tls.secretName) and
+      "explicit" (true when the operator set tls.enabled themselves).
+*/}}
 {{- define "neuraltrust-platform.ingress.renderTLS" -}}
 {{- $globalIngress := default dict (default dict .global).ingress }}
 {{- $global := default dict .global }}
@@ -3007,8 +3017,14 @@ insecureEdgeTerminationPolicy: {{ $tls.insecureEdgeTerminationPolicy | default "
   {{- if eq $platform "aws" }}{{ $provider = "aws" }}
   {{- else if eq $platform "gcp" }}{{ $provider = "gcp" }}
   {{- else if eq $platform "azure" }}{{ $provider = "azure" }}
+  {{- else if eq $platform "openshift" }}{{ $provider = "openshift" }}
   {{- else }}{{ $provider = "none" }}
   {{- end }}
+{{- end }}
+{{- $routerTLS := false }}
+{{- if eq $provider "openshift" }}
+  {{- $supplied := or .localSecretName .explicit (not (include "neuraltrust-platform.ingress.autoGenerateTLSSecret" (dict "global" $global))) }}
+  {{- if not $supplied }}{{ $routerTLS = true }}{{- end }}
 {{- end }}
 {{- $cloudTLS := false }}
 {{- if eq $provider "aws" }}
@@ -3021,7 +3037,7 @@ insecureEdgeTerminationPolicy: {{ $tls.insecureEdgeTerminationPolicy | default "
   {{- $azure := default dict $globalIngress.azure }}
   {{- if $azure.sslCertificate }}{{ $cloudTLS = true }}{{- end }}
 {{- end }}
-{{- if and .tlsEnabled (not $cloudTLS) }}true{{- end }}
+{{- if and .tlsEnabled (not $cloudTLS) (not $routerTLS) }}true{{- end }}
 {{- end }}
 
 {{/*
@@ -3037,8 +3053,9 @@ Call with the subchart context.
 {{- define "neuraltrust-platform.ingress.productTLS" -}}
 {{- $tls := default dict .Values.ingress.tls }}
 {{- $enabled := or $tls.secretName (not (include "neuraltrust-platform.ingress.autoGenerateTLSSecret" (dict "global" .Values.global))) }}
-{{- if not (kindIs "invalid" $tls.enabled) }}{{ $enabled = $tls.enabled }}{{- end }}
-{{- include "neuraltrust-platform.ingress.renderTLS" (dict "global" .Values.global "ctx" . "tlsEnabled" $enabled) }}
+{{- $explicit := not (kindIs "invalid" $tls.enabled) }}
+{{- if $explicit }}{{ $enabled = $tls.enabled }}{{- end }}
+{{- include "neuraltrust-platform.ingress.renderTLS" (dict "global" .Values.global "ctx" . "tlsEnabled" $enabled "localSecretName" ($tls.secretName | default "") "explicit" $explicit) }}
 {{- end }}
 
 {{/*
