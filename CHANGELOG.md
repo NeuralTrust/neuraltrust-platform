@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v4.4.0] — 2026-11-19
+
 ### Added
 
 - **Pod labels and annotations from values.** `global.podLabels` and
