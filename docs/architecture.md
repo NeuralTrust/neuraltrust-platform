@@ -129,21 +129,23 @@ TrustGate or TrustGuard control planes to do that.
 Hybrid installs choose products with positive `global.products` flags.
 Chart defaults leave every flag unset; in hybrid that means off, and validation
 fails if none are selected.
-External mode inverts them: an unset flag means on, so the full stack deploys
-unless a product is set to `false` (e.g. `trustgate: false` for TrustGuard only).
+External and saas invert them for TrustGate and TrustGuard: an unset flag
+means on, so both deploy unless set to `false` (e.g. `trustgate: false` for
+TrustGuard only). `dataPlane` (data-plane-api, TrustTest red teaming) is opt-in
+in every mode: it deploys only when set to `true`, and never in dedicated.
 
 | Slice | Flags | DataAgent |
 |---|---|---|
 | TrustGate | `global.products.trustgate: true` | `agentgateway.dataagent` (enrolment) |
 | TrustGuard (+ Firewall when in-cluster) | `global.products.trustguard: true` | `trustguard.dataagent` |
-| Red teaming | `global.products.dataPlane: true` | none |
+| Red teaming (TrustTest; opt-in in every mode) | `global.products.dataPlane: true` | none |
 
 Overlay only the products you want — no all-off baseline file. Product
 examples are positive-only deltas and combine in any `-f` order. Shared
 Postgres/Redis stay under `global.postgresql` / `global.redis`. Tracked
 examples: `values-trustgate.yaml.example`, `values-trustguard.yaml.example`,
-`values-red-teaming.yaml.example`. `values-required.yaml` selects all three
-for the full-hybrid preset.
+`values-red-teaming.yaml.example`. `values-required.yaml` selects TrustGate
+and TrustGuard; add `values-red-teaming.yaml.example` for data-plane-api.
 
 ### DataAgent (one per enabled product)
 
@@ -459,7 +461,7 @@ GatewayClass or a certificate.
 
 | Mode | HTTPRoutes |
 |---|---|
-| hybrid | `agentgateway-gateway` (`gateway.` + `*.llm.`), `agentgateway-mcp` (`mcp.` + `*.mcp.`), `trustguard`, `data-plane-api` |
+| hybrid | `agentgateway-gateway` (`gateway.` + `*.llm.`), `agentgateway-mcp` (`mcp.` + `*.mcp.`), `trustguard`, `data-plane-api` (when opted in) |
 | external | hybrid's, plus `agentgateway-admin`, `trustguard-admin`, `control-plane-api`, `control-plane-app`, and `datacore` when its ingress is on |
 | saas | external's, plus the `clickstack-ingest-gateway` (`telemetry.`) |
 

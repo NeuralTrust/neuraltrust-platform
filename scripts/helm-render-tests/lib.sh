@@ -46,6 +46,17 @@ validate_yaml() {
   ruby -ryaml -e 'YAML.load_stream(File.read(ARGV.fetch(0)))' "$file"
 }
 
+# data-plane-api is opt-in in every mode. Most scenarios fence its contracts,
+# so render_default and render_notes opt it in with this values file; a
+# scenario's own -f / --set still wins. Default-off is fenced explicitly in
+# 06-external, 12-product-selection and 26-saas (render without this file).
+DATA_PLANE_ON_FILE="$TMP/data-plane-on.yaml"
+cat > "$DATA_PLANE_ON_FILE" <<'EOF_DP'
+global:
+  products:
+    dataPlane: true
+EOF_DP
+
 # Scenarios below test the render-time contracts, which the in-cluster secrets
 # generator's opt-out (and hybrid/saas) still ship, so render_default turns the
 # generator off; a scenario can turn it back on. The generator's own contract,
@@ -54,6 +65,7 @@ render_default() {
   local out="$1"
   shift
   helm template test "$CHART_DIR" --namespace default -f "$CHART_DIR/values-required.yaml" \
+    -f "$DATA_PLANE_ON_FILE" \
     "${CLICKSTACK_DEFAULT_ARGS[@]}" --set global.secrets.generator.enabled=false "$@" > "$out"
   validate_yaml "$out"
 }
@@ -64,7 +76,7 @@ render_notes() {
   local out="$1"
   shift
   helm install nt-notes "$CHART_DIR" --dry-run=client --namespace default \
-    -f "$CHART_DIR/values-required.yaml" \
+    -f "$CHART_DIR/values-required.yaml" -f "$DATA_PLANE_ON_FILE" \
     "${CLICKSTACK_DEFAULT_ARGS[@]}" "$@" 2>/dev/null \
     | awk '/^NOTES:/,0' > "$out"
 }
@@ -103,7 +115,7 @@ assert_render_fails() {
   local msg="$1"
   shift
   if helm template test "$CHART_DIR" --namespace default -f "$CHART_DIR/values-required.yaml" \
-      "${CLICKSTACK_DEFAULT_ARGS[@]}" "$@" >/dev/null 2>&1; then
+      -f "$DATA_PLANE_ON_FILE" "${CLICKSTACK_DEFAULT_ARGS[@]}" "$@" >/dev/null 2>&1; then
     red "FAIL: $msg"
     exit 1
   fi
@@ -118,7 +130,7 @@ assert_render_fails_with() {
   local err
   err="$(mktemp)"
   if helm template test "$CHART_DIR" --namespace default -f "$CHART_DIR/values-required.yaml" \
-      "${CLICKSTACK_DEFAULT_ARGS[@]}" "$@" >/dev/null 2>"$err"; then
+      -f "$DATA_PLANE_ON_FILE" "${CLICKSTACK_DEFAULT_ARGS[@]}" "$@" >/dev/null 2>"$err"; then
     red "FAIL: $msg"
     red "  the render succeeded; expected it to fail with: $needle"
     rm -f "$err"

@@ -1,11 +1,13 @@
-# Full hybrid starting point (all three products selected).
+# Full hybrid starting point (TrustGate and TrustGuard selected).
 # Hybrid always exports product OTLP via the DataAgent-co-located egress
 # collector, and enables config-sync by default. Pre-create the Secrets below
 # before install (preferred). Enrolment JWTs carry tenant_id and instance_id
 # — no separate tenantId value. For local/dev inline tokens, clear each
 # `*.existingSecret.name` and set `enrolment.token` / `configSync.token`.
 # Air-gapped / local-only product telemetry → use global.deploymentMode=external.
-# For a product subset, use values-trustgate / trustguard / red-teaming examples.
+# For a product subset, use values-trustgate / trustguard examples.
+# data-plane-api (TrustTest red teaming) is opt-in and not selected here: add
+# values-red-teaming.yaml.example only if you need it.
 #
 #   helm upgrade --install neuraltrust-platform <chart> \
 #     --namespace neuraltrust --create-namespace -f values-required.yaml
@@ -16,7 +18,6 @@ global:
   products:
     trustgate: true
     trustguard: true
-    dataPlane: true
 
 # Preferred path: existing Secret names. Keys:
 #   dataagent-enrolment-* → ENROLMENT_TOKEN

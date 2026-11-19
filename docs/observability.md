@@ -174,7 +174,8 @@ centrally instead. Direct probe checks still work locally.
 
 Where both mechanisms cover the same condition, watchdog owns it. Deployment
 liveness is the example: watchdog's `v2-deployment-health` check already covers
-`agentgateway-proxy`, `trustguard-data-plane` and `data-plane-api`, and the
+`agentgateway-proxy` and `trustguard-data-plane` (add `data-plane-api` to its
+list when you opt in to it), and the
 matching `PrometheusRule` alerts exist for operators whose paging already runs
 through Prometheus. Enabling both simply gives you two notifications.
 

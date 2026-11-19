@@ -6,9 +6,17 @@ Deploy NeuralTrust on Kubernetes with one Helm umbrella chart.
 
 | Mode | Control plane | What runs in your cluster | Start here |
 |---|---|---|---|
-| **`hybrid`** (default) | Hosted by NeuralTrust | The data path: TrustGate, TrustGuard, data-plane API, one DataAgent per product; the Firewall is NeuralTrust-hosted by default | [Quick start](#quick-start-hybrid) below |
+| **`hybrid`** (default) | Hosted by NeuralTrust | The data path: TrustGate, TrustGuard, one DataAgent per product; the Firewall is NeuralTrust-hosted by default | [Quick start](#quick-start-hybrid) below |
 | **`external`** | Yours | Everything, including the console, ClickHouse analytics, DataCore, and AlertEngine | [README-EXTERNAL.md](./README-EXTERNAL.md) |
 | **`saas`** | Yours, and it also serves data planes in other clusters | `external` plus DataBridge and a public telemetry ingest gateway | [docs/saas-mode.md](./docs/saas-mode.md#quick-start) |
+
+> **data-plane API is opt-in in every mode.** `data-plane-api`, the TrustTest
+> red-teaming and evaluation API, deploys only with
+> `global.products.dataPlane: true`. TrustTest may change or be removed in a
+> future release. **Upgrading an `external` or `saas` install that uses it?**
+> Add `global.products.dataPlane: true` to your values before upgrading, or
+> `helm upgrade` removes it. Installs made with `ntctl` already carry the flag.
+> See [CHANGELOG.md](./CHANGELOG.md).
 
 On OpenShift, all modes work but ingress differs — use
 [README-OPENSHIFT.md](./README-OPENSHIFT.md) instead of the quick start below.
@@ -99,8 +107,8 @@ Turn either off and creating those credentials becomes your job. See
 
 ### 4. Write your values file
 
-[`values-required.yaml`](./values-required.yaml) is the tracked full-hybrid
-preset and already matches the Secret names above. Copy it and change the two
+[`values-required.yaml`](./values-required.yaml) is the tracked hybrid
+preset (TrustGate and TrustGuard) and already matches the Secret names above. Copy it and change the two
 cluster-specific lines:
 
 ```yaml
@@ -110,7 +118,6 @@ global:
   products:
     trustgate: true
     trustguard: true
-    dataPlane: true
 
 agentgateway:
   configSync:
@@ -151,7 +158,8 @@ For a subset, drop the flags you do not need and use the matching slice —
 [`values-trustgate.yaml.example`](./values-trustgate.yaml.example),
 [`values-trustguard.yaml.example`](./values-trustguard.yaml.example), or
 [`values-red-teaming.yaml.example`](./values-red-teaming.yaml.example)
-(data-plane API only, no DataAgent or config-sync needed).
+(`dataPlane: true`, the opt-in data-plane API for TrustTest red teaming; on its
+own it needs no DataAgent or config-sync).
 
 ### 5. Install
 
@@ -180,10 +188,11 @@ kubectl get pods -n neuraltrust
 kubectl get ingress -n neuraltrust
 ```
 
-With all three products on you should see `agentgateway-proxy`,
-`agentgateway-mcp`, `trustguard-data-plane`, `data-plane-api`, `dataagent`,
+With TrustGate and TrustGuard on you should see `agentgateway-proxy`,
+`agentgateway-mcp`, `trustguard-data-plane`, `dataagent`,
 `dataagent-trustguard`, `control-plane-postgresql`, and `redis` — plus
-`firewall` and its workers with `global.firewall.deploy: true`.
+`firewall` and its workers with `global.firewall.deploy: true`, and
+`data-plane-api` with `global.products.dataPlane: true`.
 
 Default hostnames derive from `global.domain`:
 
@@ -192,7 +201,7 @@ Default hostnames derive from `global.domain`:
 | TrustGate LLM gateway | `gateway.<domain>` and `*.llm.<domain>` |
 | TrustGate MCP | `mcp.<domain>` and `*.mcp.<domain>` |
 | TrustGuard | `trustguard.<domain>` |
-| data-plane API | `data-plane-api.<domain>` |
+| data-plane API (opt-in) | `data-plane-api.<domain>` |
 
 Point DNS at the ingress address, then finish the LLM and MCP URL setup in the
 console.
@@ -242,7 +251,7 @@ Full contract: [`docs/architecture.md`](./docs/architecture.md) and
 
 | Mode | Hosted control plane | Workloads in cluster | Analytics path |
 |---|---:|---|---|
-| `hybrid` (default) | Yes | TrustGate / TrustGuard / data-plane-api via positive `global.products` (at least one); TrustGuard calls the NeuralTrust-hosted Firewall unless `global.firewall.deploy: true`; per-product DataAgent when TrustGate/TrustGuard is on | Hosted analytics via enrolment-backed ClickStack OTLP. Raw payloads stay in Postgres for DataAgent. No in-cluster ClickHouse |
+| `hybrid` (default) | Yes | TrustGate / TrustGuard / data-plane-api (opt-in in every mode) via positive `global.products` (at least one); TrustGuard calls the NeuralTrust-hosted Firewall unless `global.firewall.deploy: true`; per-product DataAgent when TrustGate/TrustGuard is on | Hosted analytics via enrolment-backed ClickStack OTLP. Raw payloads stay in Postgres for DataAgent. No in-cluster ClickHouse |
 | `external` | No | Full product stack (opt out per product with `global.products.<name>: false`) plus control planes, product API/app, DataCore, AlertEngine; TrustGuard calls the NeuralTrust-hosted Firewall unless `global.firewall.deploy: true` | ClickStack OTel Collector writes to ClickHouse; data-plane API reads ClickHouse |
 | `saas` | No — this cluster *is* one, for `hybrid` clusters elsewhere | Everything `external` renders, plus DataBridge (HA by default) and the ClickStack ingest gateway | Local ClickHouse for central telemetry; DataCore runs `RESIDENCY_BACKEND=hybrid` and reaches remote data planes through DataBridge. Operator path: [saas-mode quick start](./docs/saas-mode.md#quick-start) |
 
@@ -296,7 +305,7 @@ For the complete endpoint and existing-secret pattern, use
 [`values-managed-datastores.yaml.example`](./values-managed-datastores.yaml.example)
 in external.
 
-In **hybrid**, AgentGateway, TrustGuard, DataAgent, and `data-plane-api` share
+In **hybrid**, AgentGateway, TrustGuard, DataAgent, and `data-plane-api` (when opted in) share
 ONE PostgreSQL role owning ONE database, driven by `global.postgresql`
 (defaults: user `neuraltrust`, database `neuraltrust`). The chart renders shared
 `postgresql-secrets` and `redis-secrets` (from `global.redis`) for all of them.
@@ -376,7 +385,7 @@ GPU workers via
 | `values-hybrid.yaml.example` | hybrid | Hybrid topology overlay with managed datastores |
 | `values-trustgate.yaml.example` | hybrid | TrustGate-only slice |
 | `values-trustguard.yaml.example` | hybrid | TrustGuard slice (hosted Firewall) |
-| `values-red-teaming.yaml.example` | hybrid | data-plane-API-only slice |
+| `values-red-teaming.yaml.example` | any | Opt-in data-plane API (TrustTest red teaming) |
 | `values-dataplane-gpu.yaml.example` | hybrid | GPU Firewall workers |
 | `values-openshift.yaml` | hybrid | OpenShift Routes |
 | `values-gateway-api.yaml.example` | any | HTTPRoutes on an existing Gateway instead of Ingress |

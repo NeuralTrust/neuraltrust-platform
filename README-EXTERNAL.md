@@ -13,7 +13,7 @@ your environment. For the default hosted-control-plane path, see the
 |                         | `hybrid` (default)                                 | `external`                                                |
 | ----------------------- | -------------------------------------------------- | --------------------------------------------------------- |
 | Console / control plane | Hosted by NeuralTrust                              | `control-plane-app` + `control-plane-api` in your cluster |
-| Product selection       | `global.products` flags, at least one `true`       | Opt-out — every product deploys unless set to `false`    |
+| Product selection       | `global.products` flags, at least one `true`       | Opt-out for TrustGate and TrustGuard (`false` removes one); data-plane API opt-in |
 | Analytics store         | Hosted, via enrolment-backed OTLP egress           | In-cluster or managed **ClickHouse**                      |
 | Telemetry collector     | `clickstack-egress-collector` sidecar on DataAgent | `clickstack-collector` Deployment writing to ClickHouse   |
 | DataAgent               | One per enabled product                            | **Never renders**                                         |
@@ -142,16 +142,26 @@ trustguard:
       name: "trustguard-firewall"
 ```
 
-`global.products` flags are not needed — external deploys every product unless
-one is set to `false`. For a TrustGuard-only install, layer
+`global.products` flags are not needed — external deploys TrustGate and
+TrustGuard unless one is set to `false`. For a TrustGuard-only install, layer
 [`values-external-trustguard-only.yaml.example`](./values-external-trustguard-only.yaml.example)
 on top: it sets `global.products.trustgate: false`, which removes TrustGate, the
 in-cluster firewall's complexity worker and the MCP OAuth / Admin API
 machine-credential keys.
-Keep `dataPlane` on — the console reads runtime activity from data-plane-api.
-The audit trail does not depend on it: audit events leave the console as OTLP
-log records and are read back through DataCore in Telemetry → Logs (see
+
+**data-plane API is opt-in.** `data-plane-api`, the TrustTest red-teaming and
+evaluation API, deploys only with `global.products.dataPlane: true` (layer
+[`values-red-teaming.yaml.example`](./values-red-teaming.yaml.example)). TrustTest
+may change or be removed in a future release. The console does not need it:
+runtime activity and requests are read through DataCore, and audit events leave
+the console as OTLP log records read back in Telemetry → Logs (see
 [docs/observability.md](./docs/observability.md)).
+
+> **Upgrading an install that uses TrustTest red teaming?** Earlier releases
+> deployed `data-plane-api` in external and saas unless `dataPlane` was `false`.
+> Add `global.products.dataPlane: true` to your values before upgrading, or
+> `helm upgrade` removes it. Installs made with `ntctl` already carry the flag.
+
 `hostedExport.enabled: false` removes the umbrella collector's hosted telemetry
 exporter; keep it `false` for no-egress deployments.
 
@@ -186,7 +196,7 @@ Default hostnames derive from `global.domain`:
 | TrustGate Admin       | `admin.<domain>`                        |
 | TrustGuard            | `trustguard.<domain>`                   |
 | TrustGuard Admin      | `trustguard-admin.<domain>`             |
-| data-plane API        | `data-plane-api.<domain>`               |
+| data-plane API (opt-in) | `data-plane-api.<domain>`             |
 
 
 Point DNS at the ingress address, then log in at `https://app.<domain>` with the
@@ -230,7 +240,7 @@ Connect), which scores the text it receives and stores none of it.
 | ------------------- | ----------------------------------------------------------------- |
 | `control-plane-api` | Platform API                                                      |
 | `control-plane-app` | Console web application; runs Prisma migrations and seed on start |
-| `data-plane-api`    | Read and analytics API over ClickHouse                            |
+| `data-plane-api`    | TrustTest evaluation API over ClickHouse; opt-in (`global.products.dataPlane: true`) |
 
 
 **Analytics and alerting**
@@ -382,7 +392,7 @@ Who creates the PostgreSQL roles and databases depends on whose instance it is:
   passwords, see
   [Optional IAM DB auth (GCP)](./SECRETS.md#full-secret-catalog).
 
-DataCore, AlertEngine, the ClickStack collector, and `data-plane-api` all read one
+DataCore, AlertEngine, the ClickStack collector, and `data-plane-api` (when opted in) all read one
 shared ClickHouse credential; point their `clickhouse.existingSecret` at your
 secret when using a managed cluster. Complete pattern:
 `[values-managed-datastores.yaml.example](./values-managed-datastores.yaml.example)`.

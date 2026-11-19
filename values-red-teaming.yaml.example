@@ -1,5 +1,8 @@
-# Positive red-teaming / data-plane-api hybrid slice.
-# No DataAgent is required when this is the only selected product.
+# Opt-in data-plane-api (TrustTest red-teaming and evaluation API).
+# data-plane-api is opt-in in every mode (hybrid, external, saas): without
+# global.products.dataPlane: true it does not deploy. TrustTest may change or
+# be removed in a future release.
+# In hybrid, no DataAgent is required when this is the only selected product.
 #
 #   helm upgrade --install neuraltrust-platform <chart> \
 #     --namespace neuraltrust --create-namespace \

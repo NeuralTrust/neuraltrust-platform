@@ -2188,17 +2188,23 @@ ClickHouse is allowed to render only in v2 external.
 
 {{/*
 Product enable flag from the shared global.products contract.
-- external / saas: opt-out — on unless the flag is explicitly false, so an
-  install that never set global.products still deploys the full stack
-- hybrid: positive opt-in — true only when the flag is explicitly true
+- dataPlane (data-plane-api): positive opt-in in every mode — true only when
+  the flag is explicitly true; never in dedicated
+- trustgate / trustguard in external / saas: opt-out — on unless the flag is
+  explicitly false, so an install that never set global.products still deploys
+  both products
+- trustgate / trustguard in hybrid: positive opt-in — true only when the flag
+  is explicitly true
 values.yaml leaves every flag unset for exactly this reason: a `false` default
-would switch every product off in external.
+would switch TrustGate and TrustGuard off in external.
 Usage: {{ include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "trustgate") }}
 */}}
 {{- define "neuraltrust-platform.product.enabled" -}}
 {{- $products := default dict (default dict .ctx.Values.global).products -}}
 {{- $flag := index $products .product -}}
 {{- if and (eq .product "dataPlane") (eq (include "neuraltrust-platform.isDedicated" .ctx) "true") -}}
+{{- else if eq .product "dataPlane" -}}
+{{- if and (kindIs "bool" $flag) $flag -}}true{{- end -}}
 {{- else if eq (include "neuraltrust-platform.isExternal" .ctx) "true" -}}
 {{- if not (and (kindIs "bool" $flag) (not $flag)) -}}true{{- end -}}
 {{- else if $flag -}}

@@ -1,7 +1,9 @@
 # External: self-hosted control/data planes and analytics.
 # ClickStack OTel Collector, DataCore, and AlertEngine render only in this mode.
-# DataAgent never renders here. Every product deploys unless global.products
-# turns it off — see values-external-trustguard-only.yaml.example.
+# DataAgent never renders here. TrustGate and TrustGuard deploy unless
+# global.products turns them off — see values-external-trustguard-only.yaml.example.
+# data-plane-api (TrustTest red teaming) is opt-in: add
+# values-red-teaming.yaml.example (global.products.dataPlane: true) to deploy it.
 #
 # Before install, create gcr-secret, the trustguard-firewall Secret (key
 # FIREWALL_JWT, the firewall key NeuralTrust sends you for this install) and

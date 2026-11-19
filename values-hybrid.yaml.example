@@ -7,8 +7,9 @@
 # Positive product slices (mix with -f; no all-off baseline):
 #   values-trustgate.yaml.example
 #   values-trustguard.yaml.example
-#   values-red-teaming.yaml.example
-# External mode inverts this: every product deploys unless set to false.
+#   values-red-teaming.yaml.example (data-plane-api, opt-in in every mode)
+# External mode inverts this for TrustGate and TrustGuard: both deploy unless
+# set to false. data-plane-api is opt-in in every mode.
 #
 # Never commit real tokens, passwords, or customer identifiers.
 # For the minimal starting point, see values-required.yaml.
@@ -20,7 +21,6 @@ global:
   products:
     trustgate: true
     trustguard: true
-    dataPlane: true
 
   # One shared PostgreSQL block. Every hybrid workload (TrustGate,
   # TrustGuard, DataAgent, data-plane-api) reads envFrom the rendered
