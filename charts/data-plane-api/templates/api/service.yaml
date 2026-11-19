@@ -58,7 +58,7 @@ spec:
   {{- if and .Values.dataPlane .Values.dataPlane.components .Values.dataPlane.components.api }}
     {{- $apiHost = include "neuraltrust-platform.ingress.host" (dict "host" .Values.dataPlane.components.api.host "prefix" .Values.dataPlane.components.api.hostPrefix "global" .Values.global) }}
   {{- end }}
-  {{- if and $tlsEnabled (include "neuraltrust-platform.ingress.renderTLS" (dict "ctx" $ "global" .Values.global "tlsEnabled" $tlsEnabled)) }}
+  {{- if and $tlsEnabled (include "neuraltrust-platform.ingress.renderTLS" (dict "ctx" $ "global" .Values.global "tlsEnabled" $tlsEnabled "localSecretName" ($apiIngress.tls.secretName | default ""))) }}
   tls:
     - {{- if $apiHost }}
       hosts:

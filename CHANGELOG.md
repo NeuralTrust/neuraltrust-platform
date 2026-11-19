@@ -4,6 +4,28 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Fixed
+
+- **OpenShift: installs under the default `restricted-v2` SCC.** The secrets
+  generator and keygen hook Jobs no longer pin `runAsUser` / `runAsGroup: 1001`
+  on OpenShift, so the namespace assigns the UID and no SCC grant is needed.
+  They also set `seccompProfile: RuntimeDefault` on every platform, which
+  clears the `restricted` Pod Security warning.
+- **OpenShift: the console advertises the host it is served on.** `APP_URL` and
+  `NEXTAUTH_URL` follow the app's Ingress host (`app.<domain>` by default)
+  instead of `control-plane-app.<domain>`, which only exists when the app is
+  exposed through its own Route (`ingress.enabled: false`, unchanged). Login
+  redirects and invitation links now resolve.
+- **OpenShift: Ingresses keep the router's trusted certificate.** With
+  `global.ingress.provider: openshift` (the default on `global.platform:
+  openshift`), the app, control-plane-api and data-plane-api Ingresses render no
+  `tls` block unless a certificate is supplied (a component
+  `ingress.tls.secretName`, or `global.ingress.tls.autoGenerate: false` with
+  your own shared secret). The router's edge Route then serves its default
+  wildcard certificate instead of the chart's self-signed `neuraltrust.local`
+  placeholder, which is no longer issued there. TrustGuard and DataCore already
+  behaved this way.
+
 ## [v4.4.0] — 2026-11-19
 
 ### Added

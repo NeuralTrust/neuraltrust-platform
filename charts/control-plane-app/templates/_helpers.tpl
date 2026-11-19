@@ -102,7 +102,24 @@ envFrom:
 {{- end }}
 
 {{/*
-Resolve the control-plane app's public origin.
+Whether the app is exposed through its own OpenShift Route
+(control-plane-app.<domain>) rather than an Ingress: OpenShift with the app
+Ingress turned off. With the Ingress on, the router converts it to a Route on
+the Ingress host instead.
+*/}}
+{{- define "control-plane.appUsesRoute" -}}
+{{- if include "neuraltrust-platform.isOpenshift" . -}}
+  {{- $ingressEnabled := false -}}
+  {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.ingress (hasKey .Values.controlPlane.components.app.ingress "enabled") -}}
+    {{- if .Values.controlPlane.components.app.ingress.enabled -}}{{- $ingressEnabled = true -}}{{- end -}}
+  {{- end -}}
+  {{- if not $ingressEnabled -}}true{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Resolve the control-plane app's public origin: the host the chart actually
+exposes, so login redirects and invitation links resolve.
 */}}
 {{- define "control-plane.appPublicUrl" -}}
 {{- $app := dict -}}
@@ -110,9 +127,9 @@ Resolve the control-plane app's public origin.
   {{- $app = .Values.controlPlane.components.app -}}
 {{- end -}}
 {{- $host := "" -}}
-{{- if eq (include "neuraltrust-platform.isOpenshift" .) "true" -}}
+{{- if include "control-plane.appUsesRoute" . -}}
   {{- $domain := include "neuraltrust-platform.domain" . -}}
-  {{- if $domain -}}{{- $host = printf "control-plane-app.%s" $domain -}}{{- end -}}
+  {{- if $domain -}}{{- $host = printf "control-plane-app.%s" $domain -}}{{- else if $app.host -}}{{- $host = $app.host -}}{{- end -}}
 {{- else -}}
   {{- $prefix := "app" -}}
   {{- if hasKey $app "hostPrefix" -}}{{- $prefix = $app.hostPrefix -}}{{- end -}}

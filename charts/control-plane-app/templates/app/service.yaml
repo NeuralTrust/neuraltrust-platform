@@ -77,7 +77,7 @@ spec:
   {{- if $className }}
   ingressClassName: {{ $className }}
   {{- end }}
-  {{- if and .Values.controlPlane.components.app.ingress.tls.enabled (include "neuraltrust-platform.ingress.renderTLS" (dict "ctx" $ "global" .Values.global "tlsEnabled" .Values.controlPlane.components.app.ingress.tls.enabled)) }}
+  {{- if and .Values.controlPlane.components.app.ingress.tls.enabled (include "neuraltrust-platform.ingress.renderTLS" (dict "ctx" $ "global" .Values.global "tlsEnabled" .Values.controlPlane.components.app.ingress.tls.enabled "localSecretName" (.Values.controlPlane.components.app.ingress.tls.secretName | default ""))) }}
   tls:
     - {{- if or $resolvedAppHost .Values.controlPlane.components.app.secondaryHost }}
       hosts:
@@ -116,19 +116,7 @@ spec:
                   name: http
     {{- end }}
 {{- end }}
-{{- $useRoutes := false }}
-{{- if include "neuraltrust-platform.isOpenshift" . }}
-  {{- $ingressEnabled := false }}
-  {{- if and .Values.controlPlane .Values.controlPlane.components .Values.controlPlane.components.app .Values.controlPlane.components.app.ingress (hasKey .Values.controlPlane.components.app.ingress "enabled") }}
-    {{- if .Values.controlPlane.components.app.ingress.enabled }}
-      {{- $ingressEnabled = true }}
-    {{- end }}
-  {{- end }}
-  {{- if not $ingressEnabled }}
-    {{- $useRoutes = true }}
-  {{- end }}
-{{- end }}
-{{- if $useRoutes }}
+{{- if include "control-plane.appUsesRoute" . }}
   {{- $host := "" }}
   {{- $domain := include "neuraltrust-platform.domain" . }}
   {{- if $domain }}

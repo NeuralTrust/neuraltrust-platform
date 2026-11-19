@@ -54,7 +54,7 @@ is stored as the raw PEM, which is what its consumer expects.
 {{- $cp := default dict $cpApp.controlPlane }}
 {{- $appImage := default dict (default dict (default dict $cp.components).app).image }}
 {{- $repo := $appImage.repository | default "europe-west1-docker.pkg.dev/neuraltrust-app-prod/nt-docker/app" }}
-{{- $appTag := $appImage.tag | default "v2.49.0" }}
+{{- $appTag := $appImage.tag | default "v2.54.0" }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -160,8 +160,12 @@ spec:
       {{- include "neuraltrust-platform.affinity" (dict "ctx" $ctx) | nindent 6 }}
       securityContext:
         runAsNonRoot: true
+        {{- if not (include "neuraltrust-platform.isOpenshift" $ctx) }}
         runAsUser: 1001
         runAsGroup: 1001
+        {{- end }}
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: generate
           image: {{ include "neuraltrust-platform.image" (dict "repository" $repo "tag" $appTag "global" $ctx.Values.global) | quote }}
@@ -171,6 +175,8 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
           env:
             - name: {{ .nameEnv }}
               value: {{ $secretName | quote }}
