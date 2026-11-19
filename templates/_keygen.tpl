@@ -144,6 +144,13 @@ spec:
         app.kubernetes.io/name: {{ include "neuraltrust-platform.name" $ctx }}
         app.kubernetes.io/instance: {{ $ctx.Release.Name }}
         app.kubernetes.io/component: {{ $component }}
+        {{- with include "neuraltrust-platform.podLabels" (dict "ctx" $ctx "job" true "identity" false) }}
+        {{- . | nindent 8 }}
+        {{- end }}
+      {{- with include "neuraltrust-platform.podAnnotations" (dict "ctx" $ctx "job" true) }}
+      annotations:
+        {{- . | nindent 8 }}
+      {{- end }}
     spec:
       restartPolicy: Never
       serviceAccountName: {{ $saName }}

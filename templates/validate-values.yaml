@@ -693,3 +693,6 @@ Secret produces a pod that cannot start. Fail at render instead.
     {{- fail (printf "infrastructure.clickhouse.external.host=%q is set but nothing reads it. That block is inert: .Values.infrastructure is an umbrella key, so the datacore, alertengine and clickstack-otel-collector subcharts cannot see it, and they would each still dial the in-cluster \"clickhouse\" Service -- which infrastructure.clickhouse.deploy=false means is never rendered. Set global.clickhouse.host (plus httpPort / nativePort / user / tls / existingSecret as your endpoint needs) instead: every consumer resolves through it. See README-EXTERNAL.md." $legacyHost) -}}
   {{- end -}}
 {{- end -}}
+{{- /* Operator pod labels and annotations must not take a key a selector or the
+       chart owns. */ -}}
+{{- include "neuraltrust-platform.podMetadata.validate" . -}}

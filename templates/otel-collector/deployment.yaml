@@ -33,13 +33,13 @@ spec:
     metadata:
       labels:
         {{- include "neuraltrust-platform.otelCollector.selectorLabels" . | nindent 8 }}
-        {{- with $coll.podLabels }}
-        {{- toYaml . | nindent 8 }}
+        {{- with include "neuraltrust-platform.podLabels" (dict "ctx" . "local" $coll.podLabels "identity" false) }}
+        {{- . | nindent 8 }}
         {{- end }}
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/otel-collector/configmap.yaml") . | sha256sum }}
-        {{- with $coll.podAnnotations }}
-        {{- toYaml . | nindent 8 }}
+        {{- with include "neuraltrust-platform.podAnnotations" (dict "ctx" . "local" $coll.podAnnotations) }}
+        {{- . | nindent 8 }}
         {{- end }}
     spec:
       serviceAccountName: {{ include "neuraltrust-platform.otelCollector.serviceAccountName" . }}

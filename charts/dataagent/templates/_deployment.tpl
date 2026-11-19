@@ -27,7 +27,7 @@ spec:
                strictly smaller dataagent.selectorLabels. Reachable from this
                library chart's synthetic context because the umbrella re-injects
                .Values.global into it. */}}
-        {{- with include "neuraltrust-platform.podLabels" (dict "ctx" .) }}
+        {{- with include "neuraltrust-platform.podLabels" (dict "ctx" . "local" .Values.podLabels) }}
         {{- . | nindent 8 }}
         {{- end }}
       annotations:
@@ -41,6 +41,9 @@ spec:
         {{- /* existingSecret is operator-owned — no chart content to checksum. */}}
         {{- if $egressEnabled }}
         checksum/egress-config: {{ include "dataagent.egressConfigmapData" . | sha256sum }}
+        {{- end }}
+        {{- with include "neuraltrust-platform.podAnnotations" (dict "ctx" . "local" .Values.podAnnotations) }}
+        {{- . | nindent 8 }}
         {{- end }}
     spec:
       serviceAccountName: {{ include "dataagent.serviceAccountName" . }}

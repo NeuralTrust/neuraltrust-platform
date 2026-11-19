@@ -52,8 +52,8 @@ spec:
     metadata:
       labels:
         {{- include "neuraltrust-watchdog.selectorLabels" . | nindent 8 }}
-        {{- with .Values.podLabels }}
-        {{- toYaml . | nindent 8 }}
+        {{- with include "neuraltrust-platform.podLabels" (dict "ctx" . "local" .Values.podLabels "identity" false) }}
+        {{- . | nindent 8 }}
         {{- end }}
       annotations:
         checksum/config: {{ include "neuraltrust-watchdog.configMap" . | sha256sum }}
@@ -69,8 +69,11 @@ spec:
         prometheus.io/port: "8080"
         prometheus.io/path: "/metrics"
         {{- end }}
-        {{- with .Values.podAnnotations }}
-        {{- toYaml . | nindent 8 }}
+        {{- /* The scrape keys above win over an operator map. */ -}}
+        {{- $managed := list -}}
+        {{- if $sa.enabled -}}{{- $managed = list "prometheus.io/scrape" "prometheus.io/port" "prometheus.io/path" -}}{{- end -}}
+        {{- with include "neuraltrust-platform.podAnnotations" (dict "ctx" . "local" .Values.podAnnotations "managed" $managed) }}
+        {{- . | nindent 8 }}
         {{- end }}
     spec:
       serviceAccountName: {{ include "neuraltrust-watchdog.serviceAccountName" . }}
