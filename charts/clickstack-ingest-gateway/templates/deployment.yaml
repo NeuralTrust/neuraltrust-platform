@@ -18,13 +18,16 @@ spec:
       labels:
         {{- include "clickstack-ingest-gateway.labels" . | nindent 8 }}
         app.kubernetes.io/component: ingest-gateway
+        {{- with include "neuraltrust-platform.podLabels" (dict "ctx" . "local" .Values.podLabels "identity" false) }}
+        {{- . | nindent 8 }}
+        {{- end }}
       annotations:
         {{- /* The collector reads its config once at boot, so an edit to the
                ConfigMap alone would sit unapplied until something else
                restarted the pod. */}}
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
-        {{- with .Values.podAnnotations }}
-        {{- toYaml . | nindent 8 }}
+        {{- with include "neuraltrust-platform.podAnnotations" (dict "ctx" . "local" .Values.podAnnotations) }}
+        {{- . | nindent 8 }}
         {{- end }}
     spec:
       {{- with .Values.priorityClassName }}

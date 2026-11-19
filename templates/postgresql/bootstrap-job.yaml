@@ -114,6 +114,14 @@ owns, has passwords and owners re-aligned.
 {{- with include "neuraltrust-platform.affinity" (dict "ctx" .) }}
   {{- $_ := set $inputs "affinity" . }}
 {{- end }}
+{{- /* Operator pod labels and annotations shape the pod too. Hashed only when
+       set, so installs without them keep their Job name. global.postgresql.*
+       is already in the hash through "postgresql". */}}
+{{- $podLabels := include "neuraltrust-platform.podLabels" (dict "ctx" . "local" $pg.podLabels "job" true "identity" false) }}
+{{- $podAnnotations := include "neuraltrust-platform.podAnnotations" (dict "ctx" . "local" $pg.podAnnotations "job" true) }}
+{{- if or $podLabels $podAnnotations }}
+  {{- $_ := set $inputs "podMetadata" (list $podLabels $podAnnotations) }}
+{{- end }}
 {{- $jobName = printf "%s-%s" $jobName (toJson $inputs | sha256sum | trunc 10) }}
 apiVersion: batch/v1
 kind: Job
@@ -134,6 +142,13 @@ spec:
     metadata:
       labels:
         app: {{ $appLabel }}
+        {{- with $podLabels }}
+        {{- . | nindent 8 }}
+        {{- end }}
+      {{- with $podAnnotations }}
+      annotations:
+        {{- . | nindent 8 }}
+      {{- end }}
     spec:
       restartPolicy: Never
       {{- if not (include "neuraltrust-platform.isOpenshift" .) }}

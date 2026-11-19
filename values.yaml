@@ -509,6 +509,15 @@ global:
   nodeSelector: {}
   tolerations: []
   affinity: {} # Merged underneath any per-component affinity
+  # Labels and annotations added to every pod the chart renders (Deployments,
+  # StatefulSets, Jobs, CronJobs), never to a selector. A component's own
+  # podLabels / podAnnotations override these key by key; `jobs` applies on top
+  # to Job pods only. See docs/pod-metadata.md.
+  podLabels: {}
+  podAnnotations: {}
+  jobs:
+    podLabels: {}
+    podAnnotations: {}
   # Availability posture for every workload. Per-component
   # podDisruptionBudget / topologySpreadConstraints / affinity keys override it.
   highAvailability:

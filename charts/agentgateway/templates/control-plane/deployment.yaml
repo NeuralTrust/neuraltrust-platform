@@ -20,9 +20,15 @@ spec:
       labels:
         {{- include "agentgateway.labels" . | nindent 8 }}
         app.kubernetes.io/component: control-plane
+        {{- with include "neuraltrust-platform.podLabels" (dict "ctx" . "local" .Values.podLabels "identity" false) }}
+        {{- . | nindent 8 }}
+        {{- end }}
       annotations:
         {{- /* AUT-403: roll when env ConfigMap / chart-managed Secret changes. */}}
         {{- include "neuraltrust-platform.checksumAnnotations" (dict "context" . "files" (list "/env-configmap.yaml" "/secrets.yaml")) | nindent 8 }}
+        {{- with include "neuraltrust-platform.podAnnotations" (dict "ctx" . "local" .Values.podAnnotations) }}
+        {{- . | nindent 8 }}
+        {{- end }}
         {{- if eq (include "neuraltrust-platform.configSync.publicSelfSigned" (dict "ctx" .)) "true" }}
         {{- /* This process reads the keypair off disk once, at startup. The
                certificate is reissued when the names it covers change — which is

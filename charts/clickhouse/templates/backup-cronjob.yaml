@@ -21,6 +21,13 @@ spec:
           labels:
             {{- include "clickhouse.selectorLabels" . | nindent 12 }}
             app.kubernetes.io/component: backup
+            {{- with include "neuraltrust-platform.podLabels" (dict "ctx" . "local" .Values.podLabels "job" true "identity" false) }}
+            {{- . | nindent 12 }}
+            {{- end }}
+          {{- with include "neuraltrust-platform.podAnnotations" (dict "ctx" . "local" .Values.podAnnotations "job" true) }}
+          annotations:
+            {{- . | nindent 12 }}
+          {{- end }}
         spec:
           {{- if .Values.backup.serviceAccount.create }}
           serviceAccountName: {{ include "clickhouse.backup.serviceAccountName" . }}

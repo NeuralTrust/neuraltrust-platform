@@ -19,9 +19,15 @@ spec:
         checksum/config: {{ .Values.customConfig | sha256sum }}
         {{- /* AUT-403: also roll when the envFrom Secret (OTLP token) changes. */}}
         checksum/secrets: {{ include (print $.Template.BasePath "/secrets.yaml") . | sha256sum }}
+        {{- with include "neuraltrust-platform.podAnnotations" (dict "ctx" . "local" .Values.podAnnotations) }}
+        {{- . | nindent 8 }}
+        {{- end }}
       labels:
         {{- include "clickstack-otel-collector.labels" . | nindent 8 }}
         app.kubernetes.io/component: telemetry
+        {{- with include "neuraltrust-platform.podLabels" (dict "ctx" . "local" .Values.podLabels "identity" false) }}
+        {{- . | nindent 8 }}
+        {{- end }}
     spec:
       serviceAccountName: {{ include "clickstack-otel-collector.serviceAccountName" . }}
       {{- include "clickstack-otel-collector.imagePullSecrets" . | nindent 6 }}
