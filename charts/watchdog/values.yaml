@@ -570,8 +570,10 @@ checks:
     enabled: false
     target:
       namespace: ""
-      # MCP is optional, so the default check covers only always-on v2 workloads.
-      deployments: [agentgateway-proxy, trustguard-data-plane, data-plane-api]
+      # MCP and data-plane-api are optional (opt-in), so the default check
+      # covers only always-on v2 workloads. Add data-plane-api here when
+      # global.products.dataPlane is true.
+      deployments: [agentgateway-proxy, trustguard-data-plane]
   - id: trustscan-deployment-health
     kind: deployment_health
     enabled: false

@@ -204,6 +204,7 @@ datacore:
       name: "external-postgresql"
       key: "DATACORE"
 
+# Read only when data-plane-api is opted in (global.products.dataPlane: true).
 data-plane-api:
   dataPlane:
     components:

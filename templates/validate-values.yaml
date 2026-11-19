@@ -101,7 +101,7 @@ no Kubernetes resource when validation succeeds.
     (eq (include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "dataPlane")) "true")
   -}}
   {{- if not $anyProduct -}}
-    {{- fail "v2 hybrid requires at least one product: set global.products.trustgate, global.products.trustguard, and/or global.products.dataPlane to true. (External mode is the opposite: every product deploys unless set to false.)" -}}
+    {{- fail "v2 hybrid requires at least one product: set global.products.trustgate, global.products.trustguard, and/or global.products.dataPlane to true. (In external, TrustGate and TrustGuard deploy unless set to false; dataPlane is opt-in in every mode.)" -}}
   {{- end -}}
   {{- /* A single dial host cannot present two product certificates. */ -}}
   {{- $cp := default dict $global.controlPlane -}}

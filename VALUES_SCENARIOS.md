@@ -34,11 +34,11 @@ renders an error until you layer it over one marked "yes".
 
 | File | Mode | Base? | Purpose |
 |---|---|:---:|---|
-| [`values-required.yaml`](./values-required.yaml) | hybrid | yes | Full-hybrid preset (all three products on) + enrolment / config-sync Secrets |
+| [`values-required.yaml`](./values-required.yaml) | hybrid | yes | Hybrid preset (TrustGate and TrustGuard on) + enrolment / config-sync Secrets |
 | [`values-hybrid.yaml.example`](./values-hybrid.yaml.example) | hybrid | yes | Hybrid topology with managed datastores |
 | [`values-trustgate.yaml.example`](./values-trustgate.yaml.example) | hybrid | yes | Positive TrustGate + DataAgent slice |
 | [`values-trustguard.yaml.example`](./values-trustguard.yaml.example) | hybrid | yes | Positive TrustGuard + DataAgent slice (NeuralTrust-hosted firewall) |
-| [`values-red-teaming.yaml.example`](./values-red-teaming.yaml.example) | hybrid | yes | Positive data-plane-api-only slice |
+| [`values-red-teaming.yaml.example`](./values-red-teaming.yaml.example) | any | yes | Opt-in data-plane-api (TrustTest red teaming); off by default in every mode |
 | [`values-hybrid-reference.yaml.example`](./values-hybrid-reference.yaml.example) | hybrid | no | Annotated reference for every hybrid knob — selects no products |
 | [`values-external.yaml.example`](./values-external.yaml.example) | external | yes | Minimal self-hosted topology |
 | [`values-managed-datastores.yaml.example`](./values-managed-datastores.yaml.example) | external | yes | Managed PostgreSQL, Redis, and ClickHouse |

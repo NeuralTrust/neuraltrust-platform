@@ -117,7 +117,7 @@ assert_contains "$out11d4" 'name: data-plane-api' \
 assert_occurrences "$out11d4" '^  name: clickstack-egress-collector$' 1 \
   "all products: exactly one egress Service"
 
-blue "==> Scenario 11e: external overlay without global.products still full stack"
+blue "==> Scenario 11e: external overlay without global.products: TrustGate and TrustGuard, no data-plane-api"
 out11e="$TMP/scenario-external-no-products.yaml"
 helm template test "$CHART_DIR" --namespace default \
   -f "$CHART_DIR/values-external.yaml.example" > "$out11e"
@@ -126,8 +126,12 @@ assert_contains "$out11e" 'name: agentgateway-admin' \
   "external no-products: AgentGateway admin renders"
 assert_contains "$out11e" 'name: trustguard-control-plane' \
   "external no-products: TrustGuard control plane renders"
-assert_contains "$out11e" 'name: data-plane-api' \
-  "external no-products: data-plane-api renders"
+assert_not_contains "$out11e" '^  name: "?data-plane-api(-service)?"?$' \
+  "external no-products: data-plane-api is opt-in and does not render"
+assert_env_value "$out11e" control-plane-app app DATA_PLANE_API_ENABLED false \
+  "external no-products: the console is told data-plane-api is absent"
+assert_contains "$out11e" 'name: DATA_PLANE_JWT_SECRET' \
+  "external no-products: the control plane keeps its data-plane JWT"
 assert_not_contains "$out11e" 'name: firewall$' \
   "external no-products: the Firewall is NeuralTrust-hosted"
 assert_contains "$out11e" 'name: FIREWALL_JWT' \
@@ -148,7 +152,7 @@ for _gone in agentgateway-admin agentgateway-proxy agentgateway-mcp agentgateway
     "external trustguard-only: $_gone is not rendered"
 done
 for _kept in trustguard-control-plane trustguard-data-plane \
-             control-plane-app control-plane-api data-plane-api datacore alertengine-api clickhouse; do
+             control-plane-app control-plane-api datacore alertengine-api clickhouse; do
   assert_contains "$out11e2" "^  name: \"?${_kept}\"?$" \
     "external trustguard-only: $_kept still renders"
 done
@@ -168,6 +172,52 @@ assert_render_fails_with 'global.agentgatewayM2m.enabled=true requires TrustGate
   "external trustguard-only: forcing Admin API machine credentials on is rejected" \
   --set global.deploymentMode=external --set global.products.trustgate=false \
   --set global.agentgatewayM2m.enabled=true
+
+blue "==> Scenario 11e3: data-plane-api is opt-in in every mode"
+# data-plane-api (TrustTest) renders only with global.products.dataPlane: true,
+# in hybrid, external and saas alike; dedicated never renders it (36-dedicated).
+for _mode in external saas; do
+  _dp_args=(--set global.deploymentMode=$_mode --set global.domain=cp.example.com)
+  out11e3="$TMP/scenario-dataplane-optin-$_mode.yaml"
+  helm template test "$CHART_DIR" --namespace default \
+    -f "$CHART_DIR/values-external.yaml.example" \
+    -f "$CHART_DIR/values-red-teaming.yaml.example" "${_dp_args[@]}" > "$out11e3"
+  validate_yaml "$out11e3"
+  assert_contains "$out11e3" '^  name: "?data-plane-api"?$' \
+    "$_mode opted in: data-plane-api renders"
+  assert_env_value "$out11e3" control-plane-app app DATA_PLANE_API_ENABLED true \
+    "$_mode opted in: the console is told data-plane-api is present"
+  out11e3_off="$TMP/scenario-dataplane-default-$_mode.yaml"
+  helm template test "$CHART_DIR" --namespace default \
+    -f "$CHART_DIR/values-external.yaml.example" "${_dp_args[@]}" > "$out11e3_off"
+  assert_not_contains "$out11e3_off" '^  name: "?data-plane-api(-service)?"?$' \
+    "$_mode default: data-plane-api does not render"
+done
+out11e3_h="$TMP/scenario-dataplane-default-hybrid.yaml"
+helm template test "$CHART_DIR" --namespace default \
+  -f "$CHART_DIR/values-required.yaml" "${CLICKSTACK_DEFAULT_ARGS[@]}" > "$out11e3_h"
+assert_not_contains "$out11e3_h" '^  name: "?data-plane-api(-service)?"?$' \
+  "hybrid values-required: data-plane-api does not render"
+
+blue "==> Scenario 11e4: legacy Secret path keeps data-plane-jwt-secret without data-plane-api"
+# The control plane reads DATA_PLANE_JWT_SECRET from data-plane-jwt-secret when
+# the shared platform Secret and the generator are off. Without data-plane-api
+# that Secret must still render, or control-plane-api/-app stop on a missing ref.
+out11e4="$TMP/scenario-dataplane-off-legacy-secrets.yaml"
+helm template test "$CHART_DIR" --namespace default \
+  -f "$CHART_DIR/values-external.yaml.example" \
+  --set global.secrets.generator.enabled=false \
+  --set global.platformSecret.enabled=false > "$out11e4"
+assert_not_contains "$out11e4" '^  name: "?data-plane-api"?$' \
+  "legacy secrets, dataPlane off: data-plane-api does not render"
+_dp_jwt_doc="$TMP/scenario-dataplane-off-jwt-secret.yaml"
+document_named_kind "$out11e4" Secret data-plane-jwt-secret "$_dp_jwt_doc"
+assert_contains "$_dp_jwt_doc" '^  DATA_PLANE_JWT_SECRET: ' \
+  "legacy secrets, dataPlane off: data-plane-jwt-secret carries the JWT"
+assert_not_contains "$_dp_jwt_doc" '^  REDIS_URL: ' \
+  "legacy secrets, dataPlane off: no data-plane-api Redis DSN"
+assert_contains "$out11e4" 'name: "?data-plane-jwt-secret"?$' \
+  "legacy secrets, dataPlane off: the control plane references data-plane-jwt-secret"
 
 blue "==> Scenario 11f: global.saasRegion picks the SaaS behind a hybrid install"
 # EU is the default, so an install that never sets the knob must render the

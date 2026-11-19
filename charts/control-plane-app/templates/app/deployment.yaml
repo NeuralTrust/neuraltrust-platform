@@ -755,6 +755,12 @@ spec:
           value: "{{ $datacoreUrl }}"
         - name: DATACORE_METRICS_ENABLED
           value: "{{ $datacoreMetricsEnabled }}"
+        {{- /* data-plane-api is opt-in (global.products.dataPlane); the console
+               hides TrustTest red-teaming when it is not deployed. */}}
+        {{- if not (has "DATA_PLANE_API_ENABLED" $ownEnv) }}
+        - name: DATA_PLANE_API_ENABLED
+          value: {{ include "neuraltrust-platform.product.enabled" (dict "ctx" . "product" "dataPlane") | default "false" | quote }}
+        {{- end }}
         - name: ALERT_ENGINE_API_URL
           value: "{{ $alertEngineApiUrl }}"
         - name: DATACORE_JWT_SECRET

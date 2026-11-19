@@ -256,7 +256,8 @@ aws_guard_passes "AWS IAM guard: verify-full passes, case-insensitively" \
 aws_guard_passes "AWS IAM guard: an operator-owned Secret carries its own sslmode" \
   --set global.postgresql.existingSecret.name=operator-pg
 aws_guard_passes "AWS IAM guard: a data-plane-only hybrid runs no token-login client" \
-  --set global.products.trustgate=false --set global.products.trustguard=false
+  --set global.products.trustgate=false --set global.products.trustguard=false \
+  --set global.products.dataPlane=true
 for mode in external saas; do
   aws_guard_passes "AWS IAM guard: $mode keeps its per-service sslMode" \
     --set global.deploymentMode=$mode

@@ -296,8 +296,8 @@ to start without it.
 
 | Kubernetes Secret | Key | Required | Description |
 |---|---|---|---|
-| `data-plane-jwt-secret` | `DATA_PLANE_JWT_SECRET` | Auto-generated | JWT for Data Plane API auth |
-| `data-plane-jwt-secret` | `REDIS_URL` | Only with a Redis password | Evaluation-progress cache. Composed from `data-plane-api.dataPlane.components.api.redis.*`, then `global.redis`. Stored here only when the URL carries a password; without one (the in-cluster default, or a token login) it is configuration and data-plane-api gets it as a plain value. Pre-provisioned/`preserveExistingSecrets` setups set this key themselves. |
+| `data-plane-jwt-secret` | `DATA_PLANE_JWT_SECRET` | Auto-generated | JWT for Data Plane API auth. Rendered when data-plane-api is opted in (`global.products.dataPlane: true`), and in external and saas whatever that flag says, because the control plane reads it on the legacy Secret path |
+| `data-plane-jwt-secret` | `REDIS_URL` | Only with data-plane-api opted in and a Redis password | Evaluation-progress cache. Composed from `data-plane-api.dataPlane.components.api.redis.*`, then `global.redis`. Stored here only when the URL carries a password; without one (the in-cluster default, or a token login) it is configuration and data-plane-api gets it as a plain value. Pre-provisioned/`preserveExistingSecrets` setups set this key themselves. |
 | `openai-secrets` | `OPENAI_API_KEY` | No | OpenAI API key |
 | `google-secrets` | `GOOGLE_API_KEY` | No | Google API key |
 | `resend-secrets` | `RESEND_API_KEY` | No | Resend email API key |
@@ -717,11 +717,11 @@ here is deliberate.
 
 | Shape (values files) | Secrets |
 |---|---|
-| Hybrid (`values-required.yaml`) | `agentgateway-secrets`, `data-plane-jwt-secret`, `neuraltrust-ingress-tls`, `platform-secrets`, `postgresql-secrets`, `redis-secrets`, `trustguard-client-credentials`, `trustguard-secrets` |
+| Hybrid (`values-required.yaml`) | `agentgateway-secrets`, `neuraltrust-ingress-tls`, `platform-secrets`, `postgresql-secrets`, `redis-secrets`, `trustguard-client-credentials`, `trustguard-secrets` |
 | Hybrid, managed datastores (`values-hybrid.yaml.example`) | as Hybrid, without `redis-secrets` |
 | Hybrid, TrustGate only (`values-trustgate.yaml.example`) | `agentgateway-secrets`, `neuraltrust-ingress-tls`, `platform-secrets`, `postgresql-secrets`, `redis-secrets` |
 | Hybrid, TrustGuard only (`values-trustguard.yaml.example`) | `neuraltrust-ingress-tls`, `platform-secrets`, `postgresql-secrets`, `redis-secrets`, `trustguard-secrets` |
-| Hybrid, red teaming (`values-red-teaming.yaml.example`) | `data-plane-jwt-secret`, `neuraltrust-ingress-tls`, `platform-secrets`, `postgresql-secrets`, `redis-secrets` |
+| Hybrid, red teaming only (`values-red-teaming.yaml.example`; adds `data-plane-jwt-secret` to any hybrid shape) | `data-plane-jwt-secret`, `neuraltrust-ingress-tls`, `platform-secrets`, `postgresql-secrets`, `redis-secrets` |
 | Hybrid with in-cluster GPU firewall (`values-required.yaml` + `values-dataplane-gpu.yaml.example`) | as Hybrid, plus `firewall-secrets` |
 | External (`values-external.yaml.example`) | `agentgateway-configsync-tls`, `neuraltrust-ingress-tls`, `platform-secrets`, `postgresql-secrets`, `trustguard-configsync-tls` |
 | External, TrustGuard only (+ `values-external-trustguard-only.yaml.example`) | `neuraltrust-ingress-tls`, `platform-secrets`, `postgresql-secrets`, `trustguard-configsync-tls` |

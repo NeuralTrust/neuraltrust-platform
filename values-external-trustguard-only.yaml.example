@@ -4,15 +4,16 @@
 #     -f values-external.yaml.example \
 #     -f values-external-trustguard-only.yaml.example
 #
-# External deploys every product by default; this opts TrustGate out. It removes
+# External deploys TrustGate and TrustGuard by default; this opts TrustGate out. It removes
 # agentgateway-admin/-proxy/-mcp, their Ingresses and Secrets, the in-cluster
 # firewall's complexity worker when global.firewall.deploy is true (it serves
 # only TrustGate's smart routing), and the MCP OAuth
 # and Admin API machine-credential keys, whose only client is TrustGate.
 #
-# TrustGuard (on the NeuralTrust-hosted Firewall), the console, data-plane-api,
-# DataCore, AlertEngine and ClickHouse still deploy. Keep data-plane-api: the console reads runtime
-# activity from it.
+# TrustGuard (on the NeuralTrust-hosted Firewall), the console, DataCore,
+# AlertEngine and ClickHouse still deploy. data-plane-api is opt-in
+# (global.products.dataPlane: true) and not needed here: the console reads
+# runtime activity from DataCore.
 
 global:
   products:

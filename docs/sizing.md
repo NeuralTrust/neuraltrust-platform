@@ -61,22 +61,24 @@ the cluster. Values are rounded up to whole vCPU and GiB.
 
 | Scenario | Firewall on CPU | Firewall on GPU: CPU pool | Firewall on GPU: GPU pool |
 |---|---|---|---|
-| Hybrid, all products, hosted Firewall (`values-required.yaml`) | 6 vCPU / 14 GiB | — | — |
-| Hybrid, all products, in-cluster Firewall | 13 vCPU / 36 GiB | 6 vCPU / 15 GiB | 7 vCPU / 28 GiB, 7 GPU shares |
+| Hybrid, TrustGate and TrustGuard, hosted Firewall (`values-required.yaml`) | 4 vCPU / 8 GiB | — | — |
+| Hybrid, TrustGate and TrustGuard, in-cluster Firewall | 11 vCPU / 30 GiB | 4 vCPU / 9 GiB | 7 vCPU / 28 GiB, 7 GPU shares |
 | Hybrid, TrustGuard only, hosted Firewall | 2 vCPU / 5 GiB | — | — |
 | Hybrid, TrustGuard only, in-cluster Firewall | 9 vCPU / 24 GiB | 3 vCPU / 6 GiB | 6 vCPU / 24 GiB, 6 GPU shares |
 | Hybrid, TrustGate only | 3 vCPU / 6 GiB | — | — |
-| External, hosted Firewall (`values-external.yaml.example`) | 11 vCPU / 23 GiB | — | — |
-| External, in-cluster Firewall | 18 vCPU / 45 GiB | 11 vCPU / 24 GiB | 7 vCPU / 28 GiB, 7 GPU shares |
-| SaaS, hosted Firewall (central control plane) | 11 vCPU / 24 GiB | — | — |
-| SaaS, in-cluster Firewall | 19 vCPU / 46 GiB | 12 vCPU / 25 GiB | 7 vCPU / 28 GiB, 7 GPU shares |
+| External, hosted Firewall (`values-external.yaml.example`) | 9 vCPU / 17 GiB | — | — |
+| External, in-cluster Firewall | 16 vCPU / 39 GiB | 9 vCPU / 18 GiB | 7 vCPU / 28 GiB, 7 GPU shares |
+| SaaS, hosted Firewall (central control plane) | 9 vCPU / 18 GiB | — | — |
+| SaaS, in-cluster Firewall | 17 vCPU / 40 GiB | 10 vCPU / 19 GiB | 7 vCPU / 28 GiB, 7 GPU shares |
 
 - **Managed PostgreSQL and Redis** lower memory requests by 2 GiB.
 - **SaaS** is External plus two DataBridge and two ingest-gateway replicas.
 - **Excluded:** the node's system reservation, DaemonSets, kube-system, and your
   ingress controller or Gateway. The node counts above already allow for them.
-- **Evaluation Jobs**, when `data-plane-api` runs evaluations as Kubernetes Jobs
-  (`k8sJobs.enabled`, off by default), add up to 1 vCPU / 3 GiB while they run.
+- **data-plane-api** (TrustTest red teaming) is opt-in in every mode and not in
+  these totals. `global.products.dataPlane: true` adds 2 vCPU / 6 GiB (two
+  replicas). When it runs evaluations as Kubernetes Jobs (`k8sJobs.enabled`, off
+  by default), each Job adds up to 1 vCPU / 3 GiB while it runs.
 
 Requests describe what the scheduler reserves, not the throughput an
 installation sustains. Measure under your own traffic before tuning.
@@ -86,7 +88,7 @@ installation sustains. Measure under your own traffic before tuning.
 | Area | Default request / limit | Notes |
 |---|---|---|
 | Firewall CPU workers (in-cluster Firewall only) | 1 vCPU / 3 GiB each; limit 2 vCPU / 4 GiB | Five Deployments and seven pods with all products (`topic-guard` and `prompt-jailbreak` run two replicas each); four and six with TrustGuard only, which drops `complexity`. `topic-guard` is limited at 5 GiB |
-| `data-plane-api` | 1 vCPU / 3 GiB per replica, two replicas; limit 2 vCPU / 6 GiB | Runs evaluations in-process unless `k8sJobs` is on |
+| `data-plane-api` (opt-in) | 1 vCPU / 3 GiB per replica, two replicas; limit 2 vCPU / 6 GiB | Only with `global.products.dataPlane: true`. Runs evaluations in-process unless `k8sJobs` is on |
 | ClickHouse (External, SaaS) | 1 vCPU / 4 GiB; limit 4 vCPU / 8 GiB | 50 GiB volume; keep headroom for analytics queries |
 | In-cluster PostgreSQL | 500m / 2 GiB | Prefer managed stores in production |
 | In-cluster Redis | 100m / 128 MiB | Prefer managed stores in production |

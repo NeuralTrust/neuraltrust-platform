@@ -9,7 +9,7 @@ source "$(dirname "$0")/lib.sh"
 blue "==> Scenario 9: AgentGateway OpenShift Routes + Ingress override"
 out_ocp="$TMP/scenario-wildcard-openshift-routes.yaml"
 helm template test "$CHART_DIR" --namespace default \
-  -f "$CHART_DIR/values-required.yaml" \
+  -f "$CHART_DIR/values-required.yaml" -f "$DATA_PLANE_ON_FILE" \
   "${CLICKSTACK_DEFAULT_ARGS[@]}" \
   --api-versions route.openshift.io/v1 \
   --set global.deploymentMode=external \
@@ -42,7 +42,7 @@ assert_not_contains "$out_ocp" 'name: agentgateway-gateway' \
 # material. TLS Secrets are referenced through spec.tls.externalCertificate.
 out_ocp_tls="$TMP/scenario-openshift-route-tls.yaml"
 helm template test "$CHART_DIR" --namespace default \
-  -f "$CHART_DIR/values-required.yaml" \
+  -f "$CHART_DIR/values-required.yaml" -f "$DATA_PLANE_ON_FILE" \
   "${CLICKSTACK_DEFAULT_ARGS[@]}" \
   --api-versions route.openshift.io/v1 \
   --set global.deploymentMode=external \
@@ -74,7 +74,7 @@ green "ok  - openshift Route TLS: no Route contains private key material"
 # Explicit Ingress on OpenShift still works.
 out_ocp_ing="$TMP/scenario-wildcard-openshift-ingress.yaml"
 helm template test "$CHART_DIR" --namespace default \
-  -f "$CHART_DIR/values-required.yaml" \
+  -f "$CHART_DIR/values-required.yaml" -f "$DATA_PLANE_ON_FILE" \
   "${CLICKSTACK_DEFAULT_ARGS[@]}" \
   --api-versions route.openshift.io/v1 \
   --set global.deploymentMode=hybrid \

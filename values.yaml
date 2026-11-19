@@ -113,13 +113,15 @@ global:
       user: ""
       password: ""
   # Product selection. Every flag is left unset on purpose, because unset means
-  # opposite things per mode:
+  # opposite things per mode for trustgate and trustguard:
   #   hybrid           — opt-in: a product deploys only when set to true.
-  #   external / saas  — opt-out: everything deploys unless set to false, e.g.
+  #   external / saas  — opt-out: both deploy unless set to false, e.g.
   #                      trustgate: false for a TrustGuard-only install.
-  # Firewall follows TrustGuard (see firewall below). In external the console
-  # also reads runtime activity from data-plane-api, so keep dataPlane on there.
-  # The audit trail does not use it: see docs/observability.md.
+  # dataPlane (data-plane-api, the TrustTest red-teaming and evaluation API) is
+  # opt-in in every mode: it deploys only with dataPlane: true. TrustTest may
+  # change or be removed in a future release. The console reads runtime
+  # activity from DataCore, not data-plane-api. Firewall follows TrustGuard
+  # (see firewall below).
   products: {}
   # trustgate: true
   # trustguard: true

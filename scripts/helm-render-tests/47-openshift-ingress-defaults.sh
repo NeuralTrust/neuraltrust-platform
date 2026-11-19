@@ -12,7 +12,7 @@ source "$(dirname "$0")/lib.sh"
 blue "==> Scenario 47: OpenShift Ingress defaults (SCC, public URL, router TLS)"
 
 ocp_args=(
-  -f "$CHART_DIR/values-required.yaml"
+  -f "$CHART_DIR/values-required.yaml" -f "$DATA_PLANE_ON_FILE"
   "${CLICKSTACK_DEFAULT_ARGS[@]}"
   --api-versions route.openshift.io/v1
   --set global.deploymentMode=external
@@ -89,7 +89,7 @@ assert_env_value "$out_route" control-plane-app app APP_URL "https://control-pla
 # Other platforms are unchanged.
 out_k8s="$TMP/scenario-47-kubernetes.yaml"
 helm template test "$CHART_DIR" --namespace default \
-  -f "$CHART_DIR/values-required.yaml" \
+  -f "$CHART_DIR/values-required.yaml" -f "$DATA_PLANE_ON_FILE" \
   "${CLICKSTACK_DEFAULT_ARGS[@]}" \
   --set global.deploymentMode=external \
   --set global.domain=example.com \

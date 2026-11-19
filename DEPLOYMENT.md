@@ -15,8 +15,10 @@ each decision those quick starts make.
 
 Hybrid runs AgentGateway and TrustGuard data-plane workloads in the cluster.
 Their control planes stay hosted. PostgreSQL and Redis deploy in-cluster by
-default; ClickHouse is not part of hybrid. `data-plane-api` renders by default
-on the shared hybrid PostgreSQL.
+default; ClickHouse is not part of hybrid. `data-plane-api` (TrustTest red
+teaming) is opt-in in every mode: it renders only with
+`global.products.dataPlane: true`, on the shared hybrid PostgreSQL. TrustTest may
+change or be removed in a future release.
 
 Hybrid product OTLP is mandatory via a local `clickstack-egress-collector` and
 requires DataAgent enrolment (no direct bearer token on apps; no

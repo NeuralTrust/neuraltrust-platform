@@ -14,7 +14,7 @@ dependencies:
     condition: infrastructure.clickhouse.deploy
     tags:
       - infrastructure
-  # Analytics / evaluation API. Gated by global.products.dataPlane in hybrid.
+  # TrustTest evaluation API. Opt-in in every mode: global.products.dataPlane: true.
   - name: data-plane-api
     version: 1.7.21
     repository: file://./charts/data-plane-api

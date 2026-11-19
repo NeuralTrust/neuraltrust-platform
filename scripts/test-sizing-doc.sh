@@ -133,8 +133,8 @@ check_row() {
 
 blue "==> docs/sizing.md request totals match the render"
 
-check_row "Hybrid, all products, hosted Firewall" nogpu render_default
-check_row "Hybrid, all products, in-cluster Firewall" gpu render_default \
+check_row "Hybrid, TrustGate and TrustGuard, hosted Firewall" nogpu render_default
+check_row "Hybrid, TrustGate and TrustGuard, in-cluster Firewall" gpu render_default \
   --set global.firewall.deploy=true
 check_row "Hybrid, TrustGuard only, hosted Firewall" nogpu render_product_slice \
   -f "$CHART_DIR/values-trustguard.yaml.example"

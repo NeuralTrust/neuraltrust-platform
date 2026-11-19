@@ -4,6 +4,35 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Changed
+
+- **data-plane-api is opt-in in every deployment mode.** It renders only with
+  `global.products.dataPlane: true`, in hybrid (unchanged), external and saas.
+  It never renders in dedicated (unchanged). Before, external and saas deployed it
+  unless the flag was `false`. data-plane-api serves TrustTest red teaming and
+  evaluation; TrustTest may change or be removed in a future release, so new
+  installs no longer carry it by default.
+  - **Action needed only if you use TrustTest red teaming on an external or
+    saas install that never set the flag:** add
+    `global.products.dataPlane: true` to your values before upgrading, or
+    `helm upgrade` removes the data-plane-api Deployment and Service. Installs
+    made with `ntctl` already carry an explicit flag and are unaffected.
+  - The console reads runtime activity and requests through DataCore, so it
+    keeps working without data-plane-api. It now receives
+    `DATA_PLANE_API_ENABLED` (`true` / `false`) so it can hide TrustTest pages
+    when the API is absent. control-plane-api keeps its data-plane settings, and
+    `data-plane-jwt-secret` still renders in external and saas on the legacy
+    Secret path (`global.platformSecret.enabled: false`), so no reference
+    dangles.
+  - `values-required.yaml` and `values-hybrid.yaml.example` no longer select
+    `dataPlane`; layer `values-red-teaming.yaml.example` to opt in. A fresh
+    hybrid install from `values-required.yaml` no longer creates
+    `data-plane-jwt-secret`.
+  - The data-plane-api host joins the shared ingress certificate only when
+    data-plane-api is opted in.
+  - watchdog's `v2-deployment-health` check (off by default) no longer lists
+    `data-plane-api`; add it back when you opt in.
+
 ## [v4.5.0] — 2026-11-19
 
 ### Fixed

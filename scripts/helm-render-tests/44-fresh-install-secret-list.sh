@@ -14,12 +14,12 @@ suite_full || exit 0
 blue "==> Scenario 44: fresh-install Secret list per documented shape"
 
 SHAPES=(
-  "hybrid|values-required.yaml|agentgateway-secrets data-plane-jwt-secret neuraltrust-ingress-tls platform-secrets postgresql-secrets redis-secrets trustguard-client-credentials trustguard-secrets"
-  "hybrid-managed|values-hybrid.yaml.example|agentgateway-secrets data-plane-jwt-secret neuraltrust-ingress-tls platform-secrets postgresql-secrets trustguard-client-credentials trustguard-secrets"
+  "hybrid|values-required.yaml|agentgateway-secrets neuraltrust-ingress-tls platform-secrets postgresql-secrets redis-secrets trustguard-client-credentials trustguard-secrets"
+  "hybrid-managed|values-hybrid.yaml.example|agentgateway-secrets neuraltrust-ingress-tls platform-secrets postgresql-secrets trustguard-client-credentials trustguard-secrets"
   "hybrid-trustgate|values-trustgate.yaml.example|agentgateway-secrets neuraltrust-ingress-tls platform-secrets postgresql-secrets redis-secrets"
   "hybrid-trustguard|values-trustguard.yaml.example|neuraltrust-ingress-tls platform-secrets postgresql-secrets redis-secrets trustguard-secrets"
   "hybrid-red-teaming|values-red-teaming.yaml.example|data-plane-jwt-secret neuraltrust-ingress-tls platform-secrets postgresql-secrets redis-secrets"
-  "hybrid-gpu|values-required.yaml,values-dataplane-gpu.yaml.example|agentgateway-secrets data-plane-jwt-secret firewall-secrets neuraltrust-ingress-tls platform-secrets postgresql-secrets redis-secrets trustguard-client-credentials trustguard-secrets"
+  "hybrid-gpu|values-required.yaml,values-dataplane-gpu.yaml.example|agentgateway-secrets firewall-secrets neuraltrust-ingress-tls platform-secrets postgresql-secrets redis-secrets trustguard-client-credentials trustguard-secrets"
   "external|values-external.yaml.example|agentgateway-configsync-tls neuraltrust-ingress-tls platform-secrets postgresql-secrets trustguard-configsync-tls"
   "external-managed|values-managed-datastores.yaml.example|"
   "external-trustguard-only|values-external.yaml.example,values-external-trustguard-only.yaml.example|neuraltrust-ingress-tls platform-secrets postgresql-secrets trustguard-configsync-tls"
