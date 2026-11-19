@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v4.5.0] — 2026-11-19
+
 ### Fixed
 
 - **OpenShift: installs under the default `restricted-v2` SCC.** The secrets
