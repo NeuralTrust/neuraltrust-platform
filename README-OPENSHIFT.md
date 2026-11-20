@@ -176,7 +176,7 @@ Two workloads need a decision before install:
 
 | Workload | Why | Options |
 |---|---|---|
-| Firewall gateway + workers | `firewall.securityContext` defaults to `runAsUser: 0` / `runAsNonRoot: false`, and `firewall.config.hfHome` is `/root/.cache/huggingface` | Grant `anyuid` to the `firewall` ServiceAccount, or override both values for an arbitrary UID |
+| Firewall gateway + workers | `firewall.firewall.securityContext` defaults to `runAsUser: 0` / `runAsNonRoot: false`, and `firewall.firewall.config.hfHome` and `tritonCacheDir` sit under `/root/.cache` | Grant `anyuid` to the `firewall` ServiceAccount, or override these values for an arbitrary UID |
 | GPU Firewall workers | `hostIPC: true` for CUDA MPS, plus GPU device resources | Dedicated SCC; only applies when GPU workers are opted into |
 
 Granting `anyuid` to the one ServiceAccount is narrower than relaxing the
@@ -186,19 +186,28 @@ namespace default:
 oc adm policy add-scc-to-user anyuid -z firewall -n neuraltrust
 ```
 
-To run Firewall under an arbitrary UID instead, the model cache has to move off
-`/root`, otherwise the container cannot write it:
+To run Firewall under an arbitrary UID instead, both caches have to move off
+`/root`, which only root can enter. The workers write to both at runtime:
+transformers copies the tokenizer code that the jailbreak and IPI models ship
+into `$HF_HOME/modules` when they load, so a pod that cannot write there fails at
+startup; GPU workers compile Triton kernels into `tritonCacheDir`.
+
+The values sit under `firewall.firewall` (subchart, then its `firewall` block).
+Helm merges these maps with the defaults, so `null` is what removes the default
+`runAsUser: 0` and `fsGroup: 2000`; leaving a key out keeps it, and
+`runAsNonRoot: true` with `runAsUser: 0` stops the pod from starting:
 
 ```yaml
 firewall:
-  podSecurityContext: {}     # let OpenShift assign fsGroup
-  securityContext:
-    capabilities:
-      drop: ["ALL"]
-    allowPrivilegeEscalation: false
-    runAsNonRoot: true       # runAsUser omitted; OpenShift assigns it
-  config:
-    hfHome: "/tmp/huggingface"
+  firewall:
+    podSecurityContext:
+      fsGroup: null          # OpenShift assigns it
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: null        # OpenShift assigns it
+    config:
+      hfHome: "/tmp/huggingface"
+      tritonCacheDir: "/tmp/triton"
 ```
 
 In hybrid this applies only with `global.firewall.deploy: true`; by default

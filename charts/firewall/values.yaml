@@ -205,9 +205,10 @@ firewall:
     pythonUnbuffered: "1"
     pythonDontWriteBytecode: "1"
     pythonPath: "/app"
+    # Both must sit under a writable mount (read-only root with
+    # securityHardening). Workers write $HF_HOME/modules at startup: transformers
+    # copies the tokenizer code the jailbreak and IPI checkpoints ship there.
     hfHome: "/root/.cache/huggingface"
-    # Must sit under the writable /root/.cache mount (read-only root with
-    # securityHardening).
     tritonCacheDir: "/root/.cache/triton"
     cudaMpsActiveThreadPercentage: "20"
     cudaMpsPinnedDeviceMemLimit: "3500M"
