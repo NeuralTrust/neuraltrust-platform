@@ -4,9 +4,11 @@
 source "$(dirname "$0")/lib.sh"
 suite_full || exit 0
 
-blue "==> Scenario 40: firewall Triton cache on the writable mount"
-# securityHardening makes the root filesystem read-only, so Triton's default
-# ~/.triton cache fails on the first GPU op torch routes to it.
+blue "==> Scenario 40: firewall HF and Triton caches on the writable mount"
+# securityHardening makes the root filesystem read-only. Triton's default
+# ~/.triton cache fails on the first GPU op torch routes to it, and the workers
+# fail at startup unless transformers can copy the checkpoints' tokenizer code
+# into $HF_HOME/modules.
 out40="$TMP/scenario-firewall-triton.yaml"
 render_default "$out40" --set global.firewall.deploy=true --set global.deploymentMode=external
 if ! ruby -ryaml -e '
@@ -15,6 +17,8 @@ if ! ruby -ryaml -e '
   abort "firewall-config missing" if cm.nil?
   got = cm["data"]["TRITON_CACHE_DIR"]
   abort "TRITON_CACHE_DIR=#{got.inspect}" unless got == "/root/.cache/triton"
+  hf = cm["data"]["HF_HOME"]
+  abort "HF_HOME=#{hf.inspect}" unless hf.to_s.start_with?("/root/.cache/")
   workers = docs.select { |d| d["kind"] == "Deployment" && d.dig("spec", "template", "spec", "containers", 0, "envFrom").to_a.any? { |e| e.dig("configMapRef", "name") == "firewall-config" } && d.dig("metadata", "name").to_s.end_with?("-worker") }
   abort "no firewall workers rendered" if workers.empty?
   workers.each do |w|
@@ -23,7 +27,7 @@ if ! ruby -ryaml -e '
     abort "#{w["metadata"]["name"]} has no /root/.cache mount" unless mounts.include?("/root/.cache")
   end
 ' "$out40"; then
-  red "FAIL: firewall workers cache Triton under the /root/.cache mount"
+  red "FAIL: firewall workers cache HF and Triton under the /root/.cache mount"
   exit 1
 fi
-green "ok  - firewall workers cache Triton under the /root/.cache mount"
+green "ok  - firewall workers cache HF and Triton under the /root/.cache mount"

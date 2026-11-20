@@ -4,6 +4,24 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Fixed
+
+- **The OpenShift arbitrary-UID override for Firewall in `README-OPENSHIFT.md`
+  now works.** As documented, it did not:
+  - Its keys sat under `firewall.*`, but the subchart reads `firewall.firewall.*`,
+    so the umbrella ignored them.
+  - Helm merges the maps with the defaults, so `runAsUser: 0` and
+    `fsGroup: 2000` survived next to `runAsNonRoot: true`, and the pod would not
+    start. The override now sets both to `null`.
+  - It moved `hfHome` but left `tritonCacheDir` under `/root`, which only root
+    can enter, so GPU workers failed on their first Triton kernel. It now sets
+    `tritonCacheDir: "/tmp/triton"` too.
+
+  The default install (root, read-only root filesystem, writable `/root/.cache`)
+  is unchanged. Render scenario 40 now also asserts that `HF_HOME` sits on the
+  writable mount: Firewall workers write `$HF_HOME/modules` at startup, where
+  transformers copies the tokenizer code the jailbreak and IPI models ship.
+
 ## [v4.5.1] — 2026-11-19
 
 ### Changed
