@@ -4,6 +4,8 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+## [v4.6.0] — 2026-11-24
+
 ### Added
 
 - **`hostAliases` on the Firewall gateway pod.** `firewall.firewall.gateway.hostAliases`
