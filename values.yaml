@@ -511,6 +511,9 @@ global:
   nodeSelector: {}
   tolerations: []
   affinity: {} # Merged underneath any per-component affinity
+  # Extra /etc/hosts entries (list of {ip, hostnames}) for pods that support it.
+  # Today that is the Firewall gateway only. See docs/firewall-decision.md.
+  hostAliases: []
   # Labels and annotations added to every pod the chart renders (Deployments,
   # StatefulSets, Jobs, CronJobs), never to a selector. A component's own
   # podLabels / podAnnotations override these key by key; `jobs` applies on top

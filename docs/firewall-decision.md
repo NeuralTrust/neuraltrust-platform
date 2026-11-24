@@ -185,6 +185,37 @@ AI User access to the project. For a per-service identity, use
 use a pre-created Kubernetes ServiceAccount, set `serviceAccount.create: false`
 and `serviceAccount.name` to that account.
 
+## Reach a provider through a private endpoint
+
+Some clusters cannot resolve the provider's hostname to its private endpoint,
+for example an on-premises cluster calling an Azure OpenAI or Foundry resource
+whose public endpoint is restricted. Set `hostAliases` on the gateway to add
+the private IP to the pod's `/etc/hosts`, with no change to cluster DNS:
+
+```yaml
+firewall:
+  firewall:
+    gateway:
+      hostAliases:
+        - ip: 10.20.30.40 # private endpoint IP
+          hostnames:
+            - your-resource.openai.azure.com
+            - your-resource.cognitiveservices.azure.com
+```
+
+Keep the public hostname in `decision.url`. The gateway still validates the
+provider's TLS certificate against that name; only the IP it connects to
+changes.
+
+`global.hostAliases` takes the same list and is added before the gateway's own
+entries. Today only the Firewall gateway pod receives either list. Entries
+apply to every container in the pod, and changing them restarts the gateway.
+
+The decision call connects directly and does not go through `global.proxy`, so
+the alias applies with a proxy configured. A client that does use the proxy
+sends the hostname to the proxy and skips `/etc/hosts`, so when `global.proxy`
+is enabled also add the aliased hostnames to `global.proxy.noProxy`.
+
 ## Values reference
 
 All paths below are relative to `firewall.firewall.gateway.decision`.

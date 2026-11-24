@@ -4203,6 +4203,21 @@ tolerations:
 {{- end -}}
 
 {{/*
+Pod hostAliases: global.hostAliases first, then the component's own list.
+Lets a cluster pin a hostname to an IP (e.g. an Azure private endpoint)
+without changing cluster DNS.
+*/}}
+{{- define "neuraltrust-platform.hostAliases" -}}
+{{- $global := (default (list) (default dict .ctx.Values.global).hostAliases) -}}
+{{- $local := default (list) .local -}}
+{{- $merged := concat $global $local -}}
+{{- with $merged }}
+hostAliases:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- end -}}
+
+{{/*
 High-availability primitives shared by every workload.
 
 All three resolve the same way: an explicit per-component value wins, then
