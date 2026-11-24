@@ -4,6 +4,15 @@ All notable changes to the `neuraltrust-platform` umbrella chart are tracked in 
 
 ## [Unreleased]
 
+### Added
+
+- **`hostAliases` on the Firewall gateway pod.** `firewall.firewall.gateway.hostAliases`
+  and `global.hostAliases` add `/etc/hosts` entries to the gateway pod, global
+  entries first. This lets a cluster that cannot resolve a provider's private
+  endpoint (for example Azure OpenAI or Foundry from an on-premises cluster)
+  reach the decision model without changing cluster DNS. Both default to empty
+  and render nothing. See `docs/firewall-decision.md`.
+
 ## [v4.5.1] — 2026-11-19
 
 ### Changed

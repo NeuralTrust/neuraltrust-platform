@@ -53,6 +53,10 @@ firewall:
     extraEnv: []
     # Extra envFrom sources appended to the gateway container (list of EnvFromSource: configMapRef/secretRef).
     extraEnvFrom: []
+    # Extra /etc/hosts entries for the gateway pod (list of {ip, hostnames}), added
+    # after global.hostAliases. Example: the private endpoint IP of an Azure
+    # OpenAI/Foundry resource used as the decision model.
+    hostAliases: []
   # --- Worker defaults (shared by all workers unless overridden) ---
   # Default: CPU image. For GPU, override image to firewall-gpu, add nvidia.com/gpu
   # resources, nodeSelector, tolerations, and hostIPC (see values-dataplane-gpu.yaml.example).
