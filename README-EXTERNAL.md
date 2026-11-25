@@ -388,8 +388,12 @@ Who creates the PostgreSQL roles and databases depends on whose instance it is:
 - **A managed instance**: pre-create every role and database yourself. The Job is
   not rendered when `global.postgresql.host` names another instance, when `deploy`
   is false, or under IAM auth, so the chart never issues DDL against an instance
-  it does not own. For Cloud SQL or AlloyDB with IAM database auth instead of
-  passwords, see
+  it does not own. Make each role the owner of its database. If the console's
+  role (`POSTGRES_USER` in `postgresql-secrets`) does not own its database,
+  grant it `CREATE ON DATABASE <db>`: its migrations create a schema, and
+  without the grant the console's `init-db` fails and the console does not
+  start. For Cloud SQL or AlloyDB with IAM database auth instead of passwords,
+  see
   [Optional IAM DB auth (GCP)](./SECRETS.md#full-secret-catalog).
 
 DataCore, AlertEngine, the ClickStack collector, and `data-plane-api` (when opted in) all read one
