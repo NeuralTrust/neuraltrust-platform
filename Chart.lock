@@ -10,19 +10,19 @@ dependencies:
   version: 0.1.21
 - name: control-plane-app
   repository: file://./charts/control-plane-app
-  version: 0.1.80
+  version: 0.1.81
 - name: agentgateway
   repository: file://./charts/agentgateway
-  version: 0.1.95
+  version: 0.1.96
 - name: trustguard
   repository: file://./charts/trustguard
-  version: 0.1.78
+  version: 0.1.79
 - name: dataagent
   repository: file://./charts/dataagent
   version: 0.1.24
 - name: datacore
   repository: file://./charts/datacore
-  version: 0.1.40
+  version: 0.1.41
 - name: databridge
   repository: file://./charts/databridge
   version: 0.1.5
@@ -37,9 +37,9 @@ dependencies:
   version: 0.1.24
 - name: firewall
   repository: file://./charts/firewall
-  version: 2.2.2
+  version: 2.2.3
 - name: watchdog
   repository: file://./charts/watchdog
-  version: 0.3.33
-digest: sha256:9173bd810002f0c1c4276170d31e90c031e82f7f52dcd99573cd5ac9f1d870a3
-generated: "2026-11-19T16:14:51.663135+01:00"
+  version: 0.3.34
+digest: sha256:7091da2fbb3ea3c3003986d9202c64f158c09f454066ac3783296bcf65027d3d
+generated: "2026-11-25T07:10:18.270218086Z"
