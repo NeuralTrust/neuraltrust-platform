@@ -18,6 +18,12 @@
 # Pre-create the Kubernetes Secrets before install, and either the service
 # databases and roles too, or let the chart create them: uncomment
 # `managedBootstrap` under global.postgresql below.
+# If you pre-create them, make each role the owner of its database. The
+# console's role (POSTGRES_USER in postgresql-secrets) needs at least CREATE
+# on its database (POSTGRES_DB), because the console's migrations create a
+# schema; without it the console's init-db fails. For a role that does not
+# own its database: GRANT CREATE ON DATABASE <db> TO <role>;
+#
 # This file contains endpoints and secret names only; it contains no credentials.
 #
 # PostgreSQL and Redis endpoints are declared ONCE, on global.postgresql and

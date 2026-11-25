@@ -172,7 +172,9 @@ existing Kubernetes Secrets for passwords. The full pattern is in
 When external PostgreSQL is selected, either pre-create the roles and databases
 before installing, or let the chart do it with
 `global.postgresql.managedBootstrap` and an admin login you provide (see
-[SECRETS.md](./SECRETS.md)). Application migrations own their own tables.
+[SECRETS.md](./SECRETS.md)). Application migrations own their own tables, and
+the console's migrations also create a schema, so the console's role needs
+`CREATE` on its database: own it, or be granted `CREATE ON DATABASE`.
 
 ## 6. Configure observability
 
