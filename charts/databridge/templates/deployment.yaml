@@ -65,8 +65,12 @@ spec:
       securityContext:
         {{- /* The distroless image runs as uid/gid 65532. The kubelet mounts
                Secret volumes root:root, so without fsGroup the process cannot
-               read the TLS keypair no matter what defaultMode says. */}}
+               read the TLS keypair no matter what defaultMode says. On
+               OpenShift, restricted-v2 assigns fsGroup and the UID from the
+               namespace range and rejects a fixed one, so none is set. */}}
+        {{- if not (include "neuraltrust-platform.isOpenshift" .) }}
         fsGroup: 65532
+        {{- end }}
         fsGroupChangePolicy: OnRootMismatch
         runAsNonRoot: true
         seccompProfile:
@@ -79,8 +83,10 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             runAsNonRoot: true
+            {{- if not (include "neuraltrust-platform.isOpenshift" .) }}
             runAsUser: 65532
             runAsGroup: 65532
+            {{- end }}
             capabilities:
               drop:
                 - ALL

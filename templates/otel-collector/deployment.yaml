@@ -46,7 +46,8 @@ spec:
       {{- include "neuraltrust-platform.otelCollector.imagePullSecrets" . | nindent 6 }}
       {{- with $coll.podSecurityContext }}
       securityContext:
-        {{- toYaml . | nindent 8 }}
+        {{- /* On OpenShift the default 10001 is left to the namespace range. */}}
+        {{- include "neuraltrust-platform.securityContext.openshift" (dict "ctx" $ "sc" . "defaultId" 10001) | nindent 8 }}
       {{- end }}
       containers:
         - name: otel-collector
