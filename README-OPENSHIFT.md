@@ -168,9 +168,21 @@ Full walkthrough, including the bootstrap admin Secret and ClickHouse sizing:
 ## Security Context Constraints
 
 Most workloads run non-root with all capabilities dropped and admit under
-`restricted-v2` unchanged. With `global.platform: openshift` the chart also stops
-emitting fixed `runAsUser` / `fsGroup` on the in-cluster PostgreSQL Deployment and
-its bootstrap Job, so the namespace-assigned UID applies instead.
+`restricted-v2` unchanged. With `global.platform: openshift` (or the legacy
+`global.openshift: true`) the chart also stops emitting fixed `runAsUser`,
+`runAsGroup` and `fsGroup` on every workload it would otherwise pin, so the
+namespace-assigned IDs apply instead:
+
+- the in-cluster PostgreSQL Deployment and its bootstrap Job;
+- the secrets generator and key-generation hook Jobs;
+- DataBridge, watchdog and the umbrella OTel collector
+  (`global.observability.collector`);
+- ClickHouse and its backup CronJob.
+
+For watchdog (`watchdog.podSecurityContext`) and the OTel collector
+(`global.observability.collector.podSecurityContext`) only the chart default
+(65532 and 10001) is dropped. A different value you set is kept, for an SCC that
+admits it. The in-cluster Firewall is the exception below.
 
 Two workloads need a decision before install:
 
