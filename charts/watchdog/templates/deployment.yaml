@@ -86,7 +86,8 @@ spec:
       priorityClassName: {{ .Values.priorityClassName }}
       {{- end }}
       securityContext:
-        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        {{- /* On OpenShift the image's 65532 is left to the namespace range. */}}
+        {{- include "neuraltrust-platform.securityContext.openshift" (dict "ctx" . "sc" .Values.podSecurityContext "defaultId" 65532) | nindent 8 }}
       containers:
         - name: watchdog
           image: {{ include "neuraltrust-watchdog.image" . | quote }}
